@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Live (bidirectional streaming) mode (port of the live half of Go internal/llminternal).
+//! Live (bidirectional streaming) mode of the LLM flow.
 
 pub(crate) mod audio_cache;
 pub(crate) mod flow;

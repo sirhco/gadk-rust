@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go agent/llmagent/llm_agent_wrapper.go (wrappedSession lives in llm/agent.rs).
+//! Runs an LLM agent as a workflow node in chat, single_turn or task mode (the wrapped session
+//! lives in `llm/agent.rs`).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -43,16 +44,16 @@ fn error_stream(err: AgentError) -> EventStream {
     Box::pin(futures::stream::once(async move { Err(err) }))
 }
 
-/// Port of Go `llmagent.RunLLMAgentAsNode`, the entry point a custom node wrapping an LLM agent
+/// The entry point a custom node wrapping an LLM agent
 /// calls to run it as a workflow node (re-exported as `gadk_engine::llm::run_llm_agent_as_node`).
-/// Not async (C4): every branch returns a lazy stream.
+/// Not async: every branch returns a lazy stream.
 ///
 /// The mode is the one this invocation bound for the agent, else its declaration, else chat.
 /// single_turn seeds `input` as a user event (never persisted) and post-processes the model reply
 /// into the output; task promotes the successful `finish_task` args; chat ignores `input` and runs
-/// the outer task-delegation dispatch loop. Go's nil-context, nil-session and "tool or callback
-/// context" error branches have no Rust counterpart: a `Context` is never null, `ctx.session()`
-/// always returns a session, and every `Context` supports `with_delta`.
+/// the outer task-delegation dispatch loop. There are no nil-context, nil-session or "tool or
+/// callback context" error branches: a `Context` is never null, `ctx.session()` always returns a
+/// session, and every `Context` supports `with_delta`.
 pub fn run_llm_agent_as_node(ctx: Context, agent: Arc<dyn Agent>, input: Value) -> EventStream {
     if reveal(agent.as_ref()).is_none() {
         return error_stream(AgentError::other(format!(
@@ -63,8 +64,8 @@ pub fn run_llm_agent_as_node(ctx: Context, agent: Arc<dyn Agent>, input: Value) 
     // A placement binds the mode it resolved for this agent; without one the agent is a plain
     // conversational callee (a transfer target, say).
     let mode = resolve_mode(mode_for(ctx.as_invocation(), agent.as_ref()), Mode::Chat);
-    // Unreachable after resolve_mode(_, Chat) (Rust's Mode cannot hold Go's arbitrary strings);
-    // kept with Go's text for parity.
+    // Unreachable after resolve_mode(_, Chat) (Rust's Mode cannot hold arbitrary strings);
+    // kept as a defensive error.
     if !matches!(mode, Mode::Task | Mode::SingleTurn | Mode::Chat) {
         return error_stream(AgentError::other(format!(
             "RunLLMAgentAsNode: LlmAgent {} only supports task, single_turn, and chat mode, got {}",
@@ -77,7 +78,7 @@ pub fn run_llm_agent_as_node(ctx: Context, agent: Arc<dyn Agent>, input: Value) 
     let bound = with_bound_mode(ctx.as_invocation(), agent.name(), agent.agent_state(), mode);
     match mode {
         Mode::Chat => {
-            // Go ctx.WithAgentContext(bound): keeps the node Context (its sub-scheduler is what
+            // Keeps the node Context (its sub-scheduler is what
             // task dispatch runs through) and only swaps in the binding.
             let chat_ctx = ctx.with_delta(ContextDelta {
                 bound_modes: Some(bound.bound_modes().clone()),
@@ -107,13 +108,12 @@ pub fn run_llm_agent_as_node(ctx: Context, agent: Arc<dyn Agent>, input: Value) 
     }
 }
 
-/// Port of the `icontext.NewInvocationContext(bound, params{…})` call in RunLLMAgentAsNode: a
-/// FRESH invocation context (`fresh_invocation`: own end-invocation flag starting NOT ended, as Go
-/// passes no `EndInvocation`; path/run_id/sub_scheduler/output_for_ancestors/resumed_inputs/
+/// A FRESH invocation context (`fresh_invocation`: own end-invocation flag starting NOT ended;
+/// path/run_id/sub_scheduler/output_for_ancestors/resumed_inputs/
 /// tool_confirmation/function_call_id reset) around the possibly wrapped session, with the
-/// params Go sets (agent, user content, the parent's isolation scope) and fresh actions, as Task
-/// 12's `AgentNode::run`. Derived with `with_delta` rather than rebuilt through the builder, so
-/// everything Go inherits through the parent context.Context (bound modes, cancellation,
+/// agent, user content, the parent's isolation scope and fresh actions, as
+/// `AgentNode::run`. Derived with `with_delta` rather than rebuilt through the builder, so
+/// everything inherited from the parent context (bound modes, cancellation,
 /// platform, plugin manager, parent map, session service, artifacts, memory, run config,
 /// invocation ID, branch) AND the per-invocation LLM-call limiter carry over unchanged.
 fn node_invocation_context(
@@ -135,7 +135,7 @@ fn node_invocation_context(
     })
 }
 
-/// Port of Go llmagent.PrepareLLMAgentInput: the seeded user-role event for a single_turn agent's
+/// The seeded user-role event for a single_turn agent's
 /// first turn (the mode `ctx` bound for `agent`, else its declaration), `None` for any other.
 pub(crate) fn prepare_llm_agent_input(
     agent: &dyn Agent,
@@ -163,7 +163,7 @@ pub(crate) fn prepare_llm_agent_input(
     Some(ev)
 }
 
-/// Port of Go llmagent.ProcessLLMAgentOutput: on the agent's final text turn (no function calls,
+/// Post-processes the agent's final reply: on the agent's final text turn (no function calls,
 /// not partial, role model) parse the merged non-thought text against the output schema (else
 /// keep the raw text), record it under the output key, and set it as the event output with
 /// `node_info.message_as_output`. Errors only when schema validation fails on a non-empty reply.
@@ -171,7 +171,7 @@ pub(crate) fn process_llm_agent_output(
     agent: &dyn Agent,
     ev: &mut Event,
 ) -> Result<(), AgentError> {
-    // Go checks function calls, then partial, then nil/role content; all return early with no
+    // Function calls, a partial event and missing or non-model content all return early with no
     // change, so the combined check is equivalent.
     let Some(content) = ev.response.content.as_ref() else {
         return Ok(());
@@ -192,8 +192,8 @@ pub(crate) fn process_llm_agent_output(
         .filter(|p| !p.thought)
         .map(|p| p.text.as_str())
         .collect();
-    // Go's `parsed` map is non-nil only for a reply that parsed to a JSON object; a literal
-    // `null` reply validates as a nil map (gadk's validator maps it to an empty map).
+    // `parsed` is true only for a reply that parsed to a JSON object; a literal
+    // `null` reply validates as an empty map but does not count.
     let mut parsed = false;
     let output = match &state.cfg.output_schema {
         Some(_) if text.trim().is_empty() => None,
@@ -218,7 +218,7 @@ pub(crate) fn process_llm_agent_output(
             .insert(state.cfg.output_key.clone(), o.clone());
     }
     ev.output = output;
-    // Go #2291 (67fc01b1): the runner drops the output of an event flagged MessageAsOutput, which
+    // The runner drops the output of an event flagged MessageAsOutput, which
     // would discard a parsed value, so a parsed reply skips the flag. An unparsed (no schema or
     // blank) or null reply keeps it, so the reply text stays the node output once stored.
     if parsed {
@@ -238,12 +238,13 @@ fn function_calls(ev: &Event) -> impl Iterator<Item = &FunctionCall> {
         .filter_map(|p| p.function_call.as_ref())
 }
 
-/// Port of Go extractFinishTaskFC.
+/// The `finish_task` function call of the event, if any.
 fn extract_finish_task_fc(ev: &Event) -> Option<&FunctionCall> {
     function_calls(ev).find(|fc| fc.name == FINISH_TASK_TOOL_NAME)
 }
 
-/// Port of Go isFinishTaskSuccessFR: the FIRST finish_task FR decides; a non-success FR (e.g. a
+/// Whether the event holds a successful finish_task response: the FIRST finish_task FR
+/// decides; a non-success FR (e.g. a
 /// validation error) lets the model retry.
 fn is_finish_task_success_fr(ev: &Event) -> bool {
     let mut frs = ev
@@ -258,14 +259,14 @@ fn is_finish_task_success_fr(ev: &Event) -> bool {
         })
 }
 
-/// Port of Go isTaskDelegationTool.
+/// Whether `name` is a task-delegation tool.
 fn is_task_delegation_tool(tools: &HashMap<String, Arc<dyn Tool>>, name: &str) -> bool {
     tools
         .get(name)
         .is_some_and(|t| t.as_any().is::<TaskAgentTool>())
 }
 
-/// Port of Go extractTaskDelegationFCs: FCs with a non-empty ID whose tool is a TaskAgentTool.
+/// FCs with a non-empty ID whose tool is a TaskAgentTool.
 fn extract_task_delegation_fcs(
     ev: &Event,
     tools: &HashMap<String, Arc<dyn Tool>>,
@@ -276,7 +277,7 @@ fn extract_task_delegation_fcs(
         .collect()
 }
 
-/// Port of Go findUnresolvedTaskDelegations: task FCs authored by `owner` (or "user") with no FR
+/// Task FCs authored by `owner` (or "user") with no FR
 /// of the same ID, in discovery order. Deliberately not filtered by isolation scope: a chat
 /// coordinator's conversation spans turns, each with a fresh scope.
 fn find_unresolved_task_delegations(
@@ -315,7 +316,7 @@ fn find_unresolved_task_delegations(
         .collect()
 }
 
-/// Port of Go findFinishTaskTool, reduced to its one use: the tool's WrapperKey ("" when absent).
+/// The finish_task tool's WrapperKey ("" when absent).
 fn finish_task_wrapper_key(agent: &dyn Agent) -> String {
     reveal(agent)
         .and_then(|s| {
@@ -328,7 +329,7 @@ fn finish_task_wrapper_key(agent: &dyn Agent) -> String {
         .unwrap_or_default()
 }
 
-/// Port of Go safeCanonicalToolsDict.
+/// The agent's tools by name, empty when it is not an LLM agent.
 fn safe_canonical_tools_dict(agent: &dyn Agent) -> HashMap<String, Arc<dyn Tool>> {
     let Some(state) = reveal(agent) else {
         return HashMap::new();
@@ -342,7 +343,7 @@ fn safe_canonical_tools_dict(agent: &dyn Agent) -> HashMap<String, Arc<dyn Tool>
         .collect()
 }
 
-/// Port of Go dispatchTaskFC: runs the target as an AgentNode under a stable run id and
+/// Runs the target as an AgentNode under a stable run id and
 /// isolation scope (both the FC id), pausing the parent on an unresolved long-running call.
 async fn dispatch_task_fc(
     parent: &Arc<dyn Agent>,
@@ -376,7 +377,7 @@ async fn dispatch_task_fc(
     .await
 }
 
-/// Port of Go synthesizeTaskFREvent: a user-role FR event closing the delegation; a non-object
+/// Builds a user-role FR event closing the delegation; a non-object
 /// output is wrapped under `output`.
 fn synthesize_task_fr_event(
     platform: &Platform,
@@ -408,11 +409,11 @@ fn synthesize_task_fr_event(
     ev
 }
 
-/// Port of Go nodeInputToContent. Go switches on `*genai.Content` / `genai.Content`; workflow
-/// inputs are `serde_json::Value` here, so a Content is recognised as an object whose keys are
+/// Converts a workflow node input to user content. Workflow
+/// inputs are `serde_json::Value`, so a Content is recognised as an object whose keys are
 /// only "parts" (an array) and optionally "role", and which deserializes as Content. Role is
-/// forced to "user"; parts are reused verbatim. A string is user text; anything else is its Go
-/// `json.Marshal` text.
+/// forced to "user"; parts are reused verbatim. A string is user text; anything else is its
+/// compact JSON text ([`go_json_marshal`]).
 pub(crate) fn node_input_to_content(input: &Value) -> Option<Content> {
     let user = |parts| Content {
         role: "user".into(),
@@ -434,7 +435,7 @@ pub(crate) fn node_input_to_content(input: &Value) -> Option<Content> {
     }
 }
 
-/// Port of Go runSingleTurn: one Agent.Run, each event post-processed so the model reply carries
+/// One agent run, each event post-processed so the model reply carries
 /// the terminal output.
 fn run_single_turn(agent: Arc<dyn Agent>, ic: InvocationContext) -> EventStream {
     Box::pin(async_stream::stream! {
@@ -456,7 +457,7 @@ fn run_single_turn(agent: Arc<dyn Agent>, ic: InvocationContext) -> EventStream 
     })
 }
 
-/// Outcome of Go runChat's dispatchAndYield closure.
+/// Outcome of one task dispatch in the chat loop.
 enum Dispatch {
     Emit(Box<Event>),
     Stop,
@@ -483,8 +484,8 @@ async fn dispatch_step(agent: &Arc<dyn Agent>, fc: &FunctionCall, ctx: &Context)
     }
 }
 
-/// Port of Go runChat: a pre-LLM scan replays unresolved delegations from prior turns, then
-/// Agent.Run is re-entered after each dispatch round until the model finishes without
+/// Chat mode: a pre-LLM scan replays unresolved delegations from prior turns, then
+/// `Agent::run` is re-entered after each dispatch round until the model finishes without
 /// delegating. Model events are yielded before their task FCs dispatch, sequentially, in the
 /// order the model emitted them.
 fn run_chat(agent: Arc<dyn Agent>, ctx: Context) -> EventStream {
@@ -534,7 +535,7 @@ fn run_chat(agent: Arc<dyn Agent>, ctx: Context) -> EventStream {
                 }
                 if !task_fcs.is_empty() {
                     had_task_fc = true;
-                    // Dropping `inner` below stops the flow, as Go's `break` out of the range.
+                    // Dropping `inner` below stops the flow.
                     break;
                 }
             }
@@ -546,9 +547,9 @@ fn run_chat(agent: Arc<dyn Agent>, ctx: Context) -> EventStream {
     })
 }
 
-/// Port of Go runTask: remember the latest finish_task FC's args; on FinishTaskTool's success FR,
+/// Task mode: remember the latest finish_task FC's args; on FinishTaskTool's success FR,
 /// promote them (or the wrapped value) as the output and stop. A non-success FR lets the model
-/// see the error and retry. Rust's `FunctionCall.args` cannot express Go's nil map, so an FC
+/// see the error and retry. Rust's `FunctionCall.args` has no null form, so an FC
 /// without args is pending with an empty map.
 fn run_task(agent: Arc<dyn Agent>, ic: InvocationContext) -> EventStream {
     Box::pin(async_stream::stream! {
@@ -578,9 +579,9 @@ fn run_task(agent: Arc<dyn Agent>, ic: InvocationContext) -> EventStream {
                         .cloned()
                         .unwrap_or_else(|| Value::Object(args.clone()))
                 };
-                // Go 8c2e2e2a (#1977): the accepted finish_task output is the task agent's
-                // result, so it goes to output_key (Go outputKeyOf: "" for a non-LLM agent; a
-                // null output, Go's nil, is not written).
+                // The accepted finish_task output is the task agent's
+                // result, so it goes to output_key (empty for a non-LLM agent; a
+                // null output is not written).
                 if let Some(key) = reveal(agent.as_ref())
                     .map(|s| s.cfg.output_key.clone())
                     .filter(|k| !k.is_empty() && !output.is_null())

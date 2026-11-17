@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of the Go internal/llminternal request/response processor chain (base_flow.go:87-112).
+//! The request/response processor chain run around each model call.
 
 pub(crate) mod basic;
 pub(crate) mod compaction;
@@ -35,7 +35,7 @@ use crate::{
     workflow::route::go_quote,
 };
 
-/// Port of base_flow.go:88 DefaultRequestProcessors, in Go order.
+/// The request processors, in the order they run.
 pub(crate) fn default_request_processors() -> Vec<RequestProcessor> {
     vec![
         basic::basic_request_processor as RequestProcessor,
@@ -54,7 +54,7 @@ pub(crate) fn default_request_processors() -> Vec<RequestProcessor> {
     ]
 }
 
-/// Port of base_flow.go:109 DefaultResponseProcessors.
+/// The response processors, in the order they run.
 pub(crate) fn default_response_processors() -> Vec<ResponseProcessor> {
     vec![
         stubs::nl_planning_response_processor as ResponseProcessor,
@@ -62,8 +62,8 @@ pub(crate) fn default_response_processors() -> Vec<ResponseProcessor> {
     ]
 }
 
-/// Go `fmt.Errorf("<msg>: %w", source)`: Display is "<msg>: <source>", and `source()` keeps the
-/// chain for errors.Is ports.
+/// An error with a context message: Display is "<msg>: <source>", and `source()` keeps the
+/// underlying error chain.
 #[derive(Debug)]
 pub(crate) struct WrappedError {
     msg: String,
@@ -82,7 +82,7 @@ impl StdError for WrappedError {
     }
 }
 
-/// Go `fmt.Errorf("<msg>: %w", source)` as an [`AgentError::Other`].
+/// Wraps `source` with `msg` as an [`AgentError::Other`]; Display is "<msg>: <source>".
 pub(crate) fn wrap_err(
     msg: impl Into<String>,
     source: impl Into<Box<dyn StdError + Send + Sync>>,
@@ -93,25 +93,26 @@ pub(crate) fn wrap_err(
     }))
 }
 
-/// Go `json.Marshal` of a decoded JSON value (keys sorted, HTML-escaped strings, Go float
-/// format), through the workspace's one Go-JSON encoder, [`gadk_model::to_go_json`]. Used where
-/// Go json.Marshal output reaches the model or an event (contents.go stringify, outputschema
-/// retrieveStructuredModelResponse, nodeInputToContent).
+/// Compact JSON of a decoded JSON value: object keys sorted, `<`, `>` and `&` (and U+2028 /
+/// U+2029) in strings written as `\u` escapes, and floats with the shortest digits and an
+/// `e+06`-style exponent for large or small magnitudes, via
+/// [`gadk_model::to_go_json`]. Used where JSON text reaches the model or an event: stringified
+/// function-call content, structured model responses, and workflow node inputs.
 pub(crate) fn go_json_marshal(v: &Value) -> String {
     gadk_model::to_go_json(v)
         .map(|b| String::from_utf8_lossy(&b).into_owned())
         .unwrap_or_default()
 }
 
-/// Go `fmt.Sprintf("%v", v)` for a JSON-decoded value:
+/// The display form of a JSON-decoded value:
 /// - string → itself; bool → true/false; null → `<nil>`;
-/// - integer numbers → decimal (Go's native ints; a Go value JSON-decoded into float64 would print
-///   %g, e.g. 1e+06, but Rust keeps integer JSON numbers as integers);
-/// - other numbers → `go_format_float_v` (Go %v of float64 = %g with shortest digits);
-/// - array → `[a b c]`; object → `map[k1:v1 k2:v2]` with keys sorted (Go fmt sorts map keys).
+/// - integer numbers → decimal (Rust keeps integer JSON numbers as integers; printed as floats
+///   they would read `1e+06`);
+/// - other numbers → `go_format_float_v` (shortest-digits `%g` form, e.g. `1e+06`, `1e-05`);
+/// - array → `[a b c]`; object → `map[k1:v1 k2:v2]` with keys sorted.
 ///
-/// Callers formatting a value Go would have JSON-decoded (tool args, model output) must apply
-/// [`as_go_floats`] first, so numbers print as Go `float64` (`1e+06`, not `1000000`).
+/// Callers formatting a value whose numbers must print as floats (tool args, model output)
+/// apply [`as_go_floats`] first, so numbers print as `1e+06`, not `1000000`.
 pub(crate) fn go_sprint(v: &Value) -> String {
     match v {
         Value::Null => "<nil>".to_owned(),
@@ -136,8 +137,8 @@ pub(crate) fn go_sprint(v: &Value) -> String {
     }
 }
 
-/// `v` with every number as a float: Go decodes tool arguments from JSON, so every number is a
-/// `float64` and `fmt.Sprint` prints it in `%v` float form (`1e+06`, not `1000000`). A number
+/// `v` with every number as a float, so [`go_sprint`] prints tool arguments and model output in
+/// float form (`1e+06`, not `1000000`). A number
 /// with no finite float form is kept as is. Apply before [`go_sprint`] on JSON-decoded values.
 pub(crate) fn as_go_floats(v: &Value) -> Value {
     match v {
@@ -155,8 +156,8 @@ pub(crate) fn as_go_floats(v: &Value) -> Value {
     }
 }
 
-/// Go `%q` of a `[]string` (log lines): `["a" "b"]`, each element quoted by Go
-/// `strconv.Quote` ([`go_quote`]).
+/// A list of strings in log-line form: `["a" "b"]`, each element quoted by [`go_quote`] (escaped
+/// and double-quoted).
 pub(crate) fn go_quote_list(items: &[String]) -> String {
     format!(
         "[{}]",

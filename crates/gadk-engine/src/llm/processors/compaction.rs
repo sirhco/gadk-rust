@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Request-time tail-retention compaction (port of Go internal/llminternal/compaction_processor.go).
+//! Request-time tail-retention compaction: summarises older session events before the model call.
 
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ use crate::llm::{
     state::reveal,
 };
 
-/// Port of Go CompactionRequestProcessor: compacts the session in place before the model call
+/// Compacts the session in place before the model call
 /// once its prompt has grown past the configured token threshold.
 ///
 /// Every failure degrades to an uncompacted prompt (logged, never yielded). It yields no events.
@@ -48,7 +48,7 @@ pub(crate) fn compaction_request_processor<'a>(
     })
 }
 
-/// The body of Go's iterator, in Go's step order.
+/// The processor body: resolves the runtime and session, chooses a window, summarises and appends.
 async fn run(ctx: &InvocationContext) {
     let Some(rt) = runtime::from_ctx(ctx) else {
         return;
@@ -61,7 +61,7 @@ async fn run(ctx: &InvocationContext) {
         return;
     };
 
-    // Writers use the session underneath any wrapper (Go UnwrapSession): every session service
+    // Writers use the session underneath any wrapper: every session service
     // downcasts to its own type, and appending to this handle is what makes the summary visible
     // to the contents processor in this same model call.
     let sess = apply::unwrap_session(&ctx.session());
@@ -142,7 +142,7 @@ async fn run(ctx: &InvocationContext) {
     }
     finish.finish(None, "");
 
-    // Go RepairContext: the repair is detached from the turn (spawned, so dropping the turn does
+    // The repair is detached from the turn (spawned, so dropping the turn does
     // not stop it) and bounded by apply::REPAIR_TIMEOUT.
     let repaired = apply::repair(async move {
         match apply::reload_session(Some(svc.as_ref()), &*sess).await {
@@ -185,7 +185,7 @@ fn excluded_len(ev: &Event) -> usize {
         .map_or(0, |c| c.excluded_events.len())
 }
 
-/// Port of Go degrade + compactionFailure: logs the failure and lets the model call proceed.
+/// Logs the failure and lets the model call proceed.
 fn degrade(stage: &str, err: BoxError) {
     tracing::warn!(
         target: "adk",
@@ -194,7 +194,7 @@ fn degrade(stage: &str, err: BoxError) {
     );
 }
 
-/// Port of Go promptTokenEstimator: estimates the prompt `events` would produce, with the agent's
+/// Estimates the prompt `events` would produce, with the agent's
 /// resolved mode, the whole session as the call source, and the invocation's user content.
 pub(crate) fn prompt_token_estimator(ctx: &InvocationContext) -> Box<TokenCounter> {
     let ctx = ctx.clone();

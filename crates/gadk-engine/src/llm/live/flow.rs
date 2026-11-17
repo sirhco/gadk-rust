@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/llminternal/base_flow.go (*Flow).RunLive: the live (bidi) flow. The
+//! The live (bidi) flow, `run_live`. The
 //! session task preprocesses the request, connects, and runs the connect/reconnect loop; each
 //! connection has a reader task and a sender task feeding one consumer loop.
 
@@ -45,22 +45,22 @@ use crate::llm::live::reconnect::{live_reconnect_gave_up_error, wait_before_reco
 use crate::llm::live::session::LiveSessionImpl;
 use crate::tool::utils::function_calls;
 
-/// Go: `fmt.Errorf("model does not support live connection")` (base_flow.go:414).
+/// Error text when the model has no live connection support.
 pub(crate) const ERR_MODEL_DOES_NOT_SUPPORT_LIVE: &str = "model does not support live connection";
-/// Go: `fmt.Errorf("live run config not found")` (base_flow.go:419).
+/// Error text when the run config has no live settings.
 pub(crate) const ERR_LIVE_RUN_CONFIG_NOT_FOUND: &str = "live run config not found";
 /// The function whose response ends the live flow (injected by SequentialAgent::run_live).
 const TASK_COMPLETED: &str = "task_completed";
-/// Go: `time.Sleep(100 * time.Millisecond)` before ending on task_completed.
+/// Grace period before ending on task_completed.
 const TASK_COMPLETED_GRACE: Duration = Duration::from_millis(100);
 /// Upper bound on closing a connection during cleanup (a wedged write cannot stall teardown).
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// What a connection's reader and sender report to the consumer loop (Go eventsChan + errChan).
+/// What a connection's reader and sender report to the consumer loop (events and errors).
 /// `Event` is boxed (clippy::large_enum_variant), as runner/mod.rs `Processed::Event(Box<Event>)` does.
 enum ConnMsg {
     Event(Box<Event>),
-    /// The failure and when it was produced (Go liveConnError{err, at}).
+    /// The failure and when it was produced.
     Error(LiveConnError, Instant),
 }
 
@@ -72,7 +72,7 @@ enum Outcome {
     Reconnect,
 }
 
-/// Go: `fmt.Errorf("failed to connect live session: %w", err)` for the first dial.
+/// "failed to connect live session: <cause>" for the first dial.
 #[derive(Debug)]
 struct LiveConnectFailed(ModelError);
 
@@ -92,7 +92,7 @@ fn conn_err(err: LiveConnError) -> AgentError {
     AgentError::Other(Box::new(err))
 }
 
-/// Go's `defer sess.Close()`, plus R9: once the session task ends, no streaming tool outlives
+/// Closes the session, and once the session task ends no streaming tool outlives
 /// the flow. A drop guard rather than trailing code, so it also runs if the task is dropped
 /// unfinished (a runtime shutting down). A tool task still running on another worker can
 /// register a streaming tool after the drain; `done` is cancelled before the drain so that
@@ -108,13 +108,13 @@ impl Drop for Teardown {
     }
 }
 
-/// Port of Go (*Flow).RunLive. Returns at once; the work runs on a spawned session task, so this
+/// Starts the live flow. Returns at once; the work runs on a spawned session task, so this
 /// must be called inside a tokio runtime. Dropping the returned stream cancels the session.
 pub(crate) fn run_live(
     flow: Arc<Flow>,
     ctx: InvocationContext,
 ) -> Result<(Arc<dyn LiveSession>, EventStream), AgentError> {
-    // Go type-asserts f.Model for its genai client before anything else.
+    // The model must be a live-capable model before anything else.
     let Some(model) = flow.model.clone() else {
         return Err(AgentError::other(ERR_MODEL_DOES_NOT_SUPPORT_LIVE));
     };
@@ -125,7 +125,7 @@ pub(crate) fn run_live(
     let sess = LiveSessionImpl::new();
     let guard = sess.probe().task_guard();
     let task_sess = sess.clone();
-    // Go starts the session work on a new goroutine (base_flow.go `go func()`): a fresh fiber
+    // The session work runs on a new task: a fresh fiber
     // started by this spawn site, child of the caller's.
     let task = tokio::spawn(fiber::spawn_child(LIVE_SESSION_CREATOR).scope(async move {
         let _guard = guard;
@@ -138,7 +138,7 @@ pub(crate) fn run_live(
     Ok((sess, stream))
 }
 
-/// Go's outer goroutine (base_flow.go:424-779).
+/// The session task: preprocesses the request, connects, and runs the connect/reconnect loop.
 async fn session_task(
     flow: Arc<Flow>,
     model: Arc<dyn Llm>,
@@ -167,7 +167,7 @@ async fn session_task(
         }
     }
 
-    // Go-parity note 5: exactly the fields Go copies.
+    // Exactly these fields are copied from the run config.
     let gen_cfg = req.config.clone().unwrap_or_default();
     let mut connect_cfg = LiveConnectConfig {
         response_modalities: live_cfg.response_modalities.clone(),
@@ -180,7 +180,7 @@ async fn session_task(
         realtime_input_config: live_cfg.realtime_input_config.clone(),
         ..Default::default()
     };
-    // Go b5cec673: affective dialog and proactivity stay unset for the models
+    // Affective dialog and proactivity stay unset for the models
     // `is_gemini_3x_live` matches (affective dialog is not supported on them; proactive audio is
     // always on or not supported). Live Translate is excluded by it and still gets both.
     if !is_gemini_3x_live(model.name()) {
@@ -266,7 +266,7 @@ async fn session_task(
             tracing::debug!(handle = %sr.handle, "connecting with live session handle");
         }
 
-        // Go connCtx.
+        // The connection's cancellation token.
         let conn_token = ctx_token.child_token();
         let connected = tokio::select! {
             r = model.connect_live(connect_cfg.clone()) => r,
@@ -298,14 +298,14 @@ async fn session_task(
             && let Err(e) = conn.send_history(&req.contents).await
         {
             tracing::warn!(error = %e, "failed to send history");
-            // R9: close the connection before reporting.
+            // Close the connection before reporting.
             conn_token.cancel();
             let _ = tokio::time::timeout(CLOSE_TIMEOUT, conn.close()).await;
             sess.push_error(conn_err(e)).await;
             return;
         }
 
-        // Go 33a587e2: a function response awaiting delivery to the model, queued on the
+        // A function response awaiting delivery to the model, queued on the
         // session's input channel so the sender task is the connection's only writer (a write
         // from this loop could overtake user input queued there). While one is pending, the
         // events that arrive are held in order; errors are handled at once.
@@ -409,7 +409,7 @@ async fn session_task(
                     }
                     if let Some(call_ev) = call_ev {
                         // Once the session is closed, start no tool: a streaming tool registered
-                        // now could miss close()'s cancellation (R9). Every later push would be
+                        // now could miss close()'s cancellation. Every later push would be
                         // refused anyway.
                         if sess.done().is_cancelled() {
                             break 'consume Outcome::Stop;
@@ -474,7 +474,7 @@ async fn session_task(
             }
         };
 
-        // Cleanup before ending or reconnecting (Go cleanup()).
+        // Cleanup before ending or reconnecting.
         conn_token.cancel();
         let _ = tokio::time::timeout(CLOSE_TIMEOUT, conn.close()).await;
         tasks.shutdown().await;
@@ -486,7 +486,7 @@ async fn session_task(
     }
 }
 
-/// Queues `req` on the session's input channel for the sender task (Go `inputCase <- inputReq`);
+/// Queues `req` on the session's input channel for the sender task;
 /// never completes without a request, so a select branch over it stays idle. `false` once the
 /// session is done.
 async fn queue_pending(sess: &LiveSessionImpl, req: Option<LiveRequest>) -> bool {
@@ -496,7 +496,7 @@ async fn queue_pending(sess: &LiveSessionImpl, req: Option<LiveRequest>) -> bool
     }
 }
 
-/// Port of base_flow.go isEmptyLiveResponse (Go 8cddb9d4): `r` carries nothing worth an event,
+/// Whether `r` carries nothing worth an event,
 /// as the response built from the Live API's setupComplete does. adk-python's live flow skips
 /// the same responses.
 pub(crate) fn is_empty_live_response(r: &LlmResponse) -> bool {
@@ -520,7 +520,7 @@ async fn report(token: &CancellationToken, tx: &mpsc::Sender<ConnMsg>, err: Live
     }
 }
 
-/// Go's reading-from-model goroutine (base_flow.go:567-595).
+/// The reader task: reads responses from the model connection.
 async fn reader(
     conn: Arc<dyn LiveConnection>,
     token: CancellationToken,
@@ -537,7 +537,7 @@ async fn reader(
         };
         let resp = match res {
             Ok(Some(r)) => r,
-            // The stream ended without a close frame: Go's io.EOF.
+            // The stream ended without a close frame: end of stream.
             Ok(None) => {
                 report(&token, &tx, LiveConnError::eof()).await;
                 return;
@@ -562,7 +562,7 @@ async fn reader(
         if is_empty_live_response(&resp) {
             continue;
         }
-        // Go-parity note 4: author and response only (no branch).
+        // Author and response only (no branch).
         let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
         ev.author = ctx.agent().name().to_owned();
         ev.response = resp;
@@ -573,12 +573,12 @@ async fn reader(
     }
 }
 
-/// Go's sending-to-model goroutine (base_flow.go:598-630).
+/// The sender task: sends requests to the model connection.
 ///
 /// `next_input` acknowledges a request when it takes it, so a caller that abandons its
 /// `LiveSession::send` future after the request was queued (for example a streaming tool whose
 /// token was cancelled mid-send) still has it delivered by whichever connection's sender takes it.
-/// A taken request is lost only if its write fails, as in Go.
+/// A taken request is lost only if its write fails.
 async fn sender(
     conn: Arc<dyn LiveConnection>,
     token: CancellationToken,
@@ -599,7 +599,7 @@ async fn sender(
             }
         }
         if let Some(input) = req.realtime_input {
-            // R8: input audio is always cached (base_flow.go:631-633).
+            // Input audio is always cached.
             if let RealtimeInput::Blob(blob) = &input {
                 sess.audio()
                     .cache_input(ctx.platform(), &blob.data, &blob.mime_type);

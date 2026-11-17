@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Contents request processor (port of Go internal/llminternal/contents_processor.go) and the
-//! display-name scrubber (Go internal/llminternal/file_uploads_processor.go).
+//! Contents request processor and the display-name scrubber.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -44,15 +43,15 @@ use crate::{
     },
 };
 
-/// Go SingleTurnNudge: appended as a second user-content text part for single_turn agents.
+/// Appended as a second user-content text part for single_turn agents.
 pub(crate) const SINGLE_TURN_NUDGE: &str = "Important: You will not receive any user replies or clarifications. Complete the task using only the information provided above.";
 
 const CONTINUE_PROCESSING: &str = "Continue processing previous requests as instructed. Exit or provide a summary if no more outputs are needed.";
 
-/// Go requestEUCFunctionCallName: the special function that handles credential requests.
+/// The special function that handles credential requests.
 const REQUEST_EUC_FUNCTION_CALL_NAME: &str = "adk_request_credential";
 
-/// Port of contents_processor.go:39 ContentsRequestProcessor: populates the request contents
+/// Populates the request contents
 /// from the session's events.
 pub(crate) fn contents_request_processor<'a>(
     ctx: &'a InvocationContext,
@@ -67,16 +66,15 @@ pub(crate) fn contents_request_processor<'a>(
         let name = agent.name().to_owned();
         // History hiding follows the PLACEMENT (bound mode), not the declaration; an explicit
         // IncludeContents::Default opts out of it; Unset behaves as Default everywhere else
-        // (C5 D5; Go contents_processor.go:72).
         let placement_hides_history = bound_mode(ctx, &*agent) == Some(Mode::SingleTurn)
             && state.cfg.include_contents != IncludeContents::Default;
         let current_turn_only =
             state.cfg.include_contents == IncludeContents::None || placement_hides_history;
-        // How to shape the turn honors the declaration too (Go ModeFor).
+        // How to shape the turn honors the declaration too (see `mode_for`).
         let is_single_turn = mode_for(ctx, &*agent) == Mode::SingleTurn;
         // A compaction record tells prompt assembly to drop a span of history and substitute
         // content in its place. Tool code and plugins can write EventActions, so records are only
-        // honored when this run actually has compaction configured (Go compactionEnabled).
+        // honored when this run actually has compaction configured.
         let compaction_enabled = runtime::configured(ctx);
         let events: Vec<Event> = ctx
             .session()
@@ -115,7 +113,7 @@ pub(crate) fn contents_request_processor<'a>(
     })
 }
 
-/// Port of contents_processor.go buildContentsDefault: the request contents after filtering,
+/// The request contents after filtering,
 /// rearrangement and content processing of `events`.
 pub(crate) fn build_contents_default(
     agent_name: &str,
@@ -136,7 +134,8 @@ pub(crate) fn build_contents_default(
     )
 }
 
-/// Port of contents_processor.go:121 buildContentsDefaultWithCallSource.
+/// As [`build_contents_default`], with the calls that responses pair with taken from
+/// `all_events`.
 pub(crate) fn build_contents_default_with_call_source(
     agent_name: &str,
     branch: &str,
@@ -162,7 +161,7 @@ pub(crate) fn build_contents_default_with_call_source(
             && !should_exclude_event(ev)
     };
     // The author of the latest visible call with each ID, filled in as the events are read so a
-    // response pairs with the call before it (Go dba8afa2). When `events` is a suffix of
+    // response pairs with the call before it. When `events` is a suffix of
     // `all_events`, as for the compaction token estimate, the calls before the suffix are
     // recorded first, so a response in the suffix pairs the same way it does when the whole
     // session is built.
@@ -199,7 +198,7 @@ pub(crate) fn build_contents_default_with_call_source(
         }
     }
 
-    // Replace each compaction summary with the events it covers (Go compactioninternal.Apply).
+    // Replace each compaction summary with the events it covers.
     // A no-op when no record reached here: records are dropped at collection unless compaction
     // is configured for the run.
     let filtered = apply(&filtered);
@@ -264,7 +263,7 @@ pub(crate) fn build_contents_default_with_call_source(
         };
         // Gemini 3 in streaming returns a last response with an empty part; filter it out. The
         // live audio cache records its blobs as artifact:// refs that are ADK bookkeeping, not
-        // conversation content; replaying one fails the request (Go 22ff1839).
+        // conversation content; replaying one fails the request.
         c.parts
             .retain(|p| *p != Part::default() && !is_internal_live_artifact_part(p));
         if c.parts.is_empty() {
@@ -292,9 +291,9 @@ fn text_part(text: String) -> Part {
     }
 }
 
-/// Port of contents_processor.go:280 dropOrphanedFunctionResponses. Returns the pruned events
+/// Drops function responses with no matching call. Returns the pruned events
 /// plus the INDICES (into the returned Vec) of the surviving events whose orphaned responses
-/// were removed (Go `map[*Event]bool`), so later rearrangement preserves their remaining content.
+/// were removed, so later rearrangement preserves their remaining content.
 pub(crate) fn drop_orphaned_function_responses(
     events: Vec<Event>,
     all_events: &[Event],
@@ -350,7 +349,7 @@ pub(crate) fn drop_orphaned_function_responses(
     (result, orphan_remnants)
 }
 
-/// Port of contents_processor.go:351 dropOrphanedFunctionCalls: removes function calls that no
+/// Removes function calls that no
 /// function response in `events` answers. A call without an ID, or listed in an event's
 /// long-running IDs, is kept. The whole part goes (thought signature included); an event left
 /// with no parts is removed.
@@ -405,7 +404,7 @@ pub(crate) fn drop_orphaned_function_calls(events: Vec<Event>) -> Vec<Event> {
     result
 }
 
-/// Go `%v` of a `map[string]struct{}`: `map[a:{} b:{}]` (fmt sorts map keys).
+/// An id set formatted as `map[a:{} b:{}]`, ids sorted (the form used in error messages).
 fn go_id_set(ids: &BTreeSet<String>) -> String {
     format!(
         "map[{}]",
@@ -416,7 +415,7 @@ fn go_id_set(ids: &BTreeSet<String>) -> String {
     )
 }
 
-/// Port of contents_processor.go:408 rearrangeEventsForLatestFunctionResponse: merges responses
+/// Merges responses
 /// to the latest event's matching call while preserving unrelated tool events and the orphan
 /// remnants (indices into `events`). Other intervening non-tool events are dropped.
 pub(crate) fn rearrange_events_for_latest_function_response(
@@ -503,7 +502,7 @@ pub(crate) fn rearrange_events_for_latest_function_response(
     Ok(result)
 }
 
-/// Port of contents_processor.go:557 rearrangeEventsForFunctionResponsesInHistory: every
+/// Rearranges the history so every
 /// function call event is immediately followed by one consolidated response event, and the
 /// pair(s) answered by the last event are emitted last.
 pub(crate) fn rearrange_events_for_function_responses_in_history(
@@ -561,9 +560,9 @@ pub(crate) fn rearrange_events_for_function_responses_in_history(
     Ok(result)
 }
 
-/// Port of contents_processor.go:688 mergeFunctionResponseEvents: merges function response
+/// Merges function response
 /// events into one. Later function response parts replace earlier ones with the same ID; other
-/// parts are appended. The Go nil-clone check cannot fail in Rust and is omitted.
+/// parts are appended.
 pub(crate) fn merge_function_response_events(events: &[Event]) -> Result<Event, AgentError> {
     let Some(first) = events.first() else {
         return Err(AgentError::other(
@@ -610,15 +609,15 @@ pub(crate) fn merge_function_response_events(events: &[Event]) -> Result<Event, 
     Ok(merged)
 }
 
-/// Port of contents_processor.go:757 buildContentsCurrentTurnContextOnly: contents for the
+/// Contents for the
 /// current turn only, which starts at the latest visible event from the user or another agent.
 ///
 /// A tool result the caller posted back (a long-running tool's, say) is not a turn start, and
 /// the turn reaches back to the call it answers, past any user turn sent while the tool was
-/// pending (Go e847ba7d). A `transfer_to_agent` hand-over continues the turn of the request it
-/// hands over, so it does not start the turn either (Go 86620857); with no earlier turn start,
-/// the turn starts at the latest hand-over. An event with nothing to read (Go fc6de07d) or on a
-/// tool's sub-branch (Go ab78c5ae) cannot start the turn.
+/// pending. A `transfer_to_agent` hand-over continues the turn of the request it
+/// hands over, so it does not start the turn either; with no earlier turn start,
+/// the turn starts at the latest hand-over. An event with nothing to read or on a
+/// tool's sub-branch cannot start the turn.
 pub(crate) fn build_contents_current_turn_context_only(
     agent_name: &str,
     branch: &str,
@@ -717,7 +716,7 @@ pub(crate) fn build_contents_current_turn_context_only(
     )
 }
 
-/// Port of contents_processor.go isEmptyEvent: `ev` gives the model nothing to read (no content
+/// `ev` gives the model nothing to read (no content
 /// with a role and parts, no transcription and no usable compaction summary).
 fn is_empty_event(ev: &Event) -> bool {
     content(ev).is_none_or(|c| c.role.is_empty() || c.parts.is_empty())
@@ -726,13 +725,13 @@ fn is_empty_event(ev: &Event) -> bool {
         && !has_usable_summary(ev)
 }
 
-/// Port of contents_processor.go isSubmittedToolResult: a tool result the caller posted back as
+/// A tool result the caller posted back as
 /// a user-authored function response.
 fn is_submitted_tool_result(ev: &Event) -> bool {
     ev.author == "user" && !function_responses(content(ev)).is_empty()
 }
 
-/// Port of contents_processor.go isDirectTransfer: a `transfer_to_agent` call or the response
+/// A `transfer_to_agent` call or the response
 /// that carries out the transfer.
 fn is_direct_transfer(ev: &Event) -> bool {
     !ev.actions.transfer_to_agent.is_empty()
@@ -741,12 +740,12 @@ fn is_direct_transfer(ev: &Event) -> bool {
             .any(|c| c.name == TRANSFER_TO_AGENT_TOOL_NAME)
 }
 
-/// Port of contents_processor.go isOtherAgentReply.
+/// Whether `ev` is a reply from an agent other than the current one or the user.
 fn is_other_agent_reply(current_agent_name: &str, ev: &Event) -> bool {
     ev.author != current_agent_name && ev.author != "user"
 }
 
-/// Port of contents_processor.go recordCallAuthors: `ev`'s author is the author of each function
+/// Records `ev`'s author as the author of each function
 /// call with an ID in `ev`. A call without one is skipped, so a response without an ID never
 /// matches it.
 fn record_call_authors(authors: &mut HashMap<String, String>, ev: &Event) {
@@ -757,7 +756,7 @@ fn record_call_authors(authors: &mut HashMap<String, String>, ev: &Event) {
     }
 }
 
-/// Port of contents_processor.go answersOtherAgentCall: `ev` holds a function response to a call
+/// `ev` holds a function response to a call
 /// that an agent other than `current_agent_name` made.
 fn answers_other_agent_call(
     current_agent_name: &str,
@@ -771,7 +770,7 @@ fn answers_other_agent_call(
     })
 }
 
-/// Port of tool_sub_branch.go functionCallIDs: the non-empty IDs of the function calls in
+/// The non-empty IDs of the function calls in
 /// `events`.
 pub(crate) fn function_call_ids(events: &[Event]) -> HashSet<String> {
     events
@@ -782,7 +781,7 @@ pub(crate) fn function_call_ids(events: &[Event]) -> HashSet<String> {
         .collect()
 }
 
-/// Port of tool_sub_branch.go isToolSubBranchEvent (Go ab78c5ae): `ev` was published by a tool
+/// `ev` was published by a tool
 /// on a sub-branch below `agent_branch`, such as a single_turn sub-agent run on
 /// `<agent>@<function_call_id>`. The calling agent gets the tool's function response, so these
 /// events are not part of its context.
@@ -816,21 +815,18 @@ pub(crate) fn is_tool_sub_branch_event(
     })
 }
 
-/// Go `stringify` (contents_processor.go:855) of a function-call args or function-response map.
+/// Stringifies a function-call args or function-response map as compact JSON.
 ///
-/// Representability trade-off: a Rust `Map` cannot tell Go's nil map (`json.Marshal` → `null`)
-/// from a non-nil empty one (`{}`). Real traffic is non-nil: Gemini sends `"args": {}` for a
-/// no-argument call (e.g. TestDelegation_06's `confirm`, TestDelegation_11's `tool_one`) and Go
-/// tool results are non-nil maps (transfer_to_agent returns `map[string]any{}`), so an empty map
-/// renders `{}`. Deviation: only a synthetic Go nil map (a hand-built FunctionCall/Response with
-/// no Args/Response, as in Go's contents_processor_test) would render `null`.
+/// A Rust `Map` has no null form, so an empty map always renders `{}`: Gemini sends
+/// `"args": {}` for a no-argument call, and tool results (transfer_to_agent returns an empty
+/// map) are maps too.
 fn stringify_map(m: &Map<String, Value>) -> String {
     go_json_marshal(&Value::Object(m.clone()))
 }
 
-/// Port of contents_processor.go:798 ConvertForeignEvent: presents another agent's event as
-/// user context. Thought parts, internal live-artifact refs (Go 22ff1839) and standalone metadata
-/// (Go 6caa3b85) are omitted. Returns `Some(ev.clone())` for a content-less event and `None` to
+/// Presents another agent's event as
+/// user context. Thought parts, internal live-artifact refs and standalone metadata
+/// are omitted. Returns `Some(ev.clone())` for a content-less event and `None` to
 /// drop it (a foreign turn with no remaining payload).
 pub(crate) fn convert_foreign_event(ev: &Event) -> Option<Event> {
     let Some(c) = content(ev).filter(|c| !c.parts.is_empty()) else {
@@ -858,7 +854,7 @@ pub(crate) fn convert_foreign_event(ev: &Event) -> Option<Event> {
                 stringify_map(&fc.args)
             )));
         } else if let Some(fr) = &p.function_response {
-            // Regression: TestDelegation_05/_09 record `returned result: {}` (see stringify_map).
+            // An empty result map renders as `{}` (see stringify_map).
             parts.push(text_part(format!(
                 "[{}] `{}` tool returned result: {}",
                 ev.author,
@@ -873,7 +869,7 @@ pub(crate) fn convert_foreign_event(ev: &Event) -> Option<Event> {
             || p.tool_response.is_some()
             || p.audio_transcription.is_some()
         {
-            // Keep Go's server-tool and transcript parts alongside Python's media/code payloads.
+            // Keep server-tool and transcript parts alongside the media/code payloads.
             // Standalone metadata has no relay payload.
             parts.push(p.clone());
         }
@@ -900,7 +896,7 @@ pub(crate) fn convert_foreign_event(ev: &Event) -> Option<Event> {
     })
 }
 
-/// Port of contents_processor.go:866 shouldExcludeEvent: credential and confirmation requests
+/// Credential and confirmation requests
 /// and responses never reach the model.
 pub(crate) fn should_exclude_event(ev: &Event) -> bool {
     let excluded = |name: &str| {
@@ -918,7 +914,7 @@ pub(crate) fn should_exclude_event(ev: &Event) -> bool {
     })
 }
 
-/// Port of contents_processor.go:911 buildTaskInputUserContent: the first turn of a scoped
+/// The first turn of a scoped
 /// (task / single_turn) agent, from the args of the delegating function call whose ID is the
 /// isolation scope, else from `user_content`. Appends [`SINGLE_TURN_NUDGE`] when single-turn.
 pub(crate) fn build_task_input_user_content(
@@ -938,7 +934,7 @@ pub(crate) fn build_task_input_user_content(
         .filter_map(|p| p.function_call.as_ref())
         .find(|fc| fc.id == isolation_scope && !fc.args.is_empty());
     if let Some(fc) = delegating_call {
-        // Render args as JSON: the same shape an LLM would emit (Go json.Marshal).
+        // Render args as JSON: the same shape an LLM would emit.
         let mut parts = vec![text_part(go_json_marshal(&Value::Object(fc.args.clone())))];
         if is_single_turn {
             parts.push(nudge());
@@ -959,7 +955,7 @@ pub(crate) fn build_task_input_user_content(
     })
 }
 
-/// Port of file_uploads_processor.go:28 removeDisplayNameIfExists: the Gemini API (non-Vertex)
+/// Removes `display_name` from file data: the Gemini API (non-Vertex)
 /// backend rejects `display_name` on file uploads, so it is removed.
 pub(crate) fn remove_display_name_if_exists<'a>(
     ctx: &'a InvocationContext,

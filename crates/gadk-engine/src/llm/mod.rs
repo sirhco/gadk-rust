@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The LLM agent and its flow (port of ADK-Go `agent/llmagent` and `internal/llminternal`).
+//! The LLM agent and its flow.
 
 pub mod agent;
 pub mod config;
@@ -37,34 +37,33 @@ use std::sync::Arc;
 
 use gadk_agent::{Agent, Tool};
 
-/// The tools of an LLM agent (Go `llminternal.Reveal(agent).Tools`: the configured tools plus any
-/// the engine installed, such as task tools for sub-agents); `None` for any other agent. The
+/// The tools of an LLM agent: the configured tools plus any
+/// the engine installed, such as task tools for sub-agents; `None` for any other agent. The
 /// REST server's agent graph draws them.
 pub fn agent_tools(agent: &dyn Agent) -> Option<Vec<Arc<dyn Tool>>> {
     state::reveal(agent).map(|s| s.tools())
 }
 
-/// The configuration an LLM agent was built from (Go `llminternal.Reveal(agent)`, whose fields
-/// the analytics plugin reads); `None` for any other agent. Engine-installed additions (task
+/// The configuration an LLM agent was built from, whose fields
+/// the analytics plugin reads; `None` for any other agent. Engine-installed additions (task
 /// tools, the appended instruction suffix) are not in it: see [`agent_tools`] and
 /// [`agent_instructions`].
 pub fn llm_agent_config(agent: &dyn Agent) -> Option<&LlmAgentConfig> {
     state::reveal(agent).map(|s| &s.cfg)
 }
 
-/// The instructions of an LLM agent (Go `llminternal.Reveal(agent).{Instruction,
-/// GlobalInstruction}`).
+/// The configured and engine-extended instructions of an LLM agent.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentInstructions {
-    /// Go `State.Instruction`: the configured instruction plus whatever the engine appended to it
+    /// The configured instruction plus whatever the engine appended to it
     /// at run time (the live `task_completed` suffix).
     pub instruction: String,
-    /// Go `State.GlobalInstruction`: the configured global instruction.
+    /// The configured global instruction.
     pub global_instruction: String,
 }
 
-/// The instructions of an LLM agent (Go `llminternal.Reveal(agent).{Instruction,
-/// GlobalInstruction}`); `None` for any other agent. The A2A agent card describes an agent with
+/// The instructions of an LLM agent (see [`AgentInstructions`]); `None` for any other agent.
+/// The A2A agent card describes an agent with
 /// them.
 pub fn agent_instructions(agent: &dyn Agent) -> Option<AgentInstructions> {
     state::reveal(agent).map(|s| AgentInstructions {

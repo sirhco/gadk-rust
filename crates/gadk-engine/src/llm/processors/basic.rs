@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Basic request processor (port of Go internal/llminternal/basic_processor.go).
+//! Basic request processor: copies the agent's generate-content config into the request.
 
 use futures::future::BoxFuture;
 use gadk_agent::{AgentError, InvocationContext, Mode};
@@ -26,7 +26,8 @@ use crate::llm::{
     processors::output_schema::need_output_schema_processor, state::reveal,
 };
 
-/// Port of Go internal/llminternal/basic_processor.go basicRequestProcessor (line 31).
+/// Sets the request config from the agent's `generate_content_config`, plus the response schema
+/// where one applies.
 pub(crate) fn basic_request_processor<'a>(
     ctx: &'a InvocationContext,
     req: &'a mut LlmRequest,
@@ -37,13 +38,13 @@ pub(crate) fn basic_request_processor<'a>(
         let Some(state) = reveal(&*agent) else {
             return Ok(Vec::new());
         };
-        // Go: req.Config = clone(state.GenerateContentConfig), replacing whatever was there;
-        // nil → empty config.
+        // The request config is a clone of the agent's `generate_content_config`, replacing
+        // whatever was there; `None` becomes an empty config.
         let mut cfg = clone_generate_content_config(state.cfg.generate_content_config.as_ref())
             .unwrap_or_default();
         // Task-mode agents never set ResponseSchema (the finish_task declaration carries it).
-        // Reads the DECLARED mode (mode.go doc).
-        // Go be529e7b: the declared schema, else one a typed workflow node bound.
+        // Reads the DECLARED mode (see the `mode` module docs).
+        // The schema is the declared one, else one a typed workflow node bound.
         if state.cfg.mode != Mode::Task
             && !need_output_schema_processor(state)
             && let Some(schema) = output_schema_for(ctx, state)
@@ -56,7 +57,7 @@ pub(crate) fn basic_request_processor<'a>(
     })
 }
 
-/// Port of basic_processor.go:70 CloneGenerateContentConfig (Go's reflective clone → Clone).
+/// Clones the config; `None` stays `None`.
 pub(crate) fn clone_generate_content_config(
     cfg: Option<&GenerateContentConfig>,
 ) -> Option<GenerateContentConfig> {

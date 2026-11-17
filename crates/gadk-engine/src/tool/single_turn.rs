@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go internal/workflowinternal/single_turn_tool.go.
+//! The single_turn tool: runs a single_turn sub-agent as a workflow node.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -29,7 +29,7 @@ use crate::tool::finish_task::go_type_name;
 use crate::tool::utils::validate_map_on_schema;
 use crate::workflow::{AgentNode, Node, NodeConfig, RunNodeOptions, run_node};
 
-/// Port of Go workflowinternal.SingleTurnTool: runs a single_turn sub-agent as a workflow node
+/// Runs a single_turn sub-agent as a workflow node
 /// and returns its output under `result`.
 pub(crate) struct SingleTurnTool {
     agent: Arc<dyn Agent>,
@@ -37,14 +37,14 @@ pub(crate) struct SingleTurnTool {
 }
 
 impl SingleTurnTool {
-    /// Port of Go NewSingleTurnTool (infallible in Go too).
+    /// Creates the tool (infallible).
     pub(crate) fn new(agent: Arc<dyn Agent>) -> Arc<SingleTurnTool> {
         let decl = make_function_declaration(agent.as_ref());
         Arc::new(SingleTurnTool { agent, decl })
     }
 }
 
-/// Port of Go getInputSchema: an LlmAgent's own input schema, else the first sub-agent's
+/// An LlmAgent's own input schema, else the first sub-agent's
 /// (recursively).
 pub(crate) fn input_schema_of(agent: &dyn Agent) -> Option<Schema> {
     if let Some(state) = reveal(agent) {
@@ -56,7 +56,7 @@ pub(crate) fn input_schema_of(agent: &dyn Agent) -> Option<Schema> {
         .and_then(|s| input_schema_of(s.as_ref()))
 }
 
-/// Port of Go getOutputSchema: an LlmAgent's own output schema, else the LAST sub-agent's
+/// An LlmAgent's own output schema, else the LAST sub-agent's
 /// (recursively).
 pub(crate) fn output_schema_of(agent: &dyn Agent) -> Option<Schema> {
     if let Some(state) = reveal(agent) {
@@ -68,7 +68,7 @@ pub(crate) fn output_schema_of(agent: &dyn Agent) -> Option<Schema> {
         .and_then(|s| output_schema_of(s.as_ref()))
 }
 
-/// Port of Go MakeFunctionDeclaration: the agent's input schema as parameters, else a required
+/// The agent's input schema as parameters, else a required
 /// `request` string.
 pub(crate) fn make_function_declaration(agent: &dyn Agent) -> FunctionDeclaration {
     let parameters = input_schema_of(agent).unwrap_or_else(|| Schema {
@@ -104,19 +104,19 @@ impl Tool for SingleTurnTool {
         Some(self.decl.clone())
     }
 
-    // `process_request` is not overridden: Go's ProcessRequest is toolutils.PackTool, which the
+    // `process_request` is not overridden: its job is `pack_tool`, which the
     // flow runs via `gadk_agent::pack_tool` before calling `Tool::process_request`.
 
     fn as_runnable(&self) -> Option<&dyn RunnableTool> {
         Some(self)
     }
 
-    /// Go classifies `workflowinternal.SingleTurnTool` as `SUB_AGENT` (`A2A` when its agent is remote).
+    /// Classified as `SubAgent` (`A2A` when its agent is remote).
     fn origin_kind(&self) -> ToolOriginKind {
         ToolOriginKind::SubAgent
     }
 
-    /// The wrapped agent (Go `subAgentOrA2A` reads the tool's `agent` field).
+    /// The wrapped agent.
     fn origin_agent(&self) -> Option<Arc<dyn Agent>> {
         Some(self.agent.clone())
     }
@@ -126,8 +126,8 @@ impl Tool for SingleTurnTool {
     }
 }
 
-/// Go `fmt.Errorf("<message>: %w", err)` where `message` already includes the source text:
-/// Display = `message`, `source()` = the wrapped [`AgentError`] (keeps the `%w` chain).
+/// An error whose `message` already includes the source text:
+/// Display = `message`, `source()` = the wrapped [`AgentError`].
 #[derive(Debug)]
 struct ChainedError {
     message: String,
@@ -148,7 +148,7 @@ impl std::error::Error for ChainedError {
 
 #[async_trait]
 impl RunnableTool for SingleTurnTool {
-    /// Port of Go (*SingleTurnTool).Run.
+    /// Runs the agent as a workflow node and returns its output under `result`.
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let margs = match args {
             Value::Object(m) => m,
@@ -170,7 +170,7 @@ impl RunnableTool for SingleTurnTool {
                 })?;
                 Value::Object(margs)
             }
-            // Unreachable: make_function_declaration always sets parameters (as in Go).
+            // Unreachable: make_function_declaration always sets parameters.
             None => margs.get("request").cloned().unwrap_or(Value::Null),
         };
         let node = AgentNode::new(Arc::clone(&self.agent), NodeConfig::default()).map_err(|e| {
@@ -178,10 +178,10 @@ impl RunnableTool for SingleTurnTool {
         })?;
         let node: Arc<dyn Node> = node;
         // Put the sub-agent's events on "<agent>@<function_call_id>", so the calling agent's
-        // contents builder can tell them apart from a workflow node's branch (Go ab78c5ae). Only
+        // contents builder can tell them apart from a workflow node's branch. Only
         // the branch carries the id: the run id stays on the scheduler's counter, so a call id the
-        // model reuses still runs the sub-agent, as in adk-python. Without a call id: Go
-        // WithUseSubBranch().
+        // model reuses still runs the sub-agent, as in adk-python. Without a call id the run
+        // uses `use_sub_branch`.
         let call_id = ctx.function_call_id();
         let opts = if call_id.is_empty() {
             RunNodeOptions {

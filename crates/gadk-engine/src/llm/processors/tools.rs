@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Tools request processor (port of Go internal/llminternal/tools_processor.go) and the flow's
-//! tool/toolset preprocessing (Go base_flow.go toolPreprocess, toolsetPreprocess).
+//! Tools request processor, and the flow's tool/toolset preprocessing (`tool_preprocess`,
+//! `toolset_preprocess`).
 
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ use crate::{
     workflow::route::go_quote,
 };
 
-/// Port of tools_processor.go:32 toolProcessor: rebuilds Flow.tools on every step (toolsets are
+/// Rebuilds `Flow.tools` on every step (toolsets are
 /// re-evaluated each step).
 pub(crate) fn tools_processor<'a>(
     ctx: &'a InvocationContext,
@@ -62,25 +62,25 @@ pub(crate) fn tools_processor<'a>(
     })
 }
 
-/// Port of base_flow.go:951 toolPreprocess. Runs AFTER all request processors (called by
-/// `Flow::preprocess`). For each tool, in order: `pack_tool` (Go toolutils.PackTool, which Go
-/// tools with a declaration call inside ProcessRequest) when the tool has a declaration, then
+/// Applies each tool to the request. Runs AFTER all request processors (called by
+/// `Flow::preprocess`). For each tool, in order: `pack_tool` (which adds the tool's declaration
+/// to the request) when the tool has a declaration, then
 /// the tool's own awaited `process_request` for extra edits (e.g. finish_task's appended
-/// instructions). This keeps Go's declaration order: processor-added tools (transfer_to_agent,
+/// instructions). This keeps the declaration order: processor-added tools (transfer_to_agent,
 /// set_model_response) come first, then the agent's tools.
 ///
-/// Go's flow packs nothing itself, and no Go tool without a declaration packs itself (the Gemini
-/// built-ins, preload_memory, example_tool), so a declaration-less tool is never in `req.tools`.
+/// The flow packs nothing itself, and a tool without a declaration (the Gemini
+/// built-ins, preload_memory, example_tool) is never in `req.tools`.
 ///
-/// Go fails with "does not implement RequestProcessor()" for a tool without `ProcessRequest`;
-/// every Rust `Tool` has a defaulted `process_request`, so that error cannot occur.
+/// Every `Tool` has a defaulted `process_request`, so there is no "tool does not implement
+/// process_request" error case.
 pub(crate) async fn tool_preprocess(
     ctx: &InvocationContext,
     req: &mut LlmRequest,
     tools: &[Arc<dyn Tool>],
 ) -> Result<(), AgentError> {
     for t in tools {
-        // Go: agent.NewToolContext(ctx, "", &session.EventActions{}, nil).
+        // A fresh tool context: empty function call id, fresh actions, no confirmation.
         let tool_ctx = ctx.clone().into_context().with_delta(ContextDelta {
             function_call_id: Some(String::new()),
             actions: Some(Arc::new(parking_lot::Mutex::new(EventActions::default()))),
@@ -98,7 +98,7 @@ pub(crate) async fn tool_preprocess(
     Ok(())
 }
 
-/// Port of base_flow.go:966 toolsetPreprocess.
+/// Runs each toolset's `process_request` on the request.
 pub(crate) async fn toolset_preprocess(
     ctx: &InvocationContext,
     req: &mut LlmRequest,
@@ -108,7 +108,7 @@ pub(crate) async fn toolset_preprocess(
         return Ok(());
     };
     for ts in &state.cfg.toolsets {
-        // Go: agent.NewToolContext(ctx, "", nil, nil): fresh actions.
+        // A fresh tool context: empty function call id, fresh actions, no confirmation.
         let tool_ctx = ctx.clone().into_context().with_delta(ContextDelta {
             function_call_id: Some(String::new()),
             tool_confirmation: Some(None),

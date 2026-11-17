@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Output-schema request processor and the `set_model_response` tool (port of Go
-//! internal/llminternal/outputschema_processor.go).
+//! Output-schema request processor and the `set_model_response` tool.
 
 use std::{any::Any, sync::Arc};
 
@@ -43,7 +42,7 @@ pub(crate) const SET_MODEL_RESPONSE_TOOL_NAME: &str = "set_model_response";
 
 const INSTRUCTION_FOR_PROCESSOR: &str = "IMPORTANT: You have access to other tools, but you must provide your final response using the set_model_response tool with the required structured format. After using any other tools needed to complete the task, always call set_model_response with your final answer in the specified schema format.";
 
-/// Port of outputschema_processor.go:41 outputSchemaRequestProcessor: adds the
+/// Adds the
 /// set_model_response tool to handle structured output.
 pub(crate) fn output_schema_request_processor<'a>(
     ctx: &'a InvocationContext,
@@ -59,7 +58,7 @@ pub(crate) fn output_schema_request_processor<'a>(
         if !need_output_schema_processor(state) {
             return Ok(Vec::new());
         }
-        // Go be529e7b: the declared schema, else one a typed workflow node bound.
+        // The declared schema, else one a typed workflow node bound.
         let Some(schema) = output_schema_for(ctx, state) else {
             return Ok(Vec::new());
         };
@@ -70,7 +69,7 @@ pub(crate) fn output_schema_request_processor<'a>(
     })
 }
 
-/// Port of outputschema_processor.go:67 createFinalModelResponseEvent: a final model response
+/// A final model response
 /// event from set_model_response JSON.
 pub(crate) fn create_final_model_response_event(ctx: &InvocationContext, response: &str) -> Event {
     let mut ev = Event::new(ctx.platform(), ctx.invocation_id());
@@ -86,7 +85,7 @@ pub(crate) fn create_final_model_response_event(ctx: &InvocationContext, respons
     ev
 }
 
-/// Port of outputschema_processor.go:80 retrieveStructuredModelResponse: the JSON of the first
+/// The JSON of the first
 /// set_model_response function response, or "" when there is none.
 pub(crate) fn retrieve_structured_model_response(ev: Option<&Event>) -> Result<String, AgentError> {
     let Some(content) = ev.and_then(|e| e.response.content.as_ref()) else {
@@ -102,7 +101,9 @@ pub(crate) fn retrieve_structured_model_response(ev: Option<&Event>) -> Result<S
     Ok(String::new())
 }
 
-/// Port of outputschema_processor.go:98 needOutputSchemaProcessor.
+/// Whether the agent needs the `set_model_response` tool: it has a model, is not in task mode,
+/// has tools or toolsets, and the model needs it (a Gemini model that cannot combine tools
+/// with a response schema).
 pub(crate) fn need_output_schema_processor(state: &LlmAgentState) -> bool {
     let Some(model) = state.cfg.model.as_deref() else {
         return false;
@@ -115,7 +116,8 @@ pub(crate) fn need_output_schema_processor(state: &LlmAgentState) -> bool {
     has_tools && gadk_model::needs_output_schema_processor(Some(model))
 }
 
-/// Port of outputschema_processor.go:113 setModelResponseTool.
+/// The `set_model_response` tool: its parameters are the agent's output schema, and running it
+/// validates the arguments against that schema.
 pub(crate) struct SetModelResponseTool {
     pub(crate) schema: Schema,
 }
@@ -129,8 +131,7 @@ impl Tool for SetModelResponseTool {
         "Set your final response using the required output schema. Use this tool to provide your final structured answer instead of outputting text directly."
     }
 
-    /// Go sets ParametersJsonSchema to the *genai.Schema value, which serializes as genai Schema
-    /// JSON.
+    /// The parameters JSON schema is the output [`Schema`] serialized as JSON.
     fn declaration(&self) -> Option<FunctionDeclaration> {
         Some(FunctionDeclaration {
             name: self.name().into(),
@@ -151,7 +152,7 @@ impl Tool for SetModelResponseTool {
 
 #[async_trait]
 impl RunnableTool for SetModelResponseTool {
-    /// Port of outputschema_processor.go setModelResponseTool.Run.
+    /// Validates the arguments against the output schema and returns them as the tool result.
     async fn run(&self, _ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let Value::Object(m) = args else {
             return Err(ToolError::InvalidArgument(format!(

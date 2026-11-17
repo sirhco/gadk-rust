@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go tool/functiontool/function.go.
+//! Function tool: a tool wrapping a typed async function.
 
 use std::any::Any;
 use std::panic::AssertUnwindSafe;
@@ -31,12 +31,12 @@ use crate::tool::utils::{
     infer_output_schema, infer_schema, panic_message, schema_expects_object, validate_with_schema,
 };
 
-/// Go functiontool's long-running declaration note (function.go Declaration).
+/// The note added to a long-running tool's declaration.
 pub(crate) const LONG_RUNNING_NOTE: &str = "NOTE: This is a long-running operation. Do not call this tool again if it has already returned some intermediate or pending status.";
 
-/// Port of Go functiontool.Config.
+/// Configuration of a function tool.
 ///
-/// Go's `RequireConfirmationProvider` is the typed `provider` argument of
+/// A confirmation provider is the typed `provider` argument of
 /// [`FunctionTool::with_confirmation_provider`] / `StreamingFunctionTool::with_confirmation_provider`.
 #[derive(Clone)]
 pub struct FunctionToolConfig {
@@ -53,9 +53,8 @@ pub struct FunctionToolConfig {
     /// Whether every call requires a Human-in-the-Loop confirmation.
     pub require_confirmation: bool,
     /// What [`Tool::origin_kind`] reports for the built tool (default [`ToolOriginKind::Local`],
-    /// as Go's analytics plugin classifies a `functiontool` tool, `plugin/agentanalytics/events.go`
-    /// `classifyADKToolType`). Go tells a skill tool apart by its argument types' package; gadk's
-    /// skill tools set [`ToolOriginKind::Skill`] here instead.
+    /// as the analytics plugin classifies a function tool). gadk's skill tools set
+    /// [`ToolOriginKind::Skill`] here instead.
     pub origin: ToolOriginKind,
 }
 
@@ -92,7 +91,7 @@ type ErasedRun = Arc<
         + Sync,
 >;
 
-/// Port of Go functiontool's functionTool: a tool wrapping a typed async Rust function.
+/// A tool wrapping a typed async Rust function.
 ///
 /// The input (and output) JSON schemas are inferred from the handler's argument and result types unless
 /// [`FunctionToolConfig`] overrides them. Type-erased: the generic handler lives in `run`.
@@ -103,9 +102,9 @@ pub struct FunctionTool {
     run: ErasedRun,
 }
 
-/// Port of the TArgs kind check in Go functiontool.New / NewStreaming (struct, map, or pointer to those
-/// ⇔ the inferred schema's root type is or includes "object"). Checked on the inferred schema even when
-/// `cfg.input_schema` overrides it, as Go checks the Go type regardless of the override.
+/// Checks the kind of the argument type (struct, map, or pointer to those
+/// ⇔ the inferred schema's root type is or includes "object"). Checked on the inferred schema
+/// even when `cfg.input_schema` overrides it.
 pub(crate) fn check_args_type<Args: schemars::JsonSchema>() -> Result<(), ToolError> {
     if schema_expects_object(&infer_schema::<Args>()) {
         return Ok(());
@@ -116,7 +115,7 @@ pub(crate) fn check_args_type<Args: schemars::JsonSchema>() -> Result<(), ToolEr
     )))
 }
 
-/// Port of Go functiontool.resolvedSchema: the override when given, else the inferred schema; compiled.
+/// The override when given, else the inferred schema; compiled.
 pub(crate) fn resolved_schema(
     override_schema: Option<&Value>,
     inferred: impl FnOnce() -> Value,
@@ -127,7 +126,7 @@ pub(crate) fn resolved_schema(
         .map_err(|e| ToolError::InvalidArgument(format!("failed to infer {what} schema: {e}")))
 }
 
-/// Port of Go functiontool Declaration (both variants).
+/// The function declaration (shared by both tool variants).
 pub(crate) fn declaration(
     cfg: &FunctionToolConfig,
     input: &CompiledSchema,
@@ -151,10 +150,9 @@ pub(crate) fn declaration(
     }
 }
 
-/// Port of the confirmation block of Go functiontool Run / RunStream. `Ok(())` ⇒ proceed to the handler.
+/// The confirmation check of a call. `Ok(())` ⇒ proceed to the handler.
 ///
-/// `require` is evaluated only when the context carries no confirmation, as Go runs the
-/// `RequireConfirmationProvider` only in that branch.
+/// `require` is evaluated only when the context carries no confirmation.
 pub(crate) fn check_confirmation(
     ctx: &Context,
     name: &str,
@@ -180,8 +178,8 @@ pub(crate) fn check_confirmation(
     Err(ToolError::ConfirmationRequired)
 }
 
-/// The `json.Unmarshal(raw, &map[string]any)` step of Go typeutil.ConvertToWithJSONSchema in functiontool
-/// Run: a `null` that passed the output schema unmarshals to a nil (empty) map, not an error.
+/// Turns a result value into a map: a `null` that passed the output schema becomes an empty
+/// map, not an error.
 fn result_map(v: Value) -> Result<Map<String, Value>, String> {
     match v {
         Value::Null => Ok(Map::new()),
@@ -189,7 +187,7 @@ fn result_map(v: Value) -> Result<Map<String, Value>, String> {
     }
 }
 
-/// Port of Go's "unexpected args type, got: %T" check: an object or `null` (Go: a typed nil map) is accepted.
+/// Accepts an object or `null`; any other value is an "unexpected args type" error.
 pub(crate) fn check_args_value(args: &Value) -> Result<(), ToolError> {
     match args {
         Value::Object(_) | Value::Null => Ok(()),
@@ -201,11 +199,11 @@ pub(crate) fn check_args_value(args: &Value) -> Result<(), ToolError> {
 }
 
 impl FunctionTool {
-    /// Port of Go functiontool.New: a tool calling `f` with arguments decoded (and validated) as `Args`.
+    /// A tool calling `f` with arguments decoded (and validated) as `Args`.
     ///
     /// Fails with [`ToolError::InvalidArgument`] when `Args` is not an object type or a schema cannot be
     /// compiled.
-    #[allow(clippy::new_ret_no_self)] // mirrors Go functiontool.New, which returns tool.Tool (C4)
+    #[allow(clippy::new_ret_no_self)] // returns the tool as `Arc<dyn Tool>`
     pub fn new<Args, Out, F, Fut>(cfg: FunctionToolConfig, f: F) -> Result<Arc<dyn Tool>, ToolError>
     where
         Args: serde::de::DeserializeOwned + schemars::JsonSchema + Send + 'static,
@@ -216,7 +214,7 @@ impl FunctionTool {
         Self::build::<Args, Out, F, Fut, fn(&Args) -> bool>(cfg, f, None)
     }
 
-    /// Like [`FunctionTool::new`], with Go's `Config.RequireConfirmationProvider`: when the call carries no
+    /// Like [`FunctionTool::new`], with a confirmation provider: when the call carries no
     /// confirmation, `provider(&args)` decides whether one is required, overriding
     /// `cfg.require_confirmation`.
     pub fn with_confirmation_provider<Args, Out, F, Fut, P>(
@@ -284,10 +282,12 @@ impl FunctionTool {
                         Ok(m) => return Ok(m),
                         Err(e) => e,
                     };
-                // Go: a result encoding/json cannot represent must not be wrapped, because it cannot be sent.
+                // A result that cannot be represented as JSON must not be wrapped: it cannot be
+                // sent.
                 let value =
                     serde_json::to_value(&output).map_err(|e| ToolError::Execution(e.into()))?;
-                // Go: a schema inferred from TResults describes the type, not what encoding/json emits for it.
+                // A schema inferred from the output type describes the type, not what
+                // serialization emits for it, so only an explicit output schema is enforced.
                 if explicit_output && validate_with_schema(&output, Some(&output_schema)).is_err() {
                     return Err(ToolError::Execution(conv_err.into()));
                 }
@@ -325,7 +325,7 @@ impl Tool for FunctionTool {
         ))
     }
 
-    // `process_request` is deliberately not overridden: Go's ProcessRequest is toolutils.PackTool, which
+    // `process_request` is deliberately not overridden: its job is `pack_tool`, which
     // the flow runs via `gadk_agent::pack_tool` before calling `Tool::process_request`.
 
     fn as_runnable(&self) -> Option<&dyn RunnableTool> {
@@ -344,9 +344,9 @@ impl Tool for FunctionTool {
 
 #[async_trait]
 impl RunnableTool for FunctionTool {
-    /// Port of Go functiontool Run, including its recover(): a panic becomes [`ToolError::Panic`] with Go's
-    /// "panic in tool %q: %v" text (Go appends "\nstack: …"; Rust cannot capture the panicking stack after
-    /// unwinding).
+    /// Runs the handler. A panic becomes [`ToolError::Panic`] with the text
+    /// `panic in tool "<name>": <message>` (no stack: Rust cannot capture the panicking stack
+    /// after unwinding).
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         match AssertUnwindSafe((self.run)(ctx, args)).catch_unwind().await {
             Ok(result) => result,
