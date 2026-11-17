@@ -13,19 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-platform: overridable time, UUID and task-execution seams (port of ADK-Go platform/),
-//! the ADK tracking header value, the injectable environment ([`env`](mod@env)), Go's
-//! `strconv.Quote` ([`go_quote`]), `strconv.FormatFloat(f, 'g', -1, bits)` ([`go_format_float_g`]),
-//! `strings.ToLower`/`ToUpper` ([`go_to_lower`], [`go_to_upper`]), `url.QueryEscape` ([`go_query_escape`]), `fmt` `%v` of a JSON-decoded value
-//! ([`go_sprint_value`]), `time.Parse(time.RFC3339, …)` ([`go_parse_rfc3339`]),
-//! `path.Clean`/`path.Join`/`path.Dir`/`path.Base` ([`go_path_clean`], [`go_path_join`],
-//! [`go_path_dir`], [`go_path_base`]), Unix `filepath.Rel`/`filepath.IsLocal` ([`go_filepath_rel`],
-//! [`go_filepath_is_local`]), ADK-Go `internal/utils.SafeSubpath` ([`safe_subpath`]), the parts
-//! of `net/url` gadk reproduces ([`go_url`]),
-//! Go's `fmt.Errorf("…: %w", err)` wrapping ([`GoWrapped`]), Go's built-in MIME table and
-//! `http.DetectContentType` ([`go_mime`]), `time.Duration` ([`GoDuration`],
-//! [`go_parse_duration`], [`go_format_duration`]) and the parts of Go's `flag` package the
-//! launcher uses ([`go_flag`]).
+//! gadk-platform: overridable time, UUID and task-execution seams, the ADK tracking header
+//! value, the injectable environment ([`env`](mod@env)), and shared helpers with exact output
+//! formats: double-quoted strings ([`go_quote`]), shortest round-trip floats
+//! ([`go_format_float_g`]), simple one-rune casing ([`go_to_lower`], [`go_to_upper`]), query
+//! escaping ([`go_query_escape`]), `%v`-style rendering of a JSON value ([`go_sprint_value`]),
+//! RFC 3339 parsing ([`go_parse_rfc3339`]), lexical path functions ([`go_path_clean`],
+//! [`go_path_join`], [`go_path_dir`], [`go_path_base`]), Unix [`go_filepath_rel`] and
+//! [`go_filepath_is_local`], safe resolution of an untrusted relative path ([`safe_subpath`]),
+//! URL parsing ([`go_url`]), error wrapping with a prefix ([`GoWrapped`]), a built-in MIME
+//! table and content sniffing ([`go_mime`]), durations ([`GoDuration`], [`go_parse_duration`],
+//! [`go_format_duration`]) and the flag parser the launcher uses ([`go_flag`]).
 
 pub mod env;
 mod exec;
@@ -66,7 +64,7 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Explicit replacement for ADK-Go's context-carried providers.
+/// Explicit replacement for context-carried providers: the clock, UUID source and task runner.
 #[derive(Clone)]
 pub struct Platform {
     time: Arc<dyn TimeProvider>,
@@ -91,17 +89,17 @@ impl std::fmt::Debug for Platform {
 }
 
 impl Platform {
-    /// Current time from the configured [`TimeProvider`] (ADK-Go `platform.Now`).
+    /// Current time from the configured [`TimeProvider`].
     pub fn now(&self) -> DateTime<Utc> {
         self.time.now()
     }
 
-    /// New identifier from the configured [`UuidProvider`] (ADK-Go `platform.NewUUID`).
+    /// New identifier from the configured [`UuidProvider`].
     pub fn new_uuid(&self) -> String {
         self.uuid.new_uuid()
     }
 
-    /// Runs all tasks on the configured [`TaskRunner`] and waits for them (ADK-Go `platform.RunTasks`).
+    /// Runs all tasks on the configured [`TaskRunner`] and waits for them.
     /// An empty task list returns immediately without invoking the runner.
     pub async fn run_tasks(&self, tasks: Vec<BoxFuture<'static, ()>>) {
         if tasks.is_empty() {

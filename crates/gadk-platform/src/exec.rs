@@ -16,7 +16,7 @@
 use futures::future::BoxFuture;
 use tokio::task::JoinSet;
 
-/// Port of ADK-Go platform/exec.go `TaskRunner`: runs all tasks, returns after all complete.
+/// Runs all tasks and returns after all complete.
 ///
 /// Contract for implementations:
 /// - the future returned by [`run`](Self::run) must not complete before every task has
@@ -32,7 +32,7 @@ pub trait TaskRunner: Send + Sync {
 
 /// Default runner: one tokio task per future, held in a [`JoinSet`] so that dropping the
 /// `run` future aborts them. A task panic aborts the remaining tasks, waits for them to
-/// stop, and is then re-raised on the caller (Go crash semantics).
+/// stop, and is then re-raised on the caller.
 pub struct TokioTaskRunner;
 
 #[async_trait::async_trait]

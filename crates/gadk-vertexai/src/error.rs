@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`VertexError`] (an HTTP or operation error from the Vertex AI API, displayed as Go's gRPC
-//! status text), the gRPC code tables, and the Go `%w` wrapping the services build on top of it.
+//! [`VertexError`] (an HTTP or operation error from the Vertex AI API, displayed as a gRPC
+//! status text), the gRPC code tables, and the prefix wrapping the services build on top of it.
 
 use std::error::Error as StdError;
 
@@ -27,8 +27,9 @@ use serde_json::Value;
 pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
 /// An HTTP error from the Vertex AI API (Google's JSON error body), or an operation that
-/// completed with an error. It displays as Go's gRPC status text,
-/// `rpc error: code = {name} desc = {message}`. It is reachable through the `source()` chain
+/// completed with an error. It displays as a gRPC status text,
+/// `rpc error: code = {name} desc = {message}`, with the CamelCase gRPC code name (`NotFound`).
+/// It is reachable through the `source()` chain
 /// only from `Backend` service errors; `SessionError::InvalidRequest` (flattened to a string) and
 /// `NotFound` do not carry it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +44,7 @@ pub struct VertexError {
     pub message: String,
 }
 
-/// gRPC code number, Google status name, Go `codes.Code` name and HTTP status
+/// gRPC code number, Google status name, gRPC code name and HTTP status
 /// (google/rpc/code.proto; the HTTP column is Google's mapping, used for replayed errors).
 const CODES: [(i64, &str, &str, u16); 17] = [
     (0, "OK", "OK", 200),
@@ -83,7 +84,7 @@ pub(crate) fn http_status_for_code(name: &str) -> u16 {
         .map_or(500, |(.., status)| *status)
 }
 
-/// The Go `codes.Code` name of a Google status name (`"NOT_FOUND"` → `"NotFound"`).
+/// The gRPC code name of a Google status name (`"NOT_FOUND"` → `"NotFound"`).
 fn go_name_for_code(name: &str) -> Option<&'static str> {
     CODES
         .iter()
@@ -91,7 +92,7 @@ fn go_name_for_code(name: &str) -> Option<&'static str> {
         .map(|(_, _, go, _)| *go)
 }
 
-/// The Go `codes.Code` name Google's HTTP-to-gRPC mapping gives an HTTP status without a
+/// The gRPC code name Google's HTTP-to-gRPC mapping gives an HTTP status without a
 /// status name.
 fn go_name_for_status(status: u16) -> &'static str {
     match status {
@@ -144,8 +145,8 @@ impl VertexError {
     }
 
     /// The error of an operation that completed with `error` (a `google.rpc.Status` in protojson:
-    /// `{"code": <gRPC number>, "message": …}`, a zero code omitted). Go's longrunning client
-    /// returns `status.ErrorProto(op.Error)`, whose text this displays.
+    /// `{"code": <gRPC number>, "message": …}`, a zero code omitted). It displays the status
+    /// text of that error.
     pub(crate) fn from_operation_error(error: &Value) -> Self {
         let number = error
             .get("code")
@@ -163,8 +164,7 @@ impl VertexError {
         }
     }
 
-    /// Whether this is a not-found error: HTTP 404 or status `NOT_FOUND` (Go
-    /// `status.Code(err) == codes.NotFound`).
+    /// Whether this is a not-found error: HTTP 404 or status `NOT_FOUND`.
     pub fn is_not_found(&self) -> bool {
         self.status == 404 || self.code.as_deref() == Some("NOT_FOUND")
     }
@@ -175,7 +175,7 @@ impl VertexError {
         self.status == 400 && matches!(self.code.as_deref(), None | Some("INVALID_ARGUMENT"))
     }
 
-    /// The Go `codes.Code` name this error displays: from [`code`](Self::code) when it is a
+    /// The gRPC code name this error displays: from [`code`](Self::code) when it is a
     /// Google status name, else from the HTTP status per Google's mapping (400
     /// `InvalidArgument`, 401 `Unauthenticated`, 403 `PermissionDenied`, 404 `NotFound`, 409
     /// `AlreadyExists`, 429 `ResourceExhausted`, 499 `Canceled`, 500 `Internal`, 501
@@ -201,13 +201,12 @@ impl std::fmt::Display for VertexError {
 
 impl StdError for VertexError {}
 
-/// Go `fmt.Errorf("{prefix}: %w", err)`, boxed.
+/// Wraps `err` as `{prefix}: {err}`, boxed; `err` stays the `source()`.
 pub(crate) fn wrap(prefix: &str, err: impl Into<BoxError>) -> BoxError {
     Box::new(GoWrapped::new(prefix, err))
 }
 
-/// The first [`VertexError`] in `err`'s `source()` chain, `err` itself included (Go
-/// `errors.As`).
+/// The first [`VertexError`] in `err`'s `source()` chain, `err` itself included.
 pub(crate) fn find_vertex_error<'a>(err: &'a (dyn StdError + 'static)) -> Option<&'a VertexError> {
     let mut cur = Some(err);
     while let Some(e) = cur {
@@ -220,7 +219,7 @@ pub(crate) fn find_vertex_error<'a>(err: &'a (dyn StdError + 'static)) -> Option
 }
 
 /// A session failure: `InvalidRequest(err.to_string())` when the chain holds an
-/// invalid-argument [`VertexError`] (the stand-in for Go's gRPC `InvalidArgument`), else
+/// invalid-argument [`VertexError`] (the stand-in for a gRPC `InvalidArgument`), else
 /// `Backend(err)`.
 pub(crate) fn session_error(err: BoxError) -> SessionError {
     if find_vertex_error(err.as_ref()).is_some_and(VertexError::is_invalid_argument) {

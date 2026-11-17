@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! [`VertexSession`]: the session a [`VertexAiSessionService`](super::VertexAiSessionService)
-//! returns (port of Go `localSession`).
+//! returns.
 
 use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -23,7 +23,7 @@ use gadk_session::state_util::trim_temp_delta_state;
 use gadk_session::{Event, Session, SessionError, State};
 use serde_json::{Map, Value};
 
-/// A session read from or created in an Agent Engine (Go `localSession`): a local copy of
+/// A session read from or created in an Agent Engine: a local copy of
 /// its state and events. [`Session::events`] returns a snapshot, so callers iterate without
 /// holding the session lock.
 pub struct VertexSession {
@@ -33,8 +33,7 @@ pub struct VertexSession {
     data: LocalData,
 }
 
-/// The mutable part, behind one lock as in Go (which guards all mutable fields with one
-/// `sync.RWMutex`); also the session's [`State`].
+/// The mutable part, behind one lock; also the session's [`State`].
 struct LocalData(RwLock<Inner>);
 
 struct Inner {
@@ -75,21 +74,20 @@ impl VertexSession {
         }
     }
 
-    /// Replaces the session's events (Go assigns `localSession.events` after listing them).
+    /// Replaces the session's events (assigned after listing them).
     pub(crate) fn set_events(&self, events: Vec<Event>) {
         self.data.write().events = events;
     }
 
-    /// Go `localSession.appendEvent`: ignores a partial event; otherwise applies the event's
-    /// whole state delta (`temp:` keys included, as Go's `updateSessionState` does), stores
+    /// Appends an event locally: ignores a partial event; otherwise applies the event's
+    /// whole state delta (`temp:` keys included), stores
     /// the event without its `temp:` keys and takes its timestamp as the last update time.
     pub(crate) fn append_event(&self, event: &Event) -> Result<(), SessionError> {
         if event.response.partial {
             return Ok(());
         }
         let mut inner = self.data.write();
-        // Go's updateSessionState cannot fail, so its "failed to update localSession
-        // state: %w" wrapper never fires.
+        // Applying the state delta cannot fail.
         if let Some(delta) = &event.actions.state_delta {
             for (k, v) in delta {
                 inner.state.insert(k.clone(), v.clone());

@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The auth config a tool requests a credential with (port of ADK-Go
-//! `tool/toolauth/auth_tool.go`): [`Config`], the key it names its credential by
+//! The auth config a tool requests a credential with: [`Config`], the key it names its
+//! credential by
 //! ([`Config::key`]), its secret-free copy ([`Config::without_secrets`]), the arguments of an
 //! `adk_request_credential` call ([`ToolArguments`]) and that call's name
 //! ([`REQUEST_CREDENTIAL_FUNCTION_CALL_NAME`]).
@@ -32,11 +32,11 @@ use super::model_json::{
 use super::schemes::Scheme;
 
 /// The name of the function call ADK sends to the client to ask the end user for a credential
-/// (auth_tool.go `RequestCredentialFunctionCallName`). ADK Web and adk-python recognize the
+/// (the `adk_request_credential` call). ADK Web and adk-python recognize the
 /// request by this exact name.
 pub const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME: &str = "adk_request_credential";
 
-/// `Config`'s JSON field names (Go json tags), in Go struct order.
+/// `Config`'s JSON field names, in struct order.
 const CONFIG_ALIASES: &[&str] = &[
     "authScheme",
     "rawAuthCredential",
@@ -44,10 +44,10 @@ const CONFIG_ALIASES: &[&str] = &[
     "credentialKey",
 ];
 
-/// `ToolArguments`' JSON field names (Go json tags), in Go struct order.
+/// `ToolArguments`' JSON field names, in struct order.
 const TOOL_ARGUMENTS_ALIASES: &[&str] = &["functionCallId", "authConfig"];
 
-/// What a tool needs in order to get a credential (Go `Config`): how the resource
+/// What a tool needs in order to get a credential: how the resource
 /// authenticates, the credential the tool was configured with, and the credential the flow
 /// produces. ADK sends it to the client in an `adk_request_credential` call, and the client
 /// fills `exchanged_auth_credential` in and sends it back.
@@ -72,7 +72,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// The key that names this config's credential in a credential service (Go `Config.Key`).
+    /// The key that names this config's credential in a credential service.
     ///
     /// It is `credential_key` when that is set. Otherwise it is the first non-empty string
     /// under `credential_key` or `credentialKey` among the unknown keys of
@@ -95,8 +95,7 @@ impl Config {
     /// `exchanged_auth_credential` and store the credential under the key of the config ADK
     /// sent, as adk-python's `store_auth_response` does.
     ///
-    /// Infallible, unlike Go's: `extra` holds only valid JSON text, so nothing in it can fail
-    /// to encode (spec R12).
+    /// Infallible: `extra` holds only valid JSON text, so nothing in it can fail to encode.
     pub fn key(&self) -> String {
         if !self.credential_key.is_empty() {
             return self.credential_key.clone();
@@ -145,7 +144,7 @@ impl Config {
     }
 
     /// A deep copy of the config without the secrets the agent was configured with, for
-    /// sending to the client and keeping in the session (Go `Config.WithoutSecrets`).
+    /// sending to the client and keeping in the session.
     ///
     /// In both `raw_auth_credential` and `exchanged_auth_credential` it drops the API key, the
     /// OAuth2 client secret, the HTTP password, token and additional headers, and a service
@@ -155,7 +154,7 @@ impl Config {
     /// since its stripped content would derive a different one.
     ///
     /// The copy shares nothing with `self`: `Clone` copies every map, list and extra value.
-    /// Infallible, unlike Go's, because [`Config::key`] is (spec R12).
+    /// Infallible, because [`Config::key`] is.
     pub fn without_secrets(&self) -> Config {
         let mut out = self.clone();
         out.credential_key = self.key();
@@ -185,7 +184,7 @@ impl Config {
         out
     }
 
-    /// Go `Config.UnmarshalJSON`: `decodeModel(data, …, "Config", "authScheme")`.
+    /// Decodes a [`Config`] with `authScheme` required.
     pub(crate) fn decode(raw: &RawValue) -> Result<Config, String> {
         let mut d = decode_object(raw, "Config", CONFIG_ALIASES, true, &["authScheme"])?;
         let auth_scheme = d
@@ -211,7 +210,7 @@ impl Config {
     }
 }
 
-/// Go `cmp.Equal`: every field, with extras compared as JSON trees.
+/// Equality of every field, with extras compared as JSON trees.
 impl PartialEq for Config {
     fn eq(&self, other: &Self) -> bool {
         self.auth_scheme == other.auth_scheme
@@ -222,7 +221,7 @@ impl PartialEq for Config {
     }
 }
 
-/// Go `Config.MarshalJSON`: the fields in Go struct order with `credentialKey` written as
+/// Encodes the fields in struct order with `credentialKey` written as
 /// [`Config::key`], then the extras that name no field.
 impl GoMarshal for Config {
     fn go_marshal(&self) -> String {
@@ -255,7 +254,7 @@ impl<'de> Deserialize<'de> for Config {
     }
 }
 
-/// The arguments of an `adk_request_credential` call (Go `ToolArguments`): the ID of the tool
+/// The arguments of an `adk_request_credential` call: the ID of the tool
 /// call that needs the credential, and its config.
 #[derive(Clone, Default)]
 pub struct ToolArguments {
@@ -268,8 +267,7 @@ pub struct ToolArguments {
 }
 
 impl ToolArguments {
-    /// Go `ToolArguments.UnmarshalJSON`:
-    /// `decodeModel(data, …, "ToolArguments", "functionCallId", "authConfig")`.
+    /// Decodes [`ToolArguments`] with `functionCallId` and `authConfig` required.
     fn decode(raw: &RawValue) -> Result<ToolArguments, String> {
         let mut d = decode_object(
             raw,
@@ -292,7 +290,7 @@ impl ToolArguments {
     }
 }
 
-/// Go `cmp.Equal`: every field, with extras compared as JSON trees.
+/// Equality of every field, with extras compared as JSON trees.
 impl PartialEq for ToolArguments {
     fn eq(&self, other: &Self) -> bool {
         self.function_call_id == other.function_call_id
@@ -301,7 +299,7 @@ impl PartialEq for ToolArguments {
     }
 }
 
-/// Go `ToolArguments.MarshalJSON`: the fields in Go struct order, then the extras that name no
+/// Encodes the fields in struct order, then the extras that name no
 /// field.
 impl GoMarshal for ToolArguments {
     fn go_marshal(&self) -> String {
@@ -325,8 +323,8 @@ impl<'de> Deserialize<'de> for ToolArguments {
     }
 }
 
-/// The value under `name` in `extra` when it is a JSON string (Go `extra[name].(string)`);
-/// any other JSON value is ignored, as Go's type assertion ignores it.
+/// The value under `name` in `extra` when it is a JSON string;
+/// any other JSON value is ignored.
 fn extra_string(extra: &Extra, name: &str) -> Option<String> {
     match GoJson::from_raw(extra.get(name)?) {
         GoJson::String(s) => Some(s),
@@ -334,18 +332,18 @@ fn extra_string(extra: &Extra, name: &str) -> Option<String> {
     }
 }
 
-/// Go `digest`: the first 16 hex digits of the SHA-256 of `v`'s JSON in canonical form.
+/// The first 16 hex digits of the SHA-256 of `v`'s JSON in canonical form.
 fn digest<T: GoMarshal>(v: &T) -> String {
     digest_text(&v.go_marshal())
 }
 
-/// Go `digest` after its `json.Marshal`:
-/// 1. decode `marshaled` keeping each number's literal text (Go `UseNumber`);
+/// Computes the digest of the encoded text `marshaled`:
+/// 1. decode `marshaled` keeping each number's literal text;
 /// 2. re-encode it compactly with keys sorted bytewise, `&` `<` `>` and non-ASCII raw, and only
-///    U+2028/U+2029 escaped (Go `Encoder` with `SetEscapeHTML(false)`), which is the JSON
+///    U+2028/U+2029 escaped, which is the JSON
 ///    Python's `json.dumps(sort_keys=True, ensure_ascii=False, separators=(",", ":"))` writes
 ///    except for those two escapes and for numbers written as they arrived;
-/// 3. SHA-256 it (the encoder's trailing newline Go trims is never written here);
+/// 3. SHA-256 it (no trailing newline is written);
 /// 4. keep the first 8 bytes as lowercase hex.
 ///
 /// `marshaled` is a model's `go_marshal()` output, which always parses. Should it ever not,
@@ -359,7 +357,7 @@ fn digest_text(marshaled: &str) -> String {
     hex_prefix(sum.as_slice())
 }
 
-/// Go `hex.EncodeToString(sum[:8])`: the first 8 bytes as 16 lowercase hex digits.
+/// The first 8 bytes as 16 lowercase hex digits.
 fn hex_prefix(sum: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(16);

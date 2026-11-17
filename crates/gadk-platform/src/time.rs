@@ -15,7 +15,7 @@
 
 use chrono::{DateTime, Utc};
 
-/// Port of ADK-Go platform/time.go `TimeProvider`.
+/// A source of the current time that tests can replace.
 pub trait TimeProvider: Send + Sync {
     /// Returns the current time.
     fn now(&self) -> DateTime<Utc>;

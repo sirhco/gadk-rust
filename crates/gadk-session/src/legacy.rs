@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `encoding/json` case-insensitive key matching, for rows written with legacy keys.
+//! Case-insensitive key matching, for rows written with legacy keys.
 
 use serde_json::{Map, Value};
 
 /// Renames every key of `map` that is not in `canonical` but equals a canonical name
-/// ignoring ASCII case, mirroring Go's case-insensitive field matching.
+/// ignoring ASCII case.
 ///
 /// When the canonical key is already present, the exact match wins and the case-folded
 /// duplicate is dropped.

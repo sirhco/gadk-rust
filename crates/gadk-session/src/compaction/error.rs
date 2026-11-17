@@ -13,13 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go session/compaction/compaction.go `ErrCompaction`.
+//! [`CompactionError`] and its message prefix [`ERR_COMPACTION`].
 
-/// Go `ErrCompaction`'s text: the prefix of every [`CompactionError`].
+/// The prefix of every [`CompactionError`]'s message.
 pub const ERR_COMPACTION: &str = "context compaction failed";
 
-/// A compaction failure rather than a failure of the turn itself (Go `ErrCompaction` and the
-/// `fmt.Errorf("%w: …", ErrCompaction, …)` errors built on it).
+/// A compaction failure rather than a failure of the turn itself.
 ///
 /// Compaction is bookkeeping: the turn's events are already persisted before it runs, so a
 /// failure costs a smaller prompt later, not the user's answer. It still surfaces; a caller that
@@ -40,7 +39,7 @@ impl CompactionError {
         }
     }
 
-    /// Go `fmt.Errorf("%w: <context>: %w", ErrCompaction, err)`: Display
+    /// Wraps `source` with context: Display
     /// `context compaction failed: <context>: <source>`, and `source()` is `source`.
     pub fn wrap(
         context: impl Into<String>,

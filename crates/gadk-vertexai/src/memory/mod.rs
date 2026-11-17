@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! [`VertexAiMemoryService`]: a [`MemoryService`] backed by Vertex AI Agent Engine Memory Bank
-//! (port of ADK-Go `memory/vertexai`).
+//! (the Memory Bank of an Agent Engine).
 
 use std::sync::Arc;
 
@@ -39,28 +39,29 @@ use crate::protojson::format_timestamp;
 #[cfg(test)]
 mod tests;
 
-/// How a [`VertexAiMemoryService`] reaches its Memory Bank (Go `ServiceConfig` plus the
-/// `option.ClientOption`s Go passes to `aiplatform.NewMemoryBankClient`).
+/// How a [`VertexAiMemoryService`] reaches its Memory Bank: the engine and memory-generation
+/// settings, plus the `endpoint`, `credentials`, `without_authentication`, `http_client` and
+/// `env` settings of the underlying client.
 #[derive(Clone)]
 pub struct VertexAiMemoryServiceConfig {
-    /// The Agent Engine whose Memory Bank is used (Go's embedded `AgentEngineData`).
+    /// The Agent Engine whose Memory Bank is used.
     pub engine: AgentEngineData,
-    /// The session state key holding the time of the session's last memory update (Go
-    /// `StateKeySessionLastUpdateTime`): when set, only events newer than that time are sent;
+    /// The session state key holding the time of the session's last memory update: when set,
+    /// only events newer than that time are sent;
     /// `None` generates memories from the whole session.
     pub state_key_session_last_update_time: Option<String>,
-    /// Wait for memory generation to finish (Go `WaitForCompletion`).
+    /// Wait for memory generation to finish.
     pub wait_for_completion: bool,
-    /// The base URL (Go `option.WithEndpoint`); `None` = `https://{location}-aiplatform.googleapis.com`
+    /// The base URL; `None` = `https://{location}-aiplatform.googleapis.com`
     /// (`https://aiplatform.googleapis.com` for an empty or `global` location).
     pub endpoint: Option<String>,
-    /// The credentials sent with every request (Go `option.WithAuthCredentials`); `None`
+    /// The credentials sent with every request; `None`
     /// resolves Application Default Credentials through [`env`](Self::env) with the
     /// `cloud-platform` scope.
     pub credentials: Option<Credentials>,
-    /// Send no credentials (Go `option.WithoutAuthentication`).
+    /// Send no credentials.
     pub without_authentication: bool,
-    /// The HTTP client (Go `option.WithHTTPClient`); `None` builds a reqwest client.
+    /// The HTTP client; `None` builds a reqwest client.
     pub http_client: Option<Arc<dyn HttpClient>>,
     /// Where `GOOGLE_APPLICATION_CREDENTIALS` is read.
     pub env: Arc<dyn EnvProvider>,
@@ -99,7 +100,7 @@ impl std::fmt::Debug for VertexAiMemoryServiceConfig {
 }
 
 /// A [`MemoryService`] that generates and retrieves memories with a Vertex AI Agent Engine
-/// Memory Bank (Go `vertexAIService`).
+/// Memory Bank.
 pub struct VertexAiMemoryService {
     client: VertexClient,
     engine: AgentEngineData,
@@ -108,17 +109,16 @@ pub struct VertexAiMemoryService {
 }
 
 impl VertexAiMemoryService {
-    /// A service for `config` (Go `NewMemoryService`). Synchronous; only Application Default
+    /// A service for `config`. Synchronous; only Application Default
     /// Credentials need a Tokio runtime.
     ///
     /// # Errors
     ///
-    /// [`MemoryError::Backend`] with Go's text `newVertexAIClient failed:
-    /// aiplatform.NewMemoryBankClient failed: {adc error}` when Application Default Credentials
-    /// cannot be built.
+    /// [`MemoryError::Backend`] with the text
+    /// `newVertexAIClient failed: aiplatform.NewMemoryBankClient failed: {adc error}`
+    /// when Application Default Credentials cannot be built.
     pub fn new(config: VertexAiMemoryServiceConfig) -> Result<Self, MemoryError> {
-        // Go `option.WithEndpoint(aiplatformutil.HostPortURL(location))`: `{host}:443`, served
-        // over HTTPS.
+        // The default endpoint is the location's host, served over HTTPS.
         let default_endpoint = format!("https://{}", host_url(&config.engine.location));
         let resolved = resolve(
             config.endpoint.as_deref(),
@@ -142,10 +142,9 @@ impl VertexAiMemoryService {
         })
     }
 
-    /// Go `vertexAIClient.addSession`: `GenerateMemories` for the session (`start` = only
-    /// events after it), then, with `wait_for_completion`, the operation's wait. Go's parent is
-    /// the configured engine as given (no app-name resolution); the session resource uses the
-    /// session's ID.
+    /// `GenerateMemories` for the session (`start` = only events after it), then, with
+    /// `wait_for_completion`, the operation's wait. The parent is the configured engine as given
+    /// (no app-name resolution); the session resource uses the session's ID.
     async fn add_session(
         &self,
         session: &dyn Session,
@@ -173,8 +172,8 @@ impl VertexAiMemoryService {
             .await
             .map_err(|e| wrap("v.client.GenerateMemories failed", e))?;
         if self.wait_for_completion {
-            // A done operation without a result is success (Go accepts `op.Wait`'s
-            // `unsupported result type <nil>: <nil>`); Go uses this text on both paths.
+            // A done operation without a result is success: the
+            // `unsupported result type <nil>: <nil>` error is accepted, on both paths.
             self.client
                 .wait_operation(op)
                 .await
@@ -184,14 +183,14 @@ impl VertexAiMemoryService {
     }
 }
 
-/// Go `createUserScope`: the Memory Bank scope `{"user_id": user_id}`.
+/// The Memory Bank scope `{"user_id": user_id}`.
 fn user_scope(user_id: &str) -> Value {
     json!({ "user_id": user_id })
 }
 
-/// The time a state value holds: an RFC 3339 string (Go stores a `time.Time`, whose JSON form
-/// this is). Anything else fails with Go's `want type time.Time, got : %T (%v)`, the value
-/// rendered as Go renders it after `json.Unmarshal` into `any`.
+/// The time a state value holds: an RFC 3339 string. Anything else fails with
+/// `want type time.Time, got : {type} ({value})`, the value rendered as a decoded JSON value
+/// (see [`gadk_platform::go_sprint_value`] and [`gadk_platform::go_type_name`]).
 fn state_time(value: &Value) -> Result<DateTime<Utc>, BoxError> {
     if let Value::String(s) = value
         && let Some(t) = go_parse_rfc3339(s)
@@ -208,12 +207,12 @@ fn state_time(value: &Value) -> Result<DateTime<Utc>, BoxError> {
 
 #[async_trait]
 impl MemoryService for VertexAiMemoryService {
-    /// Go `AddSessionToMemory`: without a state key (or with an empty one) the whole session
+    /// Adds the session to memory: without a state key (or with an empty one) the whole session
     /// is sent; with one, only the events after the time stored under it.
     ///
     /// # Errors
     ///
-    /// [`MemoryError::Backend`] with Go's wrapper chain: `state.Get({key}) failed: …`,
+    /// [`MemoryError::Backend`] with the wrapper chain: `state.Get({key}) failed: …`,
     /// `want type time.Time, got : …`, `v.client.addWholeSession failed: …` or
     /// `v.client.addEventsNewerThan failed: …` around `v.client.GenerateMemories failed: …` or
     /// `op.Wait for GenerateMemories (whole session) failed: …`.
@@ -238,7 +237,7 @@ impl MemoryService for VertexAiMemoryService {
             .map_err(|e| memory_error(wrap("v.client.addEventsNewerThan failed", e)))
     }
 
-    /// Go `SearchMemory`: `RetrieveMemories` by similarity to `req.query` within the user's
+    /// Searches memory: `RetrieveMemories` by similarity to `req.query` within the user's
     /// scope; each retrieved fact becomes a user-role text entry.
     ///
     /// # Errors

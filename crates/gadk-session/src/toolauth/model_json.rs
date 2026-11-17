@@ -13,18 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go-compatible JSON for the toolauth models (port of ADK-Go `tool/toolauth/model_json.go` and
-//! `digest`'s tree).
+//! JSON for the toolauth models, byte-identical to what an ADK server writes and reads.
 //!
 //! The credential types follow adk-python's pydantic models, which write each field under its
 //! camelCase alias, read it under the alias or under the snake_case Python field name, and keep
 //! the keys that match no field. The scheme types follow fastapi's OpenAPI models, which read
 //! each field under its exact name only. [`decode_object`] and [`ObjectWriter`] give every model
-//! that behaviour, with Go's field order and Go's `json.Marshal` bytes.
+//! that behaviour, with the field order and bytes an ADK server writes (HTML-escaped strings,
+//! sorted extras).
 //!
 //! JSON is read straight into raw text, never through `serde_json::Value`, so every number keeps
-//! the text it arrived with, as Go's `UseNumber` decode does. [`GoJson`] is Go's `any` after such
-//! a decode, and its [`GoJson::encode`] is Go's encoder.
+//! the text it arrived with. [`GoJson`] is the tree after such a decode, and its
+//! [`GoJson::encode`] writes it back.
 
 use std::collections::BTreeMap;
 
@@ -33,8 +33,7 @@ use serde_json::value::RawValue;
 
 use super::Extra;
 
-/// Go's `any` after a `UseNumber` decode: numbers keep their literal text; object keys sort
-/// bytewise (Go map order).
+/// A JSON tree in which numbers keep their literal text and object keys sort bytewise.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GoJson {
     Null,
@@ -47,8 +46,8 @@ pub(crate) enum GoJson {
 
 impl GoJson {
     /// Parses `text`, which must be one JSON value. Syntax is checked by serde_json; the tree is
-    /// then built by a Go-faithful scanner (a lone UTF-16 surrogate escape decodes to U+FFFD, as
-    /// `encoding/json` decodes it; serde_json would reject it).
+    /// then built by a scanner that decodes a lone UTF-16 surrogate escape to U+FFFD (serde_json
+    /// would reject it).
     pub(crate) fn parse(text: &str) -> Result<GoJson, serde_json::Error> {
         serde_json::from_str::<serde::de::IgnoredAny>(text)?;
         Ok(Scanner::new(text).value())
@@ -59,9 +58,9 @@ impl GoJson {
         Scanner::new(raw.get()).value()
     }
 
-    /// Compact, sorted keys, no trailing newline. `escape_html = true` is `json.Marshal`
-    /// (`<` `>` `&` as six-character `\u00xx` escapes); `false` is an Encoder with
-    /// `SetEscapeHTML(false)`. U+2028/U+2029 are always escaped; other non-ASCII is raw.
+    /// Compact, sorted keys, no trailing newline. `escape_html = true` writes `<` `>` `&` as
+    /// six-character `\u00xx` escapes; `false` leaves them raw. U+2028/U+2029 are always
+    /// escaped; other non-ASCII is raw.
     pub(crate) fn encode(&self, escape_html: bool) -> String {
         let mut out = String::new();
         self.write(&mut out, escape_html);
@@ -101,7 +100,7 @@ impl GoJson {
     }
 }
 
-/// Go `encodeState.string` (Go 1.22+): `"` `\` and the five short escapes `\b \f \n \r \t`, other
+/// Writes `s` as a JSON string: `"` `\` and the five short escapes `\b \f \n \r \t`, other
 /// control characters as `\u00xx` (lowercase hex), `<` `>` `&` as `\u00xx` when `escape_html`,
 /// U+2028 and U+2029 always escaped, everything else written raw.
 fn write_string(out: &mut String, s: &str, escape_html: bool) {
@@ -206,7 +205,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    /// The members of the object at `pos`, in input order: each key (Go-unquoted), its value and
+    /// The members of the object at `pos`, in input order: each key (unquoted), its value and
     /// the byte span of the value's text. Leaves `pos` after the closing brace. Each value is
     /// scanned once, so the cost is linear in the text.
     fn entries(&mut self) -> Vec<(String, GoJson, (usize, usize))> {
@@ -242,7 +241,7 @@ impl<'a> Scanner<'a> {
         out
     }
 
-    /// The string literal at `pos`, unquoted as Go's `unquote` does. Leaves `pos` after the
+    /// The string literal at `pos`, unquoted. Leaves `pos` after the
     /// closing quote.
     fn string(&mut self) -> String {
         let bytes = self.text.as_bytes();
@@ -261,7 +260,7 @@ impl<'a> Scanner<'a> {
     }
 }
 
-/// Go `encoding/json` `unquote` of a string literal's body. A `\u` escape of a UTF-16 surrogate
+/// Unquotes a string literal's body. A `\u` escape of a UTF-16 surrogate
 /// that is not the first half of a valid pair becomes U+FFFD.
 fn unquote(body: &str) -> String {
     let bytes = body.as_bytes();
@@ -323,7 +322,7 @@ fn hex4(body: &str, at: usize) -> Option<u32> {
     u32::from_str_radix(digits, 16).ok()
 }
 
-/// The JSON kind of `text` as Go's `UnmarshalTypeError.Value` names it, with the literal cut
+/// The JSON kind of `text`, with the literal cut
 /// off: "object", "array", "string", "bool", "null" or "number".
 fn json_kind(text: &str) -> &'static str {
     match text.trim_start().as_bytes().first() {
@@ -336,7 +335,7 @@ fn json_kind(text: &str) -> &'static str {
     }
 }
 
-/// Go `cmp` equality of two `Extra` maps (each value compared as `GoJson`).
+/// Equality of two `Extra` maps (each value compared as `GoJson`).
 pub(crate) fn extra_eq(a: &Extra, b: &Extra) -> bool {
     a.len() == b.len()
         && a.iter()
@@ -344,14 +343,14 @@ pub(crate) fn extra_eq(a: &Extra, b: &Extra) -> bool {
             .all(|((ka, va), (kb, vb))| ka == kb && GoJson::from_raw(va) == GoJson::from_raw(vb))
 }
 
-/// Go `json.Marshal` of one string (HTML-escaped).
+/// One string as JSON, HTML-escaped.
 pub(crate) fn go_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     write_string(&mut out, s, true);
     out
 }
 
-/// Go `json.Marshal` of a `[]string` that is not nil.
+/// A string list as a JSON array (never `null`).
 pub(crate) fn go_string_list(items: &[String]) -> String {
     let mut out = String::from("[");
     for (i, item) in items.iter().enumerate() {
@@ -364,7 +363,7 @@ pub(crate) fn go_string_list(items: &[String]) -> String {
     out
 }
 
-/// Go `json.Marshal` of a `map[string]string` that is not nil: keys sorted bytewise.
+/// A string map as a JSON object (never `null`): keys sorted bytewise.
 pub(crate) fn go_string_map(map: &BTreeMap<String, String>) -> String {
     let mut out = String::from("{");
     for (i, (key, value)) in map.iter().enumerate() {
@@ -379,7 +378,7 @@ pub(crate) fn go_string_map(map: &BTreeMap<String, String>) -> String {
     out
 }
 
-/// Go `pythonName` (model_json.go): "type" → "type_", camelCase → snake_case.
+/// The snake_case Python field name of an alias: "type" → "type_", camelCase → snake_case.
 pub(crate) fn python_name(alias: &str) -> String {
     if alias == "type" {
         return "type_".to_owned();
@@ -396,18 +395,18 @@ pub(crate) fn python_name(alias: &str) -> String {
     out
 }
 
-/// Go `decode` (model_json.go): one JSON object split into known fields (by Go alias, the
-/// camelCase spelling winning over its Python name) and extras. `Err` is Go's message text.
+/// One JSON object split into known fields (by alias, the
+/// camelCase spelling winning over its Python name) and extras. `Err` is the message text.
 pub(crate) struct Decoded {
     pub(crate) known: BTreeMap<String, Box<RawValue>>,
     pub(crate) extra: Extra,
 }
 
-/// Go `decode`: `aliases` are the model's json tag names in struct order; with `python_names`
-/// (Go `decodeModel`) a key that is a field's Python name is read as that field unless the
-/// object also has the alias, in which case it is dropped; without it (Go `decodeOpenAPIModel`)
-/// such a key is an extra. Each name in `required` must be present and not null. A JSON `null`
-/// reads as an empty object, as Go's `json.Unmarshal` into a map leaves it.
+/// Splits one JSON object: `aliases` are the model's field names in struct order; with
+/// `python_names` a key that is a field's Python name is read as that field unless the
+/// object also has the alias, in which case it is dropped; without it such a key is an extra.
+/// Each name in `required` must be present and not null. A JSON `null` reads as an empty
+/// object.
 pub(crate) fn decode_object(
     raw: &RawValue,
     type_name: &str,
@@ -471,12 +470,12 @@ pub(crate) fn decode_object(
 }
 
 impl Decoded {
-    /// Decode one known field; a type mismatch is Go's
-    /// "toolauth: <type_name>: field <alias>: cannot use a JSON <kind> as <go_type>".
+    /// Decodes one known field; a type mismatch is
+    /// "toolauth: <type_name>: field <alias>: cannot use a JSON <kind> as <type>".
     ///
-    /// An absent field and a JSON `null` are both `Ok(None)`, as Go leaves the field at its zero
-    /// value. A nested model's own error (any text starting `toolauth: `) is passed through, as
-    /// Go's `encoding/json` passes an `UnmarshalJSON` error through.
+    /// An absent field and a JSON `null` are both `Ok(None)`, leaving the field at its zero
+    /// value. A nested model's own error (any text starting `toolauth: `) is passed through
+    /// unchanged.
     pub(crate) fn take<T: DeserializeOwned>(
         &mut self,
         alias: &str,
@@ -490,8 +489,8 @@ impl Decoded {
         if kind == "null" {
             return Ok(None);
         }
-        // serde_json rejects a lone surrogate escape that Go decodes to U+FFFD, so text with a
-        // surrogate escape is first re-encoded through the Go-faithful tree.
+        // serde_json rejects a lone surrogate escape that is decoded to U+FFFD here, so text
+        // with a surrogate escape is first re-encoded through the tree.
         let normalized;
         let text = if raw.get().contains("\\ud") || raw.get().contains("\\uD") {
             normalized = GoJson::from_raw(&raw).encode(false);
@@ -513,9 +512,9 @@ impl Decoded {
         })
     }
 
-    /// [`Decoded::take`] for an `int64` field, read from the number's text as Go's
-    /// `strconv.ParseInt` reads it: `-0` is 0 (serde_json reads it as a float). A fraction, an
-    /// exponent, an overflow or another JSON kind is Go's type-mismatch error.
+    /// [`Decoded::take`] for an `i64` field, read from the number's text:
+    /// `-0` is 0 (serde_json reads it as a float). A fraction, an
+    /// exponent, an overflow or another JSON kind is a type-mismatch error.
     pub(crate) fn take_i64(&mut self, alias: &str, type_name: &str) -> Result<Option<i64>, String> {
         let Some(raw) = self.known.get(alias) else {
             return Ok(None);
@@ -530,8 +529,7 @@ impl Decoded {
         self.take::<i64>(alias, type_name, "int64")
     }
 
-    /// [`Decoded::take`] for a `[]string` field: a `null` element is `""`, as Go's
-    /// `json.Unmarshal` leaves the element at its zero value.
+    /// [`Decoded::take`] for a `Vec<String>` field: a `null` element is `""`.
     pub(crate) fn take_string_list(
         &mut self,
         alias: &str,
@@ -542,8 +540,7 @@ impl Decoded {
             .map(|items| items.into_iter().map(Option::unwrap_or_default).collect()))
     }
 
-    /// [`Decoded::take`] for a `map[string]string` field: a `null` value is `""`, as Go's
-    /// `json.Unmarshal` stores the element's zero value.
+    /// [`Decoded::take`] for a `BTreeMap<String, String>` field: a `null` value is `""`.
     pub(crate) fn take_string_map(
         &mut self,
         alias: &str,
@@ -559,7 +556,7 @@ impl Decoded {
     }
 }
 
-/// Go `encode` (model_json.go): known fields in Go struct order, then extras sorted, skipping an
+/// Writes one JSON object: known fields in struct order, then extras sorted, skipping an
 /// extra whose key is a field alias (or, with `python_names`, a field's Python name).
 pub(crate) struct ObjectWriter {
     buf: String,
@@ -572,7 +569,7 @@ impl ObjectWriter {
         }
     }
 
-    /// Append `"alias":<json>`; `json` is already Go-encoded.
+    /// Appends `"alias":<json>`; `json` is already encoded.
     pub(crate) fn field(&mut self, alias: &str, json: &str) {
         if self.buf.len() > 1 {
             self.buf.push(',');
@@ -582,7 +579,7 @@ impl ObjectWriter {
         self.buf.push_str(json);
     }
 
-    /// Appends each extra, re-encoded as Go's `json.Marshal` writes the decoded value, unless its
+    /// Appends each extra, re-encoded as a JSON value, unless its
     /// key names a field, and closes the object.
     pub(crate) fn finish(mut self, extra: &Extra, aliases: &[&str], python_names: bool) -> String {
         for (key, value) in extra {
@@ -599,13 +596,13 @@ impl ObjectWriter {
     }
 }
 
-/// Every model's Go `MarshalJSON` bytes (HTML-escaped, Go field order, extras last).
+/// Every model's encoder: HTML-escaped, field order as declared, extras last.
 pub(crate) trait GoMarshal {
     fn go_marshal(&self) -> String;
 }
 
 /// `Serialize` body shared by every model: emits `go_marshal()` as a `RawValue`, so a
-/// serde_json serializer writes Go's bytes verbatim.
+/// serde_json serializer writes the bytes verbatim.
 pub(crate) fn serialize_go<T: GoMarshal, S: serde::Serializer>(
     v: &T,
     s: S,
@@ -614,7 +611,7 @@ pub(crate) fn serialize_go<T: GoMarshal, S: serde::Serializer>(
     serde::Serialize::serialize(&raw, s)
 }
 
-/// Every model's Go `UnmarshalJSON`: decode one JSON value, `Err` being Go's message text.
+/// Every model's decoder: decode one JSON value, `Err` being the message text.
 pub(crate) trait GoUnmarshal: Sized {
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String>;
 }

@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `SessionClient`: Go's `vertexAiClient` session methods (create, get, list, delete, append,
-//! list events), engine-ID resolution, and the name parsers and filter quoting they use.
+//! `SessionClient`: the Vertex AI session calls (create, get, list, delete, append, list
+//! events), engine-ID resolution, and the name parsers and filter quoting they use.
 
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -38,14 +38,15 @@ use crate::client::VertexClient;
 use crate::config::AgentEngineData;
 use crate::error::{BoxError, VertexError, find_vertex_error, session_error, wrap};
 
-/// Go `waitForOperation`'s attempts (`maxRetries`)…
+/// The attempts made while waiting for a created session…
 const WAIT_ATTEMPTS: u32 = 10;
-/// …its delay unit (`baseDelay`, multiplied by the attempt number squared)…
+/// …the delay unit (multiplied by the attempt number squared)…
 const WAIT_BASE_DELAY: Duration = Duration::from_secs(1);
-/// …and its delay cap (`maxDelay`).
+/// …and the delay cap.
 const WAIT_MAX_DELAY: Duration = Duration::from_secs(5);
 
-/// Go `reasoningEnginePattern`. `[0-9]`, not `\d`: Go's `\d` is ASCII only.
+/// The shape of a full reasoning-engine resource name. `[0-9]`, not `\d`, so only ASCII digits
+/// match.
 #[allow(clippy::expect_used)] // constant pattern, cannot fail
 static REASONING_ENGINE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -54,7 +55,7 @@ static REASONING_ENGINE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid reasoning-engine regex")
 });
 
-/// Go `vertexAiClient`.
+/// The client for the Vertex AI session calls.
 pub(crate) struct SessionClient {
     client: VertexClient,
     project_id: String,
@@ -78,14 +79,15 @@ impl SessionClient {
         }
     }
 
-    /// Go `getReasoningEngineID`: the configured engine; else an app name Go's `strconv.Atoi`
-    /// accepts (optional sign, ASCII digits, fits 64 bits), verbatim; else the ID a full
+    /// The reasoning engine ID: the configured engine; else an app name that is an integer
+    /// (optional sign, ASCII digits, fits 64 bits), verbatim; else the ID a full
     /// `projects/…/locations/…/reasoningEngines/{id}` app name names.
     ///
     /// # Errors
     ///
-    /// [`SessionError::InvalidRequest`] with Go's text `app name "{app}" is not valid. It
-    /// should be the full ReasoningEngine resource name or the reasoning engine numeric ID`.
+    /// [`SessionError::InvalidRequest`] with the message `app name "{app}" is not valid.`
+    /// followed by a space and
+    /// `It should be the full ReasoningEngine resource name or the reasoning engine numeric ID`.
     pub(crate) fn reasoning_engine_id(&self, app_name: &str) -> Result<String, SessionError> {
         if !self.reasoning_engine.is_empty() {
             return Ok(self.reasoning_engine.clone());
@@ -103,7 +105,7 @@ impl SessionClient {
         }
     }
 
-    /// The engine data of an engine ID (Go builds a `vertexaiutil.AgentEngineData` per call).
+    /// The engine data of an engine ID (built per call).
     fn engine(&self, reasoning_engine: String) -> AgentEngineData {
         AgentEngineData {
             project_id: self.project_id.clone(),
@@ -112,13 +114,13 @@ impl SessionClient {
         }
     }
 
-    /// Go `sessionNameByID`.
+    /// The full session resource name of `session_id` in the engine `app_name` resolves to.
     fn session_name(&self, app_name: &str, session_id: &str) -> Result<String, SessionError> {
         let engine = self.engine(self.reasoning_engine_id(app_name)?);
         Ok(engine.session_resource(session_id))
     }
 
-    /// Go `createSession`: `CreateSession`, the session ID from the returned operation's name,
+    /// Creates a session: `CreateSession`, the session ID from the returned operation's name,
     /// then [`wait_for_session`](Self::wait_for_session).
     pub(crate) async fn create_session(
         &self,
@@ -129,7 +131,7 @@ impl SessionClient {
             session.insert("userId".into(), Value::String(req.user_id.clone()));
         }
         // temp: keys belong to a single invocation and are never stored, so they are dropped
-        // here as AppendEvent trims them from every state delta (Go #2100).
+        // here as AppendEvent trims them from every state delta.
         let state: Map<String, Value> = req
             .state
             .iter()
@@ -170,10 +172,10 @@ impl SessionClient {
             .map_err(|e| prefix_error("LRO for CreateSession failed", e))
     }
 
-    /// Go `waitForOperation`: up to 10 `getSession` attempts; a not-found on attempts 0–8
+    /// Waits for a created session: up to 10 `getSession` attempts; a not-found on attempts 0–8
     /// sleeps `min(i² × 1 s, 5 s)` and retries; any other error, or a not-found on the last
-    /// attempt, is `error getting operation '{id}': …`. (Go's `LRO '%s' timed out after %d
-    /// retries` cannot be reached and is not ported.)
+    /// attempt, is `error getting operation '{id}': …`. (A timeout error after the retries
+    /// cannot be reached, so none exists.)
     async fn wait_for_session(
         &self,
         app_name: &str,
@@ -205,7 +207,7 @@ impl SessionClient {
         }
     }
 
-    /// Go `getSession`: `GetSession`; a 404, or a session of another user, is
+    /// Reads a session: `GetSession`; a 404, or a session of another user, is
     /// [`SessionError::NotFound`]; the state drops null values.
     pub(crate) async fn get_session(
         &self,
@@ -239,8 +241,8 @@ impl SessionClient {
         ))
     }
 
-    /// Go `listSessionEvents`: `ListEvents` (with `filter=timestamp>="…"` when `after` is set
-    /// and not Go's zero time),
+    /// Lists a session's events: `ListEvents` (with `filter=timestamp>="…"` when `after` is set
+    /// and not the zero time),
     /// every page; `num_recent_events > 0` keeps the last that many. A 404 is
     /// [`SessionError::NotFound`].
     pub(crate) async fn list_session_events(
@@ -252,9 +254,9 @@ impl SessionClient {
     ) -> Result<Vec<Event>, SessionError> {
         let parent = self.session_name(app_name, session_id)?;
         let mut query = Vec::new();
-        // Go adds the filter only `if !after.IsZero()`.
+        // The filter is added only when `after` is set and not the zero time.
         if let Some(after) = after.filter(|t| *t != zero_time()) {
-            // Go `after.Format("2006-01-02T15:04:05-07:00")` of a UTC time, `%q`-quoted.
+            // The UTC time as RFC 3339 with seconds and a `+00:00` offset, quoted.
             let formatted = after.format("%Y-%m-%dT%H:%M:%S+00:00").to_string();
             query.push(("filter", format!("timestamp>={}", go_quote(&formatted))));
         }
@@ -279,7 +281,7 @@ impl SessionClient {
         Ok(events)
     }
 
-    /// Go `listSessions`: `ListSessions` (filtered to the user when one is given), every page;
+    /// Lists sessions: `ListSessions` (filtered to the user when one is given), every page;
     /// each session takes its user from the response, its ID from the last name segment, its
     /// state without null values and `updateTime` as its last update.
     pub(crate) async fn list_sessions(
@@ -321,15 +323,13 @@ impl SessionClient {
             })
             .collect::<Result<Vec<_>, String>>()
             .map_err(|e| session_error(wrap("error creating session list", e)))?;
-        // Go sortSessionsByLastUpdate (#1919): the ListSessions RPC has no ordering guarantee of
-        // its own.
+        // The ListSessions RPC has no ordering guarantee of its own, so sort by last update.
         sessions.sort_by(|a, b| gadk_session::compare_by_last_update(a, b));
         Ok(sessions)
     }
 
-    /// Go `deleteSession`: the `getSession` ownership check (a missing session, or another
-    /// user's, deletes nothing and succeeds), then `DeleteSession` and a wait on its operation
-    /// (Go `lro.Wait`).
+    /// Deletes a session: the `getSession` ownership check (a missing session, or another
+    /// user's, deletes nothing and succeeds), then `DeleteSession` and a wait on its operation.
     pub(crate) async fn delete_session(&self, req: &DeleteRequest) -> Result<(), SessionError> {
         let name = self.session_name(&req.app_name, &req.session_id)?;
         let check = GetRequest {
@@ -366,7 +366,7 @@ impl SessionClient {
         Ok(())
     }
 
-    /// Go `appendEvent`: a partial event sends nothing; otherwise `AppendEvent` with the
+    /// Appends an event: a partial event sends nothing; otherwise `AppendEvent` with the
     /// event's `SessionEvent`. A 404 is [`SessionError::NotFound`].
     pub(crate) async fn append_event(
         &self,
@@ -398,8 +398,7 @@ impl SessionClient {
     }
 }
 
-/// Go `fmt.Errorf("{prefix}: %w", err)` on a session error: a not-found stays
-/// [`SessionError::NotFound`] (Go's `errors.Is(err, session.ErrNotFound)` still holds), an
+/// Prefixes a session error with `{prefix}: `: a not-found stays [`SessionError::NotFound`], an
 /// invalid request keeps its variant with the prefixed text, anything else is wrapped.
 pub(crate) fn prefix_error(prefix: &str, err: SessionError) -> SessionError {
     match err {
@@ -411,8 +410,8 @@ pub(crate) fn prefix_error(prefix: &str, err: SessionError) -> SessionError {
     }
 }
 
-/// A call's error: [`SessionError::NotFound`] for a 404 (Go's `status.Code(err) ==
-/// codes.NotFound` arm), else `{prefix}: {err}` mapped by [`session_error`].
+/// A call's error: [`SessionError::NotFound`] for a 404, else `{prefix}: {err}` mapped by
+/// [`session_error`].
 fn not_found_or(prefix: &str, err: BoxError) -> SessionError {
     if find_vertex_error(err.as_ref()).is_some_and(VertexError::is_not_found) {
         SessionError::NotFound
@@ -421,30 +420,31 @@ fn not_found_or(prefix: &str, err: BoxError) -> SessionError {
     }
 }
 
-/// Go `quoteFilterLiteral`: `value` as a Google AIP-160 filter string literal, backslashes
+/// `value` as a Google AIP-160 filter string literal, backslashes
 /// escaped first, then double quotes, so caller input cannot add filter predicates.
 pub(crate) fn quote_filter_literal(value: &str) -> String {
     let escaped = value.replace('\\', r"\\").replace('"', r#"\""#);
     format!("\"{escaped}\"")
 }
 
-/// Go `sessionIdBySessionName`: the segment after the last `/`.
+/// The segment after the last `/` of a session name.
 ///
 /// # Errors
 ///
-/// Go's texts: `invalid session name format "{name}": missing separator '/'` and
+/// The texts `invalid session name format "{name}": missing separator '/'` and
 /// `invalid session name "{name}": empty session ID`.
 pub(crate) fn session_id_by_session_name(name: &str) -> Result<String, String> {
     event_id_from_name(name)
 }
 
-/// Go `sessionIDByOperationName`: the ID between the last `/sessions/` and the last
+/// The session ID between the last `/sessions/` and the last
 /// `/operations/`.
 ///
 /// # Errors
 ///
-/// Go's texts: `invalid operation name "{name}": missing "/sessions/"`, `… missing
-/// "/operations/"`, `… structure malformed or segments out of order`, `… empty session ID`.
+/// The texts `invalid operation name "{name}": missing "/sessions/"`,
+/// `… missing "/operations/"`, `… structure malformed or segments out of order` and
+/// `… empty session ID`.
 pub(crate) fn session_id_by_operation_name(name: &str) -> Result<String, String> {
     const SESSION_PREFIX: &str = "/sessions/";
     const OPS_SUFFIX: &str = "/operations/";

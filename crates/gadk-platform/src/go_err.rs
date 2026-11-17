@@ -13,14 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go's `%w` error wrapping ([`GoWrapped`]) and `syscall.Errno` texts ([`go_errno_text`]),
-//! shared by the gadk crates that reproduce Go's error chains.
+//! Error wrapping with a prefix ([`GoWrapped`]) and OS error texts ([`go_errno_text`]), shared
+//! by the gadk crates that build error chains.
 
 use std::error::Error as StdError;
 use std::io;
 
-/// Go `fmt.Errorf("{prefix}: %w", source)`: displays `{prefix}: {source}` and keeps `source`
-/// as its `source()`, so `errors.Is` / `errors.As` style walks of the chain find the cause.
+/// An error that displays `{prefix}: {source}` and keeps `source` as its `source()`, so walks
+/// of the error chain find the cause.
 #[derive(Debug)]
 pub struct GoWrapped {
     prefix: String,
@@ -28,7 +28,7 @@ pub struct GoWrapped {
 }
 
 impl GoWrapped {
-    /// Wraps `source` under `prefix`, as Go's `fmt.Errorf("{prefix}: %w", source)` does.
+    /// Wraps `source` under `prefix`.
     pub fn new(
         prefix: impl Into<String>,
         source: impl Into<Box<dyn StdError + Send + Sync>>,
@@ -52,10 +52,9 @@ impl StdError for GoWrapped {
     }
 }
 
-/// Go's `syscall.Errno.Error()` text for `err`: the C library's message for the OS error code
-/// with its first letter lowercased (Go's errno tables are generated from the same messages,
-/// e.g. `no such file or directory`, `permission denied`, `is a directory`); an error without
-/// an OS code keeps its own text.
+/// The text of the OS error `err`: the C library's message for the OS error code with its first
+/// letter lowercased (e.g. `no such file or directory`, `permission denied`,
+/// `is a directory`); an error without an OS code keeps its own text.
 pub fn go_errno_text(err: &io::Error) -> String {
     let Some(code) = err.raw_os_error() else {
         return err.to_string();

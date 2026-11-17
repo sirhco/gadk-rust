@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! adk-python's auth data model in its wire format (port of ADK-Go `tool/toolauth`): how a
+//! adk-python's auth data model in its wire format: how a
 //! resource expects to be authenticated ([`Scheme`]), a credential a tool was configured with or
 //! obtained ([`Credential`]), and the two together with the key the credential is stored under
 //! ([`Config`]). When a tool needs the end user's consent, ADK sends a [`Config`] to the client
@@ -37,6 +37,6 @@ pub use credential::{
 pub use schemes::{OAuthFlow, OAuthFlows, OAuthGrantType, Scheme, SchemeType};
 pub use tool::{Config, REQUEST_CREDENTIAL_FUNCTION_CALL_NAME, ToolArguments};
 
-/// Unknown JSON keys, each kept as the raw text it arrived as (Go `Extra map[string]any`
-/// decoded with `UseNumber`). Needs serde_json's `raw_value` feature.
+/// Unknown JSON keys, each kept as the raw text it arrived as (numbers keep their literal
+/// text). Needs serde_json's `raw_value` feature.
 pub type Extra = std::collections::BTreeMap<String, Box<serde_json::value::RawValue>>;

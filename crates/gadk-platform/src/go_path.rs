@@ -13,13 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `path.Clean`, `path.Join`, `path.Dir` and `path.Base` (lexical, slash-separated paths;
-//! on Unix `path/filepath`'s `Clean`/`Join`/`Dir`/`Base` are the same functions), and Unix
-//! `filepath.Rel` / `filepath.IsLocal`.
+//! Lexical, slash-separated path functions ([`go_path_clean`], [`go_path_join`],
+//! [`go_path_dir`], [`go_path_base`]) and Unix [`go_filepath_rel`] / [`go_filepath_is_local`].
 
-/// Go `path.Clean` (lexical, slash-separated): drops empty and `.` elements, resolves `..`
-/// against the preceding element, keeps leading `..` elements of a relative path, drops `..`
-/// at the root of a rooted path, and returns `.` for an empty result (`/` when rooted).
+/// Cleans a path lexically: drops empty and `.` elements, resolves `..` against the preceding
+/// element, keeps leading `..` elements of a relative path, drops `..` at the root of a rooted
+/// path, and returns `.` for an empty result (`/` when rooted).
 pub fn go_path_clean(p: &str) -> String {
     if p.is_empty() {
         return ".".to_owned();
@@ -47,8 +46,7 @@ pub fn go_path_clean(p: &str) -> String {
     }
 }
 
-/// Go `path.Join`: the non-empty elements joined with `/` and cleaned; `""` when all are
-/// empty.
+/// Joins the non-empty elements with `/` and cleans the result; `""` when all are empty.
 pub fn go_path_join<S: AsRef<str>>(elems: &[S]) -> String {
     let parts: Vec<&str> = elems
         .iter()
@@ -61,15 +59,14 @@ pub fn go_path_join<S: AsRef<str>>(elems: &[S]) -> String {
     go_path_clean(&parts.join("/"))
 }
 
-/// Go `path.Dir` (and `filepath.Dir` on Unix): everything up to the last `/`, cleaned; `.`
-/// without a `/`.
+/// Everything up to the last `/`, cleaned; `.` without a `/`.
 pub fn go_path_dir(p: &str) -> String {
     let end = p.rfind('/').map_or(0, |i| i + 1);
     go_path_clean(&p[..end])
 }
 
-/// Go `path.Base` (and `filepath.Base` on Unix): the last element, trailing slashes removed;
-/// `.` for an empty path, `/` for a path of slashes.
+/// The last element, trailing slashes removed; `.` for an empty path, `/` for a path of
+/// slashes.
 pub fn go_path_base(p: &str) -> String {
     if p.is_empty() {
         return ".".to_owned();
@@ -84,11 +81,11 @@ pub fn go_path_base(p: &str) -> String {
     }
 }
 
-/// Go `filepath.Rel` (Unix): `targpath` relative to `basepath`, lexically; `Rel: can't make
-/// <targ> relative to <base>` when one is rooted and the other is not, or when `basepath` has a
-/// `..` element that `targpath` does not share.
+/// `targpath` relative to `basepath`, lexically; `Rel: can't make <targ> relative to <base>`
+/// when one is rooted and the other is not, or when `basepath` has a `..` element that
+/// `targpath` does not share.
 pub fn go_filepath_rel(basepath: &str, targpath: &str) -> Result<String, String> {
-    // Go: path/filepath/path.go Rel
+    // Algorithm: clean both, then strip the common prefix.
     let base_clean = go_path_clean(basepath);
     let targ_clean = go_path_clean(targpath);
     if targ_clean == base_clean {
@@ -147,10 +144,10 @@ pub fn go_filepath_rel(basepath: &str, targpath: &str) -> Result<String, String>
     Ok(String::from_utf8_lossy(&targ[t0..]).into_owned())
 }
 
-/// Go `filepath.IsLocal` (Unix `unixIsLocal`): `path` is not empty, not absolute and, after
-/// `Clean` (only when it has a `.` or `..` element), neither `..` nor below `../`.
+/// True when `path` is local: not empty, not absolute and, after cleaning (only when it has a
+/// `.` or `..` element), neither `..` nor below `../`.
 pub fn go_filepath_is_local(path: &str) -> bool {
-    // Go: path/filepath/path_unix.go / internal/filepathlite unixIsLocal
+    // Unix rules only.
     if path.starts_with('/') || path.is_empty() {
         return false;
     }

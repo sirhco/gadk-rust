@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Defines a Go-style string enum: known variants plus `Unknown(String)`, serde as a plain string.
+/// Defines a string enum: known variants plus `Unknown(String)`, serde as a plain string.
 #[macro_export]
 macro_rules! string_enum {
     ($(#[$m:meta])* $name:ident { $($(#[$vm:meta])* $variant:ident => $s:literal),+ $(,)? }) => {

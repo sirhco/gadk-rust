@@ -13,16 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Session errors (ADK-Go `session.ErrNotFound`, `session.ErrStateKeyNotExist`).
+//! Session errors: a missing session and a missing state key.
 
 /// Errors returned by [`crate::SessionService`], [`crate::Session`] and [`crate::State`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SessionError {
-    /// The requested session does not exist (ADK-Go `ErrNotFound`).
+    /// The requested session does not exist.
     #[error("session not found")]
     NotFound,
-    /// The state key does not exist (ADK-Go `ErrStateKeyNotExist`).
+    /// The state key does not exist.
     #[error("state key does not exist")]
     StateKeyNotExist,
     /// The request failed validation.

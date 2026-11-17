@@ -15,8 +15,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! A reusable, backend-agnostic conformance suite for [`SessionService`] implementations
-//! (port of ADK-Go `session/sessiontestsuite`).
+//! A reusable, backend-agnostic conformance suite for [`SessionService`] implementations.
 //!
 //! Enabled by the `testsuite` feature. Call [`run`](crate::testsuite::run) from a backend's tests with a factory
 //! that returns a fresh service, or [`run_named`](crate::testsuite::run_named) when the factory needs the case name (to
@@ -43,7 +42,7 @@ use crate::toolauth::{
     Config, Credential, CredentialType, OAuth2Auth, OAuthFlow, OAuthFlows, Scheme, SchemeType,
 };
 
-/// A snapshot of a session's public state, for test comparisons (Go `ExpectedSession`).
+/// A snapshot of a session's public state, for test comparisons.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExpectedSession {
     /// The app name.
@@ -58,7 +57,7 @@ pub struct ExpectedSession {
     pub events: Vec<Event>,
 }
 
-/// Extracts an [`ExpectedSession`] from any [`Session`] implementation (Go `Snapshot`).
+/// Extracts an [`ExpectedSession`] from any [`Session`] implementation.
 pub fn snapshot(s: &dyn Session) -> ExpectedSession {
     ExpectedSession {
         app_name: s.app_name().to_string(),
@@ -69,7 +68,7 @@ pub fn snapshot(s: &dyn Session) -> ExpectedSession {
     }
 }
 
-/// Configuration for adaptive suite runs (Go `SuiteOptions`).
+/// Configuration for adaptive suite runs.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SuiteOptions {
     /// The backend accepts a caller-provided session ID on create.
@@ -77,8 +76,8 @@ pub struct SuiteOptions {
     /// The backend names events itself, so a caller's event ID is not what it stores.
     pub provides_server_assigned_event_id: bool,
     /// Runs the case that requires `append_event` to refuse an event whose requested auth
-    /// config does not decode as a [`crate::toolauth::Config`] (Go
-    /// `ChecksRequestedAuthConfigs`). [`SessionService`] does not require that check.
+    /// config does not decode as a [`crate::toolauth::Config`]. [`SessionService`] does not
+    /// require that check.
     pub checks_requested_auth_configs: bool,
     /// The app name to use; `"testApp"` when `None`.
     pub app_name: Option<String>,
@@ -96,9 +95,8 @@ where
 
 /// Like [`run`], but passes each case's name to the factory before the case runs. The name is
 /// spelled exactly as the failure lines spell it after `sessiontestsuite/` (`"Create/full_key"`,
-/// `"Get/ok"`, `"Create/when_already_exists,_it_fails"`, `"List"`, …: Go's subtest names with
-/// spaces as `_`), so a backend can, for example, replay the recording Go's
-/// `Test_vertexaiService` subtest of that name made.
+/// `"Get/ok"`, `"Create/when_already_exists,_it_fails"`, `"List"`, …: the case's subtest name
+/// with spaces as `_`), so a backend can, for example, pick the recording made for that case.
 pub async fn run_named<F, Fut>(opts: SuiteOptions, factory: F)
 where
     F: Fn(&'static str) -> Fut,
@@ -153,7 +151,7 @@ where
     }
 }
 
-/// Go `*testing.T`: `errorf` records a failure and continues; a fatal failure is the
+/// Test context: `errorf` records a failure and continues; a fatal failure is the
 /// subtest's `Err` return.
 #[derive(Default)]
 struct T {
@@ -214,7 +212,7 @@ fn utc(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32, nanos: i64) -> DateTime
     Utc.with_ymd_and_hms(y, mo, d, h, mi, s).unwrap() + Duration::nanoseconds(nanos)
 }
 
-/// Go `textOf`: the concatenated text parts of `c`.
+/// The concatenated text parts of `c`.
 fn text_of(c: Option<&Content>) -> String {
     c.map(|c| c.parts.iter().map(|p| p.text.as_str()).collect())
         .unwrap_or_default()
@@ -228,7 +226,7 @@ fn value_of(snap: &ExpectedSession, key: &str) -> Option<Value> {
 
 async fn create_full_key(t: &mut T, s: Arc<dyn SessionService>, opts: &SuiteOptions) -> Outcome {
     if !opts.supports_user_provided_session_id {
-        // Go: t.Skip("Skipping full key test: requires user provided session ID support")
+        // Skipped: the full-key case requires user provided session ID support.
         return Ok(());
     }
     let app = app_name(opts);
@@ -519,9 +517,8 @@ async fn delete(t: &mut T, s: Arc<dyn SessionService>, opts: &SuiteOptions) -> O
                 session_id: "nonExistent".into(),
             })
             .await;
-        // Go accepts nil or a gRPC InvalidArgument (VertexAI fails on Delete when the
-        // session is not found). Rust has no gRPC status here; `InvalidRequest` is the
-        // InvalidArgument stand-in.
+        // Accepts `Ok` or `InvalidRequest` (a Vertex AI backend fails on delete when the
+        // session is not found); `InvalidRequest` stands in for an invalid-argument status.
         match res {
             Ok(()) | Err(SessionError::InvalidRequest(_)) => {}
             Err(e) => t.errorf(format!(
@@ -561,7 +558,7 @@ async fn delete_session_respects_user_id(
 
 // ---- AppendEvent ----
 
-/// Go `mockSession`: a session of no backend's type.
+/// A session of no backend's type.
 struct MockSession {
     app_name: String,
     user_id: String,
@@ -569,7 +566,7 @@ struct MockSession {
     state: MockState,
 }
 
-/// Go's mock returns a nil State; a Rust `Session` must hand out one, so it is empty.
+/// A `Session` must hand out a state, so the mock's is empty.
 struct MockState;
 
 impl State for MockState {
@@ -765,7 +762,7 @@ async fn append_event_compaction_record_round_trips(
     Ok(())
 }
 
-/// The `call-1` request of Go's `requested_auth_configs_round_trip` case.
+/// The `call-1` request of the `requested_auth_configs_round_trip` case.
 fn requested_auth_configs() -> BTreeMap<String, Config> {
     let flow = OAuthFlow {
         authorization_url: "https://example.com/authorize".into(),
@@ -849,7 +846,7 @@ async fn append_event_requested_auth_config_that_does_not_decode_is_refused(
     // accepts configs its decoder refuses. A backend that stored one could not read the
     // session back. A backend that opts in refuses the append, even if it never decodes.
     if !opts.checks_requested_auth_configs {
-        // Go: t.Skip("Skipping: the backend does not check requested auth configs on append")
+        // Skipped: the backend does not check requested auth configs on append.
         return Ok(());
     }
     let app = app_name(opts);
@@ -893,7 +890,7 @@ async fn append_event_requested_auth_config_that_does_not_decode_is_refused(
         ),
     ];
     for (name, config) in cases {
-        // Go t.Run(tc.name): a fatal failure ends this subcase only.
+        // A fatal failure ends this subcase only.
         let mut sub = T::default();
         let outcome: Outcome = async {
             let created = s
@@ -1264,8 +1261,7 @@ async fn append_event_with_all_fields(
     let mut want = event.clone();
     let mut got_event = snap.events[0].clone();
     if opts.provides_server_assigned_event_id {
-        // Go: cmpopts.IgnoreFields(Event{}, "ID") and LLMResponse CitationMetadata,
-        // UsageMetadata.
+        // Ignore the event ID, citation metadata and usage metadata when comparing.
         for e in [&mut want, &mut got_event] {
             e.id.clear();
             e.response.citation_metadata = None;
@@ -1298,7 +1294,7 @@ async fn state_management_app_state_is_shared(
     opts: &SuiteOptions,
 ) -> Outcome {
     let app = app_name(opts);
-    // Go ignores this Create error (`s1, _ :=`) and would then nil-deref; here it is fatal.
+    // A failed Create ends the case.
     let s1 = s
         .create(CreateRequest {
             state: state(&[("app:k1", json!("v1"))]),
