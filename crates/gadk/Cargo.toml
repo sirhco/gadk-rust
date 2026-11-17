@@ -30,6 +30,8 @@ gcs = ["dep:gadk-artifact-gcs"]
 prompts = ["dep:gadk-prompts"]
 # The prompt registry's Firestore store (gadk-prompts-firestore); not in `default`.
 prompts-firestore = ["prompts", "dep:gadk-prompts-firestore"]
+# Offline agent evaluation: eval sets, scorers and an LLM judge (gadk-eval); not in `default`.
+eval = ["dep:gadk-eval"]
 # Sessions and memory in a Vertex AI Agent Engine (gadk-vertexai); not in `default`.
 vertexai = ["dep:gadk-vertexai"]
 # The ADK REST API server with inbound authn/authz (gadk-server); not in `default`.
@@ -86,6 +88,7 @@ gadk-agentregistry = { workspace = true, optional = true }
 gadk-agentanalytics = { workspace = true, optional = true }
 gadk-prompts = { workspace = true, optional = true }
 gadk-prompts-firestore = { workspace = true, optional = true }
+gadk-eval = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

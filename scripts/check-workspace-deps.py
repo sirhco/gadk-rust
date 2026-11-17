@@ -84,6 +84,9 @@
   `gadk-prompts` and `gadk-prompts-firestore` optionally (features `prompts`,
   `prompts-firestore`); nothing depends on `gadk-prompts-cli` except `gadk-console` (B2), and
   nothing depends on `gadk-console`.
+- eval: `gadk-eval` depends on exactly `gadk-agent`, `gadk-engine`, `gadk-genai`, `gadk-model`,
+  `gadk-platform`, `gadk-prompts` and `gadk-session` (the eleventh crate that may depend on
+  `gadk-engine`); only the façade depends on it, optionally (feature `eval`).
 """
 import pathlib, sys, tomllib
 
@@ -129,12 +132,14 @@ ALLOWED = {
     "gadk-prompts-firestore": {"gadk-prompts", "gadk-model", "gadk-platform"},
     "gadk-prompts-cli": {"gadk-prompts", "gadk-prompts-firestore"},
     "gadk-console": {"gadk-model", "gadk-prompts", "gadk-prompts-cli"},
+    "gadk-eval": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
+                  "gadk-prompts", "gadk-session"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
              "gadk-artifact-gcs", "gadk-vertexai", "gadk-server", "gadk-a2a", "gadk-launcher",
              "gadk-agentregistry", "gadk-telemetry", "gadk-agentanalytics", "gadk-prompts",
-             "gadk-prompts-firestore"},
+             "gadk-prompts-firestore", "gadk-eval"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("gadk-a2a", "gadk-server"),
@@ -142,11 +147,11 @@ OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("ga
             ("gadk-agentregistry", "gadk-a2a"), ("gadk-agentregistry", "gadk-mcp"),
             ("gadk", "gadk-telemetry"), ("gadk", "gadk-agentanalytics"),
             ("gadk-prompts-cli", "gadk-prompts-firestore"), ("gadk", "gadk-prompts"),
-            ("gadk", "gadk-prompts-firestore")}
+            ("gadk", "gadk-prompts-firestore"), ("gadk", "gadk-eval")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
                      "gadk-agentregistry", "gadk-telemetry", "gadk-configurable",
-                     "gadk-agentanalytics", "gadk-prompts")  # the only crates that may depend on gadk-engine
+                     "gadk-agentanalytics", "gadk-prompts", "gadk-eval")  # the only crates that may depend on gadk-engine
 TOOLS_DEPENDENT = "gadk"  # the only crate that may depend on gadk-tools
 OPENAI_DEPENDENT = "gadk"  # the only crate that may depend on gadk-openai (3b)
 LICENSE_OVERRIDES = {"gadk-goyaml": "Apache-2.0 AND MIT"}  # 6c-1: libyaml-derived files stay MIT
@@ -203,7 +208,7 @@ def check(repo):
             if d == name:
                 continue
             if d == "gadk-engine" and name not in ENGINE_DEPENDENTS:
-                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics and gadk-prompts may depend on gadk-engine (dev-dependency)")
+                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics, gadk-prompts and gadk-eval may depend on gadk-engine (dev-dependency)")
             elif d == "gadk-tools" and name != TOOLS_DEPENDENT:
                 errs.append(f"{rel}: only {TOOLS_DEPENDENT} may depend on gadk-tools (dev-dependency)")
             elif d == "gadk-openai" and name != OPENAI_DEPENDENT:
