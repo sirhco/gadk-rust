@@ -430,8 +430,9 @@ fn format_error_details(tool: &dyn Tool, err: &ToolError) -> String {
     format!("{err_type}: {err_details}")
 }
 
-/// The tool arguments as JSON indented by two spaces (see [`go_indent`]); an empty map gives
-/// `null`. Numbers are decoded as `f64`, as tool arguments are, hence [`as_go_floats`].
+/// The tool arguments as JSON (compact form as `go_json_marshal` writes it: keys sorted, `<`,
+/// `>` and `&` written as Unicode escapes) indented by two spaces (see [`go_indent`]); an empty map
+/// gives `null`. Numbers are decoded as `f64`, as tool arguments are, hence [`as_go_floats`].
 fn format_tool_args(args: &Map<String, Value>) -> String {
     if args.is_empty() {
         return "null".to_string();

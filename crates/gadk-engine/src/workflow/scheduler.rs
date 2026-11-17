@@ -166,7 +166,7 @@ pub(crate) fn default_content_role(c: &Content) -> &'static str {
     }
 }
 
-// ---------- node_span.go ----------
+// ---------- node spans ----------
 
 /// Starts the span of a node activation: `None` for START and for nodes that emit their own
 /// span.

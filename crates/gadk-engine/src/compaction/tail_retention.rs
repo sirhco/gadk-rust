@@ -160,8 +160,8 @@ pub(crate) async fn tail_retention(
 /// The characters assumed per token when estimating.
 const CHARS_PER_TOKEN: i64 = 4;
 
-/// The character count of the JSON encoding of `v` (as `go_json_marshal` writes it); 0 for an
-/// empty map.
+/// The character count of the compact JSON encoding of `v` (keys sorted, `<`, `>` and `&`
+/// written as Unicode escapes, as `go_json_marshal` writes it); 0 for an empty map.
 fn json_chars(v: &Map<String, Value>) -> i64 {
     if v.is_empty() {
         return 0;

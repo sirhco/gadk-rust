@@ -233,7 +233,7 @@ pub struct Edge {
 pub(crate) use gadk_agent::go_quote;
 
 // ---------------------------------------------------------------------------------------------
-// internal/workflowroute
+// outgoing-route summaries
 // ---------------------------------------------------------------------------------------------
 
 /// Classifies a concrete route value extracted from an edge.

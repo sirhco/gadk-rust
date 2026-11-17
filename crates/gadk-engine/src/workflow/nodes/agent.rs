@@ -223,7 +223,8 @@ pub(crate) fn is_own_agent_event(ev: &Event, node_agent_name: &str) -> bool {
 }
 
 /// The user content for a node's input: null → none; a string → user text; anything else → its
-/// JSON text (as `go_json_marshal` writes it) as user text. Marshaling a `Value` cannot fail, so
+/// compact JSON text (keys sorted, `<`, `>` and `&` written as Unicode escapes, as
+/// `go_json_marshal` writes it) as user text. Marshaling a `Value` cannot fail, so
 /// the error branch is unreachable; the `Result` is kept for the signature.
 pub(crate) fn node_input_to_content(input: &Value) -> Result<Option<Content>, AgentError> {
     match input {
