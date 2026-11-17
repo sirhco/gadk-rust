@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! JSON decoding of the Agent Engine request models (`go_unmarshal`): key matching and error
-//! texts that are wire-compatible with the reference ADK server's decoder, then serde.
+//! texts that are byte-identical to an ADK server's JSON-decoding errors, then serde.
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -60,11 +60,11 @@ enum Durations {
 
 /// Decodes `payload` into the struct described by `shape` (a request model from
 /// [`encode_shapes`](super::encode_shapes), e.g. `MODELS_QUERY`), producing the Rust model `T`,
-/// with the reference server's key matching and error texts:
+/// with an ADK server's key matching and error texts (see the literals in `type_error`):
 ///
 /// 1. syntax: the whole input must be one JSON value; an empty or truncated
 ///    input is `unexpected end of JSON input`; nesting deeper than [`MAX_DEPTH`] (127 arrays and
-///    objects, serde_json's limit; the reference server allows 10000) is `exceeded max depth`,
+///    objects, serde_json's limit; an ADK server allows 10000) is `exceeded max depth`,
 ///    unless a syntax error comes earlier in the input; any other syntax error keeps
 ///    serde_json's text;
 /// 2. keys: in each JSON object decoded into a struct (`GoKind::Struct`, also through
@@ -72,21 +72,19 @@ enum Durations {
 ///    json name (tag name, else field name) equals it exactly, else case-insensitively
 ///    (Unicode simple case folding); an unmatched key is ignored; a later duplicate wins (it
 ///    decodes into the existing value: a repeated struct field or map merges, a repeated slice
-///    reuses its elements); values of
-///    `Interface` and `Map(Interface)` fields (`input`, `state`, `FunctionCall.args`) are taken
-///    verbatim; a JSON `null` leaves a non-interface field at its zero value (a pointer, slice,
-///    map or interface becomes nil);
+///    reuses its elements); values of `Interface` and `Map(Interface)` fields (`input`,
+///    `state`, `FunctionCall.args`) are taken verbatim; a JSON `null` leaves a non-interface
+///    field at its zero value (a pointer, slice, map or interface becomes nil);
 /// 3. types: a value whose JSON kind does not fit the field's `GoKind` is
-///    `json: cannot unmarshal <JSON kind> into <field phrase> <Struct>.<path> of type
-///    <go_type>`, where `<field phrase>` is the fixed wording `<language> struct field` with the
-///    reference server's language name, `<Struct>` is the top-level type name without package,
-///    and `<path>` is the object keys as written in the input and the array indexes from the
-///    top level, joined by `.`; when the value is an array element the text is
-///    `… into <Struct>.<path> of type <elem type>` (no field phrase), and at the top level
-///    `… into <language> value of type <pkg.Type>`; a number
-///    that does not fit an integer or float field is `number <its text>`; an invalid base64
-///    string for `[]byte` appends `: illegal base64 data at input byte <n>`; the first error in
-///    input order wins;
+///    `json: cannot unmarshal <JSON kind> into <field> <Struct>.<path> of type <go_type>`
+///    (byte-identical to an ADK server's error; the fixed wording is in `type_error`), where
+///    `<Struct>` is the top-level type name without package, and `<path>` is the object keys as
+///    written in the input and the array indexes from the top level, joined by `.`; when the
+///    value is an array element the text is `… into <Struct>.<path> of type <elem type>` (no
+///    field wording), and at the top level `… into <value> of type <pkg.Type>`; a number that
+///    does not fit an integer or float field is `number <its text>`; an invalid base64 string
+///    for `[]byte` appends `: illegal base64 data at input byte <n>`; the first error in input
+///    order wins;
 /// 4. the canonicalized value is deserialized into `T` (its serde names are the json names).
 ///
 /// Everything runs on the caller's stack: [`MAX_DEPTH`] keeps the decoded value shallow enough
@@ -102,15 +100,15 @@ pub(crate) fn go_unmarshal<T: DeserializeOwned>(
 }
 
 /// The agentengine server's nesting limit for request bodies: `exceeded max depth` past 127
-/// arrays and objects, the top-level value included (the error text and counting rule of the
-/// reference server; the controller answers it 400).
+/// arrays and objects, the top-level value included (the error text and counting rule match an
+/// ADK server's; the controller answers it 400).
 ///
 /// This equals serde_json's recursion limit for the values it materializes (its deserializer
 /// starts `remaining_depth` at 128 and fails at 0), so agentengine accepts exactly the nesting
 /// that gadk's serde-based decoders (REST, A2A, the session loaders) materialize, and every
 /// request-derived value stays shallow enough for the recursive clone, convert and drop past
-/// this crate on a 2 MiB stack. The reference server allows a depth of 10000; the lower limit
-/// here is deliberate.
+/// this crate on a 2 MiB stack. An ADK server allows a depth of 10000; the lower limit here
+/// keeps the stack bounded.
 pub(crate) const MAX_DEPTH: usize = 127;
 
 /// The maximum nesting depth of `payload`'s arrays and objects (brackets inside strings not
@@ -197,7 +195,7 @@ struct Decoder {
     /// unmarshaler, which reports paths such as `.fps`).
     top_name: String,
     /// The type named in a top-level kind mismatch
-    /// (`… into <language> value of type <type>`).
+    /// (`… into <value> of type <type>`).
     top_type: String,
     /// The path from the top-level value to the value being decoded.
     path: Vec<Seg>,
@@ -336,7 +334,7 @@ fn fields_of(shape: &'static GoStruct) -> Vec<(String, &'static encode::GoField)
 }
 
 /// Standard-alphabet base64 decoding (`\r` and `\n` ignored, padding required, trailing
-/// bits not checked); `Err` is the `CorruptInputError` offset.
+/// bits not checked); `Err` is the byte offset of the corrupt input.
 fn go_base64_decode(s: &str) -> Result<Vec<u8>, usize> {
     let src = s.as_bytes();
     let mut out = Vec::with_capacity(src.len() / 4 * 3);

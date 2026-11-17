@@ -15,7 +15,7 @@
 //! Struct shapes for the snake-case conversion and the request decoder: every struct reachable
 //! from `session.Event` and the Agent Engine request/response models.
 //!
-//! Generated from the reference ADK server's type definitions at commit `0990f9e2`; the
+//! Recorded from an ADK server's type definitions at commit `0990f9e2`; the
 //! generator is no longer part of this repository, so edit with care.
 #![allow(dead_code)]
 

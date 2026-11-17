@@ -185,7 +185,7 @@ where
             let item = events.next().await?;
             log.print(&processing_event(&item));
             let event = match item {
-                // A compaction failure is bookkeeping, not the turn : log, go on.
+                // A compaction failure is bookkeeping, not the turn: log, go on.
                 Err(err) if err.is_compaction() => {
                     log.print(&format!("agentengine: {err}"));
                     continue;

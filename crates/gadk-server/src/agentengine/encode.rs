@@ -16,7 +16,7 @@
 //! The NDJSON line encoder of the streaming methods: a snake-case conversion of a value
 //! ([`convert_snake`]) and the line writers [`emit_json`] and [`emit_json_error`].
 //!
-//! The wire format depends on details of the reference server's struct types that serde output
+//! The wire format depends on details of an ADK server's struct types that serde output
 //! cannot recover (pointer vs value, `omitempty`, named string types, `time.Time`, `[]byte`,
 //! `float32`), so the conversion is driven by explicit struct shapes ([`GoStruct`], generated
 //! into [`encode_shapes`](super::encode_shapes)) and each Rust type that reaches an NDJSON line
@@ -43,20 +43,20 @@ use super::models::StreamingAgentRunWithEventsResponse;
 /// The kind of a shape field's type, as the conversion and the request decoder see it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GoKind {
-    /// `bool` (or a defined bool type): `v.Bool()`.
+    /// `bool` (or a defined bool type).
     Bool,
-    /// `int`, `int8`…`int64` or a defined int type (`time.Duration`, `time.Month`): `v.Int()`.
+    /// `int`, `int8`…`int64` or a defined int type (`time.Duration`, `time.Month`).
     Int,
-    /// `uint*`: `ConvertSnake` fails (`unsupported type: uint…`).
+    /// `uint*`: [`convert_snake`] fails (`unsupported type: uint…`).
     Uint,
-    /// `float32`: widened to float64 (`v.Float()`).
+    /// `float32`: widened to float64.
     Float32,
     /// `float64`.
     Float64,
     /// `string`.
     String,
     /// A defined type over `string` (`genai.Role`, `genai.FinishReason`): returned as is, so
-    /// `addIfNotEmpty` never drops it (an empty one is written `""`).
+    /// `omitempty` never drops it (an empty one is written `""`).
     NamedString,
     /// `[]byte`: standard base64 text.
     Bytes,
@@ -122,7 +122,7 @@ pub(crate) enum GoValue {
     Bool(bool),
     /// `int64`.
     Int(i64),
-    /// `float64`, written with the reference encoder's float text.
+    /// `float64`, written with the JSON encoder's float text.
     Float(f64),
     /// `string`.
     String(String),
@@ -143,7 +143,7 @@ impl Serialize for GoValue {
             GoValue::Bool(b) => serializer.serialize_bool(*b),
             GoValue::Int(i) => serializer.serialize_i64(*i),
             GoValue::Float(f) if f.is_finite() => serializer.serialize_f64(*f),
-            // The reference encoder's error: `json: unsupported value: NaN` (`+Inf`, `-Inf`).
+            // Encoding error text: `json: unsupported value: NaN` (`+Inf`, `-Inf`).
             GoValue::Float(f) => Err(S::Error::custom(format!(
                 "json: unsupported value: {}",
                 if f.is_nan() {
@@ -214,8 +214,8 @@ fn compact_html(text: &str) -> String {
 #[error("{0}")]
 pub(crate) struct ConvertError(pub(crate) String);
 
-/// A Rust value that reaches an NDJSON line, converted the way the reference server converts
-/// its counterpart type.
+/// A Rust value that reaches an NDJSON line, converted over its shape to the value tree the
+/// line is written from.
 pub(crate) trait GoSnake {
     /// Converts the value at `path`; `Ok(GoValue::Null)` is the nil result.
     fn go_snake(&self, path: &str) -> Result<GoValue, ConvertError>;
@@ -492,8 +492,8 @@ fn convert_kind(
 ) -> Result<GoValue, ConvertError> {
     if *kind == GoKind::RawMessage {
         // empty → nil; anything present (even `null`) is the JSON text. The text is
-        // re-serialised from serde's `Value` (keys sorted, number text normalised, e.g. a
-        // jsonschema `Default`), where the reference server keeps the author's compacted text.
+        // re-serialised from serde's `Value`, so keys are sorted and number text is normalised
+        // (e.g. a jsonschema `Default`).
         return Ok(v.map_or(GoValue::Null, |v| GoValue::Raw(v.to_string())));
     }
     let v = v.filter(|v| !v.is_null());
@@ -507,8 +507,7 @@ fn convert_kind(
             )));
         }
         // A NaN or ±Inf float is already `null` in serde's `to_value` output, so it becomes `0`
-        // here (a pointer to it is nil, then dropped); the reference server fails the encode
-        // with `json: unsupported value: NaN` and logs the error line.
+        // here (a pointer to it is nil, then dropped), so the line is still written.
         GoKind::Float32 => GoValue::Float(
             v.and_then(Value::as_f64)
                 .map_or(0.0, |f| f64::from(f as f32)),
@@ -567,7 +566,7 @@ fn convert_kind(
 }
 
 /// Converts an unexported field: ints and uints as `Int`, floats as `Float`,
-/// strings as `String`; any other kind is the `reflect.Value` itself, which encodes as `{}`.
+/// strings as `String`; any other kind is an empty object (`{}`).
 fn convert_value(kind: &GoKind, v: Option<&Value>) -> GoValue {
     let v = v.filter(|v| !v.is_null());
     match kind {
