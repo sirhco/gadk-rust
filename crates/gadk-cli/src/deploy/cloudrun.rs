@@ -822,7 +822,7 @@ pub fn write_oidc_flags(b: &mut String, t: &TriggerConfigFlags) {
     }
 }
 
-/// Test fixtures shared by this module's tests and the `cloudrun_test.go` ports: a Cargo
+/// Test fixtures shared by this module's tests: a Cargo
 /// workspace on disk with a [`TestEnv`](crate::testutil::TestEnv) whose runner answers
 /// `cargo metadata` for it.
 #[cfg(test)]

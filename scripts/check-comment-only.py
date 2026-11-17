@@ -65,28 +65,43 @@ def comment_lines(src):
 
 
 def toml_signature(src):
-    out = []
+    """Non-comment lines of a TOML file; a `#` inside a string is not a comment."""
+    out, multi = [], None
     for line in src.split("\n"):
-        quote, cut = None, len(line)
-        for k, ch in enumerate(line):
+        quote, cut, k = multi, len(line), 0
+        multi_here = multi is not None
+        while k < len(line):
+            ch = line[k]
             if quote:
-                if ch == quote:
+                if ch == "\\" and quote in ('"', '"""'):
+                    k += 2
+                    continue
+                if line.startswith(quote, k):
+                    k += len(quote)
                     quote = None
+                    continue
+            elif line.startswith(('"""', "'''"), k):
+                quote = line[k:k + 3]
+                k += 3
+                continue
             elif ch in "\"'":
                 quote = ch
             elif ch == "#":
                 cut = k
                 break
+            k += 1
+        multi = quote if quote in ('"""', "'''") else None
         code = line[:cut].rstrip()
-        if code:
+        if code or multi_here:
             out.append(code)
     return out
 
 
 def check(root, base):
     root = pathlib.Path(root).resolve()
-    changed = set(_git(root, "diff", "--name-only", base).split())
-    changed |= set(_git(root, "ls-files", "--others", "--exclude-standard").split())
+    changed = set(_git(root, "diff", "--name-only", "-z", base).split("\0"))
+    changed |= set(_git(root, "ls-files", "-z", "--others", "--exclude-standard").split("\0"))
+    changed.discard("")
     problems = []
     for rel in sorted(changed):
         path = root / rel

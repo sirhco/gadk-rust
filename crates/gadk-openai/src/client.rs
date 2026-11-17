@@ -206,8 +206,9 @@ impl OpenAiClient {
     ///   sleeps and a streaming body; its expiry is
     ///   [`OpenAiError::is_deadline_exceeded`], never retried.
     /// - A final status ≥ 400 is [`OpenAiError::api`]; when the body's
-    ///   top-level `error` is present but not an object, an unmarshal error instead
-    ///   (see the literal in `api_error`).
+    ///   top-level `error` is present but not an object, a plain error instead: its text
+    ///   says the string, array, bool or number `error` value cannot be unmarshalled into the
+    ///   API error type.
     /// - A body that fails to read: the bare read error for a final status ≥ 400, else
     ///   `error reading response body: <err>`.
     /// - Errors are not wrapped: the blocking paths add `openai: call failed: ` with

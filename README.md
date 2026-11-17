@@ -138,6 +138,7 @@ cargo test --workspace --all-features
 cargo deny check
 cargo +1.95 build --workspace --all-features     # MSRV
 python3 scripts/check-workspace-deps.py && python3 scripts/check_workspace_deps_test.py
+python3 scripts/check-go-refs.py && python3 scripts/check_go_refs_test.py
 RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links" \
   cargo doc --workspace --no-deps --all-features
 ```

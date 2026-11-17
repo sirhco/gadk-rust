@@ -83,7 +83,7 @@ pub async fn collect_body(mut body: BodyStream) -> Result<Bytes, ModelError> {
     Ok(buf.freeze())
 }
 
-/// `err` and its sources, joined with `": "` (moved from gadk-anthropic in 3b so every REST
+/// `err` and its sources, joined with `": "` (moved from gadk-anthropic so every REST
 /// provider renders a cause chain the same way).
 pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
     let mut out = err.to_string();

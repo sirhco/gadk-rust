@@ -84,8 +84,8 @@ pub(crate) struct DecodeState<'o> {
     /// The keys already set while a `<<` merge is applied (`None` outside a merge), compared
     /// by type and value (`GoValue` `==`).
     pub(crate) merged_fields: Option<Vec<GoValue>>,
-    /// Current nesting of the recursive walk: collections and alias expansions (plan
-    /// decision D7).
+    /// Current nesting of the recursive walk: collections and alias expansions
+    /// (limited by `MAX_WALK_DEPTH`).
     pub(crate) depth: usize,
     /// Whether the last decode succeeded (serde visitors return values, not flags).
     pub(crate) good: bool,
@@ -173,9 +173,9 @@ impl DecodeState<'_> {
         Ok(())
     }
 
-    /// One more level of nesting (plan decision D7).
+    /// One more level of nesting (limited by `MAX_WALK_DEPTH`).
     fn descend(&mut self) -> Result<(), Error> {
-        // Plan decision D7: collections and alias expansions nested deeper than MAX_WALK_DEPTH
+        // Collections and alias expansions nested deeper than MAX_WALK_DEPTH
         // fail instead of overflowing the stack.
         if self.depth >= MAX_WALK_DEPTH {
             return Err(walk_depth_exceeded());
@@ -186,7 +186,7 @@ impl DecodeState<'_> {
 
     /// Starts decoding node `n`: the counters (`count`), then unwraps documents and aliases
     /// (each counted again) until a node of another kind; a sequence,
-    /// mapping or alias also counts one level of nesting (D7).
+    /// mapping or alias also counts one level of nesting.
     pub(crate) fn enter(&mut self, doc: &Document, mut n: NodeId) -> Result<Entered, Error> {
         let mut e = Entered {
             node: None,
@@ -928,7 +928,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
     }
 
     /// An enum: a scalar names a unit variant, a one-pair mapping `{variant: value}` any
-    /// variant (R6's encoding); anything else is a type error, returned at once since serde
+    /// variant; anything else is a type error, returned at once since serde
     /// has no zero enum value.
     fn enumeration<'de, V: Visitor<'de>>(
         &mut self,
@@ -1162,8 +1162,7 @@ impl<'de> Deserializer<'de> for NodeDe<'_, '_> {
     }
 
     /// A map target. serde derive decodes a struct with a `#[serde(flatten)]` field
-    /// through `deserialize_map` with a visitor expecting `struct Name`; that is rejected
-    /// (spec R6/R8).
+    /// through `deserialize_map` with a visitor expecting `struct Name`; that is rejected.
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         let expected = format!("{}", &visitor as &dyn Expected);
         if expected.starts_with("struct ") {

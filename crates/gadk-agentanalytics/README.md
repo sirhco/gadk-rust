@@ -113,7 +113,7 @@ differences are annotated in the source with plain `//` notes.
 
 ## Tests and goldens
 
-- Unit tests per module, plus parity tests in `src/parity_tests/` for the formatter, schema
+- Unit tests per module, plus conformance tests in `src/parity_tests/` for the formatter, schema
   upgrade, views, batch processor, GCS offloader, plugin, events, late callbacks and trace
   manager (the trace-manager tests that need fiber attribution are in the `attr_*` files).
 - `tests/golden_*.rs` compare the config projection, the BigQuery and Arrow schemas (decoded IPC

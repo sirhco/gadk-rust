@@ -188,12 +188,15 @@ def _rust_hits(path, src, excluded_ranges):
 def _toml_hits(src):
     out = []
     for n, line in enumerate(src.split("\n"), 1):
-        quote = None
+        quote, skip = None, False
         for k, ch in enumerate(line):
+            if skip:
+                skip = False
+                continue
             if quote:
                 if ch == "\\" and quote == '"':
-                    continue
-                if ch == quote:
+                    skip = True
+                elif ch == quote:
                     quote = None
             elif ch in "\"'":
                 quote = ch
@@ -272,7 +275,11 @@ def load_allowlist(root):
         rel = f"{ALLOWLIST_DIR}/{f.name}"
         prefix = "README.md" if f.name == "root.txt" else f"crates/{f.stem}/"
         count = 0
-        for n, line in enumerate(f.read_text(encoding="utf-8").split("\n"), 1):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            raise CheckError(f"{rel}: {e}")
+        for n, line in enumerate(text.split("\n"), 1):
             if not line.strip() or line.startswith("#"):
                 continue
             parts = line.split("\t")

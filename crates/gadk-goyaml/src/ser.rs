@@ -213,9 +213,9 @@ impl Content {
     }
 }
 
-/// One more level of collection nesting below `depth` (plan decision D7).
+/// One more level of collection nesting below `depth` (limited by `MAX_WALK_DEPTH`).
 fn enter(depth: usize) -> Result<usize, Error> {
-    // Plan decision D7: values nested deeper than MAX_WALK_DEPTH collections fail instead of
+    // Values nested deeper than MAX_WALK_DEPTH collections fail instead of
     // overflowing the stack.
     if depth >= MAX_WALK_DEPTH {
         return Err(walk_depth_exceeded());
@@ -265,18 +265,18 @@ fn marshal(e: &mut Encoder<'_>, c: &Content) -> Result<(), Error> {
         Content::Seq(items) => nested(e, |e| slicev(e, items)),
         Content::Map(entries) | Content::InlineMap(entries) => nested(e, |e| mapv(e, entries)),
         Content::Struct(s) => nested(e, |e| structv(e, s)),
-        // A node goes to nodev (its own D7 guard counts on from e.depth).
+        // A node goes to nodev (its own depth guard counts on from e.depth).
         Content::Node(doc) => e.nodev(doc, doc.root()),
     }
 }
 
-/// Runs `f` one collection level deeper (plan decision D7, on `Encoder::depth` like
-/// `Encoder::node`).
+/// Runs `f` one collection level deeper (limited by `MAX_WALK_DEPTH`, counted on
+/// `Encoder::depth` like `Encoder::node`).
 fn nested(
     e: &mut Encoder<'_>,
     f: impl FnOnce(&mut Encoder<'_>) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    // Plan decision D7 (see `enter`).
+    // The same limit as `enter`.
     if e.depth >= MAX_WALK_DEPTH {
         return Err(walk_depth_exceeded());
     }
@@ -346,7 +346,7 @@ fn take_handoff<T: Serialize + ?Sized>(
 }
 
 /// The serde `Serializer` that captures a value into a [`Content`]. `depth` is the number of
-/// collections enclosing the value (plan decision D7).
+/// collections enclosing the value (limited by `MAX_WALK_DEPTH`).
 #[derive(Clone, Copy)]
 struct Capture<'o> {
     opts: &'o Options,

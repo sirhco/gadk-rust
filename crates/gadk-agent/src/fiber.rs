@@ -43,7 +43,8 @@ pub const SCHEDULER_CREATOR: &str = "gadk_engine::workflow::scheduler::start_nod
 /// The spawn site of a ParallelAgent branch's task (gadk-engine
 /// `agents::parallel_agent`).
 pub const ERRGROUP_CREATOR: &str = "gadk_engine::agents::parallel_agent::branch";
-/// (gadk-engine `workflow::nodes::parallel_worker`); retries of the item stay on it.
+/// The spawn site of a ParallelWorker item's task (gadk-engine
+/// `workflow::nodes::parallel_worker`); retries of the item stay on it.
 pub const PARALLEL_WORKER_CREATOR: &str = "gadk_engine::workflow::nodes::parallel_worker::run";
 /// The spawn site of a live session's task (gadk-engine `llm::live::flow`).
 pub const LIVE_SESSION_CREATOR: &str = "gadk_engine::llm::live::flow::run_live";
@@ -52,7 +53,7 @@ pub const LIVE_SESSION_CREATOR: &str = "gadk_engine::llm::live::flow::run_live";
 const FALLBACK_BIT: u64 = 1 << 63;
 
 /// The next fiber id: process-wide, starting at 1, never reused. Reaching
-/// reused). Reaching [`FALLBACK_BIT`] would take 2^63 fibers.
+/// [`FALLBACK_BIT`] would take 2^63 fibers.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 tokio::task_local! {

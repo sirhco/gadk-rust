@@ -426,7 +426,7 @@ impl ser::Error for SanitizeError {
 struct Walker<'s> {
     st: &'s mut State,
     depth: usize,
-    /// The value is a gadk-genai `[]byte` field written as base64 text.
+    /// The value is a gadk-genai bytes field written as base64 text.
     base64_bytes: bool,
 }
 
@@ -891,7 +891,7 @@ impl Compound<'_> {
         self.named_value(key.to_owned(), value, true);
     }
 
-    /// A gadk-genai `[]byte` field (see [`GENAI_BYTES_FIELDS`]).
+    /// A gadk-genai bytes field (see [`GENAI_BYTES_FIELDS`]).
     fn base64_field<T: Serialize + ?Sized>(&mut self, key: &'static str, value: &T) {
         if self.st.redact && is_sensitive_key(key) {
             return self.named_value(key.to_owned(), value, true);

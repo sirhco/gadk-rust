@@ -47,7 +47,7 @@ const WATERFALL_JS: &str = include_str!("assets/waterfall.js");
 /// GET / → 303 /traces; GET /assets/console.css and /assets/waterfall.js (include_str!, with
 /// text/css and text/javascript; charset=utf-8 content types); merges traces::routes() and
 /// prompts::routes(); wraps everything in guard::layer (Host 421, POST Origin 403) and adds the
-/// R11 CSP header to every response; unknown paths → error page 404.
+/// CSP header to every response; unknown paths → error page 404.
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(root))

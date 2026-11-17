@@ -106,7 +106,7 @@ pub(crate) fn failf(msg: impl fmt::Display) -> Error {
     Error::Syntax(format!("yaml: {msg}"))
 }
 
-/// The deepest collection nesting a recursive walk accepts (plan decision D7).
+/// The deepest collection nesting a recursive walk accepts.
 ///
 /// Parsing accepts yaml.v3's 10000 levels (the composer runs on an explicit stack), but every
 /// recursive walk — the node encoder, the serde `Serializer`/`Deserializer` and the `GoValue`

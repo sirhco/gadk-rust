@@ -259,7 +259,7 @@ pub fn fixup_class(owner: &str, key: &str) -> Option<FixupClass> {
 
 /// The deepest collection nesting the builder's and the inverse fixups' recursive walks over
 /// recursive types (`Schema`, the JSON-schema struct) accept: gadk-goyaml's walk limit
-/// (plan decision D7, the workspace-wide 127).
+/// (the workspace-wide 127).
 ///
 /// The encoder and decoder behind the recordings go as deep as the data (and yaml.v3's
 /// parser, 10000 levels) allow; gadk fails with gadk-goyaml's `yaml: exceeded max depth of

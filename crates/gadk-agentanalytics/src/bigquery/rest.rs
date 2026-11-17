@@ -228,7 +228,7 @@ impl BigQueryClient {
     }
 
     /// `GET .../projects/{p}/datasets/{d}/tables/{t}`, retried on 5xx, `backendError`,
-    /// `rateLimitExceeded`).
+    /// `rateLimitExceeded`.
     pub async fn get_table(
         &self,
         ctx: &Context,

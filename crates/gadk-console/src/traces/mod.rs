@@ -193,7 +193,7 @@ pub enum SourceError {
 }
 
 impl SourceError {
-    /// The R13 hint shown under the error banner, if any.
+    /// The hint shown under the error banner, if any.
     pub fn hint(&self) -> Option<&'static str> {
         match self {
             SourceError::Upstream {

@@ -234,7 +234,7 @@ fn normalize_output_schema_map(map: &mut Map<String, Value>) {
 }
 
 /// Builds the `output_config`: it is `None` when neither effort nor a schema is
-/// set) and whether text responses must be unwrapped.
+/// set, and whether text responses must be unwrapped.
 pub(crate) fn build_output_config_param(
     effort: Option<Effort>,
     cfg: Option<&GenerateContentConfig>,

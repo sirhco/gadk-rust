@@ -931,7 +931,7 @@ mod tests {
     }
 }
 
-// The crate-internal half of the R1 config golden (`tests/golden_config.rs` is the public half):
+// The crate-internal half of the config golden (`tests/golden_config.rs` is the public half):
 // `Config::apply_defaults` and its accessors are `pub(crate)`, so their fixture test is compiled
 // into the unit tests. It lives under `tests/support/` with the shared projection helper, which
 // `validate`'s golden reuses from here.

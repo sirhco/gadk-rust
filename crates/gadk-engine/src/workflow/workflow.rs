@@ -92,7 +92,7 @@ impl Workflow {
     ) -> Result<Arc<Workflow>, WorkflowError> {
         validate_nodes(&edges)?;
         validate_sub_workflow_names(name, &edges)?;
-        // The struct keeps the raw schema (D5 pins `state_schema: Option<Value>`); it is compiled
+        // The struct keeps the raw schema (`state_schema: Option<Value>`); it is compiled
         // here to validate.
         let compiled_state = compile_schema(opts.state_schema.clone()).map_err(|e| {
             WorkflowError::new(

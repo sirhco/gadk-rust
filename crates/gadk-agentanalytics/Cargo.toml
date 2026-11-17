@@ -51,8 +51,8 @@ prost = { workspace = true }
 tonic = { workspace = true, features = ["codegen", "channel", "tls-aws-lc", "tls-native-roots"] }
 tonic-prost = { workspace = true }
 rand = { workspace = true }
-# The plugin's trace manager (7b-3a): synchronous locks, the `traceIDFor` SHA-256 seed, random
-# trace / span / event IDs, and the plugin callbacks' boxed futures.
+# The plugin's trace manager: synchronous locks, the SHA-256 seed of `stream_writer_trace_id*`,
+# random trace / span / event IDs, and the plugin callbacks' boxed futures.
 parking_lot = { workspace = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
@@ -63,7 +63,7 @@ tower = { workspace = true, optional = true, features = ["util"] }
 
 [dev-dependencies]
 gadk-agentanalytics = { path = ".", features = ["testutil"] }
-# Scripted models and runners for the plugin's runner-level tests (7b-3a).
+# Scripted models and runners for the plugin's runner-level tests.
 gadk-engine = { workspace = true, features = ["testutil"] }
 gadk-model = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true, features = ["test-util"] }

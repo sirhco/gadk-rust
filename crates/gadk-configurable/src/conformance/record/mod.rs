@@ -178,7 +178,7 @@ impl RecordPlugin {
         let state = self.get_invocation_state(ctx.invocation_id())?;
 
         // Sanitize and clone the request (to prevent YAML serialization panics caused by
-        // HTTPOptions.ExtrasRequestProvider)
+        // `http_options.extras_request_provider`)
         // The recording is a snapshot taken now, so a later mutation of the request or response
         // before `afterRun` does not show in the file.
         let sanitized_req = sanitize_llm_request(req);
@@ -432,8 +432,7 @@ impl RecordPlugin {
     }
 }
 
-/// The request without `Tools` and `Config.HTTPOptions` (gadk's
-/// `LlmRequest.http_options`), as recorded.
+/// The request without its `tools` and `http_options`, as recorded.
 pub(crate) fn sanitize_llm_request(req: &LlmRequest) -> LlmRequestView {
     // The recorded view carries neither the tools nor the HTTP options (gadk keeps
     // `http_options` beside `config`).

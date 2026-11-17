@@ -152,7 +152,7 @@ pub struct BatchProcessor {
     pub(crate) upload_cooldown_until: Mutex<Option<Instant>>,
     /// The bytes reserved by pending uploads.
     pub(crate) pending_upload_bytes: AtomicI64,
-    /// Test override of `gcs_max_pending_upload_bytes`); 0 = unset.
+    /// Test override of `gcs_max_pending_upload_bytes`; 0 = unset.
     pub(crate) max_pending_upload_bytes: AtomicI64,
     /// Whether the pending-bytes budget exhaustion was already warned about.
     pub(crate) upload_budget_warned: AtomicBool,

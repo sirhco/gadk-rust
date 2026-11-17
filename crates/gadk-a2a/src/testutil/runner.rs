@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A runner that yields a scripted event sequence (plan 5b D7), for the executor's tests.
+//! A runner that yields a scripted event sequence, for the executor's tests.
 
 use gadk_agent::AgentError;
 #[cfg(feature = "server")]

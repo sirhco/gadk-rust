@@ -238,12 +238,12 @@ where
     }
 }
 
-/// One decoded D6 attribute as an SDK span attribute.
+/// One decoded `D6Value` attribute as an SDK span attribute.
 fn key_value(key: String, value: D6Value) -> KeyValue {
     KeyValue::new(key, span_value(value))
 }
 
-/// The SDK span value of a decoded D6 attribute. OTel Rust span values are scalars and
+/// The SDK span value of a decoded `D6Value` attribute. OTel Rust span values are scalars and
 /// homogeneous arrays only, so the kinds it cannot hold become strings.
 fn span_value(value: D6Value) -> Value {
     match value {

@@ -119,7 +119,7 @@ pub struct Env {
 impl Env {
     /// An `Env` from its parts, with default Vertex options (tests set [`Env::vertex`] on the
     /// built value). Outside this file an `Env` is built only here, by [`Env::process`] or by
-    /// the test builder, never by a struct literal (plan decision D3).
+    /// the test builder, never by a struct literal.
     pub fn new(
         runner: Arc<dyn CommandRunner>,
         out: SharedWriter,

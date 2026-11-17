@@ -57,7 +57,7 @@ pub(crate) struct Encoder<'w> {
     pub(crate) indent: usize,
     /// Whether `init` ran (the STREAM-START event was emitted).
     pub(crate) done_init: bool,
-    /// Current collection nesting of the recursive walk (plan decision D7).
+    /// Current collection nesting of the recursive walk (limited by `MAX_WALK_DEPTH`).
     pub(crate) depth: usize,
 }
 
@@ -403,7 +403,7 @@ impl<'w> Encoder<'w> {
         node: &NodeData,
         tail: &str,
     ) -> Result<(), Error> {
-        // Plan decision D7: collections nested deeper than MAX_WALK_DEPTH fail instead of
+        // Collections nested deeper than MAX_WALK_DEPTH fail instead of
         // overflowing the stack.
         let nests = matches!(node.kind, Kind::Sequence | Kind::Mapping);
         if nests {
@@ -419,7 +419,7 @@ impl<'w> Encoder<'w> {
         result
     }
 
-    /// The body of [`Encoder::node`], which wraps it with the D7 depth guard.
+    /// The body of [`Encoder::node`], which wraps it with the depth guard.
     fn node_unguarded(&mut self, doc: &Document, node: &NodeData, tail: &str) -> Result<(), Error> {
         // Zero nodes behave as nil.
         if node.kind == Kind::Zero && node.is_zero() {

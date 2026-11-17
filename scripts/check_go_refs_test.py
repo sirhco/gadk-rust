@@ -256,6 +256,22 @@ class CommentOnlyTest(unittest.TestCase):
         self.r.write("crates/c/Cargo.toml", '[package]\nname = "d" # Go\n')
         self.assertEqual(self.problems(), ["crates/c/Cargo.toml: non-comment change"])
 
+    def test_hash_inside_escaped_string_is_not_a_comment(self):
+        self.r.write("crates/c/Cargo.toml", '[package]\nname = "a \\"b\\" # c"\n')
+        self.git("add", "-A")
+        self.git("commit", "-qm", "q")
+        self.r.write("crates/c/Cargo.toml", '[package]\nname = "a \\"b\\" # d"\n')
+        self.assertEqual(self.problems(), ["crates/c/Cargo.toml: non-comment change"])
+
+    def test_multiline_string_hash_is_not_a_comment(self):
+        self.r.write("crates/c/Cargo.toml", '[package]\ndescription = """\nx # y\n"""\n')
+        self.git("add", "-A")
+        self.git("commit", "-qm", "m")
+        self.r.write("crates/c/Cargo.toml", '[package]\ndescription = """\nx # z\n"""\n')
+        self.assertEqual(self.problems(), ["crates/c/Cargo.toml: non-comment change"])
+        self.r.write("crates/c/Cargo.toml", '[package]\ndescription = """\nx # y\n""" # note\n')
+        self.assertEqual(self.problems(), [])
+
     def test_other_file_change_fails(self):
         self.r.write("crates/c/src/prompt.md", "changed\n")
         self.assertEqual(self.problems(), ["crates/c/src/prompt.md: file outside the comment-only scope changed"])

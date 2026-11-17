@@ -688,7 +688,7 @@ impl<'r> Parser<'r> {
             Frame::Document(n) => {
                 let n = *n;
                 let Some(child) = child else {
-                    return Ok(None); // p.parseChild(n)
+                    return Ok(None); // parse the child first
                 };
                 self.arena[n].content.push(child);
                 if self.peek()? == YamlEventType::DocumentEnd {
@@ -703,7 +703,7 @@ impl<'r> Parser<'r> {
                     self.arena[n].content.push(child);
                 }
                 if self.peek()? != YamlEventType::SequenceEnd {
-                    return Ok(None); // p.parseChild(n)
+                    return Ok(None); // parse the next item first
                 }
                 self.arena[n].line_comment = go_string(&self.event.line_comment);
                 self.arena[n].foot_comment = go_string(&self.event.foot_comment);
@@ -716,7 +716,7 @@ impl<'r> Parser<'r> {
                     self.arena[n].content.push(child);
                     match key.take() {
                         None => {
-                            let k = child; // k := p.parseChild(n)
+                            let k = child; // the key node
                             if block && !self.arena[k].foot_comment.is_empty() {
                                 // Must be a foot comment for the prior value when being dedented.
                                 let content = &self.arena[n].content;
@@ -728,7 +728,7 @@ impl<'r> Parser<'r> {
                                 }
                             }
                             *key = Some(k);
-                            return Ok(None); // v := p.parseChild(n)
+                            return Ok(None); // parse the value node next
                         }
                         Some(k) => {
                             let v = child;
@@ -749,7 +749,7 @@ impl<'r> Parser<'r> {
                     }
                 }
                 if self.peek()? != YamlEventType::MappingEnd {
-                    return Ok(None); // k := p.parseChild(n)
+                    return Ok(None); // parse the next key first
                 }
                 self.arena[n].line_comment = go_string(&self.event.line_comment);
                 self.arena[n].foot_comment = go_string(&self.event.foot_comment);

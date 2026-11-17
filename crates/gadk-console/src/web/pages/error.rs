@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Error banners and error pages (R13).
+//! Error banners and error pages.
 
 use axum::response::Response;
 use gadk_prompts::StoreError;
