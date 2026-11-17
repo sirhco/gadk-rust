@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Test support (feature `testutil`): the in-process BigQuery Write fake
-//! ([`fake_write_server`]) and the *row specs* of the recorded fixtures (the fixtures' row format) as
-//! [`Row`]s.
+//! Test support (feature `testutil`): the in-process BigQuery Write fake ([`fake_write_server`])
+//! and the *row specs* of the recorded fixtures (the fixtures' row format) as [`Row`]s.
 
 use serde_json::Value;
 
