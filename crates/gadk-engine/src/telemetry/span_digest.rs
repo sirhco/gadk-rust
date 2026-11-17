@@ -13,11 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `internal/telemetry/telemetrytest/span_digest.go`: the span tree a telemetry test
-//! compares, with each log record attached to the span it was emitted under. Spans and log
-//! records are captured from `tracing` (plan decision D6) instead of an OTel SDK: [`SpanStub`] is
-//! Go's `tracetest.SpanStub` and [`LogRecord`] Go's `sdklog.Record`, reduced to what a digest
-//! reads.
+//! The span tree a telemetry test compares, with each log record attached to the span it was
+//! emitted under. Spans and log records are captured from `tracing` instead of an OTel SDK:
+//! [`SpanStub`] and [`LogRecord`] are captured spans and records reduced to what a digest reads.
 
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
@@ -33,10 +31,10 @@ use tracing_subscriber::registry::LookupSpan;
 use super::d6::{self, D6Fields};
 use super::log_digest::{LogDigest, LogRecord, build_log_digest};
 
-/// Go `present`: stands in for a value that cannot be pinned (a generated ID).
+/// Stands in for a value that cannot be pinned (a generated ID).
 pub const PRESENT: &str = "PRESENT";
 
-/// Go `nonDeterministicAttributes`: attributes whose value changes run to run.
+/// Attributes whose value changes run to run.
 pub(crate) const NON_DETERMINISTIC_ATTRIBUTES: &[&str] = &[
     "gcp.vertex.agent.event_id",
     "gen_ai.tool.call.id",
@@ -44,8 +42,8 @@ pub(crate) const NON_DETERMINISTIC_ATTRIBUTES: &[&str] = &[
     "gcp.vertex.agent.invocation_id",
 ];
 
-/// Go `jsonStringAttributes`: span attributes holding a JSON string; a digest shows one parsed,
-/// wrapped as `{"JSON_STRING": value}`.
+/// Span attributes holding a JSON string; a digest shows one parsed, wrapped as
+/// `{"JSON_STRING": value}`.
 pub(crate) const JSON_STRING_ATTRIBUTES: &[&str] = &[
     "gen_ai.input.messages",
     "gen_ai.output.messages",
@@ -54,42 +52,40 @@ pub(crate) const JSON_STRING_ATTRIBUTES: &[&str] = &[
     "gcp.vertex.agent.tool_response",
 ];
 
-/// Go `jsonStringKey`.
+/// The key a parsed JSON-string attribute is wrapped under.
 pub(crate) const JSON_STRING_KEY: &str = "JSON_STRING";
 
-/// One captured span (Go `tracetest.SpanStub`, reduced to what a digest reads).
+/// One captured span, reduced to what a digest reads.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SpanStub {
-    /// Go `SpanStub.Name`: the span's `otel.name` (Go's full span name).
+    /// The span's `otel.name` (its full span name).
     pub name: String,
-    /// Go `SpanContext.SpanID()`: an ID unique within one capture.
+    /// An ID unique within one capture.
     pub span_id: u64,
-    /// Go `Parent.SpanID()`; `None` for a span without a parent.
+    /// The parent's span ID; `None` for a span without a parent.
     pub parent_span_id: Option<u64>,
-    /// Go `StartTime.UnixNano()`: orders siblings; a capture records a strictly increasing
-    /// sequence number.
+    /// Orders siblings; a capture records a strictly increasing sequence number.
     pub start_time: i64,
-    /// The span's OTel attributes in recording order (D6: every recorded field except `otel.*`
-    /// and `error.message`; str → string, i64/u64 → integer, f64 → float, bool → bool).
+    /// The span's OTel attributes in recording order (every recorded field except `otel.*` and
+    /// `error.message`; str → string, i64/u64 → integer, f64 → float, bool → bool).
     pub attributes: Vec<(String, Value)>,
-    /// Go `strings.ToUpper(Status.Code.String())`: `UNSET`, `ERROR` (`otel.status_code` recorded
-    /// as `ERROR`) or `OK`.
+    /// The status: `UNSET`, `ERROR` (`otel.status_code` recorded as `ERROR`) or `OK`.
     pub status: String,
 }
 
-/// Go `telemetrytest.Digest`: what a golden compares of one scenario run.
+/// What a golden compares of one scenario run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Digest {
-    /// Go `RootSpan` (`root_span`).
+    /// The root span.
     pub root_span: SpanDigest,
 }
 
-/// Go `telemetrytest.SpanDigest`: a deterministic snapshot of one span.
+/// A deterministic snapshot of one span.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpanDigest {
     /// The span name.
     pub name: String,
-    /// Normalized attributes (Go `map[string]any`, so sorted by key on the wire).
+    /// Normalized attributes (sorted by key).
     pub attributes: BTreeMap<String, Value>,
     /// `UNSET`, `ERROR` or `OK`.
     pub status: String,
@@ -99,9 +95,9 @@ pub struct SpanDigest {
     pub logs: Vec<LogDigest>,
 }
 
-/// Go `BuildDigest`: collects `spans` and `logs` into one tree. Fails (Go's error text) when a log
-/// record's span was not collected (`log record "<name>" was emitted outside any collected span`)
-/// or when there is not exactly one root span (`expected exactly 1 root span, got <n>`).
+/// Collects `spans` and `logs` into one tree. Fails when a log record's span was not collected
+/// (`log record "<name>" was emitted outside any collected span`) or when there is not exactly one
+/// root span (`expected exactly 1 root span, got <n>`).
 pub fn build_digest(spans: &[SpanStub], logs: &[LogRecord]) -> Result<Digest, String> {
     let mut digests: Vec<SpanDigest> = spans
         .iter()
@@ -136,8 +132,8 @@ pub fn build_digest(spans: &[SpanStub], logs: &[LogRecord]) -> Result<Digest, St
     })
 }
 
-/// Go `linkAndSort`: links each span to its parent, orders siblings by start time (name as
-/// tiebreaker), and returns the spans whose parent was not collected.
+/// Links each span to its parent, orders siblings by start time (name as tiebreaker), and returns
+/// the spans whose parent was not collected.
 fn link_and_sort(
     spans: &[SpanStub],
     digests: Vec<SpanDigest>,
@@ -193,8 +189,8 @@ pub async fn capture_spans<F: Future>(fut: F) -> (F::Output, Vec<SpanStub>) {
 }
 
 /// The one recording subscriber behind [`capture_spans`] and
-/// [`capture_logs`](super::log_digest::capture_logs): spans (fields decoded by [`D6Fields`]),
-/// and the D6 log events ([`d6::decode_log`]) as [`LogRecord`]s attached to their span.
+/// [`capture_logs`](super::log_digest::capture_logs): spans (fields decoded by [`D6Fields`]), and
+/// the log events ([`d6::decode_log`]) as [`LogRecord`]s attached to their span.
 pub(crate) async fn capture<F: Future>(fut: F) -> (F::Output, Vec<SpanStub>, Vec<LogRecord>) {
     pin_tracing_interest();
     let store: Arc<Mutex<Store>> = Arc::default();
@@ -229,8 +225,8 @@ struct CaptureLayer(Arc<Mutex<Store>>);
 /// The index of a span in the captured list (in the span's extensions).
 struct Idx(usize);
 
-/// Merges one visit's decoded D6 fields into `stub`: a recorded name or status replaces the
-/// current one, an attribute recorded again keeps its position and takes the new value (as JSON,
+/// Merges one visit's decoded fields into `stub`: a recorded name or status replaces the current
+/// one, an attribute recorded again keeps its position and takes the new value (as JSON,
 /// [`d6::D6Value::to_json`]).
 fn apply(stub: &mut SpanStub, fields: D6Fields) {
     if let Some(name) = fields.name {
@@ -316,8 +312,8 @@ where
     }
 }
 
-/// Go `normalizeSpanAttributes`: JSON-string attributes parsed and wrapped as
-/// `{"JSON_STRING": value}` (a string that is not JSON is kept), then [`normalize_attribute`].
+/// JSON-string attributes parsed and wrapped as `{"JSON_STRING": value}` (a string that is not JSON
+/// is kept), then [`normalize_attribute`].
 pub(crate) fn normalize_span_attributes(attrs: &[(String, Value)]) -> BTreeMap<String, Value> {
     attrs
         .iter()
@@ -334,7 +330,7 @@ pub(crate) fn normalize_span_attributes(attrs: &[(String, Value)]) -> BTreeMap<S
         .collect()
 }
 
-/// Go `normalizeAttribute`: [`PRESENT`] for a non-deterministic attribute, else `value`.
+/// [`PRESENT`] for a non-deterministic attribute, else `value`.
 pub(crate) fn normalize_attribute(key: &str, value: Value) -> Value {
     if NON_DETERMINISTIC_ATTRIBUTES.contains(&key) {
         return Value::String(PRESENT.to_owned());

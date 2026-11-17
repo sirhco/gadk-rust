@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go runner/run_node.go: drives an agent through a single-node root workflow
-//! (START -> agent node), sharing the agent path's session/plugin/persist pipeline.
+//! Drives an agent through a single-node root workflow (START -> agent node), sharing the agent
+//! path's session/plugin/persist pipeline.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -38,27 +38,25 @@ use crate::memory::ScopedMemory;
 use crate::tool::utils::{function_calls, function_responses};
 use crate::workflow::{Edge, Node, NodeStatus, RunState, START, Workflow, WorkflowOptions};
 
-/// Port of Go runner/run_node.go `isLlmAgent`.
+/// Whether `a` is an LLM agent.
 pub(crate) fn is_llm_agent(a: &dyn Agent) -> bool {
     a.agent_state().agent_type == AgentType::LlmAgent
 }
 
-/// Port of Go runner/run_node.go `buildRunnerNode`: wraps any agent as the node the node runtime
-/// drives (Go's nil check has no Rust counterpart).
+/// Wraps any agent as the node the node runtime drives.
 pub(crate) fn build_runner_node(a: &Arc<dyn Agent>) -> Result<Arc<dyn Node>, AgentError> {
     Ok(new_agent_node(a.clone()))
 }
 
-/// Port of Go runner/run_node.go `rootWorkflowName`: stable across turns and unique per agent.
+/// The root workflow's name, `<app>/<agent>`: stable across turns and unique per agent.
 fn root_workflow_name(app_name: &str, a: &dyn Agent) -> String {
     format!("{app_name}/{}", a.name())
 }
 
 impl RunnerInner {
-    /// Port of Go runner/run_node.go `(*Runner).newNodeInvocationContext`; the agent path
-    /// (runner.go:678-706) builds the same context inline and uses it too. `invocation_id`
-    /// empty mints a fresh one (Go `NewInvocationContext`); `branch` is the agent path's route
-    /// to a calling sub-agent (empty otherwise).
+    /// Builds the invocation context for a run; the agent path uses it too. An empty
+    /// `invocation_id` mints a fresh one; `branch` is the agent path's route to a calling sub-agent
+    /// (empty otherwise).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new_invocation_context(
         &self,
@@ -72,8 +70,7 @@ impl RunnerInner {
         mut invocation_id: String,
         branch: String,
     ) -> InvocationContext {
-        // Go runconfig.ToContext(ctx, &RunConfig{MaxLLMCalls: ResolveMaxLLMCalls(..)}): one
-        // budget for the whole invocation.
+        // One LLM-call budget for the whole invocation.
         let limiter = Arc::new(run_limits::LlmCallLimiter::new(
             run_limits::resolve_max_llm_calls(cfg.max_llm_calls),
         ));
@@ -88,7 +85,7 @@ impl RunnerInner {
             .run_config(cfg.clone())
             .llm_call_limiter(limiter)
             .platform(self.platform.clone())
-            // Go `r.withPluginManager(ctx)`: the caller resolved it.
+            // The caller resolved the plugin manager.
             .plugin_manager(plugins)
             .parent_map(self.parents.clone())
             .branch(branch)
@@ -114,8 +111,8 @@ impl RunnerInner {
                 stored.user_id(),
             )));
         }
-        // Go compactionctx.ToContext(ctx, r.compactionRuntime()): one runtime for the whole
-        // invocation, shared by every context derived from it. Go RunLive attaches none.
+        // One compaction runtime for the whole invocation, shared by every context derived from it.
+        // Live runs attach none.
         if compaction && let Some(cfg) = &self.compaction {
             b = crate::compaction::runtime::attach(
                 b,
@@ -129,8 +126,7 @@ impl RunnerInner {
     }
 }
 
-/// Port of Go runner/run_node.go `(*Runner).runNode`: wraps `agent_to_run`
-/// in a START -> node workflow and runs or resumes it.
+/// Wraps `agent_to_run` in a START -> node workflow and runs or resumes it.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_node(
     inner: Arc<RunnerInner>,
@@ -161,10 +157,8 @@ pub(super) fn run_node(
 
         let token = CancellationToken::new();
         let cancel_on_drop = token.clone().drop_guard();
-        // The user content is the workflow's seed input.
-        // Go: answers to calls from several invocations resume the first call's invocation here
-        // (adk-go accepts resume messages adk-python rejects, so runs that resume today keep
-        // working).
+        // The user content is the workflow's seed input. Answers to calls from several invocations
+        // resume the first call's invocation here rather than being rejected.
         let (invocation_id, _) = resolve_invocation_id(Some(&*stored), msg.as_ref());
         let ictx = inner.new_invocation_context(
             &stored,
@@ -177,7 +171,7 @@ pub(super) fn run_node(
             invocation_id,
             String::new(),
         );
-        // Go runner.go:610 binds the ROOT agent's placement on the context handed to runNode.
+        // Binds the ROOT agent's placement on the context handed to the node run.
         let ictx = with_bound_mode(
             &ictx,
             inner.root_agent.name(),
@@ -199,8 +193,8 @@ pub(super) fn run_node(
             Ok(v) => v,
             Err(e) => { yield Err(e); return; }
         };
-        // Go's deferred compactOnce is registered before the user message is yielded, the
-        // deferred after-run callbacks after it.
+        // Compaction is pending before the user message is yielded, the after-run callbacks only
+        // after it.
         let ictx = ctx.as_invocation().clone();
         let mut guard = InvocationGuard::new(inner.clone(), stored.clone(), ictx.clone());
         guard.cancel_on_drop(cancel_on_drop);
@@ -220,8 +214,8 @@ pub(super) fn run_node(
                 Ok(None) => {}
             }
 
-            // Resume (HITL continuation) vs fresh run: the paused state comes from session
-            // history (None = Go nil *RunState).
+            // Resume (HITL continuation) vs fresh run: the paused state comes from session history
+            // (`None` for a fresh run).
             let state: Option<RunState> = match wf.reconstruct_run_state(&*stored, ictx.invocation_id()) {
                 Ok(s) => s,
                 Err(e) => {
@@ -237,7 +231,7 @@ pub(super) fn run_node(
             let mut events: EventStream = match (responses.is_empty(), state) {
                 (true, _) => wf.run(ictx.clone()),
                 (false, Some(state)) => wf.resume(ctx.clone(), state, responses),
-                // Go Workflow.Resume with a nil state yields nothing.
+                // Resuming with no paused state yields nothing.
                 (false, None) => Box::pin(futures::stream::empty()),
             };
 
@@ -273,9 +267,8 @@ pub(super) fn run_node(
     })
 }
 
-/// Port of Go runner/run_node.go `buildResumeResponses`: `msg`'s function responses that answer
-/// a still-pending interrupt (waiting in `state`, or an open long-running call in history),
-/// keyed by interrupt ID. Empty = Go nil (a fresh turn).
+/// `msg`'s function responses that answer a still-pending interrupt (waiting in `state`, or an open
+/// long-running call in history), keyed by interrupt ID. Empty for a fresh turn.
 fn build_resume_responses(
     msg: Option<&Content>,
     state: Option<&RunState>,
@@ -303,8 +296,7 @@ fn build_resume_responses(
     out
 }
 
-/// Port of Go runner/run_node.go `openLongRunningCallIDs`: long-running call IDs in history
-/// without a matching function response.
+/// Long-running call IDs in history without a matching function response.
 fn open_long_running_call_ids(sess: Option<&dyn Session>) -> HashSet<String> {
     let mut open = HashSet::new();
     let Some(sess) = sess else {
@@ -323,9 +315,8 @@ fn open_long_running_call_ids(sess: Option<&dyn Session>) -> HashSet<String> {
     open
 }
 
-/// Port of Go runner/run_node.go `decodeResumeResponse`: `{"response": v}` (a string `v` is
-/// JSON-parsed when possible), else `{"payload": v}`, else the whole map. Go's nil `Response`
-/// has no Rust counterpart.
+/// Decodes a resume response: `{"response": v}` (a string `v` is JSON-parsed when possible), else
+/// `{"payload": v}`, else the whole map.
 fn decode_resume_response(fr: &FunctionResponse) -> Value {
     if let Some(raw) = fr.response.get("response") {
         if let Value::String(s) = raw {
@@ -339,8 +330,7 @@ fn decode_resume_response(fr: &FunctionResponse) -> Value {
     Value::Object(fr.response.clone())
 }
 
-/// Port of Go runner/run_node.go `waitingInterruptIDs`: the non-empty interrupt IDs of every
-/// waiting node.
+/// The non-empty interrupt IDs of every waiting node.
 fn waiting_interrupt_ids(state: &RunState) -> HashSet<String> {
     state
         .nodes
@@ -352,10 +342,9 @@ fn waiting_interrupt_ids(state: &RunState) -> HashSet<String> {
         .collect()
 }
 
-/// Port of Go runner/run_node.go `resolveInvocationID` (#2312): the invocation ID of the event
-/// holding the first answered call found in history, so a HITL resume shares its pause's
-/// invocation (`""` for a fresh turn or when no answered call is in history), and whether the
-/// answered calls belong to more than one invocation.
+/// The invocation ID of the event holding the first answered call found in history, so a HITL
+/// resume shares its pause's invocation (`""` for a fresh turn or when no answered call is in
+/// history), and whether the answered calls belong to more than one invocation.
 pub(super) fn resolve_invocation_id(
     sess: Option<&dyn Session>,
     msg: Option<&Content>,
@@ -381,8 +370,7 @@ pub(super) fn resolve_invocation_id(
     (id.unwrap_or_default(), spans_invocations)
 }
 
-/// Port of Go runner/run_node.go `findEventByFunctionCallID`: the most recent event carrying a
-/// function call with `id` (reverse scan).
+/// The most recent event carrying a function call with `id` (reverse scan).
 fn find_event_by_function_call_id(sess: Option<&dyn Session>, id: &str) -> Option<Event> {
     let sess = sess?;
     if id.is_empty() {

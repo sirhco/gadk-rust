@@ -13,13 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Scripted in-memory live model (stands in for Go plugin/agentanalytics `liveTestLLM` over
-//! `newFakeLiveServer`, and for the fake server of internal/llminternal/base_flow_live_test.go
-//! where no socket is needed), plus the responses Go's fake Live server messages decode to.
+//! Scripted in-memory live model (a stand-in for a live server where no socket is needed), plus the
+//! responses that server messages decode to.
 //!
-//! A [`ScriptedLiveLlm`](crate::testutil::live::ScriptedLiveLlm) connection yields its scripted responses in order, then parks until the
-//! flow closes it, as Go's fake server writes its messages and then reads until the client
-//! closes the connection.
+//! A [`ScriptedLiveLlm`](crate::testutil::live::ScriptedLiveLlm) connection yields its scripted
+//! responses in order, then parks until the flow closes it.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -47,9 +45,9 @@ struct ScriptedState {
     connects: AtomicUsize,
 }
 
-/// An [`Llm`] whose `connect_live` returns an in-memory connection that yields `responses` in
-/// order and records what the flow sends. Its `generate_content` yields nothing: like Go's
-/// `liveTestLLM`, it is for live runs only. All connections share one script.
+/// An [`Llm`] whose `connect_live` returns an in-memory connection that yields `responses` in order
+/// and records what the flow sends. Its `generate_content` yields nothing: it is for live runs
+/// only. All connections share one script.
 pub struct ScriptedLiveLlm {
     name: String,
     state: Arc<ScriptedState>,
@@ -75,7 +73,8 @@ impl ScriptedLiveLlm {
         Self::build(name, responses, false)
     }
 
-    /// `send_history` fails client-side, as Go's NaN history does (`json: unsupported value: NaN`).
+    /// `send_history` fails client-side, as a history holding a NaN value (which JSON cannot
+    /// encode) does.
     pub fn failing_history(name: &str) -> Arc<ScriptedLiveLlm> {
         Self::build(name, Vec::new(), true)
     }
@@ -170,9 +169,9 @@ impl LiveConnection for ScriptedConn {
     }
 }
 
-/// The response the Gemini live client delivers for the server's `{"setupComplete":{}}` (it
-/// buffers that message for the first receive): an empty response. Go's fake Live server sends
-/// it before its scripted messages, so a script that stands in for one starts with this.
+/// The response the Gemini live client delivers for the server's `{"setupComplete":{}}` (it buffers
+/// that message for the first receive): an empty response. A live server sends it before any other
+/// message, so a script that stands in for one starts with this.
 pub fn setup_complete() -> LlmResponse {
     LlmResponse::default()
 }
@@ -210,9 +209,8 @@ pub fn model_turn(text: &str, turn_complete: bool) -> LlmResponse {
     }
 }
 
-/// Go `newFakeLiveServer(t, messages...)` + `&liveTestLLM{client}` (name `"live-test-model"`),
-/// for scripts built from [`tool_call`] and [`model_turn`]: a [`ScriptedLiveLlm`] named
-/// `"live-test-model"` that yields [`setup_complete`] and then `responses`.
+/// A live model for scripts built from [`tool_call`] and [`model_turn`]: a [`ScriptedLiveLlm`]
+/// named `"live-test-model"` that yields [`setup_complete`] and then `responses`.
 pub fn go_live_test_llm(responses: Vec<LlmResponse>) -> Arc<ScriptedLiveLlm> {
     let mut script = Vec::with_capacity(responses.len() + 1);
     script.push(setup_complete());

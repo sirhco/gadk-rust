@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Live mode of the runner (port of ADK-Go `runner/runner.go` lines 831-1149 and
-//! `hasInlineData`): [`Runner::run_live`], `runnerLiveSession` and `closedLiveSession`.
+//! Live mode of the runner: [`Runner::run_live`], [`RunnerLiveSession`] and [`ClosedLiveSession`].
 
 use std::any::Any;
 use std::sync::Arc;
@@ -37,21 +36,19 @@ use super::{
 };
 
 impl Runner {
-    /// Port of Go `(*Runner).RunLive`: starts a live (bidirectional streaming) run of the agent
-    /// that should handle the session's next turn. Returns the session to send input on and the
-    /// event stream. Dropping the stream at a yield runs the after-run callbacks first, on the
-    /// still-live invocation context, and then cancels the invocation; dropped inside an await,
-    /// it cancels at once. The live session task is detached rather than aborted, so a tool call
-    /// already running finishes on its own (the after-run callbacks do not wait for it, as Go's
-    /// live tool goroutines are not awaited either).
+    /// Starts a live (bidirectional streaming) run of the agent that should handle the session's
+    /// next turn. Returns the session to send input on and the event stream. Dropping the stream at
+    /// a yield runs the after-run callbacks first, on the still-live invocation context, and then
+    /// cancels the invocation; dropped inside an await, it cancels at once. The live session task
+    /// is detached rather than aborted, so a tool call already running finishes on its own (the
+    /// after-run callbacks do not wait for it).
     ///
     /// Must be called inside a Tokio runtime: the live flow spawns tasks. `opts` is accepted for
-    /// symmetry with [`Runner::run`] and, as in Go, not applied.
+    /// symmetry with [`Runner::run`] and not applied.
     ///
-    /// The returned stream runs on the consumer's fiber ([`FiberStream::consumer`]), as Go's
-    /// iterator runs on the goroutine that ranges over it; this function's own work (session
-    /// lookup, before-run callbacks, starting the live flow) runs in the caller's future, as Go's
-    /// `RunLive` runs on the caller's goroutine.
+    /// The returned stream runs on the consumer's fiber ([`FiberStream::consumer`]); this
+    /// function's own work (session lookup, before-run callbacks, starting the live flow) runs in
+    /// the caller's future.
     pub async fn run_live(
         &self,
         user_id: &str,
@@ -59,7 +56,7 @@ impl Runner {
         cfg: LiveRunConfig,
         opts: RunOptions,
     ) -> Result<(Arc<dyn LiveSession>, EventStream), AgentError> {
-        // Go parses its RunOptions and never reads them in RunLive.
+        // Live runs read none of the run options.
         let _ = opts;
         let this = self.inner.clone();
         let stored = this.get_or_create_session(user_id, session_id).await?;
@@ -71,14 +68,14 @@ impl Runner {
             )));
         };
 
-        // Live is always bidirectional streaming (Go runconfig.ToContext with Bidi + Live).
+        // Live is always bidirectional streaming.
         let run_cfg = RunConfig {
             streaming_mode: StreamingMode::Bidi,
             live: Some(cfg),
             ..Default::default()
         };
         let token = CancellationToken::new();
-        // Go RunLive attaches no compaction runtime (runner.go:928).
+        // Live runs attach no compaction runtime.
         let ictx = this.new_invocation_context(
             &stored,
             agent_to_run.clone(),
@@ -86,16 +83,15 @@ impl Runner {
             &run_cfg,
             &token,
             false,
-            // Go `r.withPluginManager(ctx)`: `run_live` takes no caller context, so there is no
-            // inheritance mark.
+            // `run_live` takes no caller context, so there is no plugin-inheritance mark.
             this.with_plugin_manager(None),
-            // Go RunLive: NewInvocationContext without an invocation ID or branch.
+            // No invocation ID or branch.
             String::new(),
             String::new(),
         );
 
-        // Go #2105: the before-run reply goes through on_event (and is stamped and persisted) as
-        // on Runner::run, and the run through the after-run callbacks.
+        // The before-run reply goes through on_event (and is stamped and persisted) as on
+        // Runner::run, and the run through the after-run callbacks.
         if let Some(event) = this.run_before_run_callback(&ictx).await? {
             let stream = FiberStream::consumer(early_exit_stream(
                 this.clone(),
@@ -127,7 +123,7 @@ impl Runner {
     }
 }
 
-/// Go `RunLive`'s `earlyExitIter` (#2105): yields the before-run reply, then runs the after-run
+/// The stream for a before-run early exit: yields the before-run reply, then runs the after-run
 /// callbacks (deferred: also when the consumer drops the stream at the yield).
 fn early_exit_stream(
     this: Arc<RunnerInner>,
@@ -149,14 +145,14 @@ fn early_exit_stream(
     })
 }
 
-/// Go `RunLive`'s `wrappedIter`: plugin `on_event`, chronological buffering of tool calls and
-/// responses while a transcription is in progress, persistence of non-partial events without
-/// inline data, and the EOF flush of buffered events.
+/// Wraps the live flow's stream: plugin `on_event`, chronological buffering of tool calls and
+/// responses while a transcription is in progress, persistence of non-partial events without inline
+/// data, and the EOF flush of buffered events.
 ///
-/// An [`InvocationGuard`] without compaction (Go `RunLive` does not compact) owns the deferred
-/// after-run callbacks and the invocation token's cancel-on-drop: a consumer that drops the
-/// stream at a yield (Go `break`) gets the after-run callbacks on its fiber before the token is
-/// cancelled; a drop inside an await (Go's caller cancelling) cancels at once.
+/// An [`InvocationGuard`] without compaction (live runs do not compact) owns the deferred after-run
+/// callbacks and the invocation token's cancel-on-drop: a consumer that drops the stream at a yield
+/// gets the after-run callbacks on its fiber before the token is cancelled; a drop inside an await
+/// cancels at once.
 fn wrap_live_stream(
     this: Arc<RunnerInner>,
     ctx: InvocationContext,
@@ -172,8 +168,8 @@ fn wrap_live_stream(
         let mut guard = InvocationGuard::new(this.clone(), stored.clone(), ctx.clone());
         guard.cancel_on_drop(cancel_on_drop);
         guard.no_compaction();
-        // Go `defer pluginManager.RunAfterRunCallback(iCtx)` inside the iterator: runs once when
-        // the stream ends, or (spawned) when the consumer drops it early.
+        // The after-run callbacks run once when the stream ends, or (spawned) when the consumer
+        // drops it early.
         guard.defer_after_run();
         let mut buffered: Vec<Event> = Vec::new();
         let mut is_transcribing = false;
@@ -266,9 +262,9 @@ fn wrap_live_stream(
             guard.at_yield(false);
         }
 
-        // EOF: flush what is still buffered. Go uses context.WithoutCancel here; a Rust append
-        // takes no context, so a cancelled invocation cannot cut the flush short. Reaching this
-        // point means the consumer is still reading: a dropped stream never resumes.
+        // EOF: flush what is still buffered. An append takes no context, so a cancelled invocation
+        // cannot cut the flush short. Reaching this point means the consumer is still reading: a
+        // dropped stream never resumes.
         for mut buffered_event in std::mem::take(&mut buffered) {
             if let Err(e) = this
                 .session_service
@@ -298,7 +294,7 @@ fn is_tool_call_or_response(event: &Event) -> bool {
     })
 }
 
-/// Port of Go `hasInlineData`.
+/// Whether any part of the event's content carries inline data.
 fn has_inline_data(event: &Event) -> bool {
     event
         .response
@@ -307,8 +303,7 @@ fn has_inline_data(event: &Event) -> bool {
         .is_some_and(|c| c.parts.iter().any(|p| p.inline_data.is_some()))
 }
 
-/// Port of Go `runnerLiveSession`: forwards to the agent's live session and persists the user's
-/// non-function-response content.
+/// Forwards to the agent's live session and persists the user's non-function-response content.
 pub(crate) struct RunnerLiveSession {
     sess: Arc<dyn LiveSession>,
     runner: Arc<RunnerInner>,
@@ -318,10 +313,9 @@ pub(crate) struct RunnerLiveSession {
 
 #[async_trait]
 impl LiveSession for RunnerLiveSession {
-    /// Go drops nil parts before forwarding; a Rust `Part` cannot be absent, so the request is
-    /// forwarded unchanged.
+    /// Forwards the request unchanged; a request carrying a function call is refused.
     async fn send(&self, req: LiveRequest) -> Result<(), AgentError> {
-        // Go #2302: refused before anything is forwarded or stored.
+        // Refused before anything is forwarded or stored.
         if has_function_call(req.content.as_ref()) {
             return Err(AgentError::other(ERR_USER_FUNCTION_CALL));
         }
@@ -356,7 +350,7 @@ impl LiveSession for RunnerLiveSession {
     }
 }
 
-/// Port of Go `closedLiveSession`: the session returned by a before-run early exit.
+/// The session returned by a before-run early exit.
 pub(crate) struct ClosedLiveSession;
 
 #[async_trait]

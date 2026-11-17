@@ -15,7 +15,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! Test support (port of Go internal/testutil): MockModel, Collect*, Gemini replay helpers.
+//! Test support: [`MockModel`], the `collect_*` stream helpers, Gemini replay helpers and
+//! [`TestAgentRunner`].
 
 use std::any::Any;
 use std::collections::VecDeque;
@@ -31,22 +32,21 @@ use gadk_session::Event;
 enum Script {
     Responses(VecDeque<Result<LlmResponse, ModelError>>),
     Streams(VecDeque<Vec<Result<LlmResponse, ModelError>>>),
-    /// Go MockModel{Responses []*genai.Content, StreamResponsesCount}.
+    /// Queued contents, replayed as responses; `stream_responses_count` chunks per streaming call.
     Contents {
         contents: VecDeque<Content>,
         stream_responses_count: usize,
     },
 }
 
-/// Scripted [`Llm`]: records every request and replays queued responses (port of Go
-/// `testutil.MockModel`).
+/// Scripted [`Llm`]: records every request and replays queued responses.
 pub struct MockModel {
     name: String,
     script: parking_lot::Mutex<Script>,
     requests: parking_lot::Mutex<Vec<LlmRequest>>,
 }
 
-/// Go errNoModelData.
+/// The error a model returns once its queue is empty.
 fn no_data() -> ModelError {
     ModelError::Other("no data".into())
 }
@@ -71,12 +71,12 @@ impl MockModel {
         Self::with_script(Script::Streams(chunks.into()))
     }
 
-    /// Go `&MockModel{Responses: contents}`.
+    /// A model replaying `contents` as responses.
     pub fn from_contents(contents: Vec<Content>) -> Arc<Self> {
         Self::from_contents_streaming(contents, 0)
     }
 
-    /// Go `&MockModel{Responses: contents, StreamResponsesCount: n}`.
+    /// A model replaying `contents` as responses, streaming `n` chunks per call.
     pub fn from_contents_streaming(
         contents: Vec<Content>,
         stream_responses_count: usize,
@@ -102,7 +102,7 @@ impl MockModel {
     }
 }
 
-/// Port of Go MockModel.GenerateStream over the queued contents.
+/// The streamed chunks for the next queued contents.
 fn go_stream(
     contents: &mut VecDeque<Content>,
     count: usize,
@@ -138,8 +138,8 @@ impl Llm for MockModel {
         &self.name
     }
 
-    /// Records `req` and yields the scripted items. The items are computed eagerly (Go computes them
-    /// lazily): the stream must be `'static` and cannot borrow `self`.
+    /// Records `req` and yields the scripted items. The items are computed eagerly: the stream must
+    /// be `'static` and cannot borrow `self`.
     fn generate_content(
         &self,
         req: LlmRequest,
@@ -181,7 +181,7 @@ impl Llm for MockModel {
 }
 
 /// Drives `s`, passing each event with content to `f`; fails on a stream error or an event without
-/// content (Go `CollectEvents`/`CollectParts`/`CollectTextParts`).
+/// content .
 async fn collect_with(mut s: EventStream, mut f: impl FnMut(Event)) -> Result<(), AgentError> {
     while let Some(item) = s.next().await {
         let ev = item?;
@@ -193,14 +193,14 @@ async fn collect_with(mut s: EventStream, mut f: impl FnMut(Event)) -> Result<()
     Ok(())
 }
 
-/// Port of Go CollectEvents: every event of `s`, until an error.
+/// Every event of `s`, until an error.
 pub async fn collect_events(s: EventStream) -> Result<Vec<Event>, AgentError> {
     let mut out = Vec::new();
     collect_with(s, |ev| out.push(ev)).await?;
     Ok(out)
 }
 
-/// Port of Go CollectParts: every content part of `s`, until an error.
+/// Every content part of `s`, until an error.
 pub async fn collect_parts(s: EventStream) -> Result<Vec<Part>, AgentError> {
     let mut out = Vec::new();
     collect_with(s, |ev| {
@@ -212,7 +212,7 @@ pub async fn collect_parts(s: EventStream) -> Result<Vec<Part>, AgentError> {
     Ok(out)
 }
 
-/// Port of Go CollectTextParts: every non-empty text part of `s`, until an error.
+/// Every non-empty text part of `s`, until an error.
 pub async fn collect_text_parts(s: EventStream) -> Result<Vec<String>, AgentError> {
     let mut out = Vec::new();
     collect_with(s, |ev| {
@@ -229,12 +229,12 @@ pub async fn collect_text_parts(s: EventStream) -> Result<Vec<String>, AgentErro
     Ok(out)
 }
 
-/// Port of Go scrubGeminiRequest: drop volatile headers, compact JSON bodies.
+/// Drops volatile headers, compact JSON bodies.
 #[cfg(feature = "testutil")]
 pub fn scrub_gemini_request(
     req: &mut http::Request<bytes::Bytes>,
 ) -> Result<(), gadk_httprr::HttprrError> {
-    // http::HeaderMap is case-insensitive, so one remove covers Go's delete + Header.Del pair.
+    // http::HeaderMap is case-insensitive, so one remove covers every spelling.
     for h in ["x-goog-api-key", "x-goog-api-client", "user-agent"] {
         req.headers_mut().remove(h);
     }
@@ -251,9 +251,8 @@ pub fn scrub_gemini_request(
     Ok(())
 }
 
-/// Port of Go encoding/json.Compact: elides insignificant whitespace; `None` if `src` is not valid
-/// JSON (Go leaves the body unchanged on a Compact error). Key order and number text are preserved
-/// byte for byte.
+/// Elides insignificant whitespace from JSON; `None` if `src` is not valid JSON (the caller leaves
+/// the body unchanged then). Key order and number text are preserved byte for byte.
 #[cfg(feature = "testutil")]
 fn compact_json(src: &[u8]) -> Option<Vec<u8>> {
     serde_json::from_slice::<serde::de::IgnoredAny>(src).ok()?;
@@ -279,8 +278,8 @@ fn compact_json(src: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Port of Go NewGeminiTransport: RecordReplay over the real client plus [`scrub_gemini_request`].
-/// Panics (Go `t.Fatal`) when the recording cannot be opened.
+/// A `RecordReplay` over the real client plus [`scrub_gemini_request`]. Panics when the recording
+/// cannot be opened.
 #[cfg(feature = "testutil")]
 pub fn gemini_replay_client(path: impl AsRef<std::path::Path>) -> Arc<dyn gadk_model::HttpClient> {
     let path = path.as_ref();
@@ -291,8 +290,8 @@ pub fn gemini_replay_client(path: impl AsRef<std::path::Path>) -> Arc<dyn gadk_m
     Arc::new(rr)
 }
 
-/// Port of Go NewGeminiTestClientConfig: `"fakekey"` and an empty environment when replaying; the
-/// real environment and key when recording.
+/// The Gemini client config for a recording: `"fakekey"` and an empty environment when replaying;
+/// the real environment and key when recording.
 #[cfg(feature = "testutil")]
 pub fn gemini_test_config(path: impl AsRef<std::path::Path>) -> gadk_gemini::ClientConfig {
     let path = path.as_ref();
@@ -321,8 +320,8 @@ pub async fn gemini_test_model(model: &str, path: impl AsRef<std::path::Path>) -
         .unwrap_or_else(|e| panic!("GeminiModel::new({model}) failed: {e}"))
 }
 
-/// Port of Go internal/testutil `TestAgentRunner`: a runner over an in-memory session service with
-/// one session (`"test_app"`/`"test_user"`/`"test_session"`), created up front.
+/// A runner over an in-memory session service with one session
+/// (`"test_app"`/`"test_user"`/`"test_session"`), created up front.
 pub struct TestAgentRunner {
     runner: crate::runner::Runner,
     session_service: Arc<dyn gadk_session::SessionService>,
@@ -330,12 +329,12 @@ pub struct TestAgentRunner {
 }
 
 impl TestAgentRunner {
-    /// Port of Go `NewTestAgentRunner`.
+    /// A runner for `agent`.
     pub async fn new(agent: Arc<dyn gadk_agent::Agent>) -> Self {
         Self::build(agent, crate::runner::PluginConfig::default(), None, None).await
     }
 
-    /// Port of Go `NewTestAgentRunnerWithPluginManager`.
+    /// A runner for `agent` with the given plugins.
     pub async fn with_plugins(
         agent: Arc<dyn gadk_agent::Agent>,
         cfg: crate::runner::PluginConfig,
@@ -343,7 +342,7 @@ impl TestAgentRunner {
         Self::build(agent, cfg, None, None).await
     }
 
-    /// Port of Go `NewTestAgentRunner` + `SetInitSessionState`: the session starts with `state`.
+    /// A runner for `agent` whose session starts with `state`.
     pub async fn with_state(
         agent: Arc<dyn gadk_agent::Agent>,
         state: serde_json::Map<String, serde_json::Value>,
@@ -357,7 +356,7 @@ impl TestAgentRunner {
         .await
     }
 
-    /// Port of Go `NewTestAgentRunnerWithCompaction`: a runner with context compaction enabled.
+    /// A runner with context compaction enabled.
     pub async fn with_compaction(
         agent: Arc<dyn gadk_agent::Agent>,
         cfg: gadk_session::compaction::Config,
@@ -391,8 +390,8 @@ impl TestAgentRunner {
             compaction,
         })
         .expect("runner::Runner::new");
-        // Go creates the session on the first Run with the initial state; Rust's `run` takes no
-        // session ID, so it is created here.
+        // `run` takes no session ID and the runner does not auto-create, so the session is created
+        // here with the initial state.
         let session = session_service
             .create(gadk_session::CreateRequest {
                 app_name: "test_app".into(),
@@ -409,7 +408,7 @@ impl TestAgentRunner {
         }
     }
 
-    /// Port of Go `Run`: an empty message is Go's nil content.
+    /// Runs a user text message; an empty message runs with no content.
     pub fn run(&self, msg: &str) -> EventStream {
         let msg = (!msg.is_empty()).then(|| Content::from_text(msg, gadk_genai::ROLE_USER));
         self.runner.run(
@@ -421,12 +420,12 @@ impl TestAgentRunner {
         )
     }
 
-    /// Port of Go `RunContent`.
+    /// Runs `msg`.
     pub fn run_content(&self, msg: Content) -> EventStream {
         self.run_with_config(msg, gadk_agent::RunConfig::default())
     }
 
-    /// Port of Go `RunContentWithConfig`.
+    /// Runs `msg` with `cfg`.
     pub fn run_with_config(&self, msg: Content, cfg: gadk_agent::RunConfig) -> EventStream {
         self.runner.run(
             "test_user",
@@ -442,18 +441,17 @@ impl TestAgentRunner {
         &self.session_id
     }
 
-    /// Port of Go `SessionService`: the runner's session service, for inspecting stored events.
+    /// The runner's session service, for inspecting stored events.
     pub fn session_service(&self) -> Arc<dyn gadk_session::SessionService> {
         self.session_service.clone()
     }
 }
 
-/// The scripted in-memory live model and the responses Go's fake Live server messages decode to.
+/// The scripted in-memory live model and the responses its scripted server messages decode to.
 pub mod live;
 
-/// Telemetry test helpers (port of Go `internal/telemetry/telemetrytest`): the span and log
-/// digests, the `tracing` capture behind them, and the lock that serialises tests changing the
-/// telemetry environment (plan decision D7).
+/// Telemetry test helpers: the span and log digests, the `tracing` capture behind them, and the
+/// lock that serialises tests changing the telemetry environment.
 pub mod telemetry {
     pub use crate::telemetry::log_digest::{LogDigest, LogRecord, build_log_digest, capture_logs};
     pub use crate::telemetry::span_digest::{

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Scoped memory (port of Go `internal/memory`).
+//! Scoped memory: a [`Memory`] bound to one app and user.
 
 use std::sync::Arc;
 
@@ -22,8 +22,8 @@ use gadk_agent::{AgentError, Memory};
 use gadk_memory::{MemoryService, SearchRequest, SearchResponse};
 use gadk_session::Session;
 
-/// Port of Go internal/memory Memory: a [`Memory`] scoped to one app and user. Go's `SessionID`
-/// field is unused by its methods and is dropped.
+/// A [`Memory`] scoped to one app and user; it carries no session id because neither method needs
+/// one.
 #[derive(Clone)]
 pub(crate) struct ScopedMemory {
     service: Arc<dyn MemoryService>,
@@ -32,7 +32,7 @@ pub(crate) struct ScopedMemory {
 }
 
 impl ScopedMemory {
-    /// Go `&memory.Memory{Service, AppName, UserID}`.
+    /// Scopes `service` to `app` and `user`.
     pub(crate) fn new(service: Arc<dyn MemoryService>, app: &str, user: &str) -> Self {
         Self {
             service,
@@ -44,12 +44,12 @@ impl ScopedMemory {
 
 #[async_trait]
 impl Memory for ScopedMemory {
-    /// Port of Go Memory.AddSessionToMemory.
+    /// Adds `session` to the backing memory service.
     async fn add_session_to_memory(&self, session: Arc<dyn Session>) -> Result<(), AgentError> {
         Ok(self.service.add_session_to_memory(session.as_ref()).await?)
     }
 
-    /// Port of Go Memory.SearchMemory.
+    /// Searches the backing service for `query` within this app and user.
     async fn search_memory(&self, query: &str) -> Result<SearchResponse, AgentError> {
         Ok(self
             .service

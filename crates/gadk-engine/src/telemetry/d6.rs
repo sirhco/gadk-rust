@@ -13,14 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The one decoder of gadk's ADK telemetry as `tracing` carries it (plan 5a decision D6), shared
-//! by every consumer: gadk-server's debug store, the engine's test digests and gadk-telemetry's
-//! OpenTelemetry bridge. No OpenTelemetry dependency; consumers render the decoded values.
+//! The one decoder of gadk's ADK telemetry as `tracing` carries it, shared by every consumer:
+//! gadk-server's debug store, the engine's test digests and gadk-telemetry's OpenTelemetry bridge.
+//! No OpenTelemetry dependency; consumers render the decoded values.
 //!
 //! - An ADK span is a span whose metadata declares [`OTEL_NAME`] ([`is_adk_span`]); any other
 //!   span is foreign and transparent to ADK parenting.
-//! - [`D6Fields`] reads an ADK span's fields: [`OTEL_NAME`] is Go's span name,
-//!   [`OTEL_STATUS_CODE`] and [`ERROR_MESSAGE`] Go's span status and its description, any other
+//! - [`D6Fields`] reads an ADK span's fields: [`OTEL_NAME`] is the span name,
+//!   [`OTEL_STATUS_CODE`] and [`ERROR_MESSAGE`] the span status and its description, any other
 //!   `otel.*` field is ignored, and every remaining field is an OTel attribute ([`D6Value`]).
 //! - [`decode_log`] reads an OTel log record: an event on [`LOG_TARGET`] with fields
 //!   [`EVENT_NAME`], [`LOG_BODY`] (JSON text) and [`LOG_ATTRIBUTES`] (JSON object text).
@@ -32,11 +32,11 @@ use tracing::field::{Field, Visit};
 
 use super::LOG_TARGET;
 
-/// The span field carrying Go's full span name; declaring it makes a span an ADK span.
+/// The span field carrying the full span name; declaring it makes a span an ADK span.
 pub const OTEL_NAME: &str = "otel.name";
-/// The span field carrying Go's span status code (`OK` or `ERROR`).
+/// The span field carrying the span status code (`OK` or `ERROR`).
 pub const OTEL_STATUS_CODE: &str = "otel.status_code";
-/// The span field carrying Go's span status description.
+/// The span field carrying the span status description.
 pub const ERROR_MESSAGE: &str = "error.message";
 /// The log event field carrying the record's event name.
 pub const EVENT_NAME: &str = "event.name";
@@ -45,8 +45,7 @@ pub const LOG_BODY: &str = "otel.log.body";
 /// The log event field carrying the record's attributes as JSON object text.
 pub const LOG_ATTRIBUTES: &str = "otel.log.attributes";
 
-/// Whether a span is an ADK span (one Go's OTel SDK would see): its metadata declares
-/// [`OTEL_NAME`].
+/// Whether a span is an ADK span (one an OTel SDK would see): its metadata declares [`OTEL_NAME`].
 pub fn is_adk_span(meta: &tracing::Metadata<'_>) -> bool {
     meta.fields().field(OTEL_NAME).is_some()
 }
@@ -65,11 +64,11 @@ pub enum D6Value {
     F64(f64),
     /// A `bool` field.
     Bool(bool),
-    /// A bytes field whose JSON text is an array of strings only (Go's STRINGSLICE).
+    /// A bytes field whose JSON text is an array of strings only.
     StrSlice(Vec<String>),
     /// A bytes field whose JSON text is any other JSON value (a structured attribute).
     Json(Value),
-    /// A bytes field that is not JSON text (Go's BYTESLICE).
+    /// A bytes field that is not JSON text.
     Bytes(Vec<u8>),
 }
 
@@ -109,20 +108,20 @@ impl D6Value {
     }
 }
 
-/// Go's span status code as recorded on [`OTEL_STATUS_CODE`].
+/// The span status code as recorded on [`OTEL_STATUS_CODE`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum D6StatusCode {
-    /// Go `codes.Unset`: no status, or a recorded value other than `OK`/`ERROR`.
+    /// No status, or a recorded value other than `OK`/`ERROR`.
     #[default]
     Unset,
-    /// Go `codes.Ok` (recorded as `OK`).
+    /// Success (recorded as `OK`).
     Ok,
-    /// Go `codes.Error` (recorded as `ERROR`).
+    /// Failure (recorded as `ERROR`).
     Error,
 }
 
 impl D6StatusCode {
-    /// Go `strings.ToUpper(code.String())`: `UNSET`, `OK` or `ERROR`.
+    /// The upper-case name: `UNSET`, `OK` or `ERROR`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Unset => "UNSET",
@@ -137,8 +136,8 @@ impl D6StatusCode {
 /// the span's state (a later value of a name or attribute replaces the earlier one).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct D6Fields {
-    /// Go's span name: the [`OTEL_NAME`] field when recorded as a string (`str` or
-    /// `Debug`/`Display` text).
+    /// The span name: the [`OTEL_NAME`] field when recorded as a string (`str` or `Debug`/`Display`
+    /// text).
     pub name: Option<String>,
     /// The OTel attributes, in record order (a field recorded twice in one visit keeps its first
     /// position and its last value).
@@ -216,8 +215,8 @@ pub struct D6Log {
     pub event_name: String,
     /// The event's level (`INFO` or `DEBUG` as gadk emits them).
     pub level: tracing::Level,
-    /// The [`LOG_BODY`] JSON text, parsed: `Ok(null)` when absent, `Err(())` when not JSON (Go: a
-    /// value `encoding/json` cannot marshal).
+    /// The [`LOG_BODY`] JSON text, parsed: `Ok(null)` when absent, `Err(())` when not JSON (the
+    /// body could not be serialized).
     pub body: Result<Value, ()>,
     /// The [`LOG_ATTRIBUTES`] JSON object, parsed; `None` when absent, not JSON or not an object.
     pub attributes: Option<Map<String, Value>>,
@@ -276,8 +275,8 @@ pub struct SpanIds {
 }
 
 impl SpanIds {
-    /// Whether both IDs are non-zero (Go `SpanContext.IsValid`); a shut-down provider hands out
-    /// all-zero IDs, which consumers replace with their own.
+    /// Whether both IDs are non-zero; a shut-down provider hands out all-zero IDs, which consumers
+    /// replace with their own.
     pub fn is_valid(&self) -> bool {
         self.trace_id.iter().any(|b| *b != 0) && self.span_id.iter().any(|b| *b != 0)
     }

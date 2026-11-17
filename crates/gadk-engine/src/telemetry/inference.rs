@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `internal/telemetry/inference.go`: the `gen_ai.provider.name` of a model call.
+//! The `gen_ai.provider.name` of a model call.
 
 use std::sync::LazyLock;
 
@@ -23,14 +23,14 @@ use regex::Regex;
 
 use super::gen_ai_system;
 
-/// Go `genAIProviderName`.
+/// Attribute carrying the provider name.
 pub(crate) const GEN_AI_PROVIDER_NAME: &str = "gen_ai.provider.name";
 
-/// Go `anthropicModel`.
+/// Matches Anthropic model names (`claude-…` or `claude.…`, ignoring case).
 static ANTHROPIC_MODEL: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"(?i)^claude[-.]").ok());
 
-/// Go `modelPaths`: Vertex AI and Apigee model paths.
+/// Vertex AI and Apigee model paths.
 static MODEL_PATHS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
         r"^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/(.+)$",
@@ -41,7 +41,7 @@ static MODEL_PATHS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     .collect()
 });
 
-/// Go `resourceCollections`: leading path segments that are not providers.
+/// Leading path segments that are not providers.
 const RESOURCE_COLLECTIONS: &[&str] = &[
     "endpoints",
     "locations",
@@ -51,8 +51,8 @@ const RESOURCE_COLLECTIONS: &[&str] = &[
     "tunedmodels",
 ];
 
-/// Go `providerName`: the provider a model name or path names, else the Google backend's
-/// `gen_ai.system` value; `None` when neither can be named.
+/// The provider a model name or path names, else the Google backend's `gen_ai.system` value; `None`
+/// when neither can be named.
 pub(crate) fn provider_name(model_name: &str, backend: Option<Backend>) -> Option<String> {
     let name = bare_model_name(model_name);
     if !name.starts_with("gemini-") {
@@ -69,7 +69,7 @@ pub(crate) fn provider_name(model_name: &str, backend: Option<Backend>) -> Optio
     gen_ai_system(backend).map(str::to_owned)
 }
 
-/// Go `bareModelName`: the model ID inside a resource path.
+/// The model ID inside a resource path.
 pub(crate) fn bare_model_name(model: &str) -> &str {
     for p in MODEL_PATHS.iter() {
         if let Some(m) = p.captures(model).and_then(|c| c.get(1)) {
