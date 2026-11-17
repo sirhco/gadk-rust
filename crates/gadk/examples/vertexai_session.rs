@@ -14,10 +14,9 @@
 // limitations under the License.
 
 //! An `LlmAgent` whose sessions live in a Vertex AI Agent Engine and whose memories live in
-//! the engine's Memory Bank, through `gadk-vertexai` (the gadk counterpart of ADK-Go's
-//! `session/vertexai` and `memory/vertexai`; see Go examples/vertexai/agent.go). It reads one
-//! line per turn from stdin in a new engine session; at the end of input it generates
-//! memories from the conversation, so a later run can recall it with `load_memory`.
+//! the engine's Memory Bank, through `gadk-vertexai`. It reads one line per turn from stdin in a
+//! new engine session; at the end of input it generates memories from the conversation, so a
+//! later run can recall it with `load_memory`.
 //!
 //! `GOOGLE_CLOUD_PROJECT=my-project GOOGLE_CLOUD_LOCATION=us-central1 VERTEX_ENGINE_ID=1234567890
 //! GOOGLE_API_KEY=... cargo run -p gadk --example vertexai_session --features vertexai`
@@ -45,7 +44,7 @@ use gadk::vertexai::session::{VertexAiSessionService, VertexAiSessionServiceConf
 const APP_NAME: &str = "vertexai_session_example";
 const USER_ID: &str = "example_user";
 
-/// A required environment variable (Go `log.Fatalf("Env var %s is not set")`).
+/// A required environment variable; an error when it is unset or empty.
 fn env(name: &str) -> anyhow::Result<String> {
     std::env::var(name)
         .ok()

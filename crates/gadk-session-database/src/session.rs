@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The session handed out by the service (Go `localSession`).
+//! The session handed out by the service.
 
 use chrono::{DateTime, Utc};
 use gadk_session::state_util::trim_temp_delta_state;
@@ -32,7 +32,7 @@ pub(crate) struct DatabaseSession {
     data: SessionData,
 }
 
-/// The mutable part of a [`DatabaseSession`] behind one lock (Go `localSession.mu`); also its
+/// The mutable part of a [`DatabaseSession`] behind one lock; also its
 /// [`State`].
 pub(crate) struct SessionData(RwLock<Inner>);
 
@@ -63,7 +63,7 @@ impl DatabaseSession {
         }
     }
 
-    /// Go `localSession.appendEvent`: a partial event is ignored; otherwise the whole state
+    /// Appends an event: a partial event is ignored; otherwise the whole state
     /// delta (temp: keys included) is copied into the session state and the event, with temp:
     /// keys trimmed from its delta, is appended.
     pub(crate) fn append_event(&self, event: &Event) {
@@ -109,7 +109,7 @@ impl Session for DatabaseSession {
     fn state(&self) -> &dyn State {
         &self.data
     }
-    /// A snapshot: later appends and replacements do not change it (Go `slices.Clone`).
+    /// A snapshot: later appends and replacements do not change it.
     fn events(&self) -> Vec<Event> {
         self.data.0.read().events.clone()
     }

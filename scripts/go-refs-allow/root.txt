@@ -1,3 +1,4 @@
 # Allowlisted ADK compatibility notes in the root README.md (at most 10).
 # One entry per line: path<TAB>substring<TAB>reason. Each entry must match exactly one line that
 # check-go-refs.py reports. Per-crate entries go in scripts/go-refs-allow/<crate>.txt (at most 3).
+README.md	code derived from ADK-Go	Licence attribution: gadk contains code derived from ADK-Go (Apache-2.0); NOTICE has the details

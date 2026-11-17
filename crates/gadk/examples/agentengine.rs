@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The quickstart for an Agent Engine deployment (port of Go `examples/agentengine/main.go`):
+//! The quickstart for an Agent Engine deployment:
 //! an agent with a `random` tool and a `search_past_conversations` memory tool, a plugin that
 //! records the session's last update time before each run and adds the session to memory after
 //! it, served by `agentengine::new_launcher` — the reasoning-engine API (`/api/reasoning_engine`,
@@ -24,10 +24,9 @@
 //!
 //! `cargo run -p gadk --features agentengine,vertexai --example agentengine -- web agentengine`
 //!
-//! With the `vertexai` feature the sessions and memories live in the Agent Engine (Go's
-//! `session/vertexai` and `memory/vertexai`, reached with Application Default Credentials);
-//! without it the launcher's in-memory services are used. `… --example agentengine -- -h` prints
-//! every command line.
+//! With the `vertexai` feature the sessions and memories live in the Agent Engine (reached with
+//! Application Default Credentials); without it the launcher's in-memory services are used.
+//! `… --example agentengine -- -h` prints every command line.
 
 use std::hash::{BuildHasher, RandomState};
 use std::sync::Arc;
@@ -44,24 +43,24 @@ use gadk::model::Backend;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// The state key the plugin records the session's last update time under (Go
-/// `stateKeySessionLastUpdateTime`), from which the Memory Bank takes the new events.
+/// The state key the plugin records the session's last update time under, from which the Memory
+/// Bank takes the new events.
 const STATE_KEY_SESSION_LAST_UPDATE_TIME: &str = "sessionLastUpdateTime";
 
-/// The input of the memory search tool (Go `Args`).
+/// The input of the memory search tool.
 #[derive(Deserialize, JsonSchema)]
 struct Args {
     /// The query to search for in the memory.
     query: String,
 }
 
-/// The output of the memory search tool (Go `Result`).
+/// The output of the memory search tool.
 #[derive(Serialize, JsonSchema)]
 struct SearchResult {
     results: Vec<String>,
 }
 
-/// Go `memorySearchToolFunc`: the texts of the user's memories relevant to the query.
+/// The texts of the user's memories relevant to the query.
 async fn memory_search(ctx: Context, args: Args) -> Result<SearchResult, ToolError> {
     let found = ctx.search_memory(&args.query).await.map_err(|e| {
         Logger::stderr().print(&format!("Error searching memory: {e}"));
@@ -90,7 +89,7 @@ struct Output {
     result: i64,
 }
 
-/// A number between `min` and `max` (Go `min + rand.IntN(max-min+1)`).
+/// A number between `min` and `max`, both included.
 async fn random(_ctx: Context, input: Input) -> Result<Output, ToolError> {
     let span = input.max.saturating_sub(input.min).saturating_add(1);
     if span <= 0 {
@@ -105,7 +104,8 @@ async fn random(_ctx: Context, input: Input) -> Result<Output, ToolError> {
     })
 }
 
-/// Go `plugin.New(plugin.Config{Name: "Memory generator", …})`.
+/// The plugin that records the session's last update time before each run and adds the session
+/// to memory after it.
 fn memory_plugin() -> Plugin {
     Plugin::new(PluginConfig {
         name: "Memory generator".to_string(),
@@ -142,7 +142,7 @@ fn memory_plugin() -> Plugin {
     })
 }
 
-/// A required setting of the example (Go reads them with `os.Getenv`).
+/// A required setting of the example, read from the environment.
 fn env(name: &str) -> String {
     std::env::var(name).unwrap_or_default()
 }
@@ -229,7 +229,7 @@ async fn main() -> anyhow::Result<()> {
     let mut l = gadk::agentengine::new_launcher(&agent_engine_id);
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
-        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        // Print the error and the command-line syntax, then exit.
         log.print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
         std::process::exit(1);
     }

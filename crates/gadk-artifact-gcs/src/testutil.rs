@@ -38,8 +38,7 @@ pub fn multipart_parts(req: &RecordedRequest) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Go `r.URL.Query().Get(key)`, as an `Option`: the first value of query parameter `key`,
-/// form-decoded.
+/// The first value of query parameter `key`, form-decoded.
 pub fn query_param(req: &RecordedRequest, key: &str) -> Option<String> {
     url::form_urlencoded::parse(req.query.as_deref().unwrap_or_default().as_bytes())
         .find(|(k, _)| k == key)

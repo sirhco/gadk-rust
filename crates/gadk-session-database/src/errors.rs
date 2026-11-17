@@ -13,14 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! ADK-Go error texts: `fmt.Errorf("<prefix>: %w", cause)` as a [`SessionError::Backend`].
+//! Error texts of the form `<prefix>: <cause>`, as a [`SessionError::Backend`].
 
 use std::error::Error as StdError;
 use std::fmt;
 
 use gadk_session::SessionError;
 
-/// A Go-style wrapped error: `Display` is the whole Go message, `source` the cause.
+/// A wrapped error: `Display` is the whole message, `source` the cause.
 #[derive(Debug)]
 pub(crate) struct GoError {
     msg: String,
@@ -41,7 +41,7 @@ impl StdError for GoError {
     }
 }
 
-/// Go `fmt.Errorf("<prefix>: %w", cause)`.
+/// Wraps `cause` under `prefix`: displays `<prefix>: <cause>` and keeps `cause` as the source.
 pub(crate) fn wrap(
     prefix: &str,
     cause: impl Into<Box<dyn StdError + Send + Sync>>,
@@ -53,7 +53,7 @@ pub(crate) fn wrap(
     }))
 }
 
-/// Go `fmt.Errorf("<message>")` (no cause).
+/// An error with just a message (no cause).
 pub(crate) fn message(msg: impl Into<String>) -> SessionError {
     SessionError::Backend(Box::new(GoError {
         msg: msg.into(),
@@ -61,7 +61,7 @@ pub(crate) fn message(msg: impl Into<String>) -> SessionError {
     }))
 }
 
-/// A database error Go returns unwrapped (transaction begin/commit, connect).
+/// A database error returned unwrapped (transaction begin/commit, connect).
 pub(crate) fn raw(err: sqlx::Error) -> SessionError {
     SessionError::Backend(Box::new(err))
 }

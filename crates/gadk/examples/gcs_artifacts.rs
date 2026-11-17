@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Saves, lists, loads and deletes an artifact in a Google Cloud Storage bucket through
-//! `gadk-artifact-gcs` (the gadk counterpart of ADK-Go's `artifact/gcsartifact`), with
+//! `gadk-artifact-gcs`, with
 //! Application Default Credentials (`gcloud auth application-default login`).
 //!
 //! `GADK_GCS_BUCKET=my-bucket cargo run -p gadk --example gcs_artifacts --features gcs`

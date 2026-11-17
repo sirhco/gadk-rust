@@ -14,9 +14,8 @@
 // limitations under the License.
 
 //! Tools hidden behind `search_tools`: the model loads a tool's declaration only when it needs
-//! that tool (port of Go examples/toolsearch/main.go). The catalog and agent are in
-//! `toolsearch_catalog.rs`, shared with the example's test. It runs through the launcher, as
-//! Go's does.
+//! that tool. The catalog and agent are in `toolsearch_catalog.rs`, shared with the example's
+//! test. It runs through the launcher.
 //!
 //! `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example toolsearch [console | web
 //! webui api]`, then ask
@@ -47,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
     let mut l = full::new();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
-        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        // Print the error and the command-line syntax, then exit.
         Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
         std::process::exit(1);
     }

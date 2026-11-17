@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An agent that discovers and follows skills through the `SkillToolset` (port of Go
-//! examples/skills/main.go). The skills (`grocery-prices` and `weather`) are Go's, copied under
-//! `examples/skills/`; they are read through `DirFs` from the crate directory, so the example
-//! runs from any directory. It runs through the launcher, as Go's does.
+//! An agent that discovers and follows skills through the `SkillToolset`. The skills
+//! (`grocery-prices` and `weather`) live under `examples/skills/`; they are read through
+//! `DirFs` from the crate directory, so the example runs from any directory. It runs through
+//! the launcher.
 //!
 //! `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example skills [console | web
 //! webui api]`, then ask
@@ -34,7 +34,7 @@ use gadk::launcher::{CancellationToken, Config, Launcher, full};
 use gadk::tools::skills::skill::{self, DirFs, FileSystemSource};
 use gadk::tools::skills::{SkillToolset, SkillToolsetConfig};
 
-/// Go's `./skills` directory, resolved at compile time.
+/// The `examples/skills` directory, resolved at compile time.
 const SKILLS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/skills");
 
 #[tokio::main]
@@ -71,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
     let mut l = full::new();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
-        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        // Print the error and the command-line syntax, then exit.
         Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
         std::process::exit(1);
     }

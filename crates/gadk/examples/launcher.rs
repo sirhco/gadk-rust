@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An agent run through ADK-Go's launcher (port of Go `examples/quickstart/main.go`, which hands
-//! its agent to `full.NewLauncher()`): the command line picks the console or the web server and
-//! its sub-launchers, exactly as with Go.
+//! An agent run through the launcher (`gadk::launcher::full::new()`): the command line picks the
+//! console or the web server and its sub-launchers.
 //!
 //! `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example launcher` (the console),
 //! `… --example launcher -- web api webui` (the REST API and the web UI on
@@ -53,12 +52,12 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::new(Arc::new(SingleLoader::new(agent)));
 
-    // Go passes `context.Background()`: a token nothing cancels. The console stops at end of
-    // input or Ctrl-C; the web server runs until the process is stopped.
+    // Nothing cancels this token. The console stops at end of input or Ctrl-C; the web server
+    // runs until the process is stopped.
     let mut l = full::new();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
-        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        // Print the error and the command-line syntax, then exit.
         Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
         std::process::exit(1);
     }

@@ -16,32 +16,32 @@
 // features it is compiled out (`clean_name` and `PROTOCOL_TYPE_A2A_AGENT` serve `a2a` only).
 #![cfg_attr(not(any(feature = "a2a", feature = "mcp")), allow(dead_code))]
 
-//! Go `agentregistry/resolve.go`: name cleaning and connection-URI resolution. The A2A
+//! Name cleaning and connection-URI resolution. The A2A
 //! transport names are a2a's wire strings (`JSONRPC`, `HTTP+JSON`, `GRPC`), held here as
 //! constants so the module needs no `a2a` feature.
 
 use crate::types::{Interface, Protocol};
 
-/// Go `protocolTypeA2AAgent`.
+/// Registry protocol type of an A2A agent.
 #[cfg_attr(not(feature = "a2a"), allow(dead_code))]
 pub(crate) const PROTOCOL_TYPE_A2A_AGENT: &str = "A2A_AGENT";
-/// Go `bindingJSONRPC`: registry protocol-binding wire value.
+/// Registry protocol-binding wire value for JSON-RPC.
 pub(crate) const BINDING_JSONRPC: &str = "JSONRPC";
-/// Go `bindingHTTPJSON`.
+/// Registry protocol-binding wire value for HTTP+JSON.
 pub(crate) const BINDING_HTTP_JSON: &str = "HTTP_JSON";
-/// Go `bindingGRPC`.
+/// Registry protocol-binding wire value for gRPC.
 pub(crate) const BINDING_GRPC: &str = "GRPC";
 
-/// a2a `TransportProtocolJSONRPC` (= `a2a::TRANSPORT_PROTOCOL_JSONRPC`).
+/// The A2A JSON-RPC transport name (= `a2a::TRANSPORT_PROTOCOL_JSONRPC`).
 pub(crate) const TRANSPORT_JSONRPC: &str = "JSONRPC";
-/// a2a `TransportProtocolHTTPJSON` (= `a2a::TRANSPORT_PROTOCOL_HTTP_JSON`).
+/// The A2A HTTP+JSON transport name (= `a2a::TRANSPORT_PROTOCOL_HTTP_JSON`).
 pub(crate) const TRANSPORT_HTTP_JSON: &str = "HTTP+JSON";
-/// a2a `TransportProtocolGRPC` (= `a2a::TRANSPORT_PROTOCOL_GRPC`).
+/// The A2A gRPC transport name (= `a2a::TRANSPORT_PROTOCOL_GRPC`).
 pub(crate) const TRANSPORT_GRPC: &str = "GRPC";
 
-/// Go `cleanName`: non-identifier bytes (`[^a-zA-Z0-9_]`, per UTF-8 character as Go's regexp)
-/// become `_`, runs of `_` collapse, leading/trailing `_` are trimmed, and a leading digit gets a
-/// `_` prefix.
+/// Cleans a name into an identifier: non-identifier characters (`[^a-zA-Z0-9_]`, one per UTF-8
+/// character) become `_`, runs of `_` collapse, leading/trailing `_` are trimmed, and a leading
+/// digit gets a `_` prefix.
 #[cfg_attr(not(feature = "a2a"), allow(dead_code))]
 pub(crate) fn clean_name(name: &str) -> String {
     let mut collapsed = String::with_capacity(name.len());
@@ -65,22 +65,22 @@ pub(crate) fn clean_name(name: &str) -> String {
     }
 }
 
-/// Go `connectionURI`'s result: the interface URL, its protocol's version, and the
+/// The result of [`connection_uri`]: the interface URL, its protocol's version, and the
 /// interface's A2A transport (`""` for an unrecognized binding).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConnectionUri {
-    /// Go `uri`.
+    /// The interface URL.
     pub(crate) uri: String,
-    /// Go `version`: the protocol's `protocolVersion`.
+    /// The protocol's `protocolVersion`.
     pub(crate) version: String,
-    /// Go `binding`: a `TRANSPORT_*` constant or `""`.
+    /// A `TRANSPORT_*` constant or `""`.
     pub(crate) binding: &'static str,
 }
 
-/// Go `connectionURI`: the first interface with a non-empty URL whose protocol matches
+/// Finds the first interface with a non-empty URL whose protocol matches
 /// `protocol_type` and whose mapped transport matches `transport` (an empty filter matches
-/// anything); non-empty `ifaces` are tried last as a type-less protocol. `None` is Go's
-/// `ok == false`.
+/// anything); non-empty `ifaces` are tried last as a type-less protocol. `None` when
+/// nothing matches.
 pub(crate) fn connection_uri(
     protocols: &[Protocol],
     ifaces: &[Interface],
@@ -112,8 +112,8 @@ pub(crate) fn connection_uri(
     None
 }
 
-/// Go `transportBinding`: `JSONRPC` → `JSONRPC`, `HTTP_JSON` → `HTTP+JSON`, `GRPC` → `GRPC`;
-/// anything else `None` (Go `("", false)`).
+/// Maps a registry binding to an A2A transport: `JSONRPC` → `JSONRPC`, `HTTP_JSON` →
+/// `HTTP+JSON`, `GRPC` → `GRPC`; anything else `None`.
 pub(crate) fn transport_binding(wire: &str) -> Option<&'static str> {
     match wire {
         BINDING_JSONRPC => Some(TRANSPORT_JSONRPC),

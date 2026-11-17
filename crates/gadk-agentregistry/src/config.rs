@@ -12,8 +12,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//! Go `agentregistry/registry.go`: [`Config`], [`Client::new`] (ADC, endpoint and quota-project
-//! resolution).
+//! [`Config`] and [`Client::new`]: Application Default Credentials, endpoint selection and
+//! quota-project resolution.
 
 use std::path::PathBuf;
 
@@ -23,31 +23,31 @@ use gadk_platform::env::{EnvProvider, ProcessEnv};
 use crate::error::Error;
 use crate::requester::RestRequester;
 
-/// Go `cloudPlatformScope`: the OAuth scope used for Application Default Credentials.
+/// The OAuth scope used for Application Default Credentials.
 pub(crate) const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
-/// Go `baseURLProd`.
+/// Registry endpoint used by default.
 pub(crate) const BASE_URL_PROD: &str = "https://agentregistry.googleapis.com/v1";
-/// Go `baseURLMTLS`.
+/// Registry endpoint used when mTLS is selected.
 pub(crate) const BASE_URL_MTLS: &str = "https://agentregistry.mtls.googleapis.com/v1";
 
-/// Go `Config`: configures a [`Client`].
+/// Configures a [`Client`].
 #[derive(Debug, Clone, Default)]
 pub struct Config {
-    /// Go `ProjectID`: the Google Cloud project ID. Required.
+    /// The Google Cloud project ID. Required.
     pub project_id: String,
-    /// Go `Location`: the Google Cloud location (region), e.g. `us-central1`. Required.
+    /// The Google Cloud location (region), e.g. `us-central1`. Required.
     pub location: String,
-    /// Go `HTTPClient`: used for registry API calls, unauthenticated by this crate (a supplied
+    /// HTTP client used for registry API calls, unauthenticated by this crate (a supplied
     /// client manages its own credentials). `None` authenticates with Application Default
     /// Credentials (cloud-platform scope) over a default client and resolves the endpoint from
     /// `GOOGLE_API_USE_MTLS_ENDPOINT`.
     pub http_client: Option<reqwest::Client>,
 }
 
-/// Go `Client`: a client for the Google Cloud Agent Registry.
+/// A client for the Google Cloud Agent Registry.
 #[derive(Clone)]
 pub struct Client {
-    /// Go `requester` + `httpClient`: the REST transport; the factory helpers reuse its HTTP
+    /// The REST transport; the factory helpers reuse its HTTP
     /// client and credential provider for egress to `*.googleapis.com` endpoints.
     pub(crate) requester: RestRequester,
 }
@@ -62,7 +62,7 @@ impl std::fmt::Debug for Client {
 }
 
 impl Client {
-    /// Go `New`: validates the config and wires the REST requester. Without
+    /// Validates the config and wires the REST requester. Without
     /// [`Config::http_client`], ADC is resolved here (one `credential` call), so a missing ADC
     /// fails now with `agentregistry: loading Application Default Credentials: …`.
     pub async fn new(cfg: Config) -> Result<Client, Error> {
@@ -78,7 +78,7 @@ impl Client {
         let (http, auth, base_url, creds_json) = match cfg.http_client {
             Some(http) => (http, None, endpoint_for(env, true), None),
             None => {
-                // Go `google.FindDefaultCredentials`: discovery only (no token is minted).
+                // Credential discovery only (no token is minted).
                 let auth = gadk_auth::adc(&[CLOUD_PLATFORM_SCOPE]);
                 auth.credential(&AuthContext::anonymous())
                     .await
@@ -111,17 +111,16 @@ impl Client {
     }
 }
 
-/// Go's endpoint choice: the ADC path's `htransport.NewHTTPClient` (no client certificate:
-/// `GOOGLE_API_USE_MTLS_ENDPOINT`, else the deprecated `GOOGLE_API_USE_MTLS`, lowercased; `always`
-/// → mTLS) when `custom_client` is false, Go `customClientBaseURL` (only
-/// `GOOGLE_API_USE_MTLS_ENDPOINT`, `EqualFold("always")` → mTLS) when true.
+/// Chooses the registry endpoint. With the default ADC client (`custom_client` false) the mode is
+/// `GOOGLE_API_USE_MTLS_ENDPOINT`, else the deprecated `GOOGLE_API_USE_MTLS`, lowercased;
+/// `always` selects mTLS. With a caller-supplied client (`custom_client` true) only
+/// `GOOGLE_API_USE_MTLS_ENDPOINT` is read, compared to `always` ignoring case.
 pub(crate) fn endpoint_for(env: &dyn EnvProvider, custom_client: bool) -> &'static str {
     let var = |key: &str| env.var(key).unwrap_or_default();
     let always = if custom_client {
         var("GOOGLE_API_USE_MTLS_ENDPOINT").eq_ignore_ascii_case("always")
     } else {
-        // Go `getMTLSMode` (google-api internal/cba.go); with no client certificate only
-        // `always` selects the mTLS endpoint.
+        // With no client certificate only `always` selects the mTLS endpoint.
         let mut mode = var("GOOGLE_API_USE_MTLS_ENDPOINT");
         if mode.is_empty() {
             mode = var("GOOGLE_API_USE_MTLS");
@@ -131,8 +130,8 @@ pub(crate) fn endpoint_for(env: &dyn EnvProvider, custom_client: bool) -> &'stat
     if always { BASE_URL_MTLS } else { BASE_URL_PROD }
 }
 
-/// Go `quotaProjectID`: `GOOGLE_CLOUD_QUOTA_PROJECT` when non-empty, else the credentials JSON's
-/// `quota_project_id` (`None` / unparsable JSON → empty), else `""`.
+/// Resolves the quota project: `GOOGLE_CLOUD_QUOTA_PROJECT` when non-empty, else the credentials
+/// JSON's `quota_project_id` (`None` / unparsable JSON → empty), else `""`.
 pub(crate) fn quota_project_id(env: &dyn EnvProvider, creds_json: Option<&[u8]>) -> String {
     if let Some(q) = env
         .var("GOOGLE_CLOUD_QUOTA_PROJECT")
@@ -143,8 +142,7 @@ pub(crate) fn quota_project_id(env: &dyn EnvProvider, creds_json: Option<&[u8]>)
     let Some(json) = creds_json.filter(|j| !j.is_empty()) else {
         return String::new();
     };
-    // Divergence (ledger 5c): the key is matched case-sensitively (Go's `json.Unmarshal`
-    // also accepts e.g. `Quota_Project_ID`).
+    // The key is matched case-sensitively: `Quota_Project_ID` is not recognised.
     #[derive(serde::Deserialize)]
     struct Parsed {
         #[serde(default)]
@@ -156,14 +154,14 @@ pub(crate) fn quota_project_id(env: &dyn EnvProvider, creds_json: Option<&[u8]>)
         .unwrap_or_default()
 }
 
-/// The ADC credentials JSON as Go's `creds.JSON`: the file named by
+/// The ADC credentials JSON: the file named by
 /// `GOOGLE_APPLICATION_CREDENTIALS`, else the gcloud well-known file
 /// (`$HOME/.config/gcloud/application_default_credentials.json`, or
 /// `%APPDATA%\gcloud\application_default_credentials.json` on Windows); `None` when unreadable
 /// (metadata-server credentials carry no JSON).
 pub(crate) fn adc_json(env: &dyn EnvProvider) -> Option<Vec<u8>> {
     let var = |key: &str| env.var(key).filter(|v| !v.is_empty());
-    // Go `FindDefaultCredentialsWithParams`: the named file, else the well-known file.
+    // The named file, else the well-known file.
     let path = match var("GOOGLE_APPLICATION_CREDENTIALS") {
         Some(file) => PathBuf::from(file),
         None if cfg!(windows) => PathBuf::from(var("APPDATA")?)

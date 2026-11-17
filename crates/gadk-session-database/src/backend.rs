@@ -15,7 +15,7 @@
 
 //! The dialect-neutral layer the service talks to: one transaction type whose operations
 //! dispatch to `sqlite.rs` or `postgres.rs` (identical function names and signatures) and
-//! record the state-table statements ADK-Go's locking test observes.
+//! record the state-table statements for tests that observe locking.
 
 use std::sync::Arc;
 
@@ -42,8 +42,7 @@ enum TxInner {
     Postgres(sqlx::Transaction<'static, sqlx::Postgres>),
 }
 
-/// An open transaction. Dropping it without [`Tx::commit`] rolls back (Go's `Transaction`
-/// callback returning an error).
+/// An open transaction. Dropping it without [`Tx::commit`] rolls back.
 pub(crate) struct Tx {
     inner: TxInner,
     log: StatementLog,
@@ -85,7 +84,7 @@ impl Backend {
 
     /// A transaction for writes: sqlite `BEGIN IMMEDIATE` (takes the write lock up front, so
     /// concurrent writers wait for the busy timeout instead of failing mid-transaction),
-    /// Postgres `BEGIN` (rows are locked `FOR UPDATE` where Go locks them).
+    /// Postgres `BEGIN` (state rows are locked `FOR UPDATE`).
     pub(crate) async fn begin_write(&self, log: StatementLog) -> sqlx::Result<Tx> {
         let inner = match self {
             #[cfg(feature = "sqlite")]
@@ -96,7 +95,7 @@ impl Backend {
         Ok(Tx { inner, log })
     }
 
-    /// The four tables in Go's `AutoMigrate` order (sessions, events, app_states, user_states).
+    /// The four tables in migration order (sessions, events, app_states, user_states).
     pub(crate) fn tables(&self) -> &'static [TableDef] {
         match self {
             #[cfg(feature = "sqlite")]
@@ -158,7 +157,7 @@ impl Tx {
         dispatch!(&mut self.inner, update_session(row))
     }
 
-    /// Deletes every event of one session (Go #1774: not left to ON DELETE CASCADE).
+    /// Deletes every event of one session explicitly rather than relying on `ON DELETE CASCADE`.
     pub(crate) async fn delete_session_events(
         &mut self,
         app_name: &str,

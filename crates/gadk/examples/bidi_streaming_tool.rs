@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// parity: adapted: Go example is an HTTP server on RunLiveHandler (sub-project 5)
-
 //! Live streaming tool: `count_to` streams its results back to the model while the session
 //! continues; the model can cancel it with `stop_streaming`.
 //!
@@ -48,7 +46,7 @@ struct StopArgs {
     function_name: String,
 }
 
-/// Result of `stop_streaming` (Go returns `{"status": …}`).
+/// Result of `stop_streaming`: `{"status": …}`.
 #[derive(Serialize, JsonSchema)]
 struct StatusResult {
     status: String,
@@ -61,7 +59,7 @@ struct DivisibleArgs {
     divisor: i64,
 }
 
-/// Result of `check_divisible` (Go returns `{"result": bool}` or `{"result": false, "error": …}`).
+/// Result of `check_divisible`: `{"result": bool}`, or `{"result": false, "error": …}`.
 #[derive(Serialize, JsonSchema)]
 struct DivisibleResult {
     result: bool,

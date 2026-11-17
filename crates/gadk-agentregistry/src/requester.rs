@@ -12,9 +12,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//! Go `agentregistry/requester.go`: `restRequester.Get`, the registry's GET transport. Go's
-//! `requester` interface seam (for a non-REST transport) has no counterpart: the client holds
-//! the REST requester directly.
+//! [`RestRequester`], the registry's GET transport. The client holds the REST requester
+//! directly; there is no trait seam for a non-REST transport.
 
 use std::sync::Arc;
 
@@ -26,29 +25,28 @@ use serde::de::DeserializeOwned;
 
 use crate::error::{ApiError, Error};
 
-/// Go `restRequester`: issues authenticated GETs to the public Agent Registry REST endpoint.
+/// Issues authenticated GETs to the public Agent Registry REST endpoint.
 #[derive(Clone)]
 pub(crate) struct RestRequester {
-    /// Go `httpClient`: the caller's client, or a default one on the ADC path.
+    /// The caller's client, or a default one on the ADC path.
     pub(crate) http: reqwest::Client,
     /// The ADC credential provider (cloud-platform scope) on the ADC path; `None` for a
     /// caller-supplied client. Its credential's headers are applied to every request.
     pub(crate) auth: Option<Arc<dyn CredentialProvider>>,
-    /// Go `baseURL`, e.g. `https://agentregistry.googleapis.com/v1`.
+    /// Base URL, e.g. `https://agentregistry.googleapis.com/v1`.
     pub(crate) base_url: String,
-    /// Go `basePath`: `projects/<project>/locations/<location>`.
+    /// Base path: `projects/<project>/locations/<location>`.
     pub(crate) base_path: String,
-    /// Go `userProject`: the `x-goog-user-project` value; empty sends none.
+    /// The `x-goog-user-project` value; empty sends none.
     pub(crate) user_project: String,
 }
 
 impl RestRequester {
-    /// Go `Get` with a nil `v`: GETs `resource_path` (absolute when it starts with `projects/`,
-    /// else under `base_path`) with `params` as the query (Go `url.Values.Encode`: keys sorted,
-    /// `QueryEscape`d; no `?` when empty). Applies the credential's headers (ADC path), then sets
-    /// `Content-Type: application/json` and, when `user_project` is non-empty,
-    /// `x-goog-user-project` over them (one value each). A non-2xx status is
-    /// [`Error::Api`]; the body of a 2xx answer is returned undecoded.
+    /// GETs `resource_path` (absolute when it starts with `projects/`, else under `base_path`)
+    /// with `params` as the query (keys sorted, query-escaped; no `?` when empty). Applies the
+    /// credential's headers (ADC path), then sets `Content-Type: application/json` and, when
+    /// `user_project` is non-empty, `x-goog-user-project` over them (one value each). A non-2xx
+    /// status is [`Error::Api`]; the body of a 2xx answer is returned undecoded.
     pub(crate) async fn get(
         &self,
         resource_path: &str,
@@ -59,9 +57,8 @@ impl RestRequester {
         } else {
             format!("{}/{}/{}", self.base_url, self.base_path, resource_path)
         };
-        // Divergence (ledger 5c): `Url::parse` (WHATWG) normalises `.` / `..` path segments and
-        // accepts an invalid escape such as `%zz`; Go's `url.Parse` + `RequestURI()` sends
-        // `projects/p/../x` as written and fails `%zz` with `building request:`.
+        // `Url::parse` (WHATWG) normalises `.` / `..` path segments and accepts an invalid escape
+        // such as `%zz`, so `projects/p/../x` is not sent as written.
         let mut url =
             reqwest::Url::parse(&full_url).map_err(|e| Error::BuildRequest(e.to_string()))?;
         if !params.is_empty() {
@@ -85,7 +82,7 @@ impl RestRequester {
         }
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         if !self.user_project.is_empty() {
-            // Go's transport rejects a value with control characters when the request is sent.
+            // A value with control characters is rejected when the request is sent.
             let value = HeaderValue::from_bytes(self.user_project.as_bytes()).map_err(|_| {
                 http_err(
                     "net/http: invalid header field value for \"X-Goog-User-Project\"".to_owned(),
@@ -116,7 +113,7 @@ impl RestRequester {
         Ok(body)
     }
 
-    /// Go `Get` with a non-nil `v`: [`RestRequester::get`] then a JSON decode into `T`
+    /// [`RestRequester::get`] then a JSON decode into `T`
     /// ([`Error::Decode`] on failure).
     pub(crate) async fn get_json<T: DeserializeOwned>(
         &self,

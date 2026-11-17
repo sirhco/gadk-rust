@@ -13,18 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk: Agent Development Kit for Rust (port of ADK-Go).
+//! gadk: Agent Development Kit for Rust.
 //!
 //! The member crates are re-exported as modules; [`prelude`] gathers the common types for
 //! building and running agents.
 
-/// The Agent2Agent (A2A) protocol: serve a gadk agent over A2A (`a2a::server`) and use a remote
-/// A2A agent as a gadk agent (`a2a::remoteagent`), wire-compatible with ADK-Go (feature `a2a`, not
-/// on by default; re-export of `gadk-a2a`).
+/// The Agent2Agent (A2A) protocol: serve a gadk agent over A2A (`a2a::server`) and use a remote A2A
+/// agent as a gadk agent (`a2a::remoteagent`), wire-compatible with ADK's A2A agents (feature
+/// `a2a`, not on by default; re-export of `gadk-a2a`).
 #[cfg(feature = "a2a")]
 pub use gadk_a2a as a2a;
 pub use gadk_agent as agent;
-/// The BigQuery Agent Analytics plugin, as ADK-Go's `plugin/agentanalytics`: the plugin
+/// The BigQuery Agent Analytics plugin: the plugin
 /// (`new_bigquery_agent_analytics_plugin*`, a [`agent::Plugin`] for a runner's plugin list,
 /// `as_bigquery_agent_analytics_plugin` for its drop stats and view sync), its configuration,
 /// the events table's BigQuery and Arrow schemas, table creation and additive schema upgrade, the
@@ -34,8 +34,7 @@ pub use gadk_agent as agent;
 pub use gadk_agentanalytics as agentanalytics;
 /// The Agent Engine server and launcher: serve an agent with the Vertex AI Agent Engine
 /// reasoning-engine API (`/reasoning_engine`, `/stream_reasoning_engine`), wire-compatible with
-/// ADK-Go's `server/agentengine` and `cmd/launcher/agentengine` (feature `agentengine`, not on by
-/// default).
+/// ADK's Agent Engine server and launcher (feature `agentengine`, not on by default).
 #[cfg(feature = "agentengine")]
 pub mod agentengine {
     pub use gadk_launcher::agentengine::new_launcher;
@@ -46,8 +45,8 @@ pub mod agentengine {
 }
 /// The Agent Registry client: list and resolve registered agents, MCP servers and endpoints,
 /// and use them as a remote A2A agent (`remote_agent`, feature `a2a` of the crate) or an MCP
-/// toolset (`mcp_toolset`, feature `mcp`), as ADK-Go's `agentregistry` (feature `agentregistry`,
-/// not on by default; re-export of `gadk-agentregistry`).
+/// toolset (`mcp_toolset`, feature `mcp`). Feature `agentregistry`, not on by default; re-export
+/// of `gadk-agentregistry`.
 #[cfg(feature = "agentregistry")]
 pub use gadk_agentregistry as agentregistry;
 /// Claude models on the Anthropic Messages API and on Vertex AI (feature `anthropic`, not on
@@ -71,9 +70,9 @@ pub use gadk_eval as eval;
 #[cfg(feature = "gemini")]
 pub use gadk_gemini as gemini;
 pub use gadk_genai as genai;
-/// The ADK-Go launcher: run an agent from the command line in console mode or behind a web server
-/// with the REST API, A2A, the ADK web UI and the Pub/Sub and Eventarc triggers, with ADK-Go's
-/// command lines, flags and output (feature `launcher`, not on by default; re-export of
+/// The launcher: run an agent from the command line in console mode or behind a web server with the
+/// REST API, A2A, the ADK web UI and the Pub/Sub and Eventarc triggers, with the command lines,
+/// flags and output of ADK's launcher (feature `launcher`, not on by default; re-export of
 /// `gadk-launcher`).
 #[cfg(feature = "launcher")]
 pub use gadk_launcher as launcher;
@@ -110,8 +109,8 @@ pub use gadk_prompts as prompts;
 #[cfg(feature = "prompts-firestore")]
 pub use gadk_prompts_firestore as prompts_firestore;
 /// The ADK REST API server (`server::rest`) with inbound authentication (`server::authn`) and
-/// authorization (`server::authz`), wire-compatible with an ADK-Go server (feature `server`, not
-/// on by default; re-export of `gadk-server`).
+/// authorization (`server::authz`), wire-compatible with ADK REST clients such as the ADK web UI
+/// (feature `server`, not on by default; re-export of `gadk-server`).
 #[cfg(feature = "server")]
 pub use gadk_server as server;
 pub use gadk_session as session;
@@ -119,7 +118,7 @@ pub use gadk_session as session;
 /// feature (feature `database`, not on by default; re-export of `gadk-session-database`).
 #[cfg(feature = "database")]
 pub use gadk_session_database as session_database;
-/// OpenTelemetry export, as ADK-Go's `telemetry` package: tracer, logger and meter providers
+/// OpenTelemetry export: tracer, logger and meter providers
 /// from options and the environment (OTLP/HTTP, export to `telemetry.googleapis.com`, the GCP
 /// resource detector) and the `tracing` layer that exports gadk's ADK spans and log records
 /// through them (feature `telemetry`, not on by default, enabled by `launcher`; re-export of

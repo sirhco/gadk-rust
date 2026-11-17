@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The tool catalog and agent of Go examples/toolsearch/main.go (`newAgent`, `catalog`,
-//! `catalogTools`), shared by the `toolsearch` example and
+//! The tool catalog and agent of the toolsearch example (`new_agent`, `Catalog`,
+//! `catalog_tools`), shared by the `toolsearch` example and
 //! `crates/gadk/tests/examples_toolsearch_main.rs` through `#[path]`. Not an example target:
 //! `crates/gadk/Cargo.toml` sets `autoexamples = false`.
 
@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 /// The one tool the model sees before any search.
 pub const CORE_TOOL: &str = "get_current_time";
 
-/// Port of Go `newAgent`: an agent that sees `get_current_time` and `search_tools` up front.
+/// An agent that sees `get_current_time` and `search_tools` up front.
 /// Every other catalog tool is declared to the model only after `search_tools` has returned it.
 pub fn new_agent(model: Arc<dyn Llm>) -> anyhow::Result<Arc<dyn Agent>> {
     let tools = catalog_tools()?;
@@ -64,7 +64,7 @@ pub fn new_agent(model: Arc<dyn Llm>) -> anyhow::Result<Arc<dyn Agent>> {
     })?)
 }
 
-/// Port of Go `catalog`: the base toolset toolsearch wraps. In a real agent it would typically
+/// The base toolset toolsearch wraps. In a real agent it would typically
 /// be one or more MCP toolsets with many tools.
 struct Catalog(Vec<Arc<dyn Tool>>);
 
@@ -83,7 +83,7 @@ impl Toolset for Catalog {
     }
 }
 
-/// Go `numbers`.
+/// The two numbers of an arithmetic tool.
 #[derive(Deserialize, JsonSchema)]
 struct Numbers {
     /// The first number.
@@ -92,13 +92,13 @@ struct Numbers {
     b: f64,
 }
 
-/// Go `numberResult`.
+/// The result of an arithmetic tool.
 #[derive(Serialize, JsonSchema)]
 struct NumberResult {
     value: f64,
 }
 
-/// Go `temperature`.
+/// The input of `convert_temperature`.
 #[derive(Deserialize, JsonSchema)]
 struct Temperature {
     /// The temperature to convert.
@@ -107,21 +107,21 @@ struct Temperature {
     from: String,
 }
 
-/// Go `temperatureResult`.
+/// The converted temperature and its unit.
 #[derive(Serialize, JsonSchema)]
 struct TemperatureResult {
     value: f64,
     unit: String,
 }
 
-/// Go `text`.
+/// The input of the text tools.
 #[derive(Deserialize, JsonSchema)]
 struct Text {
     /// The text to process.
     text: String,
 }
 
-/// Go `textResult` (both fields `omitempty`).
+/// The result of a text tool; each field is omitted when empty or zero.
 #[derive(Serialize, JsonSchema)]
 struct TextResult {
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -134,18 +134,18 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
-/// Go `empty`.
+/// The input of a tool that takes no arguments.
 #[derive(Deserialize, JsonSchema)]
 struct Empty {}
 
-/// Go `timeResult`.
+/// The result of `get_current_time`.
 #[derive(Serialize, JsonSchema)]
 struct TimeResult {
     time: String,
 }
 
 async fn get_current_time(_ctx: Context, _args: Empty) -> Result<TimeResult, ToolError> {
-    // Go formats local time with time.RFC3339; the platform clock is UTC.
+    // RFC 3339 in UTC: the platform clock is UTC.
     let now = gadk::platform::Platform::default().now();
     Ok(TimeResult {
         time: now.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
@@ -190,7 +190,7 @@ async fn reverse_text(_ctx: Context, t: Text) -> Result<TextResult, ToolError> {
     })
 }
 
-/// Port of Go `catalogTools`: the six function tools, in Go's order.
+/// The six function tools of the catalog.
 fn catalog_tools() -> Result<Vec<Arc<dyn Tool>>, ToolError> {
     Ok(vec![
         FunctionTool::new(

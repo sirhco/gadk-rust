@@ -27,8 +27,7 @@ use http::HeaderMap;
 
 use crate::error::backend;
 
-/// The OAuth scopes requested for Application Default Credentials (Go `storage.NewClient`'s
-/// defaults).
+/// The OAuth scopes requested for Application Default Credentials.
 pub(crate) const SCOPES: [&str; 2] = [
     "https://www.googleapis.com/auth/devstorage.full_control",
     "https://www.googleapis.com/auth/cloud-platform",
@@ -37,21 +36,19 @@ pub(crate) const SCOPES: [&str; 2] = [
 /// The base URL when neither an endpoint nor `STORAGE_EMULATOR_HOST` is set.
 pub(crate) const DEFAULT_BASE_URL: &str = "https://storage.googleapis.com";
 
-/// How a [`GcsArtifactService`](crate::GcsArtifactService) reaches Google Cloud Storage (the
-/// counterpart of the `option.ClientOption`s Go's `NewService` passes to `storage.NewClient`).
+/// How a [`GcsArtifactService`](crate::GcsArtifactService) reaches Google Cloud Storage.
 #[derive(Clone)]
 pub struct GcsConfig {
-    /// The credentials sent with every request (Go `option.WithAuthCredentials`). `None`
+    /// The credentials sent with every request. `None`
     /// resolves Application Default Credentials through [`env`](Self::env) with the scopes
-    /// `devstorage.full_control` and `cloud-platform` (Go's defaults).
+    /// `devstorage.full_control` and `cloud-platform`.
     pub credentials: Option<Credentials>,
-    /// The HTTP client (Go `option.WithHTTPClient`); `None` builds a reqwest client.
+    /// The HTTP client; `None` builds a reqwest client.
     pub http_client: Option<Arc<dyn HttpClient>>,
-    /// The base URL (Go `option.WithEndpoint`): `scheme://host[:port]`, optionally ending in `/`
-    /// or `/storage/v1` (the form Go's endpoint values take). `None` uses
+    /// The base URL: `scheme://host[:port]`, optionally ending in `/` or `/storage/v1`. `None` uses
     /// `STORAGE_EMULATOR_HOST` when it is set, else `https://storage.googleapis.com`.
     pub endpoint: Option<String>,
-    /// Headers added to every request (Go `option.WithHeaders`).
+    /// Headers added to every request.
     pub headers: HeaderMap,
     /// Where `STORAGE_EMULATOR_HOST` and `GOOGLE_APPLICATION_CREDENTIALS` are read.
     pub env: Arc<dyn EnvProvider>,
@@ -89,7 +86,7 @@ pub(crate) struct Resolved {
 }
 
 impl GcsConfig {
-    /// The base URL and the credentials (Go `storage.NewClient`'s option handling): the
+    /// The base URL and the credentials: the
     /// endpoint, else `STORAGE_EMULATOR_HOST`, else [`DEFAULT_BASE_URL`]; no authentication
     /// when `STORAGE_EMULATOR_HOST` is non-empty, else [`credentials`](Self::credentials) or
     /// Application Default Credentials with [`SCOPES`].
@@ -123,7 +120,7 @@ impl GcsConfig {
 }
 
 /// The base URL of an endpoint value: `http`/`https`, a host, and no path other than `/`,
-/// `/storage/v1` or `/storage/v1/` (the form Go's `option.WithEndpoint` values take).
+/// `/storage/v1` or `/storage/v1/`.
 fn endpoint_base_url(endpoint: &str) -> Result<String, ArtifactError> {
     let invalid = || {
         ArtifactError::InvalidRequest(format!(
@@ -144,7 +141,7 @@ fn endpoint_base_url(endpoint: &str) -> Result<String, ArtifactError> {
 }
 
 /// The base URL of a `STORAGE_EMULATOR_HOST` value: `http://{host}`, or the value's own scheme
-/// and host when it has a scheme (Go replaces its path).
+/// and host when it has a scheme (any path, query or fragment is dropped).
 fn emulator_base_url(host: &str) -> String {
     match host.split_once("://") {
         Some((scheme, rest)) => {

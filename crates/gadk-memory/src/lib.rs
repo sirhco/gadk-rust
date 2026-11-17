@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-memory: long-term memory service (port of ADK-Go memory/).
+//! gadk-memory: long-term memory service.
 
 pub mod inmemory;
 pub mod service;
