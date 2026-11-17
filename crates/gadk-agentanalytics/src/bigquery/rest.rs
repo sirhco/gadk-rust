@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`BigQueryClient`]: the subset of `cloud.google.com/go/bigquery` (v1.79.0) that ADK-Go's
-//! `plugin/agentanalytics` uses, over gadk's REST transport (`gadk_model::rest`): table
-//! metadata get / insert / patch (with `If-Match`), query jobs (`jobs.insert`, then Go's
-//! `Job.Wait` polling), and the `googleapi.CheckResponse` error mapping
-//! ([`gadk_model::rest::googleapi::check_response`]'s [`ApiError`](crate::error::ApiError)).
-//! [`TableOps`] is Go's `bqTableAdapter` (one table's [`TableMetadataOps`]).
+//! [`BigQueryClient`]: the subset of the Google Cloud BigQuery client library that the plugin uses,
+//! over gadk's REST transport (`gadk_model::rest`): table metadata get / insert / patch (with
+//! `If-Match`), query jobs (`jobs.insert`, then polling until done), and the error mapping of
+//! [`gadk_model::rest::googleapi::check_response`] ([`ApiError`](crate::error::ApiError)). The
+//! requests and retry policy are those of the client library. [`TableOps`] is one table's
+//! [`TableMetadataOps`].
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -50,14 +50,13 @@ use crate::schema_upgrade::{
     TimePartitioning,
 };
 
-/// The OAuth scope Go's `bigquery.NewClient` requests (`bigquery.Scope`).
+/// The OAuth scope the client requests.
 pub(crate) const SCOPE: &str = "https://www.googleapis.com/auth/bigquery";
 
-/// The REST base path without its trailing `/` (Go `bigquery/v2`'s `basePath`).
+/// The REST base path without its trailing `/`.
 pub(crate) const DEFAULT_BASE_URL: &str = "https://bigquery.googleapis.com/bigquery/v2";
 
-/// One attempt per call: the retries are Go's `runWithRetry` loop in this module, not the
-/// transport's.
+/// One attempt per call: the retries are this module's retry loop, not the transport's.
 const SINGLE_ATTEMPT: RetryPolicy = RetryPolicy {
     max_retries: 0,
     max_backoff: Duration::ZERO,
@@ -65,10 +64,10 @@ const SINGLE_ATTEMPT: RetryPolicy = RetryPolicy {
     retry_dropped_body: false,
 };
 
-/// Go `defaultRetryReasons`.
+/// The error reasons that are retried by default.
 const DEFAULT_RETRY_REASONS: &[&str] = &["backendError", "rateLimitExceeded"];
 
-/// Go `jobRetryReasons` (`jobs.insert` and `jobs.getQueryResults`).
+/// The error reasons that are retried for `jobs.insert` and `jobs.getQueryResults`.
 const JOB_RETRY_REASONS: &[&str] = &[
     "backendError",
     "rateLimitExceeded",
@@ -76,10 +75,10 @@ const JOB_RETRY_REASONS: &[&str] = &[
     "internalError",
 ];
 
-/// Go `retry5xxCodes`.
+/// The HTTP status codes that are always retried.
 const RETRY_5XX_CODES: [u16; 4] = [500, 502, 503, 504];
 
-/// A BigQuery job's identity (Go `bigquery.Job`'s project, ID and location).
+/// A BigQuery job's identity (project, ID and location).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JobReference {
     /// The job's project.
@@ -90,53 +89,51 @@ pub struct JobReference {
     pub location: String,
 }
 
-/// A job's status (Go `bigquery.JobStatus` subset).
+/// A job's status (a subset of a job's status).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JobStatus {
     /// `PENDING`, `RUNNING` or `DONE`.
     pub state: String,
-    /// The job's error (Go `JobStatus.Err()`), from `status.errorResult`; set only once the
-    /// job is `DONE` (Go `setStatus`).
+    /// The job's error from `status.errorResult`; set only once the job is `DONE`.
     pub error_result: Option<BigQueryError>,
     /// All errors the job met (`status.errors`).
     pub errors: Vec<BigQueryError>,
 }
 
 impl JobStatus {
-    /// Go `JobStatus.Done()`.
+    /// Whether the job is `DONE`.
     pub fn done(&self) -> bool {
         self.state == "DONE"
     }
 
-    /// Go `JobStatus.Err()`: the job's error result, `None` when it succeeded.
+    /// The job's error result, `None` when it succeeded.
     pub fn err(&self) -> Option<Error> {
         self.error_result.clone().map(Error::BigQuery)
     }
 }
 
-/// A submitted job (Go `*bigquery.Job`): its reference, whether it is a query job and the
-/// status `jobs.insert` returned (Go `Job.LastStatus()`).
+/// A submitted job: its reference, whether it is a query job and the status `jobs.insert` returned.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Job {
     /// The job's identity.
     pub reference: JobReference,
-    /// Go `Job.isQuery()`: the job resource carried a `configuration.query`. [`wait_job`]
-    /// waits for a query job through `jobs.getQueryResults`, and polls `jobs.get` otherwise.
+    /// The job resource carried a `configuration.query`. [`wait_job`] waits for a query job through
+    /// `jobs.getQueryResults`, and polls `jobs.get` otherwise.
     ///
     /// [`wait_job`]: BigQueryClient::wait_job
     pub is_query: bool,
-    /// Go `LastStatus()`.
+    /// The status of the last read.
     pub last_status: Option<JobStatus>,
 }
 
-/// A BigQuery REST client for one default project (Go `*bigquery.Client`).
+/// A BigQuery REST client for one default project.
 pub struct BigQueryClient {
     /// The transport (HTTP client, one attempt per request).
     pub(crate) transport: RestTransport,
     /// The REST base path without a trailing `/`, e.g.
     /// `https://bigquery.googleapis.com/bigquery/v2`; request paths are appended after `/`.
     pub(crate) base_url: String,
-    /// The client's project (Go `Client.Project()`), for jobs and `Dataset(...)`.
+    /// The client's project for jobs and for datasets given without a project.
     pub(crate) project_id: String,
     /// The credentials sent with every request; `None` turns authentication off.
     pub(crate) credentials: Option<Credentials>,
@@ -155,15 +152,15 @@ impl fmt::Debug for BigQueryClient {
 }
 
 impl BigQueryClient {
-    /// Go `bigquery.NewClient(ctx, projectID, opts...)`, reading `GOOGLE_APPLICATION_CREDENTIALS`
-    /// from the process environment.
+    /// Builds a client for `project_id`, reading `GOOGLE_APPLICATION_CREDENTIALS` from the process
+    /// environment.
     ///
-    /// Requests go to [`ClientOptions::endpoint`] (Go `option.WithEndpoint`: a URL is the REST
-    /// base path, e.g. `http://127.0.0.1:9050/bigquery/v2/`; a bare `host[:port]` replaces the
-    /// host of the default `https://bigquery.googleapis.com/bigquery/v2/`), else the default.
-    /// They carry [`ClientOptions::credentials`], no credentials when
-    /// [`ClientOptions::without_authentication`] or [`ClientOptions::http_client`] is set (Go
-    /// uses a `WithHTTPClient` client as is), else Application Default Credentials with the
+    /// Requests go to [`ClientOptions::endpoint`] (a URL is the REST base path, e.g.
+    /// `http://127.0.0.1:9050/bigquery/v2/`; a bare `host[:port]` replaces the host of the default
+    /// `https://bigquery.googleapis.com/bigquery/v2/`), else the default. They carry
+    /// [`ClientOptions::credentials`], no credentials when
+    /// [`ClientOptions::without_authentication`] or [`ClientOptions::http_client`] is set (a
+    /// caller's HTTP client is used as is), else Application Default Credentials with the
     /// `bigquery` scope.
     ///
     /// # Errors
@@ -191,8 +188,7 @@ impl BigQueryClient {
                  credentials",
             )));
         }
-        // Go `htransport.NewClient` (via `bq.NewService`): a caller-supplied
-        // `option.WithHTTPClient` is used as is, with no credential lookup and no
+        // A caller-supplied HTTP client is used as is, with no credential lookup and no
         // authentication.
         let credentials = if options.without_authentication || options.http_client.is_some() {
             None
@@ -226,13 +222,13 @@ impl BigQueryClient {
         })
     }
 
-    /// Go `Client.Project()`.
+    /// The client's default project.
     pub fn project_id(&self) -> &str {
         &self.project_id
     }
 
-    /// Go `Table.Metadata(ctx)`: `GET .../projects/{p}/datasets/{d}/tables/{t}`, retried as
-    /// Go's `runWithRetry` (5xx, `backendError`, `rateLimitExceeded`).
+    /// `GET .../projects/{p}/datasets/{d}/tables/{t}`, retried on 5xx, `backendError`,
+    /// `rateLimitExceeded`).
     pub async fn get_table(
         &self,
         ctx: &Context,
@@ -248,8 +244,8 @@ impl BigQueryClient {
         table_metadata_from_reply(&body)
     }
 
-    /// Go `Table.Create(ctx, meta)`: `POST .../projects/{p}/datasets/{d}/tables` with the
-    /// table resource (and its `tableReference`), retried as Go's `runWithRetry`.
+    /// `POST .../projects/{p}/datasets/{d}/tables` with the table resource (and its
+    /// `tableReference`), retried as `get_table` is.
     pub async fn insert_table(
         &self,
         ctx: &Context,
@@ -277,8 +273,8 @@ impl BigQueryClient {
         table_metadata_from_reply(&body)
     }
 
-    /// Go `Table.Update(ctx, update, etag)`: `PATCH .../tables/{t}` with `If-Match: etag` when
-    /// `etag` is non-empty, retried as Go's `runWithRetry`.
+    /// `PATCH .../tables/{t}` with `If-Match: etag` when `etag` is non-empty, retried as
+    /// `get_table` is.
     pub async fn patch_table(
         &self,
         ctx: &Context,
@@ -308,14 +304,14 @@ impl BigQueryClient {
         table_metadata_from_reply(&body)
     }
 
-    /// Go `client.Query(query).Run(ctx)`: `POST .../projects/{client project}/jobs` with a
-    /// standard-SQL query job under a new random 32-hex-digit job ID, retried with the same ID
-    /// as Go's `runWithRetryExplicit(jobRetryReasons)`; the returned job and its last status.
+    /// `POST .../projects/{client project}/jobs` with a standard-SQL query job under a new random
+    /// 32-hex-digit job ID, retried with the same ID on the job retry reasons; the returned job and
+    /// its last status.
     ///
     /// # Errors
     ///
-    /// The `jobs.insert` error (a 409 is returned as it is: Go does not fetch the existing
-    /// job), or `unexpected job state: …` for a status Go does not know.
+    /// The `jobs.insert` error (a 409 is returned as it is: the existing job is not fetched), or
+    /// `unexpected job state: …` for an unknown status.
     pub async fn insert_query_job(&self, ctx: &Context, query: &str) -> Result<Job, Error> {
         let reference = JobReference {
             project_id: self.project_id.clone(),
@@ -339,8 +335,7 @@ impl BigQueryClient {
                 job_id: r.job_id,
                 location: r.location,
             },
-            // Divergence (ledger 7b-1): Go's `bqToJob` dereferences a missing `jobReference`
-            // (a panic); the reference sent is kept instead.
+            // A reply without a `jobReference` keeps the reference sent.
             None => reference,
         };
         Ok(Job {
@@ -350,10 +345,10 @@ impl BigQueryClient {
         })
     }
 
-    /// Go `Job.Wait(ctx)`: for a query job, polls `jobs.getQueryResults` (`maxResults=0`)
-    /// until `jobComplete`, then reads the status with `jobs.get`
-    /// (`fields=status,statistics`); for another job, polls `jobs.get` until the job is done.
-    /// Go's backoffs and retry predicates apply. The returned status may carry the job's error
+    /// Waits for the job: for a query job, polls `jobs.getQueryResults` (`maxResults=0`) until
+    /// `jobComplete`, then reads the status with `jobs.get` (`fields=status,statistics`); for
+    /// another job, polls `jobs.get` until the job is done. The polling backoff and retry rules are
+    /// those of the client library. The returned status may carry the job's error
     /// ([`JobStatus::err`]); an `Err` is a failure to learn the status.
     pub async fn wait_job(&self, ctx: &Context, job: &Job) -> Result<JobStatus, Error> {
         let mut last = job.last_status.clone();
@@ -361,8 +356,8 @@ impl BigQueryClient {
             self.wait_for_query(ctx, &job.reference).await?;
             return self.job_status(ctx, &job.reference, &mut last).await;
         }
-        // Go `internal.Retry(ctx, gax.Backoff{}, …)` stopping at the first error, so a pause
-        // cut short by `ctx` returns the bare context error.
+        // The retry loop stops at the first error, so a pause cut short by `ctx` returns the bare
+        // context error.
         let mut backoff = Pauses::new(Backoff::default());
         loop {
             let status = self.job_status(ctx, &job.reference, &mut last).await?;
@@ -373,7 +368,7 @@ impl BigQueryClient {
         }
     }
 
-    /// Go `Job.waitForQuery`: `GET .../projects/{p}/queries/{job}` until `jobComplete`.
+    /// `GET .../projects/{p}/queries/{job}` until `jobComplete`.
     async fn wait_for_query(&self, ctx: &Context, job: &JobReference) -> Result<(), Error> {
         let path = format!(
             "projects/{}/queries/{}",
@@ -413,8 +408,8 @@ impl BigQueryClient {
         .await
     }
 
-    /// Go `Job.Status(ctx)`: `jobs.get` with `fields=status,statistics` (retried as Go's
-    /// `runWithRetry`), updating `last` (Go `Job.lastStatus`) when the reply has a status.
+    /// `jobs.get` with `fields=status,statistics` (retried as `get_table` is), updating `last` when
+    /// the reply has a status.
     async fn job_status(
         &self,
         ctx: &Context,
@@ -443,8 +438,8 @@ impl BigQueryClient {
         Ok(last.clone().unwrap_or_default())
     }
 
-    /// `{base_url}/{path}?{query}`: `alt=json`, `prettyPrint=false` and `params`, sorted by key
-    /// and query-escaped (Go `url.Values.Encode`).
+    /// `{base_url}/{path}?{query}`: `alt=json`, `prettyPrint=false` and `params`, sorted by key and
+    /// query-escaped.
     fn url(&self, path: &str, params: &[(&str, &str)]) -> String {
         let mut all: BTreeMap<&str, &str> = params.iter().copied().collect();
         all.insert("alt", "json");
@@ -457,8 +452,8 @@ impl BigQueryClient {
         format!("{}/{path}?{query}", self.base_url)
     }
 
-    /// One request (Go `call.Do()`), cancelled when `ctx` ends: a 2xx response's body, else
-    /// Go `googleapi.CheckResponse`'s [`ApiError`](crate::error::ApiError).
+    /// One request, cancelled when `ctx` ends: a 2xx response's body, else the
+    /// [`ApiError`](crate::error::ApiError).
     async fn call(
         &self,
         ctx: &Context,
@@ -489,7 +484,7 @@ impl BigQueryClient {
                 return Err(Error::msg("bigquery: unexpected streaming reply"));
             };
             if parts.status == http::StatusCode::NO_CONTENT {
-                // Go `gensupport.DecodeResponse` leaves the zero value for a 204.
+                // A 204 decodes to the zero value.
                 Ok(Bytes::from_static(b"{}"))
             } else {
                 check_response(&parts, &body).map_err(Error::Api)?;
@@ -537,9 +532,9 @@ impl RequestHeaders for CallHeaders<'_> {
     }
 }
 
-/// The base path of an endpoint option (Go `getEndpoint` + `googleapi.ResolveRelative`): a
-/// value with `://` is the base path itself, which keeps everything up to its last `/` (Go
-/// resolves request paths against it); a bare `host[:port]` replaces the host of the default.
+/// The base path of an endpoint option: a value with `://` is the base path itself, which keeps
+/// everything up to its last `/` (request paths are resolved against it); a bare `host[:port]`
+/// replaces the host of the default.
 fn endpoint_base_url(endpoint: &str) -> String {
     let Some(scheme_end) = endpoint.find("://") else {
         return format!("https://{endpoint}/bigquery/v2");
@@ -561,8 +556,8 @@ fn table_path(project_id: &str, dataset_id: &str, table_id: &str) -> String {
     )
 }
 
-/// Go `googleapi.Expand`'s escaping of a `{var}` path parameter: everything but ASCII letters,
-/// digits and `-._~` is percent-encoded (upper-case hex).
+/// The escaping of a `{var}` path parameter: everything but ASCII letters, digits and `-._~` is
+/// percent-encoded (upper-case hex).
 fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -575,33 +570,32 @@ fn escape(s: &str) -> String {
     out
 }
 
-/// Go `url.QueryEscape`: like [`escape`], with a space as `+`.
+/// Like [`escape`], with a space as `+`.
 fn query_escape(s: &str) -> String {
     escape(s).replace("%20", "+")
 }
 
-/// The JSON request body Go's client sends (`json.NewEncoder(...).Encode`: trailing newline).
+/// The JSON request body: compact JSON with a trailing newline.
 fn json_body(v: &Value) -> Result<Bytes, Error> {
     let mut out = serde_json::to_vec(v).map_err(Error::other)?;
     out.push(b'\n');
     Ok(Bytes::from(out))
 }
 
-/// Go `gensupport.DecodeResponse` for a 2xx other than 204 (which [`BigQueryClient::call`]
-/// turns into `{}`): the body must be JSON.
+/// Decodes a 2xx response other than 204 (which [`BigQueryClient::call`] turns into `{}`): the body
+/// must be JSON.
 fn decode<T: for<'de> Deserialize<'de>>(body: &[u8]) -> Result<T, Error> {
     if body.is_empty() {
-        // Go's decoder reports `EOF` for an empty 2xx body.
+        // An empty 2xx body is an `EOF` error.
         return Err(Error::msg("EOF"));
     }
     serde_json::from_slice(body).map_err(Error::other)
 }
 
-/// Go `(*TableMetadata).toBQ()` for the fields [`TableMetadata`] has.
+/// The `tables` resource for the fields [`TableMetadata`] has.
 fn table_resource(meta: &TableMetadata) -> Result<Map<String, Value>, Error> {
-    // Divergence (ledger 7b-1): Go tests `Schema != nil`; a `Vec` has no nil, so an empty
-    // schema counts as none (Go sends `"schema":{}` for a non-nil empty one and rejects it
-    // beside a view query).
+    // An empty schema counts as none: it is not sent as `"schema":{}` and is not rejected beside a
+    // view query.
     if !meta.schema.is_empty() && !meta.view_query.is_empty() {
         return Err(Error::msg(
             "bigquery: provide Schema or ViewQuery, not both",
@@ -639,7 +633,7 @@ fn table_resource(meta: &TableMetadata) -> Result<Map<String, Value>, Error> {
     Ok(t)
 }
 
-/// Go `(*TableMetadataToUpdate).toBQ()` for a schema and set labels.
+/// The `tables.patch` body for a schema and set labels.
 fn table_update_resource(update: &TableMetadataUpdate) -> Result<Value, Error> {
     let mut t = Map::new();
     if let Some(schema) = &update.schema {
@@ -651,7 +645,7 @@ fn table_update_resource(update: &TableMetadataUpdate) -> Result<Value, Error> {
     Ok(Value::Object(t))
 }
 
-/// Go `Schema.toBQ()`: `{"fields": [...]}` (`{}` for an empty schema).
+/// `{"fields": [...]}` (`{}` for an empty schema).
 fn schema_value(schema: &Schema) -> Result<Value, Error> {
     serde_json::to_value(TableSchema {
         fields: schema.clone(),
@@ -659,7 +653,7 @@ fn schema_value(schema: &Schema) -> Result<Value, Error> {
     .map_err(Error::other)
 }
 
-/// Go `(*TimePartitioning).toBQ()`: an empty type is `DAY`; `expirationMs` is an int64 string.
+/// An empty type is `DAY`; `expirationMs` is an int64 string.
 fn time_partitioning_value(p: &TimePartitioning) -> Value {
     let mut m = Map::new();
     let partition_type = if p.partition_type.is_empty() {
@@ -681,7 +675,7 @@ fn time_partitioning_value(p: &TimePartitioning) -> Value {
     Value::Object(m)
 }
 
-/// The `tables` resource fields Go's `bqToTableMetadata` keeps that [`TableMetadata`] has.
+/// The `tables` resource fields that [`TableMetadata`] has.
 #[derive(Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct TableReply {
@@ -723,16 +717,14 @@ struct ViewReply {
     query: String,
 }
 
-/// Go `bqToTableMetadata` for the fields [`TableMetadata`] has.
+/// The [`TableMetadata`] of a `tables` reply.
 fn table_metadata_from_reply(body: &[u8]) -> Result<TableMetadata, Error> {
     let reply: TableReply = decode(body)?;
     let time_partitioning = match reply.time_partitioning {
         None => None,
         Some(p) => {
-            // Divergence (ledger 7b-1): Go decodes `expirationMs` as a `,string` int64: a bare
-            // JSON number is an error there and accepted here (a non-u64 one as 0), and a
-            // negative string is a negative expiration there and a parse error here (a
-            // `Duration` cannot be negative).
+            // `expirationMs` is an int64 string. A bare JSON number is also accepted (a non-u64 one
+            // as 0), and a negative string is a parse error (a `Duration` cannot be negative).
             let ms = match &p.expiration_ms {
                 None | Some(Value::Null) => 0,
                 Some(Value::String(s)) => s.parse::<u64>().map_err(Error::other)?,
@@ -763,7 +755,7 @@ fn table_metadata_from_reply(body: &[u8]) -> Result<TableMetadata, Error> {
     })
 }
 
-/// The `jobs` resource fields Go's `bqToJob` / `Job.Status` read.
+/// The `jobs` resource fields that are read.
 #[derive(Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct JobReply {
@@ -827,8 +819,8 @@ struct QueryResultsReply {
     job_complete: bool,
 }
 
-/// Go `(*Job).setStatus`: `None` for a missing status; `unexpected job state: …` for a state
-/// other than `PENDING` / `RUNNING` / `DONE`; the error result kept only once `DONE`.
+/// The status of a reply: `None` for a missing status; `unexpected job state: …` for a state other
+/// than `PENDING` / `RUNNING` / `DONE`; the error result kept only once `DONE`.
 fn job_status(status: Option<JobStatusReply>) -> Result<Option<JobStatus>, Error> {
     let Some(status) = status else {
         return Ok(None);
@@ -845,8 +837,7 @@ fn job_status(status: Option<JobStatusReply>) -> Result<Option<JobStatus>, Error
             .error_result
             .filter(|_| done)
             .map(BigQueryError::from),
-        // Divergence (ledger 7b-1): Go appends `bqToError(nil)` (a nil `*Error`) for a null
-        // entry of `status.errors`; Rust has no nil error, so the entry is skipped.
+        // A null entry of `status.errors` is skipped.
         errors: status
             .errors
             .into_iter()
@@ -857,14 +848,13 @@ fn job_status(status: Option<JobStatusReply>) -> Result<Option<JobStatus>, Error
     }))
 }
 
-/// Go `retryableError(err, allowedReasons)`: a Google API error whose first reason is allowed
-/// or whose code is 500/502/503/504; a context deadline (Go's `Timeout()`); a transport failure
-/// that refused or reset the connection, timed out, or cut a body short.
+/// Whether `err` is worth retrying: a Google API error whose first reason is allowed or whose code
+/// is 500/502/503/504; a context deadline; a transport failure that refused or reset the
+/// connection, timed out, or cut a body short.
 pub(crate) fn retryable_error(err: &Error, reasons: &[&str]) -> bool {
-    // Divergence (ledger 7b-1): Go also retries an error whose text is exactly
-    // `http2: stream closed` or `http2: client connection lost` (Go net/http's HTTP/2 texts);
-    // the gadk transport's HTTP/2 failures carry other texts and are retried only as a refused
-    // or reset connection or a timeout.
+    // The gadk transport's HTTP/2 failures are retried only as a refused or reset connection or a
+    // timeout. (The client library also retries an error whose text is exactly `http2: stream
+    // closed` or `http2: client connection lost`, which this transport does not produce.)
     match err {
         Error::Api(api) => {
             api.errors
@@ -878,7 +868,7 @@ pub(crate) fn retryable_error(err: &Error, reasons: &[&str]) -> bool {
             | RestError::DeadlineExceeded
             | RestError::DroppedBody { .. } => true,
             RestError::Transport(e) => connection_error(e),
-            // Go: a credential fetch's `*url.Error` is checked like any transport failure.
+            // A failed credential fetch is checked like any transport failure.
             RestError::Headers(e) => connection_error(e.as_ref()),
         },
         Error::Wrapped { source, .. } => retryable_error(source, reasons),
@@ -886,8 +876,8 @@ pub(crate) fn retryable_error(err: &Error, reasons: &[&str]) -> bool {
     }
 }
 
-/// Go's `*url.Error` test (`connection refused` / `connection reset` in the text, or a
-/// timeout) over the error's source chain.
+/// Whether a connection was refused or reset (`connection refused` / `connection reset` in the
+/// text) or timed out, anywhere in the error's source chain.
 fn connection_error(err: &(dyn std::error::Error + 'static)) -> bool {
     let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(e) = cur {
@@ -910,14 +900,14 @@ fn connection_error(err: &(dyn std::error::Error + 'static)) -> bool {
     false
 }
 
-/// Go `runWithRetryExplicit`'s backoff (the BigQuery SLA suggestion): 1 s → 32 s, ×2.
+/// The retry backoff (the BigQuery SLA suggestion): 1 s → 32 s, ×2.
 const BIGQUERY_BACKOFF: Backoff = Backoff {
     initial: Duration::from_secs(1),
     max: Duration::from_secs(32),
     multiplier: 2.0,
 };
 
-/// What one turn of [`retry`] decided (Go's `(stop bool, err error)`).
+/// What one turn of [`retry`] decided.
 enum Step<T> {
     /// Stop with this result.
     Stop(Result<T, Error>),
@@ -925,10 +915,9 @@ enum Step<T> {
     Again(Option<Error>),
 }
 
-/// Go `cloud.google.com/go/internal.Retry`: runs `f` until it stops; between turns it pauses
-/// per `backoff` under `ctx`. When `ctx` ends during a pause the result is the context error,
-/// or Go's `wrappedCallErr` (`retry failed with <ctx err>; last error: <err>`) when a turn
-/// failed with an error other than a bare context error.
+/// Runs `f` until it stops; between turns it pauses per `backoff` under `ctx`. When `ctx` ends
+/// during a pause the result is the context error, or the wrapped call error (`retry failed with
+/// <ctx err>; last error: <err>`) when a turn failed with an error other than a bare context error.
 async fn retry<T, F, Fut>(ctx: &Context, backoff: &mut Pauses, mut f: F) -> Result<T, Error>
 where
     F: FnMut() -> Fut,
@@ -955,8 +944,8 @@ where
     }
 }
 
-/// Go `runWithRetryExplicit(ctx, call, allowedReasons)`: `call` until it succeeds or fails with
-/// an error [`retryable_error`] rejects, with [`BIGQUERY_BACKOFF`].
+/// `call` until it succeeds or fails with an error [`retryable_error`] rejects, with
+/// [`BIGQUERY_BACKOFF`].
 async fn run_with_retry<T, F, Fut>(ctx: &Context, reasons: &[&str], mut call: F) -> Result<T, Error>
 where
     F: FnMut() -> Fut,
@@ -976,7 +965,7 @@ where
     .await
 }
 
-/// One table's metadata RPCs (Go `bqTableAdapter` over `client.DatasetInProject(p, d).Table(t)`).
+/// One table's metadata RPCs.
 #[derive(Debug, Clone)]
 pub struct TableOps {
     pub(crate) client: Arc<BigQueryClient>,

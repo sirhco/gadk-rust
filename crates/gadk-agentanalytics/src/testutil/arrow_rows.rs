@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Decoding of the Arrow rows of a recorded `AppendRowsRequest` (feature `testutil`), Go's
-//! `arrow_test_helper_test.go` (`decodeArrowRows`, `arrowValue`, `arrowWriterSchemaColumns`):
-//! the rows as BigQuery reads them, for the tests of this crate and its integration tests.
+//! Decoding of the Arrow rows of a recorded `AppendRowsRequest` (feature `testutil`): the rows as
+//! BigQuery reads them, for the tests of this crate and its integration tests.
 
 use std::io::Cursor;
 use std::sync::Arc;
@@ -31,11 +30,11 @@ use chrono::DateTime;
 use crate::row::{Row, RowValue};
 use crate::storagepb::{AppendRowsRequest, append_rows_request};
 
-/// The end-of-stream marker of the Arrow IPC stream format (Go `arrowEOS`).
+/// The end-of-stream marker of the Arrow IPC stream format.
 pub const ARROW_EOS: [u8; 8] = [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0];
 
 /// `schema` with every top-level field nullable: arrow-rs's IPC reader rejects a NULL in a
-/// non-nullable field, and Go writes NULL `timestamp`s for rows without one.
+/// non-nullable field, and the writer emits NULL `timestamp`s for rows without one.
 fn relaxed(schema: &Schema) -> Schema {
     let fields: Vec<FieldRef> = schema
         .fields()
@@ -57,7 +56,7 @@ fn writer_schema(serialized: &[u8]) -> Result<Schema, String> {
     Ok(reader.schema().as_ref().clone())
 }
 
-/// The Arrow parts of `req` (Go `req.GetArrowRows()`).
+/// The Arrow parts of `req`.
 fn arrow_rows(req: &AppendRowsRequest) -> Result<&append_rows_request::ArrowData, String> {
     match &req.rows {
         Some(append_rows_request::Rows::ArrowRows(data)) => Ok(data),
@@ -101,7 +100,7 @@ pub fn decode_record_batches(req: &AppendRowsRequest) -> Result<Vec<RecordBatch>
         .map_err(|e| format!("reading the Arrow stream: {e}"))
 }
 
-/// Go `decodeArrowRows(t, req)`: the rows of `req` as BigQuery reads them; NULLs and empty
+/// The rows of `req` as BigQuery reads them; NULLs and empty
 /// `content_parts` lists are left out. Strings are `Str`, booleans `Bool`, int64 `Int`,
 /// timestamps `Timestamp`, lists `Parts`, structs `Map`.
 ///
@@ -133,7 +132,7 @@ pub fn decode_arrow_rows(req: &AppendRowsRequest) -> Result<Vec<Row>, String> {
     Ok(rows)
 }
 
-/// Go `arrowValue(t, arr, i)`: `None` for NULLs and empty lists.
+/// The value at row `i` of `arr`: `None` for NULLs and empty lists.
 ///
 /// # Errors
 ///
@@ -185,7 +184,7 @@ pub fn arrow_value(arr: &dyn Array, i: usize) -> Result<Option<RowValue>, String
     }))
 }
 
-/// Go `arrowWriterSchemaColumns(t, req)`: the column names of `req`'s writer schema.
+/// The column names of `req`'s writer schema.
 ///
 /// # Errors
 ///

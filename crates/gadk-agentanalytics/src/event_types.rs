@@ -13,10 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The event types written to the `event_type` column and `newSet`, from ADK-Go
-//! `plugin/agentanalytics/bigquery_agent_analytics_plugin.go` (the rest of that file is
-//! [`crate::plugin`]).
-//! The names match adk-python, so rows from either language can be queried together.
+//! The event types written to the `event_type` column. The names match adk-python, so rows from
+//! either language can be queried together.
 
 /// A user message reached the runner.
 pub const EVENT_USER_MESSAGE_RECEIVED: &str = "USER_MESSAGE_RECEIVED";
@@ -50,8 +48,8 @@ pub const EVENT_TOOL_ERROR: &str = "TOOL_ERROR";
 pub const EVENT_STATE_DELTA: &str = "STATE_DELTA";
 /// A session event transferred to another agent.
 pub const EVENT_AGENT_TRANSFER: &str = "AGENT_TRANSFER";
-/// Emitted when `session.EventActions.Compaction` is populated (or when the event's custom
-/// metadata carries `"adk_compaction"` on ADK versions before typed compaction).
+/// Emitted when the event's `actions.compaction` is populated (or when the event's custom metadata
+/// carries `"adk_compaction"` on ADK versions before typed compaction).
 pub const EVENT_EVENT_COMPACTION: &str = "EVENT_COMPACTION";
 /// Emitted when the event's custom metadata carries `"adk_agent_state"` or `"agent_state"` (or a
 /// terminal `"end_of_agent"` / `"adk_end_of_agent"` == true), mirroring adk-python's checkpoint
@@ -80,7 +78,7 @@ pub const EVENT_NODE_OUTPUT: &str = "NODE_OUTPUT";
 /// A workflow node error.
 pub const EVENT_NODE_ERROR: &str = "NODE_ERROR";
 
-/// Go `newSet(items...)`: the items as a set (Go `map[string]struct{}`).
+/// The items as a set.
 #[cfg(test)]
 pub(crate) fn new_set<S: AsRef<str>>(items: &[S]) -> std::collections::BTreeSet<String> {
     items.iter().map(|s| s.as_ref().to_owned()).collect()

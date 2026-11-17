@@ -13,21 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The rows of ADK-Go `plugin/agentanalytics` (`batch_processor.go`, `gcs_offloader.go`): Go's
-//! `map[string]any` row is [`Row`], a map of [`RowValue`]s, and the side-channel keys Go keeps
-//! in the same map (`_raw_parts`, `_summary_builder`, `_deferred_uploads`) are typed fields of
-//! [`QueuedRow`].
+//! The rows the batch processor queues and the Arrow encoder writes: a [`Row`] is a map of
+//! [`RowValue`]s, and the side-channel data of a queued row (the payloads still to upload, the
+//! content summary builder, the deferred uploads) are typed fields of [`QueuedRow`].
 //!
 //! Every reader (the Arrow encoder, the size estimate, the upload orchestration) reads a value
-//! through the accessors below, each of which accepts exactly what the matching Go type
-//! assertion accepts: [`RowValue::as_str`] is Go `v.(string)`, [`RowValue::as_int64_like`] is
-//! the `part_index` chain `v.(int64)` / `v.(float64)` (truncated) / `v.(int)`, and so on. Go's
-//! `int` and `int64` are both [`RowValue::Int`] (Go reads them alike wherever it accepts
-//! either); a Go value of a type no assertion accepts (`int32`, `[]any`, `map[string]string`,
-//! `[]byte`, …) is [`RowValue::Other`]. A missing key and Go's nil map read alike: a lookup
-//! misses, so an empty [`Row`] is Go's nil row.
+//! through the accessors below, each of which accepts exactly one variant: [`RowValue::as_str`] a
+//! string, [`RowValue::as_int64_like`] an integer or a float (truncated), and so on. A value of a
+//! type no accessor accepts (an `i32`, a list of anything but rows, a map of strings, a byte
+//! string, …) is [`RowValue::Other`]. A lookup of a missing key misses, so an empty [`Row`] is a
+//! row without values.
 //!
-//! [`from_json_map`] / [`to_json_map`] bridge the 7b-1 helpers that build or rewrite rows as
+//! [`from_json_map`] / [`to_json_map`] bridge the helpers that build or rewrite rows as
 //! `serde_json` maps (`object_ref`, `format_content_parts`, `ContentSummaryBuilder::apply_to_row`).
 
 use std::collections::BTreeMap;
@@ -38,35 +35,35 @@ use serde_json::{Map, Number, Value};
 
 use crate::formatter::{ContentSummaryBuilder, PendingUpload};
 
-/// A row (Go `map[string]any`): column name → value. Side-channel data lives in [`QueuedRow`].
+/// A row: column name → value. Side-channel data lives in [`QueuedRow`].
 pub type Row = BTreeMap<String, RowValue>;
 
-/// A value of a [`Row`] (a Go `any` held by a row map).
+/// A value of a [`Row`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum RowValue {
-    /// Go `string`.
+    /// A string.
     Str(String),
-    /// Go `time.Time`.
+    /// A timestamp.
     Timestamp(DateTime<Utc>),
-    /// Go `bool`.
+    /// A boolean.
     Bool(bool),
-    /// Go `int64` or `int`.
+    /// An integer.
     Int(i64),
-    /// Go `float64`.
+    /// A float.
     Float(f64),
-    /// Go `[]map[string]any` (`content_parts`); Go's nil element is an empty [`Row`].
+    /// A list of rows (`content_parts`); a `null` element is an empty [`Row`].
     Parts(Vec<Row>),
-    /// Go `map[string]any` (`object_ref`).
+    /// A nested row (`object_ref`).
     Map(Row),
-    /// Go `nil` (the key is present, its value nil).
+    /// A null (the key is present, its value is null).
     Null,
-    /// A Go value of any other type, which every type assertion of the transports rejects;
-    /// the text describes it (for `Debug` output only).
+    /// A value of any other type, which every accessor of the transports rejects; the text
+    /// describes it (for `Debug` output only).
     Other(String),
 }
 
 impl RowValue {
-    /// Go `v.(string)`.
+    /// The string, if this is a [`RowValue::Str`].
     pub fn as_str(&self) -> Option<&str> {
         match self {
             RowValue::Str(s) => Some(s),
@@ -74,7 +71,7 @@ impl RowValue {
         }
     }
 
-    /// Go `v.(time.Time)`.
+    /// The timestamp, if this is a [`RowValue::Timestamp`].
     pub fn as_timestamp(&self) -> Option<DateTime<Utc>> {
         match self {
             RowValue::Timestamp(t) => Some(*t),
@@ -82,7 +79,7 @@ impl RowValue {
         }
     }
 
-    /// Go `v.(bool)`.
+    /// The boolean, if this is a [`RowValue::Bool`].
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             RowValue::Bool(b) => Some(*b),
@@ -90,7 +87,7 @@ impl RowValue {
         }
     }
 
-    /// Go `v.(int64)` (or `v.(int)`).
+    /// The integer, if this is a [`RowValue::Int`].
     pub fn as_int64(&self) -> Option<i64> {
         match self {
             RowValue::Int(n) => Some(*n),
@@ -98,7 +95,7 @@ impl RowValue {
         }
     }
 
-    /// Go `v.(float64)`.
+    /// The float, if this is a [`RowValue::Float`].
     pub fn as_float(&self) -> Option<f64> {
         match self {
             RowValue::Float(f) => Some(*f),
@@ -106,12 +103,11 @@ impl RowValue {
         }
     }
 
-    /// Go's `part_index` read (`buildRecordBatch`): `v.(int64)`, else `int64(v.(float64))`
-    /// (truncated toward zero), else `int64(v.(int))`.
+    /// The `part_index` read of the record batch encoder: the integer, else the float truncated
+    /// toward zero.
     ///
-    /// A float outside the `i64` range (or NaN) converts as Rust's `as` does (saturating, NaN
-    /// to 0); Go leaves that conversion to the platform (arm64 saturates likewise, amd64 yields
-    /// `i64::MIN`).
+    /// A float outside the `i64` range (or NaN) converts as Rust's `as` does (saturating, NaN to
+    /// 0).
     pub fn as_int64_like(&self) -> Option<i64> {
         match self {
             RowValue::Int(n) => Some(*n),
@@ -121,7 +117,7 @@ impl RowValue {
         }
     }
 
-    /// Go `v.([]map[string]any)`.
+    /// The rows, if this is a [`RowValue::Parts`].
     pub fn as_parts(&self) -> Option<&[Row]> {
         match self {
             RowValue::Parts(parts) => Some(parts),
@@ -129,7 +125,7 @@ impl RowValue {
         }
     }
 
-    /// Go `v.([]map[string]any)`, for rewriting the entries in place.
+    /// The rows of a [`RowValue::Parts`], for rewriting the entries in place.
     pub fn as_parts_mut(&mut self) -> Option<&mut Vec<Row>> {
         match self {
             RowValue::Parts(parts) => Some(parts),
@@ -137,7 +133,7 @@ impl RowValue {
         }
     }
 
-    /// Go `v.(map[string]any)`.
+    /// The nested row, if this is a [`RowValue::Map`].
     pub fn as_map(&self) -> Option<&Row> {
         match self {
             RowValue::Map(m) => Some(m),
@@ -194,24 +190,23 @@ impl From<Row> for RowValue {
     }
 }
 
-/// Go's type-asserted lookups on a row map: `row[key].(T)` with the comma-ok form, `None` when
-/// the key is missing or holds another type.
+/// Typed lookups on a row map: `None` when the key is missing or holds another type.
 pub trait RowExt {
-    /// Go `row[key].(string)`.
+    /// The string at `key`.
     fn str(&self, key: &str) -> Option<&str>;
-    /// Go `row[key].(time.Time)`.
+    /// The timestamp at `key`.
     fn timestamp(&self, key: &str) -> Option<DateTime<Utc>>;
-    /// Go `row[key].(bool)`.
+    /// The boolean at `key`.
     fn bool(&self, key: &str) -> Option<bool>;
-    /// Go `row[key].(int64)` (or `.(int)`).
+    /// The integer at `key`.
     fn int64(&self, key: &str) -> Option<i64>;
-    /// Go's `part_index` chain on `row[key]` ([`RowValue::as_int64_like`]).
+    /// The integer or truncated float at `key` ([`RowValue::as_int64_like`]).
     fn int64_like(&self, key: &str) -> Option<i64>;
-    /// Go `row[key].([]map[string]any)`.
+    /// The rows at `key`.
     fn parts(&self, key: &str) -> Option<&[Row]>;
-    /// Go `row[key].([]map[string]any)`, mutable.
+    /// The rows at `key`, mutable.
     fn parts_mut(&mut self, key: &str) -> Option<&mut Vec<Row>>;
-    /// Go `row[key].(map[string]any)`.
+    /// The nested row at `key`.
     fn map(&self, key: &str) -> Option<&Row>;
 }
 
@@ -274,23 +269,21 @@ impl<T: AsRow + ?Sized> AsRow for &T {
     }
 }
 
-/// A content summary builder shared by a row and its deferred uploads (Go
-/// `*contentSummaryBuilder`, a pointer both hold).
+/// A content summary builder shared by a row and its deferred uploads (both hold the same builder).
 pub(crate) type SharedSummaryBuilder = Arc<Mutex<ContentSummaryBuilder>>;
 
-/// A row queued for writing (Go's row map with its side-channel keys): `row` holds the
-/// columns; `raw_parts` is Go's `_raw_parts` (payloads still to upload; Go's missing key is
-/// an empty `Vec`), `summary_builder` Go's `_summary_builder`, `deferred` Go's
-/// `_deferred_uploads`.
+/// A row queued for writing, with its side-channel data: `row` holds the columns; `raw_parts` the
+/// payloads still to upload (empty when there are none), `summary_builder` the content summary
+/// builder and `deferred` the deferred uploads.
 #[derive(Debug, Clone, Default)]
 pub struct QueuedRow {
     /// The columns.
     pub row: Row,
-    /// Go `_raw_parts` (`[]pendingUpload`).
+    /// The payloads still to upload.
     pub(crate) raw_parts: Vec<PendingUpload>,
-    /// Go `_summary_builder` (`*contentSummaryBuilder`).
+    /// The content summary builder.
     pub(crate) summary_builder: Option<SharedSummaryBuilder>,
-    /// Go `_deferred_uploads` (`*deferredRowUploads`).
+    /// The deferred uploads.
     pub(crate) deferred: Option<DeferredRowUploads>,
 }
 
@@ -310,34 +303,33 @@ impl From<Row> for QueuedRow {
     }
 }
 
-/// Go `deferredUpload`: a failed upload kept for a retry of its batch.
+/// A failed upload kept for a retry of its batch.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DeferredUpload {
-    /// Go `upload`.
+    /// The upload to retry.
     pub(crate) upload: PendingUpload,
-    /// Go `eventID`.
+    /// The ID of the event the upload belongs to.
     pub(crate) event_id: String,
-    /// Go `errSummary` (`safeUploadErrorSummary` of the failure).
+    /// A summary of the failure that is safe to log.
     pub(crate) err_summary: String,
 }
 
-/// Go `deferredRowUploads`: the deferred uploads of a row, and what requeuing them needs to put
-/// the row back in the form it was queued in.
+/// The deferred uploads of a row, and what requeuing them needs to put the row back in the form it
+/// was queued in.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DeferredRowUploads {
-    /// Go `pending`.
+    /// The deferred uploads.
     pub(crate) pending: Vec<DeferredUpload>,
-    /// Go `builder`.
+    /// The row's content summary builder.
     pub(crate) builder: Option<SharedSummaryBuilder>,
-    /// Go `nonDeferredTruncated`.
+    /// Whether the content that was not deferred was truncated.
     pub(crate) non_deferred_truncated: bool,
 }
 
-/// The [`RowValue`] of a JSON value as the 7b-1 helpers mean it: strings, booleans and null as
-/// such; an integer that fits `i64` is [`RowValue::Int`], any other number [`RowValue::Float`];
-/// an object is [`RowValue::Map`]; an array of objects (or `null`s, Go's nil maps, which become
-/// empty rows) — including the empty array — is [`RowValue::Parts`] (Go
-/// `[]map[string]any`); any other array is [`RowValue::Other`].
+/// The [`RowValue`] of a JSON value as the formatter helpers mean it: strings, booleans and null as
+/// such; an integer that fits `i64` is [`RowValue::Int`], any other number [`RowValue::Float`]; an
+/// object is [`RowValue::Map`]; an array of objects (or `null`s, which become empty rows) —
+/// including the empty array — is [`RowValue::Parts`]; any other array is [`RowValue::Other`].
 pub fn from_json_value(v: &Value) -> RowValue {
     match v {
         Value::Null => RowValue::Null,
@@ -369,9 +361,9 @@ pub fn from_json_map(m: &Map<String, Value>) -> Row {
         .collect()
 }
 
-/// The JSON value of a [`RowValue`] (Go `encoding/json` of the Go value): a timestamp is its
-/// RFC 3339 text with nanoseconds (Go `time.Time.MarshalJSON`), a non-finite float and
-/// [`RowValue::Other`] (which has no JSON form here) are `null`.
+/// The JSON value of a [`RowValue`] a timestamp is its RFC 3339 text with nanosecond fractions
+/// (trailing zeros trimmed, omitted when zero), a non-finite float and [`RowValue::Other`] (which
+/// has no JSON form here) are `null`.
 pub fn to_json_value(v: &RowValue) -> Value {
     match v {
         RowValue::Str(s) => Value::String(s.clone()),
@@ -397,9 +389,9 @@ pub fn to_json_map(row: &Row) -> Map<String, Value> {
         .collect()
 }
 
-/// Go `builder.applyToRow(row)` on a [`Row`]: runs the 7b-1
-/// [`ContentSummaryBuilder::apply_to_row`] on a JSON map and copies the columns it writes
-/// (`content`, `is_truncated`) into `row`. `apply_to_row` only writes, so the map starts empty.
+/// Applies a content summary builder to a [`Row`]: runs [`ContentSummaryBuilder::apply_to_row`] on
+/// a JSON map and copies the columns it writes (`content`, `is_truncated`) into `row`.
+/// `apply_to_row` only writes, so the map starts empty.
 pub(crate) fn apply_summary_to_row(builder: &ContentSummaryBuilder, row: &mut Row) {
     let mut written = Map::new();
     builder.apply_to_row(&mut written);

@@ -13,14 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/schema_upgrade.go`: the [`TableMetadataOps`]
-//! abstraction over the table metadata RPCs (Go `tableMetadataOps`; the REST implementation is
-//! [`TableOps`](crate::bigquery::TableOps), Go's `bqTableAdapter`), table creation and the
-//! additive schema upgrade ([`ensure_table_and_schema`], [`maybe_upgrade_schema`]). Go's
-//! `hasErrorCode` and the `is*Error` classifiers live in [`crate::error`].
+//! The [`TableMetadataOps`] abstraction over the table metadata RPCs (the REST implementation is
+//! [`TableOps`](crate::bigquery::TableOps)), table creation and the additive schema upgrade
+//! ([`ensure_table_and_schema`], [`maybe_upgrade_schema`]). The error classifiers (`has_error_code`
+//! and the `is_*_error` functions) live in [`crate::error`].
 //!
-//! [`TableMetadata`] / [`TableMetadataUpdate`] are the parts of Go's `bigquery.TableMetadata` /
-//! `bigquery.TableMetadataToUpdate` the package reads or writes.
+//! [`TableMetadata`] / [`TableMetadataUpdate`] are the parts of a BigQuery table's metadata this
+//! crate reads or writes.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -32,78 +31,77 @@ use crate::schema::{
     FieldSchema, Schema, TIMESTAMP_FIELD, project_events_schema, upgrade_table_schema,
 };
 
-/// Go `maxPreconditionRetries`: re-reads after an etag precondition failure.
+/// Re-reads after an etag precondition failure.
 pub(crate) const MAX_PRECONDITION_RETRIES: usize = 2;
 
-/// Go `bigquery.DayPartitioningType`.
+/// The `DAY` time-partitioning type.
 pub const DAY_PARTITIONING_TYPE: &str = "DAY";
-/// Go `bigquery.ViewTable` (`TableMetadata.Type` of a logical view).
+/// The [`TableMetadata::table_type`] of a logical view.
 pub const VIEW_TABLE_TYPE: &str = "VIEW";
 
-/// Go `bigquery.TimePartitioning`.
+/// A table's time partitioning.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TimePartitioning {
-    /// Go `Type` (`DAY`, `HOUR`, …).
+    /// The partitioning type (`DAY`, `HOUR`, …).
     pub partition_type: String,
-    /// Go `Expiration` (zero: none).
+    /// The partition expiration (zero: none).
     pub expiration: Duration,
-    /// Go `Field`.
+    /// The partitioning column.
     pub field: String,
-    /// Go `RequirePartitionFilter`.
+    /// Whether queries must filter on the partitioning column.
     pub require_partition_filter: bool,
 }
 
-/// Go `bigquery.Clustering`.
+/// A table's clustering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Clustering {
-    /// Go `Fields`.
+    /// The clustering columns.
     pub fields: Vec<String>,
 }
 
-/// The table metadata the package reads and creates (Go `bigquery.TableMetadata` subset).
+/// The table metadata this crate reads and creates (a subset of a table's metadata).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TableMetadata {
-    /// Go `Schema`.
+    /// The schema.
     pub schema: Schema,
-    /// Go `TimePartitioning`.
+    /// The time partitioning.
     pub time_partitioning: Option<TimePartitioning>,
-    /// Go `Clustering`.
+    /// The clustering.
     pub clustering: Option<Clustering>,
-    /// Go `Labels`.
+    /// The labels.
     pub labels: BTreeMap<String, String>,
-    /// Go `ETag` (read-only).
+    /// The etag (read-only).
     pub etag: String,
-    /// Go `Type` (`TABLE`, `VIEW`, `MATERIALIZED_VIEW`, …; read-only; empty when unknown).
+    /// The table type (`TABLE`, `VIEW`, `MATERIALIZED_VIEW`, …; read-only; empty when unknown).
     pub table_type: String,
-    /// Go `ViewQuery`.
+    /// The query of a view.
     pub view_query: String,
 }
 
-/// A metadata update (Go `bigquery.TableMetadataToUpdate` subset: `Schema` and `SetLabel`).
+/// A metadata update (a schema and labels to set).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TableMetadataUpdate {
-    /// Go `Schema` (`None`: unchanged).
+    /// The new schema (`None`: unchanged).
     pub schema: Option<Schema>,
-    /// The labels set by Go `SetLabel`.
+    /// The labels to set.
     pub set_labels: BTreeMap<String, String>,
 }
 
 impl TableMetadataUpdate {
-    /// Go `SetLabel(name, value)`.
+    /// Sets a label.
     pub fn set_label(&mut self, name: impl Into<String>, value: impl Into<String>) {
         self.set_labels.insert(name.into(), value.into());
     }
 }
 
-/// The table metadata RPCs (Go `tableMetadataOps`), so startup and schema-upgrade paths can be
-/// tested without BigQuery.
+/// The table metadata RPCs so startup and schema-upgrade paths can be tested without BigQuery.
 #[async_trait::async_trait]
 pub trait TableMetadataOps: Send + Sync {
-    /// Go `Metadata(ctx)` (`tables.get`).
+    /// Reads the table's metadata (`tables.get`).
     async fn metadata(&self, ctx: &Context) -> Result<TableMetadata, Error>;
-    /// Go `Create(ctx, meta)` (`tables.insert`).
+    /// Creates the table (`tables.insert`).
     async fn create(&self, ctx: &Context, meta: &TableMetadata) -> Result<(), Error>;
-    /// Go `Update(ctx, update, etag)` (`tables.patch` with `If-Match: etag` when non-empty).
+    /// Updates the table (`tables.patch` with `If-Match: etag` when non-empty).
     async fn update(
         &self,
         ctx: &Context,
@@ -112,9 +110,9 @@ pub trait TableMetadataOps: Send + Sync {
     ) -> Result<TableMetadata, Error>;
 }
 
-/// Go `ensureTableAndSchema`: creates the table when it is missing (DAY partitioning on
-/// `timestamp`, `config.clustering_fields`, the schema-version label; a create conflict re-reads
-/// and upgrades unless `disable_schema_upgrade`), else upgrades the schema additively unless
+/// Creates the table when it is missing (DAY partitioning on `timestamp`,
+/// `config.clustering_fields`, the schema-version label; a create conflict re-reads and upgrades
+/// unless `disable_schema_upgrade`), else upgrades the schema additively unless
 /// `disable_schema_upgrade`. `denied` are the payload columns left out of the table.
 pub async fn ensure_table_and_schema(
     ctx: &Context,
@@ -176,9 +174,9 @@ pub async fn ensure_table_and_schema(
     maybe_upgrade_schema(ctx, table, md, config, &desired).await
 }
 
-/// Go `maybeUpgradeSchema`: adds the missing columns of `desired` with an etag-guarded update
-/// (re-reading after a precondition failure up to `MAX_PRECONDITION_RETRIES` times), writing
-/// nothing when every column already matches.
+/// Adds the missing columns of `desired` with an etag-guarded update (re-reading after a
+/// precondition failure up to `MAX_PRECONDITION_RETRIES` times), writing nothing when every column
+/// already matches.
 pub async fn maybe_upgrade_schema(
     ctx: &Context,
     table: &dyn TableMetadataOps,
@@ -235,7 +233,7 @@ pub async fn maybe_upgrade_schema(
     }
 }
 
-/// Go `fmt.Errorf("failed to get BigQuery table %s metadata: %w", config.TableName, err)`.
+/// `err` wrapped as `failed to get BigQuery table <table> metadata: <err>`.
 fn metadata_error(config: &Config, err: Error) -> Error {
     Error::wrap(
         format!(

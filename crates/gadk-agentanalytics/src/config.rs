@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/config.go`: [`Config`] (Go `DefaultConfig()` is
-//! [`Config::default`], Go's zero value `Config{}` is [`Config::zero`]), `applyDefaults`,
-//! [`Logger`], [`RetryConfig`], [`ContentFormatter`], [`DropStats`], [`GcsUploadRequest`] and the
-//! [`GcsContentOffloader`] trait, plus `gcsUploadTimeout` and `defaultMaxPendingUploadBytes` from
-//! `gcs_offloader.go`. Go's `[]option.ClientOption` is [`ClientOptions`].
+//! [`Config`] ([`Config::default`] is the standard configuration, [`Config::zero`] the all-zero
+//! one), its `apply_defaults`, [`Logger`], [`RetryConfig`], [`ContentFormatter`], [`DropStats`],
+//! [`GcsUploadRequest`] and the [`GcsContentOffloader`] trait, plus the offloader's default upload
+//! timeout and pending-bytes cap. [`ClientOptions`] says how a Google client reaches its service.
 
 use std::fmt;
 use std::io::Write;
@@ -35,41 +34,39 @@ use crate::context::Context;
 use crate::error::{BoxError, Error};
 
 /// The version of the events table schema written by this plugin and stored under the
-/// `SCHEMA_VERSION_KEY` table label (Go `SchemaVersion`). It matches adk-python's.
+/// `SCHEMA_VERSION_KEY` table label. It matches adk-python's.
 pub const SCHEMA_VERSION: &str = "2";
-/// The BigQuery table label key that records the schema version (Go `schemaVersionKey`).
+/// The BigQuery table label key that records the schema version.
 pub(crate) const SCHEMA_VERSION_KEY: &str = "adk_schema_version";
 
-/// Go `defaultTableName`.
+/// The table name used when [`Config::table_name`] is empty.
 pub(crate) const DEFAULT_TABLE_NAME: &str = "agent_events";
-/// Go `defaultMaxInlineTextSize` (32 KiB).
+/// The default for [`Config::max_inline_text_size`] (32 KiB).
 pub(crate) const DEFAULT_MAX_INLINE_TEXT_SIZE: i64 = 32 * 1024;
-/// Go `defaultGCSMaxConcurrentUploads`.
+/// The default for [`Config::gcs_max_concurrent_uploads`].
 pub(crate) const DEFAULT_GCS_MAX_CONCURRENT_UPLOADS: i64 = 8;
-/// Go `defaultViewPrefix`.
+/// The default for [`Config::view_prefix`].
 pub(crate) const DEFAULT_VIEW_PREFIX: &str = "v";
-/// Go `gcsUploadTimeout` (`gcs_offloader.go`): bounds one batch's uploads to Cloud Storage when
-/// [`Config::gcs_upload_timeout`] is not set.
+/// Bounds one batch's uploads to Cloud Storage when [`Config::gcs_upload_timeout`] is not set.
 pub(crate) const GCS_UPLOAD_TIMEOUT: Duration = Duration::from_secs(10);
-/// Go `defaultMaxPendingUploadBytes` (`gcs_offloader.go`): caps the bytes held in memory by
-/// pending uploads across queued rows (256 MiB).
+/// Caps the bytes held in memory by pending uploads across queued rows (256 MiB).
 pub(crate) const DEFAULT_MAX_PENDING_UPLOAD_BYTES: i64 = 256 * 1024 * 1024;
 
-/// Go's `Logger` interface (`Printf`, `Println`). The caller formats the arguments
-/// (`format_args!`), so `printf(format_args!("x %d", n))` is Go's `Printf("x %d", n)`.
+/// Where the plugin's log messages go: `printf` and `println` with the caller's arguments already
+/// formatted (`format_args!`), as in `printf(format_args!("x {n}"))`.
 pub trait Logger: Send + Sync {
-    /// Go `Printf(format, v...)`.
+    /// Logs a message; a final newline is added when it has none.
     fn printf(&self, args: fmt::Arguments<'_>);
-    /// Go `Println(v...)`.
+    /// Logs a message followed by a newline.
     fn println(&self, args: fmt::Arguments<'_>);
-    /// Whether this is Go's `log.Default()` ([`StdLogger`]): background view creation never
-    /// logs through it (Go `viewLogf`). Other loggers keep the default `false`.
+    /// Whether this is the process-wide default logger ([`StdLogger`]): background view creation
+    /// never logs through it. Other loggers keep the default `false`.
     fn is_std_default(&self) -> bool {
         false
     }
 }
 
-/// Go `log.Default()`: writes each message to stderr after a local `2006/01/02 15:04:05 `
+/// The default logger: writes each message to stderr after a local `YYYY/MM/DD HH:MM:SS `
 /// timestamp, adding a final newline when the message has none.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StdLogger;
@@ -83,7 +80,7 @@ impl StdLogger {
         if !out.ends_with('\n') {
             out.push('\n');
         }
-        // Go's log package ignores write errors too.
+        // A failed write to stderr is ignored.
         let _ = std::io::stderr().write_all(out.as_bytes());
     }
 }
@@ -102,24 +99,24 @@ impl Logger for StdLogger {
     }
 }
 
-/// Retry parameters for BigQuery appends (Go `RetryConfig`). An all-zero `RetryConfig` is
-/// filled from [`Config::default`] (3 retries, 100ms initial delay, 10s max delay, multiplier 2);
-/// to disable retries set `max_retries: 0` with a non-zero delay or multiplier.
+/// Retry parameters for BigQuery appends. An all-zero `RetryConfig` is filled from
+/// [`Config::default`] (3 retries, 100ms initial delay, 10s max delay, multiplier 2); to disable
+/// retries set `max_retries: 0` with a non-zero delay or multiplier.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct RetryConfig {
-    /// Go `MaxRetries`.
+    /// How many times a failed append is retried.
     pub max_retries: i64,
-    /// Go `InitialDelay`.
+    /// The delay before the first retry.
     pub initial_delay: Duration,
-    /// Go `MaxDelay`.
+    /// The cap on the delay between retries.
     pub max_delay: Duration,
-    /// Go `Multiplier`.
+    /// The factor the delay grows by after each retry.
     pub multiplier: f64,
 }
 
 /// Transforms or redacts an event payload before it is truncated and written to the `content`
-/// column (Go `ContentFormatter`). It must return a new value; an error (or a panic) replaces the
-/// content with `"[FORMATTER_FAILED]"`. The second argument is the event type.
+/// column. It must return a new value; an error (or a panic) replaces the content with
+/// `"[FORMATTER_FAILED]"`. The second argument is the event type.
 ///
 /// Return `Err` rather than panic. A panic is caught only when the binary is built with
 /// `panic = "unwind"` (the default); under `panic = "abort"` it aborts the process. Even when
@@ -128,8 +125,8 @@ pub struct RetryConfig {
 /// (`panic!("bad {v}")`, an `expect` on an `Err` that holds the value) leaks that data.
 pub type ContentFormatter = Arc<dyn Fn(&Value, &str) -> Result<Value, BoxError> + Send + Sync>;
 
-/// Cumulative event-drop and formatter-failure counts (Go `DropStats`; JSON field names as Go's
-/// tags).
+/// Cumulative event-drop and formatter-failure counts (serialized to JSON with the field names of
+/// an ADK plugin's drop stats).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct DropStats {
     /// Events dropped because `queue_max_size` was reached.
@@ -144,8 +141,7 @@ pub struct DropStats {
     pub total_drops: i64,
 }
 
-/// One payload to upload to Cloud Storage (Go `GCSUploadRequest`). `Debug` writes the payload's
-/// length, never its bytes.
+/// One payload to upload to Cloud Storage. `Debug` writes the payload's length, never its bytes.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct GcsUploadRequest {
     /// The object name within the bucket. When [`Config::gcs_path_prefix`] is non-empty after
@@ -170,11 +166,10 @@ impl fmt::Debug for GcsUploadRequest {
 }
 
 /// Uploads multimodal or oversized text payloads to Cloud Storage and returns the `gs://` URI of
-/// the stored object (Go `GCSContentOffloader`). Called from several tasks at once; must return
-/// soon after `ctx` ends.
+/// the stored object. Called from several tasks at once; must return soon after `ctx` ends.
 #[async_trait::async_trait]
 pub trait GcsContentOffloader: Send + Sync {
-    /// Go `UploadContent(ctx, req)`.
+    /// Uploads `req` and returns the `gs://` URI of the stored object.
     async fn upload_content(&self, ctx: &Context, req: GcsUploadRequest) -> Result<String, Error>;
 
     /// Releases the offloader's resources (the plugin closes only an offloader it built
@@ -184,27 +179,25 @@ pub trait GcsContentOffloader: Send + Sync {
     }
 }
 
-/// How a Google client reaches its service (Go `[]option.ClientOption`; the options the plugin
-/// uses). Empty ([`ClientOptions::is_empty`]) means Go's empty option list.
+/// How a Google client reaches its service (the options the plugin uses). Empty
+/// ([`ClientOptions::is_empty`]) means every default.
 #[derive(Clone, Default)]
 pub struct ClientOptions {
-    /// Go `option.WithCredentials` / `WithAuthCredentials`; `None` resolves Application Default
-    /// Credentials.
+    /// The credentials to use; `None` resolves Application Default Credentials.
     pub credentials: Option<Credentials>,
-    /// Go `option.WithoutAuthentication`.
+    /// Sends requests without authentication.
     pub without_authentication: bool,
-    /// Go `option.WithHTTPClient`; `None` builds a reqwest client. As Go's
-    /// `htransport.NewClient`, the REST clients use it as is: no Application Default
-    /// Credentials lookup and no authentication headers.
+    /// The HTTP client to use; `None` builds a reqwest client. The REST clients use it as is: no
+    /// Application Default Credentials lookup and no authentication headers.
     pub http_client: Option<Arc<dyn HttpClient>>,
-    /// Go `option.WithEndpoint`.
+    /// The service endpoint to use instead of the default.
     pub endpoint: Option<String>,
-    /// Extra headers on every request (Go `option.WithRequestReason`-style header options).
+    /// Extra headers on every request (such as a request-reason header).
     pub headers: HeaderMap,
 }
 
 impl ClientOptions {
-    /// Whether no option is set (Go `len(opts) == 0`).
+    /// Whether no option is set.
     pub fn is_empty(&self) -> bool {
         self.credentials.is_none()
             && !self.without_authentication
@@ -226,109 +219,115 @@ impl fmt::Debug for ClientOptions {
     }
 }
 
-/// The plugin's settings (Go `Config`, mapping to adk-python's `BigQueryLoggerConfig`). See the
-/// Go documentation of each field; Go `int` fields are `i64`, `time.Duration` fields
-/// [`Duration`], `map[string]any` a JSON object, and func / interface fields `Option`s.
+/// The plugin's settings (mapping to adk-python's `BigQueryLoggerConfig`). Counts and sizes are
+/// `i64`, intervals [`Duration`], free-form maps JSON objects, and callback / trait-object fields
+/// `Option`s.
 ///
-/// [`Config::default`] is Go's `DefaultConfig()`; Go's zero value `Config{}` is
-/// [`Config::zero`]. Zero numeric and duration fields are filled from the defaults when a plugin
-/// or batch processor is built (Go `applyDefaults`).
+/// [`Config::default`] is the standard configuration; [`Config::zero`] is the all-zero one. Zero
+/// numeric and duration fields are filled from the defaults when a plugin or batch processor is
+/// built.
 #[derive(Clone)]
 pub struct Config {
-    /// Go `Enabled`.
+    /// Whether the plugin records rows; a disabled plugin only closes.
     pub enabled: bool,
-    /// Go `ProjectID`.
+    /// The Google Cloud project of the events table.
     pub project_id: String,
-    /// Go `DatasetID`.
+    /// The BigQuery dataset of the events table; empty means `agent_analytics`.
     pub dataset_id: String,
-    /// Go `TableName`.
+    /// The events table's name; empty means `agent_events`.
     pub table_name: String,
-    /// Go `MaxContentLen`.
+    /// The text truncation limit; -1 means no limit and 0 means 500 KiB. Must be -1 or at least 1
+    /// once defaults are applied.
     pub max_content_len: i64,
-    /// Go `BatchSize`.
+    /// The most rows in one append batch; 0 means 100.
     pub batch_size: i64,
-    /// Go `BatchFlushIntv`.
+    /// How often queued rows are flushed; zero means 1s.
     pub batch_flush_intv: Duration,
-    /// Go `QueueMaxSize`.
+    /// The queue capacity; rows arriving when it is full are dropped; 0 means 10000.
     pub queue_max_size: i64,
-    /// Go `ClientOptions`.
+    /// How the BigQuery clients reach their services.
     pub client_options: ClientOptions,
-    /// Fields to cluster the table by (Go `ClusteringFields`).
+    /// Fields to cluster the table by.
     pub clustering_fields: Vec<String>,
-    /// Written to `attributes.custom_tags` on every event (Go `CustomTags`).
+    /// Written to `attributes.custom_tags` on every event.
     pub custom_tags: Map<String, Value>,
-    /// Whether to log multi-modal content in `content_parts` (Go `LogMultiModalContent`).
+    /// Whether to log multi-modal content in `content_parts`.
     pub log_multi_modal_content: bool,
-    /// Go `ShutdownTimeout`.
+    /// How long close waits for the queue to drain; zero means 10s.
     pub shutdown_timeout: Duration,
-    /// Go `Logger`; `None` is Go's nil logger.
+    /// Where log messages go; `None` logs nothing.
     pub logger: Option<Arc<dyn Logger>>,
-    /// Go `RetryConfig`.
+    /// Retry settings for BigQuery appends.
     pub retry_config: RetryConfig,
-    /// Go `DisableMultiModalContent`.
+    /// Turns multi-modal content logging off even when `log_multi_modal_content` is set.
     pub disable_multi_modal_content: bool,
-    /// Go `DisableSessionMetadata`.
+    /// Leaves the session metadata out of the rows.
     pub disable_session_metadata: bool,
-    /// Go `CaptureFullMessageContent`.
+    /// Writes message text untruncated (the effective limit is -1).
     pub capture_full_message_content: bool,
-    /// Go `DisableSensitiveKeyRedaction`.
+    /// Turns off the redaction of sensitive keys in payloads.
     pub disable_sensitive_key_redaction: bool,
-    /// Go `ContentFormatter`.
+    /// Transforms or redacts each payload before it is written; see [`ContentFormatter`].
     pub content_formatter: Option<ContentFormatter>,
-    /// Go `DebugContentFormatterErrors`.
+    /// Adds the length of a failing formatter's error text to the log message.
     pub debug_content_formatter_errors: bool,
-    /// Go `EventAllowlist`.
+    /// When non-empty, only these event types are logged (the denylist applies first).
     pub event_allowlist: Vec<String>,
-    /// Go `EventDenylist`.
+    /// Event types that are never logged.
     pub event_denylist: Vec<String>,
-    /// Go `PayloadColumnDenylist`: `content`, `content_parts`, `attributes`, `latency_ms`.
+    /// Payload columns left out of the table and the rows: any of `content`, `content_parts`,
+    /// `attributes`, `latency_ms`.
     pub payload_column_denylist: Vec<String>,
-    /// Go `CustomMetadataAllowlist`.
+    /// Custom metadata keys written to the rows, by exact name or by prefix (an entry ending in
+    /// `*`); cannot be combined with a denied `attributes` column.
     pub custom_metadata_allowlist: Vec<String>,
-    /// Go `FinalResponseToolNames`.
+    /// Names of tools whose result is also logged as an `AGENT_RESPONSE`.
     pub final_response_tool_names: Vec<String>,
-    /// Go `DisableFlushOnRunEnd`.
+    /// Turns off the flush that otherwise ends each run.
     pub disable_flush_on_run_end: bool,
-    /// Go `DisableSchemaUpgrade`.
+    /// Leaves an existing table's schema as it is instead of upgrading it additively.
     pub disable_schema_upgrade: bool,
-    /// Go `EnableOTelCorrelation`.
+    /// Adds the enclosing span's OpenTelemetry trace and span IDs to `attributes`.
     pub enable_otel_correlation: bool,
-    /// Go `GCSBucketName`.
+    /// The Cloud Storage bucket for offloaded content; empty means no offloading unless
+    /// `gcs_offloader` is set.
     pub gcs_bucket_name: String,
-    /// Go `GCSClientOptions`; empty means [`client_options`](Self::client_options).
+    /// How the Cloud Storage client reaches its service; empty means
+    /// [`client_options`](Self::client_options).
     pub gcs_client_options: ClientOptions,
-    /// Go `GCSPathPrefix`: prepended, followed by `/`, to the names of offloaded objects, with
-    /// leading and trailing `/` trimmed. The trimmed prefix is used verbatim when it is at most
-    /// 750 bytes, holds no `~` (the rewrite hash delimiter), no control character (U+0000 to
-    /// U+001F, U+007F to U+009F) and no U+2028 / U+2029, and its first two `/`-separated
-    /// segments are not, case-insensitively, `.well-known` and `acme-challenge`. Any other
-    /// prefix is rewritten to `<base>~<sha256>` (those characters replaced with `_`, a leading
-    /// `.well-known` segment renamed `_well-known`, cut to at most 402 bytes, then `~` and the
-    /// 64 hex digits of the SHA-256 of the trimmed prefix), and a warning with the reason and
-    /// byte lengths (never the prefix text) is logged when the batch processor is built.
+    /// Prepended, followed by `/`, to the names of offloaded objects, with leading and trailing `/`
+    /// trimmed. The trimmed prefix is used verbatim when it is at most 750 bytes, holds no `~` (the
+    /// rewrite hash delimiter), no control character (U+0000 to U+001F, U+007F to U+009F) and no
+    /// U+2028 / U+2029, and its first two `/`-separated segments are not, case-insensitively,
+    /// `.well-known` and `acme-challenge`. Any other prefix is rewritten to `<base>~<sha256>`
+    /// (those characters replaced with `_`, a leading `.well-known` segment renamed `_well-known`,
+    /// cut to at most 402 bytes, then `~` and the 64 hex digits of the SHA-256 of the trimmed
+    /// prefix), and a warning with the reason and byte lengths (never the prefix text) is logged
+    /// when the batch processor is built.
     pub gcs_path_prefix: String,
-    /// Go `ConnectionID` (`location.connection_id`).
+    /// The BigQuery connection (`location.connection_id`) recorded in the object references of
+    /// offloaded content.
     pub connection_id: String,
-    /// Go `MaxInlineTextSize`; values ≤ 0 mean 32 KiB.
+    /// The largest text kept inline before it is offloaded; values ≤ 0 mean 32 KiB.
     pub max_inline_text_size: i64,
-    /// Go `GCSMaxConcurrentUploads`; values ≤ 0 mean 8.
+    /// The most uploads in flight at once; values ≤ 0 mean 8.
     pub gcs_max_concurrent_uploads: i64,
-    /// Go `GCSUploadTimeout`; zero means 10s.
+    /// Bounds one batch's uploads; zero means 10s.
     pub gcs_upload_timeout: Duration,
-    /// Go `GCSMaxPendingUploadBytes`; values ≤ 0 mean 256 MiB.
+    /// Caps the bytes held by pending uploads; values ≤ 0 mean 256 MiB.
     pub gcs_max_pending_upload_bytes: i64,
-    /// Go `GCSOffloader`.
+    /// A caller-supplied offloader; when set, the plugin does not close it.
     pub gcs_offloader: Option<Arc<dyn GcsContentOffloader>>,
-    /// Go `DisableCreateViews`.
+    /// Skips creating the per-event-type analytics views.
     pub disable_create_views: bool,
-    /// Go `ViewPrefix`; empty means `"v"`.
+    /// The prefix of the view names; empty means `"v"`.
     pub view_prefix: String,
-    /// Go `ExactlyOnceDelivery`.
+    /// Appends to a committed stream with explicit offsets (needs an empty stream name).
     pub exactly_once_delivery: bool,
 }
 
 impl Default for Config {
-    /// Go `DefaultConfig()`.
+    /// The standard configuration.
     fn default() -> Self {
         Config {
             enabled: true,
@@ -364,7 +363,7 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Go's zero value `Config{}`: every field empty, zero, `false` or `None`.
+    /// The all-zero configuration: every field empty, zero, `false` or `None`.
     pub fn zero() -> Config {
         Config {
             enabled: false,
@@ -411,7 +410,7 @@ impl Config {
         }
     }
 
-    /// Go `applyDefaults(c)`: fills the zero values that have a non-zero default.
+    /// Fills the zero values that have a non-zero default.
     pub(crate) fn apply_defaults(mut self) -> Config {
         let defaults = Config::default();
         if self.dataset_id.is_empty() {
@@ -454,8 +453,7 @@ impl Config {
         if self.gcs_max_concurrent_uploads <= 0 {
             self.gcs_max_concurrent_uploads = DEFAULT_GCS_MAX_CONCURRENT_UPLOADS;
         }
-        // Divergence (ledger 7b-1): Go also replaces a negative GCSUploadTimeout; a Rust
-        // `Duration` cannot be negative, so only zero is replaced.
+        // A Rust `Duration` cannot be negative, so only zero is replaced.
         if self.gcs_upload_timeout.is_zero() {
             self.gcs_upload_timeout = GCS_UPLOAD_TIMEOUT;
         }
@@ -468,32 +466,32 @@ impl Config {
         self
     }
 
-    /// Go `logMultiModalContent()`.
+    /// Whether multi-modal content is logged: enabled and not disabled.
     pub(crate) fn log_multi_modal_content(&self) -> bool {
         self.log_multi_modal_content && !self.disable_multi_modal_content
     }
 
-    /// Go `logSessionMetadata()`.
+    /// Whether session metadata is logged.
     pub(crate) fn log_session_metadata(&self) -> bool {
         !self.disable_session_metadata
     }
 
-    /// Go `redactSensitiveKeys()`.
+    /// Whether sensitive keys are redacted.
     pub(crate) fn redact_sensitive_keys(&self) -> bool {
         !self.disable_sensitive_key_redaction
     }
 
-    /// Go `flushOnRunEnd()`.
+    /// Whether each run end flushes the queue.
     pub(crate) fn flush_on_run_end(&self) -> bool {
         !self.disable_flush_on_run_end
     }
 
-    /// Go `createViews()`.
+    /// Whether the analytics views are created.
     pub(crate) fn create_views(&self) -> bool {
         !self.disable_create_views
     }
 
-    /// Go `maxContentLength()`: the text truncation limit; -1 means no limit.
+    /// The text truncation limit; -1 means no limit.
     pub(crate) fn max_content_length(&self) -> i64 {
         if self.capture_full_message_content {
             -1
@@ -502,16 +500,16 @@ impl Config {
         }
     }
 
-    /// Go `logf(format, args...)`: logs through [`logger`](Self::logger) when one is set.
+    /// Logs through [`logger`](Self::logger) when one is set.
     pub(crate) fn logf(&self, args: fmt::Arguments<'_>) {
         if let Some(logger) = &self.logger {
             logger.printf(args);
         }
     }
 
-    /// Go `viewLogf()`: the logger when the caller set a non-default one, else `None` (no logger,
-    /// or Go's `log.Default()`), so background view creation never writes to the process-wide
-    /// standard logger.
+    /// The logger when the caller set a non-default one, else `None` (no logger, or the default
+    /// [`StdLogger`]), so background view creation never writes to the process-wide standard
+    /// logger.
     pub(crate) fn view_logf(&self) -> Option<Arc<dyn Logger>> {
         self.logger
             .as_ref()

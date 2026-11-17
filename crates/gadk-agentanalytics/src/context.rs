@@ -13,13 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`Context`]: the subset of Go's `context.Context` that `plugin/agentanalytics` relies on —
-//! cancellation, deadlines and `Err()` telling `context.Canceled` from
-//! `context.DeadlineExceeded` (Go's `syncAnalyticsViews` and `viewDDLTimeout` depend on the
-//! difference), timeout causes (`context.WithTimeoutCause` / `context.Cause`), `context.AfterFunc`,
-//! and of Go's context values the one the transports carry: grpc-go's outgoing metadata
-//! (`metadata.NewOutgoingContext` / `AppendToOutgoingContext` / `FromOutgoingContext`), which
-//! every derived context — [`without_cancel`](Context::without_cancel) included — keeps.
+//! [`Context`]: the cancellation context the analytics plugin and its transports share —
+//! cancellation, deadlines and an error telling [`ContextError::Canceled`] from
+//! [`ContextError::DeadlineExceeded`] (view synchronisation and its DDL timeout depend on the
+//! difference), timeout causes, after-cancel callbacks ([`Context::after_func`]), and the one
+//! context value the transports carry: gRPC outgoing metadata, which every derived context —
+//! [`without_cancel`](Context::without_cancel) included — keeps.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -33,13 +32,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
 
-/// Why a [`Context`] ended (Go `context.Canceled` / `context.DeadlineExceeded`). `Display` is
-/// Go's text.
+/// Why a [`Context`] ended (canceled or deadline exceeded). `Display` is the text `context
+/// canceled` / `context deadline exceeded`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContextError {
-    /// `context.Canceled`: `context canceled`.
+    /// The context was canceled: `context canceled`.
     Canceled,
-    /// `context.DeadlineExceeded`: `context deadline exceeded`.
+    /// The context's deadline passed: `context deadline exceeded`.
     DeadlineExceeded,
 }
 
@@ -54,7 +53,7 @@ impl fmt::Display for ContextError {
 
 impl std::error::Error for ContextError {}
 
-/// grpc-go `metadata.MD`: lowercase keys, each with its values in order.
+/// gRPC metadata: lowercase keys, each with its values in order.
 pub type Metadata = BTreeMap<String, Vec<String>>;
 
 /// When a context ended, why, and its cause.
@@ -67,28 +66,27 @@ struct Inner {
     parent: Option<Context>,
     /// The effective deadline: the earlier of this context's own and its parent's.
     deadline: Option<Instant>,
-    /// This context's own deadline (Go's timer of `WithDeadline`), if it set one.
+    /// This context's own deadline (the one its own timer fires at), if it set one.
     own_deadline: Option<Instant>,
     /// Cancelled when this context ends (a child token of the parent's).
     token: CancellationToken,
-    /// The cause recorded when this context's own deadline ends it (Go `WithTimeoutCause`);
-    /// `None` records `DeadlineExceeded`.
+    /// The cause recorded when this context's own deadline ends it (see
+    /// [`Context::with_timeout_cause`]); `None` records `DeadlineExceeded`.
     timeout_cause: Option<Arc<Error>>,
-    /// The first reason this context ended and its cause (Go `context.Cause`), with the instant
-    /// it ended at; never changes once set.
+    /// The first reason this context ended and its cause, with the instant it ended at; never
+    /// changes once set.
     ended: OnceLock<Ended>,
-    /// grpc-go's outgoing metadata, copied into every derived context.
+    /// gRPC outgoing metadata, copied into every derived context.
     outgoing: Option<Arc<Metadata>>,
 }
 
-/// A Go `context.Context`: a cheap `Clone` handle. A child made by
+/// A cancellation context: a cheap `Clone` handle. A child made by
 /// [`with_cancel`](Context::with_cancel) / [`with_timeout`](Context::with_timeout) /
-/// [`with_timeout_cause`](Context::with_timeout_cause) /
-/// [`with_deadline`](Context::with_deadline) ends when its parent ends (with the parent's
-/// error and cause), when [`cancel`](Context::cancel) is called on it (`Canceled`), or when its
-/// deadline passes (`DeadlineExceeded`). Deadlines use [`tokio::time::Instant`], so tests may
-/// pause time. Of Go's context values only grpc-go's outgoing metadata is modeled
-/// ([`with_outgoing_metadata`](Context::with_outgoing_metadata)).
+/// [`with_timeout_cause`](Context::with_timeout_cause) / [`with_deadline`](Context::with_deadline)
+/// ends when its parent ends (with the parent's error and cause), when [`cancel`](Context::cancel)
+/// is called on it (`Canceled`), or when its deadline passes (`DeadlineExceeded`). Deadlines use
+/// [`tokio::time::Instant`], so tests may pause time. The only context value modeled is gRPC
+/// outgoing metadata ([`with_outgoing_metadata`](Context::with_outgoing_metadata)).
 #[derive(Clone)]
 pub struct Context {
     inner: Arc<Inner>,
@@ -111,7 +109,7 @@ impl Default for Context {
 }
 
 impl Context {
-    /// Go `context.Background()`: never ends.
+    /// A context that never ends.
     pub fn background() -> Context {
         Context {
             inner: Arc::new(Inner {
@@ -154,31 +152,29 @@ impl Context {
         self.derive(deadline, timeout_cause, self.inner.outgoing.clone())
     }
 
-    /// Go `context.WithCancel(ctx)`: a child that [`cancel`](Context::cancel) ends.
+    /// A child that [`cancel`](Context::cancel) ends.
     pub fn with_cancel(&self) -> Context {
         self.child(None, None)
     }
 
-    /// Go `context.WithTimeout(ctx, d)`.
+    /// A child that ends when `d` has passed (`DeadlineExceeded`).
     pub fn with_timeout(&self, d: Duration) -> Context {
         self.child(Instant::now().checked_add(d), None)
     }
 
-    /// Go `context.WithTimeoutCause(ctx, d, cause)`: as [`with_timeout`](Self::with_timeout),
-    /// but when its own deadline ends it, [`cause`](Self::cause) is `cause` (its
-    /// [`err`](Self::err) is still `DeadlineExceeded`). When the parent ends it first, the
-    /// parent's cause is kept, as Go's `WithDeadlineCause` does.
+    /// As [`with_timeout`](Self::with_timeout), but when its own deadline ends it,
+    /// [`cause`](Self::cause) is `cause` (its [`err`](Self::err) is still `DeadlineExceeded`). When
+    /// the parent ends it first, the parent's cause is kept.
     pub fn with_timeout_cause(&self, d: Duration, cause: Arc<Error>) -> Context {
         self.child(Instant::now().checked_add(d), Some(cause))
     }
 
-    /// Go `context.WithDeadline(ctx, at)`.
+    /// A child that ends at the instant `at` (`DeadlineExceeded`).
     pub fn with_deadline(&self, at: Instant) -> Context {
         self.child(Some(at), None)
     }
 
-    /// Go `context.WithoutCancel(ctx)`: a context that never ends but keeps `ctx`'s values
-    /// (its outgoing metadata).
+    /// A context that never ends but keeps this context's values (its outgoing metadata).
     pub fn without_cancel(&self) -> Context {
         Context {
             inner: Arc::new(Inner {
@@ -193,8 +189,8 @@ impl Context {
         }
     }
 
-    /// grpc-go `metadata.NewOutgoingContext(ctx, md)`: a child (ending with this context)
-    /// whose outgoing metadata is `md` (keys lowercased), replacing any this context carries.
+    /// A child (ending with this context) whose outgoing metadata is `md` (keys lowercased),
+    /// replacing any this context carries.
     pub fn with_outgoing_metadata(&self, md: Metadata) -> Context {
         let mut lower = Metadata::new();
         for (k, vals) in md {
@@ -203,9 +199,8 @@ impl Context {
         self.derive(None, None, Some(Arc::new(lower)))
     }
 
-    /// grpc-go `metadata.AppendToOutgoingContext(ctx, kv...)`: a child (ending with this
-    /// context) whose outgoing metadata is this context's with `pairs` appended (keys
-    /// lowercased).
+    /// A child (ending with this context) whose outgoing metadata is this context's with `pairs`
+    /// appended (keys lowercased).
     pub fn append_outgoing_metadata(&self, pairs: &[(&str, &str)]) -> Context {
         let mut md = self.outgoing_metadata().unwrap_or_default();
         for (k, v) in pairs {
@@ -216,14 +211,13 @@ impl Context {
         self.derive(None, None, Some(Arc::new(md)))
     }
 
-    /// grpc-go `metadata.FromOutgoingContext(ctx)`: a copy of the outgoing metadata, `None`
-    /// when no context in the chain set any.
+    /// A copy of the outgoing metadata, `None` when no context in the chain set any.
     pub fn outgoing_metadata(&self) -> Option<Metadata> {
         self.inner.outgoing.as_deref().cloned()
     }
 
-    /// Go `cancel()` of `WithCancel` / `WithTimeout` / `WithDeadline`: ends this context and its
-    /// children with `Canceled`, unless it has already ended (then its error stays).
+    /// Ends this context and its children with `Canceled`, unless it has already ended (then its
+    /// error stays).
     pub fn cancel(&self) {
         if self.ended().is_none() {
             let _ = self.inner.ended.set((
@@ -235,14 +229,14 @@ impl Context {
         self.inner.token.cancel();
     }
 
-    /// Go `ctx.Deadline()`.
+    /// The effective deadline, if any.
     pub fn deadline(&self) -> Option<Instant> {
         self.inner.deadline
     }
 
-    /// Why this context ended, if it has, latched as of the instant it ended (Go fixes `Err` and
-    /// `Cause` when the timer fires or the cancel happens): the earliest of the parent's end, this
-    /// context's own deadline, and its own cancel (which [`cancel`](Self::cancel) latches at
+    /// Why this context ended, if it has, latched as of the instant it ended (the error and cause
+    /// are fixed when the timer fires or the cancel happens): the earliest of the parent's end,
+    /// this context's own deadline, and its own cancel (which [`cancel`](Self::cancel) latches at
     /// once). A deadline is the instant it passed, so a context whose own timeout passed before a
     /// later end of its parent keeps its own cause however late it is first asked; on a tie the
     /// parent's end wins (its deadline is the child's effective one).
@@ -272,21 +266,20 @@ impl Context {
         self.inner.ended.get()
     }
 
-    /// Go `ctx.Err()`: `None` while the context is live.
+    /// Why the context ended: `None` while the context is live.
     pub fn err(&self) -> Option<ContextError> {
         self.ended().map(|(_, err, _)| *err)
     }
 
-    /// Go `context.Cause(ctx)`: `None` while the context is live; once it ended, the cause given
-    /// to [`with_timeout_cause`](Self::with_timeout_cause) when that deadline ended it, else
-    /// the parent's cause when the parent ended it, else [`Error::Context`] of
-    /// [`err`](Self::err). The same `Arc` is returned every time (compare with
-    /// [`Arc::ptr_eq`]).
+    /// The cause of the end: `None` while the context is live; once it ended, the cause given to
+    /// [`with_timeout_cause`](Self::with_timeout_cause) when that deadline ended it, else the
+    /// parent's cause when the parent ended it, else [`Error::Context`] of [`err`](Self::err). The
+    /// same `Arc` is returned every time (compare with [`Arc::ptr_eq`]).
     pub fn cause(&self) -> Option<Arc<Error>> {
         self.ended().map(|(_, _, cause)| Arc::clone(cause))
     }
 
-    /// Go `<-ctx.Done()`: resolves once the context has ended.
+    /// Resolves once the context has ended.
     pub async fn done(&self) {
         match self.inner.deadline {
             Some(at) => {
@@ -299,9 +292,9 @@ impl Context {
         }
     }
 
-    /// Go `context.AfterFunc(ctx, f)`: runs `f` once, on a spawned task, after this context
-    /// ends (at once if it already has), unless [`AfterFunc::stop`] is called first. Dropping
-    /// the handle does not stop it. Must be called inside a Tokio runtime.
+    /// Runs `f` once, on a spawned task, after this context ends (at once if it already has),
+    /// unless [`AfterFunc::stop`] is called first. Dropping the handle does not stop it. Must be
+    /// called inside a Tokio runtime.
     pub fn after_func(&self, f: impl FnOnce() + Send + 'static) -> AfterFunc {
         let f: Box<dyn FnOnce() + Send> = Box::new(f);
         let slot: AfterFuncSlot = Arc::new(Mutex::new(Some(f)));
@@ -309,7 +302,7 @@ impl Context {
         let task_slot = Arc::clone(&slot);
         let task = tokio::spawn(async move {
             ctx.done().await;
-            // Record the end, as Go's cancellation does before it starts `f`.
+            // Record the end before `f` runs.
             let _ = ctx.err();
             let f = task_slot
                 .lock()
@@ -327,8 +320,7 @@ impl Context {
     }
 
     /// Runs `fut` until it finishes or the context ends; an ended context (also one that had
-    /// already ended) returns [`Error::Context`] with [`err`](Context::err) and drops `fut`
-    /// (Go's request cancellation).
+    /// already ended) returns [`Error::Context`] with [`err`](Context::err) and drops `fut`.
     pub async fn run<T, F>(&self, fut: F) -> Result<T, Error>
     where
         F: Future<Output = Result<T, Error>>,
@@ -344,7 +336,7 @@ impl Context {
     }
 }
 
-/// The handle of [`Context::after_func`] (Go's `stop` function).
+/// The handle of [`Context::after_func`].
 pub struct AfterFunc {
     ctx: Context,
     slot: AfterFuncSlot,
@@ -358,9 +350,9 @@ impl fmt::Debug for AfterFunc {
 }
 
 impl AfterFunc {
-    /// Go `stop()`: `true` if it kept `f` from running, `false` if `f` has started (or the
-    /// context has ended, which starts it — here on the calling thread when the watcher task
-    /// has not taken it yet) or `stop` was already called. It does not wait for `f`.
+    /// `true` if it kept `f` from running, `false` if `f` has started (or the context has ended,
+    /// which starts it — here on the calling thread when the watcher task has not taken it yet) or
+    /// `stop` was already called. It does not wait for `f`.
     ///
     /// Because `f` may run inline here, `f` must not block or take locks the caller holds.
     pub fn stop(&self) -> bool {

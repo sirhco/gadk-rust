@@ -13,12 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/batch_processor.go`'s `BatchProcessor`: the row
-//! queue, the flush ticker, size-triggered and run-end flushes, the deferred batch, `Close`'s
-//! bounded drain and finalization, drop counters, the pending-upload byte budget, and the
-//! estimated-size splitting and serialized-size halving of batches into AppendRows requests.
-//! The upload orchestration (`gcs_offloader.go`) is `impl BatchProcessor` in
-//! `crate::offload::uploads`; the stream is [`crate::write::stream_writer`].
+//! The [`BatchProcessor`]: the row queue, the flush ticker, size-triggered and run-end flushes, the
+//! deferred batch, `close`'s bounded drain and finalization, drop counters, the pending-upload byte
+//! budget, and the estimated-size splitting and serialized-size halving of batches into AppendRows
+//! requests. The upload orchestration is `impl BatchProcessor` in `crate::offload::uploads`; the
+//! stream is [`crate::write::stream_writer`].
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
@@ -50,7 +49,7 @@ use crate::write::stream_writer::{
     DEFAULT_ROTATE_TIMEOUT, StreamWriter, create_committed_write_stream,
 };
 
-/// Go `shutdownTimeout()`'s fallback when `ShutdownTimeout` is zero.
+/// The shutdown timeout used when [`Config::shutdown_timeout`] is zero.
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// `std::sync::Mutex::lock` that ignores poisoning (a panicking logger must not wedge the
@@ -59,27 +58,27 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// A row count as Go's `int64(len(batch))`.
+/// A row count as an `i64`.
 fn count(n: usize) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 
-/// Go `dropCounters`: event-drop and formatter-failure counters, shared (`Arc`) so a registry
-/// can read them without holding the processor.
+/// Event-drop and formatter-failure counters, shared (`Arc`) so a registry can read them without
+/// holding the processor.
 #[derive(Debug, Default)]
 pub(crate) struct DropCounters {
-    /// Go `queueFullDrops`.
+    /// Rows dropped because the queue was full.
     pub(crate) queue_full_drops: AtomicI64,
-    /// Go `appendFailureDrops`.
+    /// Rows dropped by failed or skipped appends.
     pub(crate) append_failure_drops: AtomicI64,
-    /// Go `formatterFailureDrops`.
+    /// Events whose payload the content formatter replaced.
     pub(crate) formatter_failure_drops: AtomicI64,
-    /// Go `shutdownDrops`.
+    /// Rows rejected after close or dropped when the shutdown timeout ran out.
     pub(crate) shutdown_drops: AtomicI64,
 }
 
 impl DropCounters {
-    /// Go `(*dropCounters).DropStats()`.
+    /// A snapshot of the counters.
     pub(crate) fn drop_stats(&self) -> DropStats {
         let q = self.queue_full_drops.load(Ordering::SeqCst);
         let a = self.append_failure_drops.load(Ordering::SeqCst);
@@ -95,80 +94,78 @@ impl DropCounters {
     }
 }
 
-/// What Go's `flushMu` guards besides the flush itself.
+/// What the flush lock guards besides the flush itself.
 #[derive(Debug, Default)]
 pub(crate) struct FlushState {
-    /// Go `deferredBatch`: the unconfirmed rows of at most one batch whose run-end write ran
-    /// out of time; drained before the queue.
+    /// The unconfirmed rows of at most one batch whose run-end write ran out of time; drained
+    /// before the queue.
     pub(crate) deferred_batch: Vec<QueuedRow>,
 }
 
-/// Asynchronous batching and writing of rows to BigQuery (Go `BatchProcessor`). Built by
-/// [`BatchProcessor::new`] as an `Arc`, since appends and the ticker spawn flushes.
+/// Asynchronous batching and writing of rows to BigQuery Built by [`BatchProcessor::new`] as an
+/// `Arc`, since appends and the ticker spawn flushes.
 pub struct BatchProcessor {
-    /// Go `writeClient`.
+    /// The BigQuery Write client, if any.
     pub(crate) write_client: Option<WriteClient>,
-    /// Go `streamWriter`.
+    /// The stream writer the batches are appended through.
     pub(crate) stream_writer: StreamWriter,
-    /// Go `streamName` (after a committed stream was created, its name).
-    #[allow(dead_code)] // Go keeps it; read by the ported tests
+    /// The stream name (after a committed stream was created, its name).
+    #[allow(dead_code)] // kept for the tests
     pub(crate) stream_name: String,
-    /// Go `createdCommittedStream`.
+    /// Whether `new` created a committed stream (exactly-once delivery).
     pub(crate) created_committed_stream: bool,
-    /// Go `config` (after `applyDefaults`).
+    /// The config, with the defaults applied.
     pub(crate) config: Config,
-    /// Go `effectiveGCSPathPrefix` / `gcsPathPrefixResolved`: the prefix `new` resolved
-    /// (`resolve_gcs_path_prefix`); `None` when unresolved (Go's struct literals), so
-    /// `object_path` cleans `config.gcs_path_prefix` per call.
+    /// The prefix `new` resolved (`resolve_gcs_path_prefix`); `None` when unresolved (a processor
+    /// built by hand), so `object_path` cleans `config.gcs_path_prefix` per call.
     pub(crate) effective_gcs_path_prefix: Option<String>,
-    /// Go `queue` (`chan map[string]any` of capacity `QueueMaxSize`).
+    /// The row queue, of capacity `queue_max_size`.
     pub(crate) queue: Mutex<VecDeque<QueuedRow>>,
-    /// The queue's capacity (Go `cap(queue)`).
+    /// The queue's capacity.
     pub(crate) queue_capacity: usize,
-    /// Go `counters`.
+    /// The drop counters.
     pub(crate) counters: Arc<DropCounters>,
-    /// Go `appendMu`: appends hold it shared, `stop_accepting_rows` exclusively.
+    /// Appends hold it shared, `stop_accepting_rows` exclusively.
     pub(crate) append_mu: RwLock<()>,
-    /// Go `flushMu` and the deferred batch it guards (`try_lock` is Go's `TryLock`).
+    /// Serializes flushes, and guards the deferred batch (flushes take it with `try_lock`).
     pub(crate) flush_mu: tokio::sync::Mutex<FlushState>,
-    /// Go `arrowSchema`: `project_arrow_schema(denied)`.
+    /// The Arrow schema of the rows: `project_arrow_schema(denied)`.
     pub(crate) arrow_schema: Arc<Schema>,
-    /// Go `baseCtx`: `without_cancel` of the constructor's context (keeps its values).
+    /// `without_cancel` of the constructor's context (keeps its values).
     pub(crate) base_ctx: Context,
-    /// Go `uploadCtx` / `cancelUploads` (`upload_ctx.cancel()`): bounds the uploads of
-    /// background and run-end flushes; `close` cancels it before taking `flush_mu`.
+    /// Bounds the uploads of background and run-end flushes; `close` cancels it before taking
+    /// `flush_mu`.
     pub(crate) upload_ctx: Context,
-    /// Go `stopCh`.
+    /// Cancelled by `close` to stop the ticker.
     pub(crate) stop: CancellationToken,
-    /// Go `closeOnce`: concurrent `close` calls wait for the first to finish.
+    /// Concurrent `close` calls wait for the first to finish.
     pub(crate) close_once: tokio::sync::OnceCell<()>,
-    /// Go `done`: the ticker task, awaited by `close` when started.
+    /// The ticker task, awaited by `close` when started.
     pub(crate) ticker: Mutex<Option<JoinHandle<()>>>,
-    /// Go `started`.
+    /// Whether the ticker was started.
     pub(crate) started: AtomicBool,
-    /// Go `closed`.
+    /// Whether the processor stopped accepting rows.
     pub(crate) closed: AtomicBool,
-    /// Go `uploadTimeout` (test override of `gcs_upload_timeout`), in ns; 0 = unset.
+    /// Test override of `gcs_upload_timeout`, in ns; 0 = unset.
     pub(crate) upload_timeout: AtomicU64,
-    /// Go `uploadCooldownUntil`: uploads are paused until this instant; `None` = not paused.
+    /// Uploads are paused until this instant; `None` = not paused.
     pub(crate) upload_cooldown_until: Mutex<Option<Instant>>,
-    /// Go `pendingUploadBytes`.
+    /// The bytes reserved by pending uploads.
     pub(crate) pending_upload_bytes: AtomicI64,
-    /// Go `maxPendingUploadBytes` (test override of `gcs_max_pending_upload_bytes`); 0 = unset.
+    /// Test override of `gcs_max_pending_upload_bytes`); 0 = unset.
     pub(crate) max_pending_upload_bytes: AtomicI64,
-    /// Go `uploadBudgetWarned`.
+    /// Whether the pending-bytes budget exhaustion was already warned about.
     pub(crate) upload_budget_warned: AtomicBool,
-    /// Go `maxAppendBytes` (test override of `MAX_APPEND_REQUEST_BYTES`); 0 = unset.
+    /// Test override of `MAX_APPEND_REQUEST_BYTES`; 0 = unset.
     pub(crate) max_append_bytes: AtomicUsize,
-    /// Go `maxSerializedAppendBytes` (test override of the serialized limit); 0 = unset.
+    /// Test override of the serialized limit; 0 = unset.
     pub(crate) max_serialized_append_bytes: AtomicUsize,
 }
 
 impl BatchProcessor {
-    /// Go `NewBatchProcessor(ctx, writeClient, streamName, config)`: applies the defaults,
-    /// validates the config (`crate::validate::validate_config`), and with exactly-once
-    /// delivery and a client creates the committed stream under `ctx` bounded by the rotate
-    /// timeout. Later work keeps only `ctx`'s values (`without_cancel`).
+    /// Applies the defaults, validates the config (`crate::validate::validate_config`), and with
+    /// exactly-once delivery and a client creates the committed stream under `ctx` bounded by the
+    /// rotate timeout. Later work keeps only `ctx`'s values (`without_cancel`).
     ///
     /// # Errors
     ///
@@ -255,9 +252,8 @@ impl BatchProcessor {
         }))
     }
 
-    /// Go's `&BatchProcessor{config: config, queue: make(chan …, queue_capacity)}` in tests: a
-    /// processor with `config` as given (no defaults applied, no validation), no write client,
-    /// an unstarted stream writer on the empty stream name, background contexts and zero
+    /// A processor for tests: with `config` as given (no defaults applied, no validation), no write
+    /// client, an unstarted stream writer on the empty stream name, background contexts and zero
     /// counters.
     #[cfg(test)]
     pub(crate) fn bare(config: Config, queue_capacity: usize) -> BatchProcessor {
@@ -296,8 +292,8 @@ impl BatchProcessor {
         }
     }
 
-    /// Go `Start()`: spawns the ticker that flushes every `batch_flush_intv` until `close`;
-    /// later calls do nothing. Must run inside a Tokio runtime.
+    /// Spawns the ticker that flushes every `batch_flush_intv` until `close`; later calls do
+    /// nothing. Must run inside a Tokio runtime.
     pub fn start(self: &Arc<Self>) {
         // Held while spawning, so a concurrent `close` either sees the handle or runs first
         // (and the ticker then stops at once).
@@ -310,12 +306,12 @@ impl BatchProcessor {
             return;
         }
         let this = Arc::clone(self);
-        // Go's `time.NewTicker` panics on a non-positive interval; `new` always applies the
-        // 1s default, so only a hand-built zero interval reaches this floor.
+        // `interval_at` panics on a zero period; `new` always applies the 1s default, so only a
+        // hand-built zero interval reaches this floor.
         let period = this.config.batch_flush_intv.max(Duration::from_nanos(1));
         *ticker = Some(tokio::spawn(async move {
             let mut interval = tokio::time::interval_at(Instant::now() + period, period);
-            // Go's ticker drops the ticks a slow receiver misses.
+            // Ticks missed by a slow flush are skipped.
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             loop {
                 tokio::select! {
@@ -327,9 +323,9 @@ impl BatchProcessor {
         }));
     }
 
-    /// Go `Append(row)`: queues `row` without blocking; a full queue drops it (logging `WARNING:
-    /// BigQuery event queue is full, dropping event.`), a closed processor discards it; when the
-    /// queue reaches `batch_size` rows a flush is spawned.
+    /// Queues `row` without blocking; a full queue drops it (logging `WARNING: BigQuery event queue
+    /// is full, dropping event.`), a closed processor discards it; when the queue reaches
+    /// `batch_size` rows a flush is spawned.
     pub fn append(self: &Arc<Self>, row: QueuedRow) {
         let (dropped, should_flush) = self.enqueue(row);
         // Log and flush only after enqueue has released append_mu, so that a panicking Logger
@@ -340,15 +336,15 @@ impl BatchProcessor {
             ));
         }
         if should_flush && let Ok(handle) = tokio::runtime::Handle::try_current() {
-            // Go `go b.flush()`. Outside a runtime there is nothing to spawn on; the ticker or
-            // close writes the rows.
+            // Spawn the flush. Outside a runtime there is nothing to spawn on; the ticker or close
+            // writes the rows.
             let this = Arc::clone(self);
             handle.spawn(async move { this.flush().await });
         }
     }
 
-    /// Go `flush()`: unless a flush runs (`try_lock`) or the processor is closed, writes the
-    /// deferred batch or a batch from the queue, then further full batches.
+    /// Unless a flush runs (`try_lock`) or the processor is closed, writes the deferred batch or a
+    /// batch from the queue, then further full batches.
     pub async fn flush(&self) {
         let Ok(mut state) = self.flush_mu.try_lock() else {
             return;
@@ -368,13 +364,14 @@ impl BatchProcessor {
         }
     }
 
-    /// Go `len(b.queue) >= b.config.BatchSize`.
+    /// Whether the queue holds at least `batch_size` rows.
     fn queue_reaches_batch_size(&self) -> bool {
         count(lock(&self.queue).len()) >= self.config.batch_size
     }
 
-    /// Go `flushRunEnd()`: drains and writes the queue under one `shutdown_timeout` budget,
-    /// with Go's upload shares, deferral and cooldown rules.
+    /// Drains and writes the queue under one `shutdown_timeout` budget: uploads get half of the
+    /// remaining time (a quarter when retrying a deferred batch), and a batch whose write runs out
+    /// of time is deferred to the next flush.
     ///
     /// Not cancellation-safe: callers must run it to completion. Dropping the future mid-await
     /// loses the rows it already drained from the queue without counting them as dropped.
@@ -435,15 +432,14 @@ impl BatchProcessor {
         flush_ctx.cancel();
     }
 
-    /// Go `Close()`: idempotent; stops accepting rows, cancels the uploads of in-flight
-    /// flushes, waits for the ticker and the in-flight batch, drains the queue (uploads within
-    /// half a `shutdown_timeout`, writes within one), closes the stream and finalizes streams
-    /// as Go does.
+    /// Idempotent; stops accepting rows, cancels the uploads of in-flight flushes, waits for the
+    /// ticker and the in-flight batch, drains the queue (uploads within half a `shutdown_timeout`,
+    /// writes within one), closes the stream and finalizes streams.
     ///
     /// Not cancellation-safe: callers must run it to completion. Dropping the future mid-await
-    /// loses the rows it already drained without counting them, and (unlike Go's `sync.Once`,
-    /// which never reruns) a later `close` reruns the body after the first call was dropped or
-    /// panicked (`OnceCell::get_or_init`).
+    /// loses the rows it already drained without counting them, and (unlike a run-once cell that
+    /// never reruns) a later `close` reruns the body after the first call was dropped or panicked
+    /// (`OnceCell::get_or_init`).
     pub async fn close(&self) {
         self.close_once
             .get_or_init(|| async {
@@ -452,13 +448,13 @@ impl BatchProcessor {
             .await;
     }
 
-    /// The body of Go's `closeOnce.Do`.
+    /// The body run once by [`close`](Self::close).
     async fn close_once_body(&self) {
         self.stop_accepting_rows();
         if self.started.load(Ordering::SeqCst) {
             let ticker = lock(&self.ticker).take();
             if let Some(ticker) = ticker {
-                // Go `<-b.done`; a ticker that panicked has finished as well.
+                // Wait for the ticker; a ticker that panicked has finished as well.
                 let _ = ticker.await;
             }
         }
@@ -496,17 +492,17 @@ impl BatchProcessor {
         finalize_ctx.cancel();
     }
 
-    /// Go `DropStats()`.
+    /// The cumulative drop counts.
     pub fn drop_stats(&self) -> DropStats {
         self.counters.drop_stats()
     }
 
-    /// The shared drop counters (Go's `counters`, held by the plugin registry).
+    /// The shared drop counters (held by the plugin registry).
     pub(crate) fn counters(&self) -> Arc<DropCounters> {
         Arc::clone(&self.counters)
     }
 
-    /// Go `shutdownTimeout()`: `shutdown_timeout`, or 10s when zero.
+    /// `shutdown_timeout`, or 10s when zero.
     pub(crate) fn shutdown_timeout(&self) -> Duration {
         if self.config.shutdown_timeout > Duration::ZERO {
             self.config.shutdown_timeout
@@ -515,13 +511,13 @@ impl BatchProcessor {
         }
     }
 
-    /// Go `tryReserveUploadBytes(n)`: reserves `n` bytes of the pending-upload budget
-    /// (override, `gcs_max_pending_upload_bytes`, or 256 MiB), warning once per exhaustion.
+    /// Reserves `n` bytes of the pending-upload budget (override, `gcs_max_pending_upload_bytes`,
+    /// or 256 MiB), warning once per exhaustion.
     pub(crate) fn try_reserve_upload_bytes(&self, n: i64) -> bool {
         if n <= 0 {
             return true;
         }
-        // Go `cmp.Or`: the first non-zero value.
+        // The first non-zero value.
         let limit = [
             self.max_pending_upload_bytes.load(Ordering::SeqCst),
             self.config.gcs_max_pending_upload_bytes,
@@ -559,7 +555,7 @@ impl BatchProcessor {
         }
     }
 
-    /// Go `releaseUploadBytes(n)`.
+    /// Releases `n` bytes of the pending-upload budget.
     pub(crate) fn release_upload_bytes(&self, n: i64) {
         if n <= 0 {
             return;
@@ -570,13 +566,13 @@ impl BatchProcessor {
         self.upload_budget_warned.store(false, Ordering::SeqCst);
     }
 
-    /// Go `releaseRowUploads(row)`.
+    /// Releases the uploads of one row, as [`release_batch_uploads`](Self::release_batch_uploads).
     pub(crate) fn release_row_uploads(&self, row: &mut QueuedRow) {
         self.release_batch_uploads(std::slice::from_mut(row));
     }
 
-    /// Go `releaseBatchUploads(batch)`: drops the summary builders and queued payloads of the
-    /// rows (releasing their reservations first), then their deferred uploads.
+    /// Drops the summary builders and queued payloads of the rows (releasing their reservations
+    /// first), then their deferred uploads.
     pub(crate) fn release_batch_uploads(&self, batch: &mut [QueuedRow]) {
         let mut total: i64 = 0;
         for row in batch.iter_mut() {
@@ -589,12 +585,12 @@ impl BatchProcessor {
         self.clear_deferred_uploads(batch);
     }
 
-    /// Go `hasPendingWorkLocked()`.
+    /// Whether a deferred batch or queued rows are waiting.
     pub(crate) fn has_pending_work_locked(&self, state: &FlushState) -> bool {
         !state.deferred_batch.is_empty() || !lock(&self.queue).is_empty()
     }
 
-    /// Go `nextBatchLocked()`: the deferred batch, else up to `batch_size` queued rows.
+    /// The deferred batch, else up to `batch_size` queued rows.
     pub(crate) fn next_batch_locked(&self, state: &mut FlushState) -> Vec<QueuedRow> {
         if !state.deferred_batch.is_empty() {
             return std::mem::take(&mut state.deferred_batch);
@@ -602,7 +598,7 @@ impl BatchProcessor {
         self.drain_queue()
     }
 
-    /// Go `enqueue(row)`: `(dropped, should_flush)`.
+    /// Queues a row; returns `(dropped, should_flush)`.
     pub(crate) fn enqueue(&self, mut row: QueuedRow) -> (bool, bool) {
         let _append = self
             .append_mu
@@ -624,33 +620,33 @@ impl BatchProcessor {
         (true, false)
     }
 
-    /// Go `recordQueueFullDrop()`.
+    /// Counts one row dropped because the queue was full.
     pub(crate) fn record_queue_full_drop(&self) {
         self.counters
             .queue_full_drops
             .fetch_add(1, Ordering::SeqCst);
     }
 
-    /// Go `recordShutdownDrop(n)`.
+    /// Counts `n` rows dropped by shutdown.
     pub(crate) fn record_shutdown_drop(&self, n: i64) {
         self.counters.shutdown_drops.fetch_add(n, Ordering::SeqCst);
     }
 
-    /// Go `recordFormatterFailureDrop()`.
+    /// Counts one event whose payload the content formatter replaced.
     pub(crate) fn record_formatter_failure_drop(&self) {
         self.counters
             .formatter_failure_drops
             .fetch_add(1, Ordering::SeqCst);
     }
 
-    /// Go `recordAppendFailureDrop(n)`.
+    /// Counts `n` rows dropped by failed or skipped appends.
     pub(crate) fn record_append_failure_drop(&self, n: i64) {
         self.counters
             .append_failure_drops
             .fetch_add(n, Ordering::SeqCst);
     }
 
-    /// Go `drainQueue()`: up to `batch_size` queued rows.
+    /// Up to `batch_size` queued rows.
     pub(crate) fn drain_queue(&self) -> Vec<QueuedRow> {
         let mut queue = lock(&self.queue);
         let size = queue
@@ -659,7 +655,8 @@ impl BatchProcessor {
         queue.drain(..size).collect()
     }
 
-    /// Go `writeAndLogBatch(uploadCtx, writeCtx, pauseOnCallerDeadline, batch)`.
+    /// Writes `batch` (see [`write_batch_with_contexts`](Self::write_batch_with_contexts)) and logs
+    /// a failure.
     pub(crate) async fn write_and_log_batch(
         &self,
         upload_ctx: &Context,
@@ -681,7 +678,7 @@ impl BatchProcessor {
         }
     }
 
-    /// Go `writeBatchBounded(batch)`.
+    /// Writes `batch` with the processor's own upload and write contexts.
     pub(crate) async fn write_batch_bounded(&self, batch: Vec<QueuedRow>) {
         if batch.is_empty() {
             return;
@@ -690,8 +687,8 @@ impl BatchProcessor {
             .await;
     }
 
-    /// Go `writeRunEndBatchLocked(flushCtx, retry, batch)`: `true` when the unconfirmed rows
-    /// were kept in `state.deferred_batch`.
+    /// Writes a run-end batch: `true` when the unconfirmed rows were kept in
+    /// `state.deferred_batch`.
     pub(crate) async fn write_run_end_batch_locked(
         &self,
         state: &mut FlushState,
@@ -699,12 +696,11 @@ impl BatchProcessor {
         retry: bool,
         mut batch: Vec<QueuedRow>,
     ) -> bool {
-        // A deferred batch is counted in DropStats only if a later flush drops it, so that a
-        // batch that the next flush writes is not reported as dropped, and one that fails
-        // again is not counted twice.
-        // Go's deferred dropDeferredUploadsQuietly(batch) also runs when the function panics (a
-        // Logger that panics on the "BigQuery response" line of the write, on the "pending
-        // retry" lines of requeue_deferred_uploads or on the write's error line): the
+        // A deferred batch is counted in DropStats only if a later flush drops it, so that a batch
+        // that the next flush writes is not reported as dropped, and one that fails again is not
+        // counted twice. The batch's deferred uploads are also dropped quietly when this function
+        // panics (a Logger that panics on the "BigQuery response" line of the write, on the
+        // "pending retry" lines of requeue_deferred_uploads or on the write's error line): the
         // reservations of the batch's deferred uploads are released before the panic goes on.
         let appended =
             crate::offload::uploads::catch_unwind_future(self.try_append_batch(flush_ctx, &batch))
@@ -716,8 +712,8 @@ impl BatchProcessor {
                 std::panic::resume_unwind(panic);
             }
         };
-        // The rows of Go's batch that this function keeps in state.deferred_batch (Go's
-        // deferred drop covers them through the shared slice).
+        // Whether this function kept rows in state.deferred_batch (the quiet drop below covers them
+        // too).
         let mut kept = false;
         let settled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if let Err(err) = result {
@@ -740,7 +736,7 @@ impl BatchProcessor {
             }
             self.clear_deferred_uploads(&mut batch);
         }));
-        // Go's deferred dropDeferredUploadsQuietly(batch).
+        // Drop the batch's deferred uploads quietly, panic or not.
         self.drop_deferred_uploads_quietly(&mut batch);
         if kept {
             self.drop_deferred_uploads_quietly(&mut state.deferred_batch);
@@ -751,11 +747,11 @@ impl BatchProcessor {
         kept
     }
 
-    /// Go `flushAndWaitForInflightBatch()`: what is left of the write budget.
+    /// Waits for the in-flight batch and drains the rest; returns what is left of the write budget.
     pub(crate) async fn flush_and_wait_for_inflight_batch(&self) -> Duration {
         let mut state = self.flush_mu.lock().await;
 
-        // Go's signed durations: a budget at or below zero is Duration::ZERO here.
+        // A budget at or below zero is Duration::ZERO.
         let mut write_left = self.shutdown_timeout();
         let mut upload_left = write_left / 2;
         while self.has_pending_work_locked(&state) {
@@ -819,12 +815,12 @@ impl BatchProcessor {
         write_left
     }
 
-    /// Go `writeBatch(ctx, batch)`.
+    /// Writes `batch` with one context for both the uploads and the append.
     ///
     /// # Errors
     ///
     /// As [`write_batch_with_contexts`](Self::write_batch_with_contexts).
-    #[cfg_attr(not(test), allow(dead_code))] // consumers: the ported Go tests
+    #[cfg_attr(not(test), allow(dead_code))] // used by tests
     pub(crate) async fn write_batch(
         &self,
         ctx: &Context,
@@ -834,8 +830,7 @@ impl BatchProcessor {
             .await
     }
 
-    /// Go `writeBatchWithContexts(uploadCtx, writeCtx, pauseOnCallerDeadline, batch)`: resolves
-    /// the uploads under `upload_ctx`, then appends under `write_ctx`.
+    /// Resolves the uploads under `upload_ctx`, then appends under `write_ctx`.
     ///
     /// # Errors
     ///
@@ -868,8 +863,8 @@ impl BatchProcessor {
         result
     }
 
-    /// Go `appendBatch(writeCtx, batch)`: [`try_append_batch`](Self::try_append_batch) counting
-    /// the unconfirmed rows of a failed append.
+    /// [`try_append_batch`](Self::try_append_batch) counting the unconfirmed rows of a failed
+    /// append.
     ///
     /// # Errors
     ///
@@ -886,9 +881,8 @@ impl BatchProcessor {
         result
     }
 
-    /// Go `tryAppendBatch(writeCtx, batch)`: `(confirmed, result)` — how many leading rows
-    /// BigQuery confirmed (all on `Ok`). A `write_ctx` without a deadline gets
-    /// `shutdown_timeout`.
+    /// Appends `batch`: `(confirmed, result)` — how many leading rows BigQuery confirmed (all on
+    /// `Ok`). A `write_ctx` without a deadline gets `shutdown_timeout`.
     pub(crate) async fn try_append_batch(
         &self,
         write_ctx: &Context,
@@ -934,12 +928,14 @@ impl BatchProcessor {
         (confirmed, Ok(()))
     }
 
-    /// Go `appendChunk(writeCtx, batch)`.
+    /// Appends one chunk of rows, as
+    /// [`append_chunk_with_rotation_budget`](Self::append_chunk_with_rotation_budget) with a fresh
+    /// rotation budget.
     ///
     /// # Errors
     ///
     /// As [`append_chunk_with_rotation_budget`](Self::append_chunk_with_rotation_budget).
-    #[cfg_attr(not(test), allow(dead_code))] // consumers: the ported Go tests
+    #[cfg_attr(not(test), allow(dead_code))] // used by tests
     pub(crate) async fn append_chunk(
         &self,
         write_ctx: &Context,
@@ -951,7 +947,6 @@ impl BatchProcessor {
             .1
     }
 
-    /// Go `appendChunkWithRotationBudget(writeCtx, batch, rotatedInBatch)`:
     /// `(confirmed, result)`; a multi-row chunk over the serialized limit is halved.
     pub(crate) async fn append_chunk_with_rotation_budget(
         &self,
@@ -1019,8 +1014,7 @@ impl BatchProcessor {
             if (in_band.is_some() || !res.row_errors.is_empty())
                 && let Some(logger) = &self.config.logger
             {
-                // Divergence (ledger 7b-2): Go logs the response's prototext `String()` (whose
-                // format protobuf-go deliberately randomizes); this logs prost's `Debug`.
+                // The response is logged with prost's `Debug` format.
                 logger.printf(format_args!("BigQuery response: {res:?}"));
             }
             if let Some(status) = in_band {
@@ -1045,7 +1039,7 @@ impl BatchProcessor {
         })
     }
 
-    /// Go `buildRecordBatch(batch)` over this processor's schema.
+    /// The Arrow record batch of `batch` over this processor's schema.
     ///
     /// # Errors
     ///
@@ -1054,7 +1048,7 @@ impl BatchProcessor {
         build_record_batch(batch, &self.arrow_schema)
     }
 
-    /// Go `appendRequestByteLimit()`.
+    /// The estimated-size limit of one AppendRows request.
     pub(crate) fn append_request_byte_limit(&self) -> usize {
         match self.max_append_bytes.load(Ordering::SeqCst) {
             0 => MAX_APPEND_REQUEST_BYTES,
@@ -1062,7 +1056,7 @@ impl BatchProcessor {
         }
     }
 
-    /// Go `serializedAppendRequestByteLimit()`.
+    /// The serialized-size limit of one AppendRows request.
     pub(crate) fn serialized_append_request_byte_limit(&self) -> usize {
         let serialized = self.max_serialized_append_bytes.load(Ordering::SeqCst);
         if serialized > 0 {
@@ -1075,7 +1069,7 @@ impl BatchProcessor {
         MAX_SERIALIZED_APPEND_REQUEST_BYTES
     }
 
-    /// Go `stopAcceptingRows()`.
+    /// Stops accepting rows and cancels the uploads.
     pub(crate) fn stop_accepting_rows(&self) {
         {
             let _append = self
@@ -1088,32 +1082,32 @@ impl BatchProcessor {
         self.upload_ctx.cancel();
     }
 
-    /// Test override of Go's `uploadTimeout`.
-    #[cfg_attr(not(test), allow(dead_code))] // tests (Go sets the field)
+    /// Test override of the upload timeout.
+    #[cfg_attr(not(test), allow(dead_code))] // used by tests
     pub(crate) fn set_upload_timeout(&self, timeout: Duration) {
         let ns = u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX);
         self.upload_timeout.store(ns, Ordering::SeqCst);
     }
 
-    /// Go's `cmp.Or(b.uploadTimeout, …)` first operand: the override, or zero.
+    /// The test override of the upload timeout, or zero.
     pub(crate) fn upload_timeout_override(&self) -> Duration {
         Duration::from_nanos(self.upload_timeout.load(Ordering::SeqCst))
     }
 
-    /// Test override of Go's `maxPendingUploadBytes`.
-    #[cfg_attr(not(test), allow(dead_code))] // tests (Go sets the field)
+    /// Test override of the pending-upload byte budget.
+    #[cfg_attr(not(test), allow(dead_code))] // used by tests
     pub(crate) fn set_max_pending_upload_bytes(&self, n: i64) {
         self.max_pending_upload_bytes.store(n, Ordering::SeqCst);
     }
 
-    /// Test override of Go's `maxAppendBytes`.
-    #[cfg_attr(not(test), allow(dead_code))] // tests (Go sets the field)
+    /// Test override of the estimated-size limit of one AppendRows request.
+    #[cfg_attr(not(test), allow(dead_code))] // used by tests
     pub(crate) fn set_max_append_bytes(&self, n: usize) {
         self.max_append_bytes.store(n, Ordering::SeqCst);
     }
 
-    /// Test override of Go's `maxSerializedAppendBytes`.
-    #[cfg_attr(not(test), allow(dead_code))] // tests (Go sets the field)
+    /// Test override of the serialized-size limit of one AppendRows request.
+    #[cfg_attr(not(test), allow(dead_code))] // used by tests
     pub(crate) fn set_max_serialized_append_bytes(&self, n: usize) {
         self.max_serialized_append_bytes.store(n, Ordering::SeqCst);
     }

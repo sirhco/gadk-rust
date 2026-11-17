@@ -13,15 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/schema.go`: the events table's BigQuery schema
-//! ([`events_schema`]) and Arrow schema ([`arrow_schema`](fn@arrow_schema), [`serialized_arrow_schema`]), their
-//! payload-column projections, and the additive schema merge ([`upgrade_table_schema`],
-//! [`SchemaMismatchError`]).
+//! The events table's BigQuery schema ([`events_schema`]) and Arrow schema
+//! ([`arrow_schema`](fn@arrow_schema), [`serialized_arrow_schema`]), their payload-column
+//! projections, and the additive schema merge ([`upgrade_table_schema`], [`SchemaMismatchError`]).
 //!
-//! [`FieldSchema`] has the fields of Go's `bigquery.FieldSchema`; its serde form is the BigQuery
-//! REST `TableFieldSchema` JSON Go's client sends and reads (`FieldSchema.toBQ` /
-//! `bqToFieldSchema`: `mode` `REPEATED` / `REQUIRED` or omitted, int64 fields as JSON strings,
-//! empty fields omitted).
+//! [`FieldSchema`] has the fields of a BigQuery schema field; its serde form is the BigQuery REST
+//! `TableFieldSchema` JSON (`mode` `REPEATED` / `REQUIRED` or omitted, int64 fields as JSON
+//! strings, empty fields omitted).
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
@@ -34,80 +32,79 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::Error;
 
-/// Go `timestampField`: the partitioning column.
+/// The partitioning column.
 pub(crate) const TIMESTAMP_FIELD: &str = "timestamp";
-/// Go `eventIDField`.
+/// The event ID column.
 pub(crate) const EVENT_ID_FIELD: &str = "event_id";
 
-/// Go `bigquery.StringFieldType`.
+/// The `STRING` field type.
 pub const FIELD_TYPE_STRING: &str = "STRING";
-/// Go `bigquery.TimestampFieldType`.
+/// The `TIMESTAMP` field type.
 pub const FIELD_TYPE_TIMESTAMP: &str = "TIMESTAMP";
-/// Go `bigquery.JSONFieldType`.
+/// The `JSON` field type.
 pub const FIELD_TYPE_JSON: &str = "JSON";
-/// Go `bigquery.RecordFieldType`.
+/// The `RECORD` field type.
 pub const FIELD_TYPE_RECORD: &str = "RECORD";
-/// Go `bigquery.IntegerFieldType`.
+/// The `INTEGER` field type.
 pub const FIELD_TYPE_INTEGER: &str = "INTEGER";
-/// Go `bigquery.BooleanFieldType`.
+/// The `BOOLEAN` field type.
 pub const FIELD_TYPE_BOOLEAN: &str = "BOOLEAN";
 
-/// A BigQuery table schema (Go `bigquery.Schema`, a list of fields).
+/// A BigQuery table schema (a list of fields).
 pub type Schema = Vec<FieldSchema>;
 
-/// The policy tags of a field (Go `bigquery.PolicyTagList`; REST `policyTags`).
+/// The policy tags of a field (REST `policyTags`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PolicyTagList {
-    /// Go `Names`.
+    /// The policy tag resource names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub names: Vec<String>,
 }
 
-/// The element type of a RANGE field (Go `bigquery.RangeElementType`; REST `rangeElementType`).
+/// The element type of a RANGE field (REST `rangeElementType`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RangeElementType {
-    /// Go `Type`.
+    /// The element type.
     #[serde(rename = "type", default, skip_serializing_if = "String::is_empty")]
     pub field_type: String,
 }
 
-/// One field of a BigQuery schema (Go `bigquery.FieldSchema`).
+/// One field of a BigQuery schema.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FieldSchema {
-    /// Go `Name`.
+    /// The field name.
     pub name: String,
-    /// Go `Description`.
+    /// The field description.
     pub description: String,
-    /// Go `Repeated`.
+    /// Whether the field is `REPEATED`.
     pub repeated: bool,
-    /// Go `Required`.
+    /// Whether the field is `REQUIRED`.
     pub required: bool,
-    /// Go `Type` (`STRING`, `RECORD`, …).
+    /// The field type (`STRING`, `RECORD`, …).
     pub field_type: String,
-    /// Go `PolicyTags`.
+    /// The policy tags.
     pub policy_tags: Option<PolicyTagList>,
-    /// Go `Schema`: the nested fields of a RECORD.
+    /// The nested fields of a RECORD.
     pub schema: Schema,
-    /// Go `MaxLength`.
+    /// The maximum length of a STRING or BYTES value.
     pub max_length: i64,
-    /// Go `Precision`.
+    /// The precision of a NUMERIC or BIGNUMERIC value.
     pub precision: i64,
-    /// Go `Scale`.
+    /// The scale of a NUMERIC or BIGNUMERIC value.
     pub scale: i64,
-    /// Go `DefaultValueExpression`.
+    /// The default value expression.
     pub default_value_expression: String,
-    /// Go `Collation`.
+    /// The collation.
     pub collation: String,
-    /// Go `RangeElementType`.
+    /// The element type of a RANGE field.
     pub range_element_type: Option<RangeElementType>,
-    /// Go `RoundingMode`.
+    /// The rounding mode.
     pub rounding_mode: String,
-    /// Go `TimestampPrecision` (sent only when > 0).
+    /// The timestamp precision (sent only when > 0).
     pub timestamp_precision: i64,
 }
 
-/// A REST `TableSchema` (`{"fields": [...]}`); `"fields": null` reads as no fields (Go's nil
-/// slice).
+/// A REST `TableSchema` (`{"fields": [...]}`); `"fields": null` reads as no fields.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableSchema {
     /// The fields.
@@ -119,7 +116,7 @@ pub struct TableSchema {
     pub fields: Schema,
 }
 
-/// A JSON `null` (or a missing field) as the type's zero value, as Go's decoder leaves it.
+/// A JSON `null` (or a missing field) as the type's default value.
 pub(crate) fn nullable<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
@@ -128,8 +125,7 @@ where
     Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
-/// Go's `json:",string"` int64 encoding of the REST client: a JSON string; reads a string or a
-/// number.
+/// The REST encoding of an int64: a JSON string; reads a string or a number.
 mod int64_string {
     use serde::de::Error as _;
     use serde::{Deserialize, Deserializer, Serializer};
@@ -179,7 +175,7 @@ fn is_zero(n: &i64) -> bool {
     *n == 0
 }
 
-/// The REST `TableFieldSchema` written for a [`FieldSchema`] (Go `FieldSchema.toBQ`).
+/// The REST `TableFieldSchema` written for a [`FieldSchema`].
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WireFieldRef<'a> {
@@ -213,8 +209,7 @@ struct WireFieldRef<'a> {
     field_type: &'a str,
 }
 
-/// The REST `TableFieldSchema` read into a [`FieldSchema`] (Go `bqToFieldSchema`); unknown
-/// properties are ignored, as Go's struct ignores them.
+/// The REST `TableFieldSchema` read into a [`FieldSchema`]; unknown properties are ignored.
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 struct WireField {
@@ -322,8 +317,8 @@ fn bq_repeated_record_field(name: &str, description: &str, schema: Schema) -> Fi
     }
 }
 
-/// Go `EventsSchema()`: the BigQuery schema of the events table (names, types, modes,
-/// descriptions, nesting and order as Go's).
+/// The BigQuery schema of the events table (names, types, modes, descriptions, nesting and order as
+/// an ADK plugin writes them).
 pub fn events_schema() -> Schema {
     vec![
         bq_required_field(
@@ -463,8 +458,8 @@ pub fn events_schema() -> Schema {
     ]
 }
 
-/// The Arrow field metadata Go puts on the JSON columns
-/// (`ARROW:extension:name` = `google:sqlType:json`).
+/// The Arrow field metadata put on the JSON columns (`ARROW:extension:name` =
+/// `google:sqlType:json`).
 fn json_metadata() -> HashMap<String, String> {
     HashMap::from([(
         "ARROW:extension:name".to_owned(),
@@ -472,7 +467,7 @@ fn json_metadata() -> HashMap<String, String> {
     )])
 }
 
-/// A nullable UTF-8 Arrow field (Go `arrow.BinaryTypes.String`, `Nullable: true`).
+/// A nullable UTF-8 Arrow field.
 fn utf8_field(name: &str) -> Field {
     Field::new(name, DataType::Utf8, true)
 }
@@ -482,9 +477,8 @@ fn json_field(name: &str) -> Field {
     utf8_field(name).with_metadata(json_metadata())
 }
 
-/// Go `ArrowSchema()`: the Arrow schema of the Storage Write API rows (timestamp µs, UTF-8
-/// strings, the `content_parts` list of structs, `google:sqlType:json` extension metadata on the
-/// JSON columns).
+/// The Arrow schema of the Storage Write API rows (timestamp µs, UTF-8 strings, the `content_parts`
+/// list of structs, `google:sqlType:json` extension metadata on the JSON columns).
 pub fn arrow_schema() -> ::arrow_schema::Schema {
     let object_ref = DataType::Struct(Fields::from(vec![
         utf8_field("uri"),
@@ -530,7 +524,7 @@ pub fn arrow_schema() -> ::arrow_schema::Schema {
     ])
 }
 
-/// Go `projectEventsSchema(denied)`: [`events_schema`] without the denied top-level columns.
+/// [`events_schema`] without the denied top-level columns.
 pub fn project_events_schema(denied: &BTreeSet<String>) -> Schema {
     let schema = events_schema();
     if denied.is_empty() {
@@ -542,7 +536,7 @@ pub fn project_events_schema(denied: &BTreeSet<String>) -> Schema {
         .collect()
 }
 
-/// Go `projectArrowSchema(denied)`: [`arrow_schema`](fn@arrow_schema) without the denied top-level columns.
+/// [`arrow_schema`](fn@arrow_schema) without the denied top-level columns.
 pub fn project_arrow_schema(denied: &BTreeSet<String>) -> ::arrow_schema::Schema {
     let schema = arrow_schema();
     if denied.is_empty() {
@@ -557,28 +551,26 @@ pub fn project_arrow_schema(denied: &BTreeSet<String>) -> ::arrow_schema::Schema
     ::arrow_schema::Schema::new(fields)
 }
 
-/// Go `SerializedArrowSchema()`: [`arrow_schema`](fn@arrow_schema) as an Arrow IPC stream (schema message then
-/// the end-of-stream marker, as Go's `ipc.NewWriter` + `Close`).
+/// [`arrow_schema`](fn@arrow_schema) as an Arrow IPC stream (schema message then the end-of-stream
+/// marker).
 pub fn serialized_arrow_schema() -> Result<Vec<u8>, Error> {
     serialize_arrow_schema(&arrow_schema())
 }
 
-/// Go `serializeArrowSchema(schema)`: `schema` as an Arrow IPC stream with no batches.
+/// `schema` as an Arrow IPC stream with no batches.
 ///
-/// Divergence (ledger 7b-1): the bytes are arrow-rs's encoding, not arrow-go's. Both are one
-/// continuation-framed schema message then the end-of-stream marker and decode to the same
-/// schema (spec R3), but the flatbuffer table layout and padding differ (events schema: 1864
-/// bytes here, 1880 from Go), so the bytes are not compared.
+/// The bytes are arrow-rs's encoding. Other Arrow writers produce one continuation-framed schema
+/// message then the end-of-stream marker too, and the stream decodes to the same schema, but the
+/// flatbuffer table layout and padding differ (events schema: 1864 bytes here, 1880 from another
+/// writer), so the bytes are not compared.
 pub(crate) fn serialize_arrow_schema(schema: &::arrow_schema::Schema) -> Result<Vec<u8>, Error> {
     let mut writer = StreamWriter::try_new(Vec::new(), schema)?;
     writer.finish()?;
     Ok(writer.into_inner()?)
 }
 
-/// Go `upgradeTableSchema(existing, desired)`: the additive merge of `desired` into `existing`
-/// and whether it changed anything (Go `mergeSchemaFields(existing, desired, "")`). Existing
-/// column order is kept; missing fields (and nested RECORD sub-fields) are appended as
-/// NULLABLE.
+/// The additive merge of `desired` into `existing` and whether it changed anything. Existing column
+/// order is kept; missing fields (and nested RECORD sub-fields) are appended as NULLABLE.
 pub fn upgrade_table_schema(
     existing: &[FieldSchema],
     desired: &[FieldSchema],
@@ -586,8 +578,8 @@ pub fn upgrade_table_schema(
     merge_schema_fields(existing, desired, "")
 }
 
-/// Go `mergeSchemaFields(existing, desired, prefix)`. Names match case-insensitively (Go
-/// `strings.ToLower`); with duplicate names the last existing field wins, as Go's map does.
+/// The additive merge of one level of fields; `prefix` is the dotted path of the enclosing RECORD.
+/// Names match case-insensitively (lower-cased); with duplicate names the last existing field wins.
 fn merge_schema_fields(
     existing: &[FieldSchema],
     desired: &[FieldSchema],
@@ -651,7 +643,7 @@ fn merge_schema_fields(
     Ok((merged, true))
 }
 
-/// Go `cloneNullableFieldSchema(f)`: `f` and its nested fields with `required` cleared.
+/// `f` and its nested fields with `required` cleared.
 fn clone_nullable_field_schema(f: &FieldSchema) -> FieldSchema {
     FieldSchema {
         required: false,
@@ -660,7 +652,7 @@ fn clone_nullable_field_schema(f: &FieldSchema) -> FieldSchema {
     }
 }
 
-/// Go `fieldMode(required, repeated)`: `REPEATED`, `REQUIRED` or `NULLABLE`.
+/// `REPEATED`, `REQUIRED` or `NULLABLE`.
 fn field_mode(required: bool, repeated: bool) -> &'static str {
     if repeated {
         "REPEATED"
@@ -671,9 +663,8 @@ fn field_mode(required: bool, repeated: bool) -> &'static str {
     }
 }
 
-/// An existing field whose type or mode the desired schema cannot be merged into (Go
-/// `*schemaMismatchError`). `Display`: `incompatible BigQuery schema field <path>:
-/// existing=<TYPE>/<MODE>, desired=<TYPE>/<MODE>`.
+/// An existing field whose type or mode the desired schema cannot be merged into. `Display`:
+/// `incompatible BigQuery schema field <path>: existing=<TYPE>/<MODE>, desired=<TYPE>/<MODE>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaMismatchError {
     /// The dotted field path.

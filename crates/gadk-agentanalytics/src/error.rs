@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! [`Error`]: the crate's error type, carrying Go's error texts and Go's `%w` / `errors.Join`
-//! chains, plus the Go error classifiers the package uses: `hasErrorCode`, `isNotFoundError`,
-//! `isConflictError` and `isPreconditionFailedError` (from `plugin/agentanalytics/schema_upgrade.go`),
-//! `status.Code` (grpc-go), and the texts of `bigquery.Error` and grpc-go's status errors.
-//! [`ApiError`] / [`ErrorItem`] (Go `*googleapi.Error`) are `gadk_model::rest::googleapi`'s,
-//! re-exported here.
+//! [`Error`]: the crate's error type, whose texts match those of an ADK plugin and which keeps
+//! wrapped (`: %w`-style) and joined (newline-separated) error chains, plus the error classifiers
+//! the crate uses: `has_error_code`, `is_not_found_error`, `is_conflict_error`,
+//! `is_precondition_failed_error` and `status_code`, and the texts of BigQuery job errors and gRPC
+//! status errors. [`ApiError`] / [`ErrorItem`] (a Google API HTTP error) are
+//! `gadk_model::rest::googleapi`'s, re-exported here.
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -34,47 +34,47 @@ use crate::schema::SchemaMismatchError;
 /// offloader error, …).
 pub type BoxError = Box<dyn StdError + Send + Sync>;
 
-/// A gRPC status code (grpc-go `codes.Code`). `Display` is Go's `Code.String()`.
+/// A gRPC status code. `Display` is the code's name (`OK`, `Canceled`, …).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Code {
-    /// `codes.OK` (0).
+    /// `OK` (0).
     Ok,
-    /// `codes.Canceled` (1).
+    /// `Canceled` (1).
     Canceled,
-    /// `codes.Unknown` (2).
+    /// `Unknown` (2).
     Unknown,
-    /// `codes.InvalidArgument` (3).
+    /// `InvalidArgument` (3).
     InvalidArgument,
-    /// `codes.DeadlineExceeded` (4).
+    /// `DeadlineExceeded` (4).
     DeadlineExceeded,
-    /// `codes.NotFound` (5).
+    /// `NotFound` (5).
     NotFound,
-    /// `codes.AlreadyExists` (6).
+    /// `AlreadyExists` (6).
     AlreadyExists,
-    /// `codes.PermissionDenied` (7).
+    /// `PermissionDenied` (7).
     PermissionDenied,
-    /// `codes.ResourceExhausted` (8).
+    /// `ResourceExhausted` (8).
     ResourceExhausted,
-    /// `codes.FailedPrecondition` (9).
+    /// `FailedPrecondition` (9).
     FailedPrecondition,
-    /// `codes.Aborted` (10).
+    /// `Aborted` (10).
     Aborted,
-    /// `codes.OutOfRange` (11).
+    /// `OutOfRange` (11).
     OutOfRange,
-    /// `codes.Unimplemented` (12).
+    /// `Unimplemented` (12).
     Unimplemented,
-    /// `codes.Internal` (13).
+    /// `Internal` (13).
     Internal,
-    /// `codes.Unavailable` (14).
+    /// `Unavailable` (14).
     Unavailable,
-    /// `codes.DataLoss` (15).
+    /// `DataLoss` (15).
     DataLoss,
-    /// `codes.Unauthenticated` (16).
+    /// `Unauthenticated` (16).
     Unauthenticated,
 }
 
 impl Code {
-    /// The numeric code (grpc-go `uint32(code)`).
+    /// The numeric code.
     pub fn as_u32(self) -> u32 {
         match self {
             Code::Ok => 0,
@@ -97,7 +97,7 @@ impl Code {
         }
     }
 
-    /// The code for a number; unknown numbers are `None` (grpc-go prints them as `Code(n)`).
+    /// The code for a number; unknown numbers are `None` (a gRPC client prints them as `Code(n)`).
     pub fn from_u32(n: u32) -> Option<Code> {
         Some(match n {
             0 => Code::Ok,
@@ -146,8 +146,8 @@ impl fmt::Display for Code {
     }
 }
 
-/// A BigQuery job error (Go `*bigquery.Error`, from a job status's `errorResult` / `errors`).
-/// `Display` is Go's `Error()`: `{Location: "…"; Message: "…"; Reason: "…"}`.
+/// A BigQuery job error (from a job status's `errorResult` / `errors`). `Display` is `{Location:
+/// "…"; Message: "…"; Reason: "…"}`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BigQueryError {
     /// `location`.
@@ -170,17 +170,17 @@ impl fmt::Display for BigQueryError {
     }
 }
 
-/// The crate's error. `Display` is the Go error's `Error()` text; [`Error::Wrapped`] and
-/// [`Error::Joined`] keep Go's `%w` / `errors.Join` chains so [`Error::is_context`],
-/// `has_error_code` and `status_code` see what Go's `errors.Is` / `errors.As` see.
+/// The crate's error. `Display` is the error's text; [`Error::Wrapped`] and [`Error::Joined`] keep
+/// the wrapped and joined chains, so [`Error::is_context`], `has_error_code` and `status_code` find
+/// an error anywhere in the tree.
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// A Go `errors.New` / `fmt.Errorf` (without `%w`) text.
+    /// A plain error text (no wrapped source).
     #[error("{0}")]
     Message(String),
-    /// A Go `fmt.Errorf` with one `%w`: `text` is the whole formatted message, `source` the
-    /// wrapped error (Go `Unwrap`).
+    /// A wrapping error with one source: `text` is the whole formatted message, `source` the
+    /// wrapped error.
     #[error("{text}")]
     Wrapped {
         /// The full error text.
@@ -189,14 +189,13 @@ pub enum Error {
         #[source]
         source: Box<Error>,
     },
-    /// Go `errors.Join(errs...)` of at least one error: the texts joined by `\n`.
+    /// At least one error joined: the texts joined by `\n`.
     #[error("{}", join_texts(.0))]
     Joined(Vec<Error>),
-    /// A context error (`context.Canceled`, `context.DeadlineExceeded`).
+    /// A context error ([`ContextError::Canceled`], [`ContextError::DeadlineExceeded`]).
     #[error("{0}")]
     Context(ContextError),
-    /// A gRPC status error (grpc-go `status.Error(code, message)`): `rpc error: code = … desc = …`.
-    /// 7b-2's tonic errors map into it.
+    /// A gRPC status error: `rpc error: code = … desc = …`. Tonic errors map into it.
     #[error("rpc error: code = {code} desc = {message}")]
     Status {
         /// The status code.
@@ -204,14 +203,13 @@ pub enum Error {
         /// The status message.
         message: String,
     },
-    /// A Google API HTTP error (Go `*googleapi.Error`).
+    /// A Google API HTTP error.
     #[error("{0}")]
     Api(Box<ApiError>),
-    /// A BigQuery job error (Go `*bigquery.Error`).
+    /// A BigQuery job error.
     #[error("{0}")]
     BigQuery(BigQueryError),
-    /// An incompatible field between an existing and the desired table schema (Go
-    /// `*schemaMismatchError`).
+    /// An incompatible field between an existing and the desired table schema.
     #[error("{0}")]
     SchemaMismatch(SchemaMismatchError),
     /// The REST transport failed before a response ended the call.
@@ -233,12 +231,12 @@ fn join_texts(errs: &[Error]) -> String {
 }
 
 impl Error {
-    /// Go `errors.New(text)` / `fmt.Errorf` without `%w`.
+    /// An error with the plain text `text` (no wrapped source).
     pub fn msg(text: impl Into<String>) -> Error {
         Error::Message(text.into())
     }
 
-    /// Go `fmt.Errorf("{prefix}: %w", source)`.
+    /// An error with the text `{prefix}: {source}`, wrapping `source`.
     pub fn wrap(prefix: impl fmt::Display, source: Error) -> Error {
         Error::Wrapped {
             text: format!("{prefix}: {source}"),
@@ -246,8 +244,8 @@ impl Error {
         }
     }
 
-    /// Go `fmt.Errorf` with one `%w` placed anywhere: `text` is the complete message (the
-    /// caller formats `source` into it), `source` what `Unwrap` returns.
+    /// An error wrapping `source` with a free-form text: `text` is the complete message (the caller
+    /// formats `source` into it), `source` the wrapped error.
     pub fn wrap_text(text: impl Into<String>, source: Error) -> Error {
         Error::Wrapped {
             text: text.into(),
@@ -255,7 +253,7 @@ impl Error {
         }
     }
 
-    /// Go `errors.Join(errs...)`: `None` (Go `nil`) when `errs` is empty.
+    /// The errors joined into one: `None` when `errs` is empty.
     pub fn join(errs: Vec<Error>) -> Option<Error> {
         if errs.is_empty() {
             None
@@ -278,15 +276,14 @@ impl Error {
         }
     }
 
-    /// Go `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)`:
-    /// whether `target` is in this error's tree.
+    /// Whether the context error `target` is in this error's tree.
     pub fn is_context(&self, target: ContextError) -> bool {
         self.find(&mut |e| matches!(e, Error::Context(c) if *c == target))
             .is_some()
     }
 
-    /// Go `errors.Is`/`errors.As` traversal: the first error of this error's tree (pre-order,
-    /// depth first, as Go walks `Unwrap() error` and `Unwrap() []error`) for which `pred` holds.
+    /// The first error of this error's tree (pre-order, depth first, through wrapped sources and
+    /// joined errors) for which `pred` holds.
     pub fn find<'a>(&'a self, pred: &mut dyn FnMut(&Error) -> bool) -> Option<&'a Error> {
         if pred(self) {
             return Some(self);
@@ -294,9 +291,9 @@ impl Error {
         match self {
             Error::Wrapped { source, .. } => source.find(pred),
             Error::Joined(errs) => errs.iter().find_map(|e| e.find(pred)),
-            // Go `errors.As` walks every `Unwrap`: follow the foreign `source()` chain to the
-            // first `Error`, whose own tree the recursion walks. A bare `ContextError` link
-            // (Go `fmt.Errorf("…: %w", ctx.Err())`) is tested as the matching `Error::Context`.
+            // Follow the foreign `source()` chain to the first `Error`, whose own tree the
+            // recursion walks. A bare `ContextError` link is tested as the matching
+            // `Error::Context`.
             Error::Other(boxed) => {
                 static CANCELED: Error = Error::Context(ContextError::Canceled);
                 static DEADLINE_EXCEEDED: Error = Error::Context(ContextError::DeadlineExceeded);
@@ -339,9 +336,8 @@ impl From<ApiError> for Error {
     }
 }
 
-/// Go `hasErrorCode`: the HTTP status of the first `*googleapi.Error` in `err`'s tree equals
-/// `http_code`; when there is none, the code of the first gRPC status in the tree equals
-/// `grpc_code`.
+/// Whether the HTTP status of the first [`Error::Api`] in `err`'s tree equals `http_code`; when
+/// there is none, the code of the first gRPC status in the tree equals `grpc_code`.
 pub(crate) fn has_error_code(err: &Error, http_code: u16, grpc_code: Code) -> bool {
     if let Some(Error::Api(api)) = err.find(&mut |e| matches!(e, Error::Api(_))) {
         return api.code == http_code;
@@ -352,23 +348,22 @@ pub(crate) fn has_error_code(err: &Error, http_code: u16, grpc_code: Code) -> bo
     false
 }
 
-/// Go `isNotFoundError`: HTTP 404 or gRPC `NotFound`.
+/// Whether `err` is an HTTP 404 or gRPC `NotFound`.
 pub(crate) fn is_not_found_error(err: &Error) -> bool {
     has_error_code(err, 404, Code::NotFound)
 }
 
-/// Go `isConflictError`: HTTP 409 or gRPC `AlreadyExists`.
+/// Whether `err` is an HTTP 409 or gRPC `AlreadyExists`.
 pub(crate) fn is_conflict_error(err: &Error) -> bool {
     has_error_code(err, 409, Code::AlreadyExists)
 }
 
-/// Go `isPreconditionFailedError`: HTTP 412 or gRPC `FailedPrecondition`.
+/// Whether `err` is an HTTP 412 or gRPC `FailedPrecondition`.
 pub(crate) fn is_precondition_failed_error(err: &Error) -> bool {
     has_error_code(err, 412, Code::FailedPrecondition)
 }
 
-/// grpc-go `status.Code(err)` for a non-nil error: the code of the first gRPC status in `err`'s
-/// tree, else `Unknown`.
+/// The code of the first gRPC status in `err`'s tree, else `Unknown`.
 pub(crate) fn status_code(err: &Error) -> Code {
     match err.find(&mut |e| matches!(e, Error::Status { .. })) {
         Some(Error::Status { code, .. }) => *code,
