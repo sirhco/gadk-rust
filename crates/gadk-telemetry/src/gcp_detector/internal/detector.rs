@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of `internal/detector.go`: [`Detector`], [`Platform`] and platform detection.
+//! [`Detector`], [`Platform`] and platform detection.
 
 use std::fmt;
 use std::sync::Arc;
@@ -22,47 +22,47 @@ use gadk_platform::env::EnvProvider;
 
 use crate::gcp_detector::metadata::{MetadataClient, MetadataError};
 
-/// A lookup failure; `Display` is Go's text.
+/// A lookup failure; `Display` is byte-identical to ADK's text.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DetectorError {
-    /// Go `errEnvVarNotFound`.
+    /// The environment variable is not set.
     #[error("environment variable not found")]
     EnvVarNotFound,
     /// A metadata server error.
     #[error(transparent)]
     Metadata(#[from] MetadataError),
-    /// Any other Go `errors.New` / `fmt.Errorf` text.
+    /// Any other lookup failure text.
     #[error("{0}")]
     Other(String),
 }
 
-/// Go `Platform`.
+/// The GCP platform the process runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
-    /// Go `UnknownPlatform`.
+    /// No known platform.
     UnknownPlatform,
-    /// Go `GKE`.
+    /// Google Kubernetes Engine.
     Gke,
-    /// Go `GCE`.
+    /// Compute Engine.
     Gce,
-    /// Go `CloudRun`.
+    /// Cloud Run service.
     CloudRun,
-    /// Go `CloudRunJob`.
+    /// Cloud Run job.
     CloudRunJob,
-    /// Go `CloudRunWorkerPool`.
+    /// Cloud Run worker pool.
     CloudRunWorkerPool,
-    /// Go `CloudFunctions`.
+    /// Cloud Functions.
     CloudFunctions,
-    /// Go `AppEngineStandard`.
+    /// App Engine standard.
     AppEngineStandard,
-    /// Go `AppEngineFlex`.
+    /// App Engine flexible.
     AppEngineFlex,
-    /// Go `BareMetalSolution`.
+    /// Bare Metal Solution.
     BareMetalSolution,
 }
 
-/// Go `*Detector`: collects resource information for all GCP platforms from the environment
-/// (Go `osProvider`), the metadata server and, for `GKEHostType`, the Compute API.
+/// Collects resource information for all GCP platforms from the environment, the
+/// metadata server and, for the GKE host type, the Compute API.
 #[derive(Clone)]
 pub struct Detector {
     pub(super) metadata: MetadataClient,
@@ -72,12 +72,12 @@ pub struct Detector {
 }
 
 impl Detector {
-    /// Go `NewDetector`: the metadata server named by `env` and `env` itself.
+    /// A detector over the metadata server named by `env` and `env` itself.
     pub fn new(env: Arc<dyn EnvProvider>) -> Self {
         Self::new_with(MetadataClient::new(Arc::clone(&env)), env)
     }
 
-    /// Go `NewTestDetector`: an injected metadata client and environment.
+    /// A detector over an injected metadata client and environment.
     pub fn new_with(metadata: MetadataClient, env: Arc<dyn EnvProvider>) -> Self {
         Self {
             metadata,
@@ -87,8 +87,8 @@ impl Detector {
         }
     }
 
-    /// Go's test seam `d.httpClient = …; d.computeBaseURL = …`: the Compute API client (used
-    /// as is, without credentials) and base URL for `GKEHostType`.
+    /// Injects the Compute API client (used
+    /// as is, without credentials) and base URL for `gke_host_type`.
     #[must_use]
     pub fn with_compute(
         self,
@@ -102,7 +102,7 @@ impl Detector {
         }
     }
 
-    /// Go `CloudPlatform`.
+    /// The cloud platform the process runs on.
     pub async fn cloud_platform(&self) -> Platform {
         if self.on_bare_metal_solution() {
             Platform::BareMetalSolution
@@ -127,13 +127,13 @@ impl Detector {
         }
     }
 
-    /// Go `ProjectID`: `project/project-id`, trimmed.
+    /// `project/project-id`, trimmed.
     ///
     /// # Errors
     ///
     /// [`DetectorError`].
     pub async fn project_id(&self) -> Result<String, DetectorError> {
-        // Go reads `project/project-id` uncached (the metadata package caches `ProjectID`).
+        // `project/project-id` is read uncached on every call.
         Ok(self
             .metadata
             .get("project/project-id")
@@ -142,7 +142,7 @@ impl Detector {
             .to_owned())
     }
 
-    /// Go `instanceID`: `instance/id`, trimmed.
+    /// `instance/id`, trimmed.
     pub(super) async fn instance_id(&self) -> Result<String, DetectorError> {
         Ok(self.metadata.get("instance/id").await?.trim().to_owned())
     }

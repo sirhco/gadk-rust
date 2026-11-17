@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Cancel causes on gadk contexts (port of Go `context.WithCancelCause` / `context.Cause` as used by
-//! `agent.WithAgentCancel` / `agent.WithAgentTimeout` in `agent/context.go`).
+//! Cancel causes on gadk contexts: why a context was cancelled, as used by
+//! `Context::with_agent_cancel` and `Context::with_agent_timeout`.
 
 use std::sync::Arc;
 
@@ -22,15 +22,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::AgentError;
 
-/// Why a context was cancelled (Go `context.Cause`).
+/// Why a context was cancelled.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum CancelCause {
-    /// Go `context.Canceled`: a plain cancel.
+    /// A plain cancel.
     Canceled,
-    /// Go `context.DeadlineExceeded`: a timeout fired.
+    /// A timeout fired.
     DeadlineExceeded,
-    /// Go `cancel(err)` with a non-nil error: the shared error value.
+    /// Cancelled with an error: the shared error value.
     Error(Arc<dyn std::error::Error + Send + Sync>),
 }
 
@@ -45,10 +45,10 @@ impl std::fmt::Display for CancelCause {
 }
 
 impl CancelCause {
-    /// The cause as the error a Go caller would return for it: `Canceled` → `AgentError::Cancelled`,
+    /// The cause as the error a caller would return for it: `Canceled` → `AgentError::Cancelled`,
     /// `DeadlineExceeded` → `AgentError::DeadlineExceeded`, `Error(e)` →
     /// `AgentError::Other(SharedCauseError(e))` (the same `Arc`, so `Arc::ptr_eq` after a downcast
-    /// is Go's `errors.Is` on the same value).
+    /// identifies the same error value).
     pub fn to_agent_error(&self) -> AgentError {
         match self {
             CancelCause::Canceled => AgentError::Cancelled,
@@ -76,7 +76,7 @@ impl std::error::Error for SharedCauseError {
     }
 }
 
-/// One cancellable layer of a context (Go one `context.WithCancelCause` node): its token, the cause
+/// One cancellable layer of a context: its token, the cause
 /// recorded when it was cancelled through the scope, and the scope it was derived from.
 #[derive(Debug)]
 pub(crate) struct CancelScope {
@@ -115,7 +115,7 @@ impl CancelScope {
         self.token.cancel();
     }
 
-    /// Go `context.Cause`: `None` while the token is live; else the first recorded cause walking
+    /// The cause: `None` while the token is live; else the first recorded cause walking
     /// outward through cancelled scopes, else `Canceled`.
     pub(crate) fn cause(&self) -> Option<CancelCause> {
         if !self.token.is_cancelled() {
@@ -136,7 +136,7 @@ impl CancelScope {
 }
 
 /// Cancels its derived context (cause `Canceled`) when dropped or when [`CancelGuard::cancel`] is
-/// called (Go `context.CancelFunc`); keep it alive while the derived context is used, or give the
+/// called; keep it alive while the derived context is used, or give the
 /// context up without cancelling it with [`CancelGuard::release`].
 pub struct CancelGuard {
     pub(crate) scope: Option<Arc<CancelScope>>,
@@ -151,7 +151,7 @@ impl CancelGuard {
         }
     }
 
-    /// Gives the derived context up without cancelling it (Go dropping a `CancelFunc` uncalled):
+    /// Gives the derived context up without cancelling it:
     /// the context stays live until its parent ends, and an armed timeout timer keeps running
     /// (then records `DeadlineExceeded`).
     pub fn release(mut self) {

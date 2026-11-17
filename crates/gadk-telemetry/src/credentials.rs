@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `google.FindDefaultCredentials` (golang.org/x/oauth2 v0.37.0 `google/default.go`) over
-//! gadk's Application Default Credentials ([`gadk_model::gcp_auth::adc_credentials`]), with the
-//! project ID Go reports alongside.
+//! Default-credentials lookup over gadk's Application Default Credentials
+//! ([`gadk_model::gcp_auth::adc_credentials`]), with the project ID found alongside.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -27,22 +26,22 @@ use serde_json::Value;
 use crate::config::GoogleCredentials;
 use crate::gcp_detector::metadata::MetadataClient;
 
-/// The scope Go's `configure` requests ADC with.
+/// The scope telemetry setup requests ADC with.
 pub(crate) const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 
-/// Go `envVar` in `FindDefaultCredentialsWithParams`.
+/// The environment variable that names the credentials file.
 const CREDENTIALS_ENV: &str = "GOOGLE_APPLICATION_CREDENTIALS";
 
-/// Go `adcSetupURL`.
+/// Where to find instructions for setting up ADC.
 const ADC_SETUP_URL: &str = "https://cloud.google.com/docs/authentication/external/set-up-adc";
 
-/// Go `google.FindDefaultCredentials(ctx, scopes...)`: the `GOOGLE_APPLICATION_CREDENTIALS`
+/// Finds the default credentials: the `GOOGLE_APPLICATION_CREDENTIALS`
 /// file, else gcloud's well-known file under `$HOME` (`%APPDATA%` on Windows), else — on GCE
 /// ([`crate::gcp_detector::metadata::MetadataClient::on_gce`]) — the metadata server's
-/// credentials and project. `env` is the injected environment. The error is Go's text
-/// (callers wrap it).
-// Divergence (ledger 7a): the file read and parse error details are gadk's (Rust's I/O and
-// serde_json texts, google-cloud-auth's builder errors), inside Go's wrapping texts.
+/// credentials and project. `env` is the injected environment. The error text is
+/// byte-identical to ADK's (callers wrap it).
+// The file read and parse error details are gadk's (Rust's I/O and serde_json texts,
+// google-cloud-auth's builder errors), inside the wrapping texts ADK uses.
 pub(crate) async fn find_default_credentials(
     env: &Arc<dyn EnvProvider>,
     scopes: &[&str],
@@ -91,9 +90,10 @@ fn credentials_from_file(path: &Path, scopes: &[&str]) -> Result<GoogleCredentia
     })
 }
 
-/// Go `wellKnownFile`: `%APPDATA%\gcloud\…` on Windows, `$HOME/.config/gcloud/…` elsewhere.
-// Divergence (ledger 7a): without `HOME` in the injected environment there is no well-known
-// file (Go falls back to `user.Current()`).
+/// The well-known credentials file: `%APPDATA%\gcloud\…` on Windows, `$HOME/.config/gcloud/…`
+/// elsewhere.
+// Without `HOME` in the injected environment there is no well-known file (no fallback to the
+// current user's home directory).
 fn well_known_file(env: &dyn EnvProvider) -> Option<PathBuf> {
     const FILE: &str = "application_default_credentials.json";
     if cfg!(windows) {

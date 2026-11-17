@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `cmd/adkgo/internal/root/root.go` and cobra's `Execute`: the command tree
-//! `gadk` → `deploy` → {`agentengine`, `cloudrun`}, dispatch, and cobra's error reporting
-//! (`Error: <msg>` and the failing command's usage on stderr, exit 1).
+//! The root command and its dispatch: the command tree `gadk` → `deploy` →
+//! {`agentengine`, `cloudrun`}, and the error reporting (`Error: <msg>` and the failing
+//! command's usage on stderr, exit 1).
 
 use std::ffi::OsString;
 
@@ -27,19 +27,17 @@ use crate::Env;
 use crate::deploy::{self, agentengine, cloudrun};
 use crate::flags::{STRAY_ARGS, pflag_error};
 
-/// The root command's name (Go `RootCmd.Use` `adkgo`).
+/// The root command's name.
 pub const NAME: &str = "gadk";
-// Divergence (ledger 6b): the root texts name gadk (Go: "CLI tool for use with ADK-GO",
-// "adkgo is a CLI tool …").
-/// Go `RootCmd.Short`.
+// The root texts name gadk, not ADK's own tool.
+/// The root command's short description.
 pub const SHORT: &str = "CLI tool for use with gadk";
-/// Go `RootCmd.Long`.
+/// The root command's long description.
 pub const LONG: &str =
     "gadk is a CLI tool which allows developer to quickly deploy and test an agentic application";
 
-/// Go `RootCmd` with `deploy` added.
-// Divergence (ledger 6b): no `completion` command (cobra adds one to every root); clap's
-// `help` subcommand stands in for cobra's.
+/// The root command with `deploy` added.
+// There is no `completion` command; clap's `help` subcommand is the only extra one.
 pub fn command() -> Command {
     Command::new(NAME)
         .about(SHORT)
@@ -47,8 +45,8 @@ pub fn command() -> Command {
         .subcommand(deploy::command())
 }
 
-/// Go `root.Execute()`: parses `args` (program name first), runs the selected command and
-/// returns the exit code (0, or 1 after printing the error as cobra does).
+/// Parses `args` (program name first), runs the selected command and
+/// returns the exit code (0, or 1 after printing the error).
 pub async fn execute(args: Vec<OsString>, env: &Env) -> u8 {
     let raw: Vec<String> = args
         .iter()
@@ -60,7 +58,7 @@ pub async fn execute(args: Vec<OsString>, env: &Env) -> u8 {
         Found::UnknownCommand(name) => return unknown_command(&name, env),
     };
     // clap parses the found command's own arguments: flags written before a subcommand name
-    // move after it, as cobra parses every remaining argument with the found command's flags.
+    // move after it, so every remaining argument is parsed with the found command's flags.
     let argv: Vec<OsString> = args
         .iter()
         .take(1)
@@ -69,14 +67,13 @@ pub async fn execute(args: Vec<OsString>, env: &Env) -> u8 {
         .chain(rest.iter().map(|&i| args[i + 1].clone()))
         .collect();
     let parsed: Vec<String> = rest.iter().map(|&i| raw[i].clone()).collect();
-    // Divergence (ledger 6b): a non-UTF-8 argument is a clap parse error (Go keeps the bytes
-    // and the shell-safe checks reject them later).
+    // A non-UTF-8 argument is a clap parse error.
     let matches = match command().try_get_matches_from(&argv) {
         Ok(m) => m,
         Err(e) => return report_parse_error(&e, &path, &parsed, env),
     };
     let Some(("deploy", deploy_m)) = matches.subcommand() else {
-        // Go: the root command is not runnable, so cobra prints its help.
+        // The root command is not runnable, so the help is printed.
         env.out.write_str(&help(&[]));
         return 0;
     };
@@ -97,7 +94,7 @@ pub async fn execute(args: Vec<OsString>, env: &Env) -> u8 {
             (result, "agentengine")
         }
         _ => {
-            // Go `DeployCmd.RunE`: help when there are no arguments, else nothing.
+            // `deploy` prints its help when there are no arguments, else nothing.
             if deploy_m.get_many::<String>(STRAY_ARGS).is_none() {
                 env.out.write_str(&help(&["deploy"]));
             }
@@ -110,7 +107,7 @@ pub async fn execute(args: Vec<OsString>, env: &Env) -> u8 {
     }
 }
 
-/// cobra's error report: `Error: <msg>`, then the command's usage and an empty line.
+/// The error report: `Error: <msg>`, then the command's usage and an empty line.
 fn report(env: &Env, msg: &str, path: &[&str]) -> u8 {
     env.err.write_str(&format!("Error: {msg}\n"));
     env.err.write_str(&format!("{}\n", usage(path)));
@@ -138,7 +135,7 @@ fn report_parse_error(e: &clap::Error, path: &[&str], args: &[String], env: &Env
     }
 }
 
-/// Go `legacyArgs` on the root: the unknown command, cobra's suggestions, and a pointer to
+/// An unknown command at the root: the error, suggestions, and a pointer to
 /// `--help` instead of the usage.
 fn unknown_command(name: &str, env: &Env) -> u8 {
     env.err.write_str(&format!(
@@ -152,7 +149,7 @@ fn unknown_command(name: &str, env: &Env) -> u8 {
     1
 }
 
-/// What cobra's `Find` selects for the arguments after the program name.
+/// What the command search selects for the arguments after the program name.
 #[derive(Debug, PartialEq, Eq)]
 enum Found {
     /// The command at `path`, to be parsed from the arguments at the indices `rest` (the
@@ -161,14 +158,14 @@ enum Found {
         path: Vec<&'static str>,
         rest: Vec<usize>,
     },
-    /// Go `legacyArgs`: the first non-flag argument left at the root names no command.
+    /// The first non-flag argument left at the root names no command.
     UnknownCommand(String),
 }
 
-// Go: cobra Find/stripFlags (cobra v1.10.2 `Find`, `stripFlags`, `argsMinusFirstX`). At each
+// Finds the command for the arguments. At each
 // level the first argument that is not a flag or a flag's value names the next subcommand,
-// and that one occurrence is removed. Neither `gadk` nor `deploy` has a flag when `Find`
-// runs (cobra adds `-h/--help` to the found command only, later), so every `--x` and `-x`
+// and that one occurrence is removed. Neither `gadk` nor `deploy` has a flag at that point
+// (`-h/--help` is added to the found command only, later), so every `--x` and `-x`
 // written without `=` takes the next argument as its value: `gadk deploy -r x cloudrun` runs
 // cloudrun with region x, and `gadk -h deploy agentengine` is an unknown command
 // "agentengine".
@@ -190,7 +187,7 @@ fn cobra_find(raw: &[String]) -> Found {
                 break;
             }
             if next == "help" {
-                // clap's `help` subcommand (cobra's `help` command) parses the arguments as
+                // clap's `help` subcommand parses the arguments as
                 // given.
                 return Found::Command {
                     path,
@@ -212,8 +209,8 @@ fn cobra_find(raw: &[String]) -> Found {
         cmd = sub;
     }
     if path.is_empty() {
-        // Go: the root is not runnable; pflag leaves the arguments after `--` alone and cobra
-        // prints the help (the root has no positional arguments in clap).
+        // The root is not runnable; the arguments after `--` are left alone and the
+        // help is printed (the root has no positional arguments in clap).
         if let Some(end) = rest.iter().position(|&i| raw[i] == "--") {
             rest.truncate(end);
         }
@@ -221,8 +218,8 @@ fn cobra_find(raw: &[String]) -> Found {
     Found::Command { path, rest }
 }
 
-/// cobra `stripFlags` on a command without flags: `--x`/`-x` (no `=`) take the next argument,
-/// `--` ends the flags, and the other non-flag arguments are returned.
+/// Strips the flags from the arguments of a command without flags: `--x`/`-x` (no `=`) take the
+/// next argument, `--` ends the flags, and the other non-flag arguments are returned.
 fn strip_flags<'a>(args: &[&'a str]) -> Vec<&'a str> {
     let mut commands = Vec::new();
     let mut i = 0;
@@ -241,7 +238,7 @@ fn strip_flags<'a>(args: &[&'a str]) -> Vec<&'a str> {
     commands
 }
 
-/// cobra `argsMinusFirstX`'s position: the first argument equal to `x` that is not a flag or
+/// The position of the first argument equal to `x` that is not a flag or
 /// a flag's value, before any `--`.
 fn position_of_first(args: &[&str], x: &str) -> Option<usize> {
     let mut pos = 0;
@@ -262,7 +259,7 @@ fn position_of_first(args: &[&str], x: &str) -> Option<usize> {
     None
 }
 
-/// A flag cobra's `Find` treats as taking the next argument: `--x` or a two-byte `-x`,
+/// A flag that takes the next argument during the command search: `--x` or a two-byte `-x`,
 /// without `=` (no flag of `gadk` or `deploy` has a no-option default at `Find` time).
 fn takes_next(s: &str) -> bool {
     !s.contains('=') && (s.starts_with("--") || (s.starts_with('-') && s.len() == 2))
@@ -281,8 +278,8 @@ fn find(path: &[&str]) -> Command {
     cmd
 }
 
-/// cobra's `UsageString()` in clap's layout: the usage line and the argument list.
-// Divergence (ledger 6b): clap's help and usage layout, not cobra's template.
+/// The usage string in clap's layout: the usage line and the argument list.
+// The layout is clap's.
 fn usage(path: &[&str]) -> String {
     find(path)
         .help_template("{usage-heading} {usage}\n\n{all-args}")
@@ -290,12 +287,12 @@ fn usage(path: &[&str]) -> String {
         .to_string()
 }
 
-/// cobra's help for the command at `path` in clap's layout.
+/// The help for the command at `path` in clap's layout.
 fn help(path: &[&str]) -> String {
     find(path).render_long_help().to_string()
 }
 
-/// cobra `findSuggestions` on the root: each available subcommand within Levenshtein
+/// Suggestions for an unknown command at the root: each available subcommand within Levenshtein
 /// distance 2 (case-insensitive) of `typed`, or that `typed` prefixes.
 fn suggestions(typed: &str) -> String {
     let names: Vec<String> = command()
@@ -316,7 +313,7 @@ fn suggestions(typed: &str) -> String {
     s
 }
 
-/// cobra `ld(s, t, true)`: byte-wise Levenshtein distance of the lowercased strings.
+/// Byte-wise Levenshtein distance of the lowercased strings.
 fn levenshtein_ignore_case(s: &str, t: &str) -> usize {
     let (s, t) = (s.to_lowercase().into_bytes(), t.to_lowercase().into_bytes());
     let mut prev: Vec<usize> = (0..=t.len()).collect();

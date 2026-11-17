@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The telemetry providers (port of ADK-Go `telemetry/telemetry.go`).
+//! The telemetry providers.
 
 use std::sync::Arc;
 
@@ -30,7 +30,7 @@ use crate::error::Error;
 use crate::gcp_detector::{self, ResourceDetector};
 use crate::setup;
 
-/// Go `telemetry.Providers`: the configured providers, each `None` when nothing configures it.
+/// The configured providers, each `None` when nothing configures it.
 #[derive(Debug, Clone, Default)]
 pub struct Providers {
     /// The configured tracer provider or `None`.
@@ -42,9 +42,9 @@ pub struct Providers {
 }
 
 impl Providers {
-    /// Go `Shutdown`: shuts the providers down and returns their errors joined with `\n` (Go
-    /// `errors.Join`). The SDK's blocking shutdowns run on `spawn_blocking`, so a current-thread
-    /// runtime keeps driving the exports they wait for. A second call returns `Ok`, as Go's does.
+    /// Shuts the providers down and returns their errors joined with `\n`.
+    /// The SDK's blocking shutdowns run on `spawn_blocking`, so a current-thread
+    /// runtime keeps driving the exports they wait for. A second call returns `Ok`.
     ///
     /// # Errors
     ///
@@ -63,7 +63,7 @@ impl Providers {
             }
             if let Some(mp) = meter_provider {
                 // The tracer and logger providers return Ok on a repeated shutdown; the meter
-                // provider returns the bare `AlreadyShutdown` (Go `ErrReaderShutdown`). A
+                // provider returns the bare `AlreadyShutdown`. A
                 // reader's own error on the first shutdown comes as `InternalFailure` and is kept.
                 push_err(&mut errs, mp.shutdown());
             }
@@ -83,9 +83,8 @@ impl Providers {
         }
     }
 
-    /// Go `SetGlobalOtelProviders`: sets OpenTelemetry's global tracer and meter providers, each
-    /// when one is configured. OpenTelemetry Rust has no global logger provider.
-    // Divergence (ledger 7a): no global logger provider is set (OpenTelemetry Rust has none).
+    /// Sets OpenTelemetry's global tracer and meter providers, each
+    /// when one is configured. OpenTelemetry Rust has no global logger provider, so none is set.
     pub fn set_global_otel_providers(&self) {
         self.set_global_otel_providers_with(|tp| {
             opentelemetry::global::set_tracer_provider(tp);
@@ -112,10 +111,10 @@ impl Providers {
     }
 }
 
-/// Records a provider shutdown error; the SDK's already-shut-down error is success, as a
-/// second Go `Shutdown` is.
-// Divergence (ledger 7a): the text is opentelemetry_sdk's provider error
-// (`Operation failed: Shutdown errors: [InternalFailure("<processor error>")]`), not Go's; a
+/// Records a provider shutdown error; the SDK's already-shut-down error is success, so a
+/// second shutdown succeeds.
+// The text is opentelemetry_sdk's provider error
+// (`Operation failed: Shutdown errors: [InternalFailure("<processor error>")]`); a
 // periodic metric reader whose exporter fails to shut down reports
 // `Operation failed: [InternalFailure("Failed to shutdown")]`, without the exporter's error.
 fn push_err(errs: &mut Vec<String>, result: OTelSdkResult) {
@@ -125,11 +124,11 @@ fn push_err(errs: &mut Vec<String>, result: OTelSdkResult) {
     }
 }
 
-/// Go `telemetry.New`: configures the providers from `opts` and the process environment.
+/// Configures the providers from `opts` and the process environment.
 ///
 /// # Errors
 ///
-/// Go's setup error texts (credentials, projects, resource, exporters).
+/// The setup error texts (credentials, projects, resource, exporters), byte-identical to ADK's.
 pub async fn new(opts: &[TelemetryOption]) -> Result<Providers, Error> {
     let env: Arc<dyn EnvProvider> = Arc::new(ProcessEnv);
     let detector = gcp_detector::new_detector(Arc::clone(&env));
@@ -153,7 +152,7 @@ pub async fn new_with(
     Ok(new_internal(&cfg))
 }
 
-/// Go `newInternal`: the providers of a configured [`setup::configure`] result.
+/// The providers of a configured [`setup::configure`] result.
 pub(crate) fn new_internal(cfg: &crate::config::Config) -> Providers {
     Providers {
         tracer_provider: setup::init_tracer_provider(cfg),

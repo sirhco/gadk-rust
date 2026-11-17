@@ -13,16 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Agent modes (Go `llminternal.Mode`, hoisted so `ContextDelta` can name it, and the `boundModeKey`
-//! binding), plus the bound output schema (Go `boundOutputSchemaKey`, be529e7b), which rides the
-//! same per-invocation map.
+//! Agent modes, hoisted so `ContextDelta` can name them, and their per-invocation binding, plus
+//! the bound output schema, which rides the same per-invocation map.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use gadk_genai::Schema;
 
-/// Go `llminternal.Mode`.
+/// The mode an agent runs in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Mode {
     /// No mode set (`""`).
@@ -37,7 +36,7 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// Go's string value of the mode.
+    /// The mode's string value.
     pub fn as_str(&self) -> &'static str {
         match self {
             Mode::Unset => "",
@@ -48,9 +47,8 @@ impl Mode {
     }
 }
 
-/// Immutable (copy-on-write) map (agent name, `AgentState::key()`) → [`Mode`]; Go
-/// `boundModeKey{agent, state}`. A second map under the same key holds the output schema a typed
-/// workflow node binds for the agent (Go `boundOutputSchemaKey{agent, state}`).
+/// Immutable (copy-on-write) map (agent name, `AgentState::key()`) → [`Mode`]. A second map under
+/// the same key holds the output schema a typed workflow node binds for the agent.
 #[derive(Debug, Clone, Default)]
 pub struct BoundModes {
     map: Arc<HashMap<(String, usize), Mode>>,
@@ -58,7 +56,7 @@ pub struct BoundModes {
 }
 
 impl BoundModes {
-    /// Go `WithBoundMode`: a copy with `mode` bound to the agent; [`Mode::Unset`] leaves the map
+    /// A copy with `mode` bound to the agent; [`Mode::Unset`] leaves the map
     /// unchanged.
     pub fn with(&self, agent_name: &str, state_key: usize, mode: Mode) -> Self {
         if mode == Mode::Unset {
@@ -77,7 +75,7 @@ impl BoundModes {
         self.map.get(&(agent_name.to_string(), state_key)).copied()
     }
 
-    /// Go `WithBoundOutputSchema` (be529e7b): a copy in which the agent is asked to answer with
+    /// A copy in which the agent is asked to answer with
     /// `schema`. `None` is bound too, so an inner placement shadows an outer one.
     pub fn with_output_schema(
         &self,

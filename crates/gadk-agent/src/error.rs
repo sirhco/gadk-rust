@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Agent and tool errors, and the agent event stream type (ports of Go `agent.ErrLLMCallsLimitExceeded`,
-//! `tool.ErrConfirmationRequired`/`ErrConfirmationRejected`, and the `fmt.Errorf("…: %w")` wrapping in
-//! `agent/agent.go`).
+//! Agent and tool errors, and the agent event stream type. The `Display` texts of the wrapping
+//! and limit errors match the ADK error messages.
 
 use futures::stream::BoxStream;
 use gadk_model::ModelError;
@@ -41,7 +40,7 @@ pub enum AgentError {
     /// A memory service operation failed.
     #[error(transparent)]
     Memory(#[from] gadk_memory::MemoryError),
-    /// A tool failed (Go functiontool: `fmt.Errorf("error tool %q %w", name, err)`).
+    /// A tool failed: `error tool "<name>" <source>`.
     #[error("error tool {} {source}", crate::go_fmt::go_quote(.tool))]
     Tool {
         /// The tool's name.
@@ -53,23 +52,22 @@ pub enum AgentError {
     /// A workflow error (carries `gadk_engine::WorkflowError`).
     #[error(transparent)]
     Workflow(Box<dyn std::error::Error + Send + Sync>),
-    /// Go `fmt.Errorf("%w: limit is %d", agent.ErrLLMCallsLimitExceeded, max)`
-    /// (`internal/agent/runconfig/limits.go`).
+    /// The LLM call limit was exceeded: `max number of llm calls exceeded: limit is <n>`.
     #[error("max number of llm calls exceeded: limit is {limit}")]
     LlmCallsLimitExceeded {
         /// The configured limit.
         limit: i32,
     },
-    /// Go `context.Canceled`.
+    /// The context was cancelled.
     #[error("context canceled")]
     Cancelled,
-    /// Go `context.DeadlineExceeded`.
+    /// The context's deadline passed.
     #[error("context deadline exceeded")]
     DeadlineExceeded,
-    /// Invalid configuration; the text is Go's error text.
+    /// Invalid configuration; the message is shown as is.
     #[error("{0}")]
     Config(String),
-    /// Context compaction failed (Go `fmt.Errorf("%w: …", compaction.ErrCompaction, …)`); the
+    /// Context compaction failed; the
     /// turn's own events are already persisted.
     #[error(transparent)]
     Compaction(CompactionError),
@@ -79,12 +77,12 @@ pub enum AgentError {
 }
 
 impl AgentError {
-    /// An [`AgentError::Other`] carrying `msg` (Go `errors.New(msg)`).
+    /// An [`AgentError::Other`] carrying `msg`.
     pub fn other(msg: impl Into<String>) -> Self {
         AgentError::Other(msg.into().into())
     }
 
-    /// Go `errors.Is(err, compaction.ErrCompaction)`: whether this error, or any error it wraps,
+    /// Whether this error, or any error it wraps,
     /// is a [`CompactionError`].
     pub fn is_compaction(&self) -> bool {
         chain_any(self, &|e| {
@@ -97,7 +95,7 @@ impl AgentError {
     }
 }
 
-/// Go `errors.Is`'s walk: whether `pred` holds for `err` or any error it wraps. Besides
+/// Whether `pred` holds for `err` or any error it wraps. Besides
 /// `source()`, it steps into the errors [`AgentError::Other`], [`AgentError::Workflow`] and
 /// [`ToolError::Execution`] carry as a plain field (their `source()` skips them).
 pub(crate) fn chain_any(
@@ -136,13 +134,13 @@ pub(crate) fn chain_any(
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
-    /// Go `tool.ErrConfirmationRequired`.
+    /// A tool that requires confirmation was called without one.
     #[error("requires confirmation, please approve or reject")]
     ConfirmationRequired,
-    /// Go `tool.ErrConfirmationRejected`.
+    /// The user rejected the tool call.
     #[error("call is rejected")]
     ConfirmationRejected,
-    /// Invalid arguments or tool usage; the text is Go's error text.
+    /// Invalid arguments or tool usage; the message is shown as is.
     #[error("{0}")]
     InvalidArgument(String),
     /// A tool panicked; the text describes the panic.
@@ -154,8 +152,8 @@ pub enum ToolError {
 }
 
 /// A shared [`ToolError`] carried as an error value, for callbacks that hand the original tool
-/// error back unchanged (e.g. as `AgentError::Other(Box::new(SharedToolError(err)))`), where Go
-/// returns the same `error` value. Display-transparent: it writes the tool error's text, and
+/// error back unchanged (e.g. as `AgentError::Other(Box::new(SharedToolError(err)))`).
+/// Display-transparent: it writes the tool error's text, and
 /// `source()` is the tool error's own source. The `Arc` is kept, so callers can check identity
 /// with `Arc::ptr_eq` after a downcast.
 #[derive(Debug, Clone)]
@@ -173,7 +171,7 @@ impl std::error::Error for SharedToolError {
     }
 }
 
-/// Go `fmt.Errorf("<msg>: %w", err)`: Display `"<msg>: <source>"`, `source()` = the wrapped error.
+/// Prefixes an error: Display `"<msg>: <source>"`, `source()` = the wrapped error.
 #[derive(Debug)]
 pub(crate) struct Wrapped {
     msg: String,
@@ -192,7 +190,7 @@ impl std::error::Error for Wrapped {
     }
 }
 
-/// Wraps `source` as Go's `fmt.Errorf("<msg>: %w", source)` does.
+/// Wraps `source` with the prefix `msg`, as `"<msg>: <source>"`.
 pub(crate) fn wrap(msg: impl Into<String>, source: AgentError) -> AgentError {
     AgentError::Other(Box::new(Wrapped {
         msg: msg.into(),

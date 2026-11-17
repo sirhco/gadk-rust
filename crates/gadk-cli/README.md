@@ -1,10 +1,9 @@
 # gadk-cli
 
-`gadk`, the gadk deploy CLI: a port of ADK-Go's `adkgo` (`cmd/adkgo`) and its helper package
-`internal/cli/util`. It deploys a gadk agent, a Cargo binary target, to Cloud Run or to Vertex AI
-Agent Engine with ADK-Go's flags, checks, generated Dockerfile `CMD`, `gcloud` invocations,
-Reasoning Engine requests and console output. Where gadk differs from ADK-Go, the difference is
-annotated in the source with `// Divergence (ledger 6b)`.
+`gadk`, the gadk deploy CLI. It deploys a gadk agent, a Cargo binary target, to Cloud Run or to
+Vertex AI Agent Engine with the flags, checks, generated Dockerfile `CMD`, `gcloud` invocations,
+Reasoning Engine requests and console output of ADK's deploy tool, adapted to Cargo (the entry
+point is a Cargo package and the image is built remotely with `cargo`).
 
 ## Install
 

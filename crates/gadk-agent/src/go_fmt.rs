@@ -13,8 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `fmt` verb ports used by gadk-agent and gadk-engine: `strconv.Quote` (`%q`), shared
-//! from gadk-platform so every crate formats `%q` with one implementation.
+//! Quoting helper used by gadk-agent and gadk-engine: [`go_quote`] renders a string as a
+//! double-quoted literal (`"` and `\` backslash-escaped, non-printable characters as `\n`-style,
+//! `\xNN` or `\uNNNN` escapes), shared from gadk-platform so every crate quotes with one
+//! implementation.
 
 pub use gadk_platform::go_quote;
 

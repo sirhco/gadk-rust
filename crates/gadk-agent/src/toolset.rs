@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `filter_toolset`, `allowed_tools_predicate`, `with_confirmation` (port of Go `tool/tool.go`
-//! helpers).
+//! Tool helpers: `filter_toolset`, `allowed_tools_predicate` and `with_confirmation`.
 
 use crate::go_fmt::go_quote;
 use std::any::Any;
@@ -34,25 +33,25 @@ use crate::tool::{
     ConfirmationProvider, RunnableTool, StreamingTool, Tool, ToolPredicate, Toolset,
 };
 
-/// Go `AllowedToolsPredicate`: a predicate that allows only the named tools.
+/// A predicate that allows only the named tools.
 pub fn allowed_tools_predicate(allowed: &[&str]) -> ToolPredicate {
     let set: HashSet<String> = allowed.iter().map(|s| (*s).to_string()).collect();
     Arc::new(move |_ctx, tool| set.contains(tool.name()))
 }
 
-/// Go `StringPredicate` (an alias of [`allowed_tools_predicate`]).
+/// An alias of [`allowed_tools_predicate`].
 pub fn string_predicate(allowed: &[&str]) -> ToolPredicate {
     allowed_tools_predicate(allowed)
 }
 
-/// Go `FilterToolset`: a toolset exposing only the inner tools the predicate allows. Like Go's
-/// `filteredToolset`, the wrapper exposes only `Name` and `Tools`: the inner toolset's
+/// A toolset exposing only the inner tools the predicate allows. The wrapper
+/// exposes only `Name` and `Tools`: the inner toolset's
 /// `process_request` is NOT forwarded (default no-op).
 pub fn filter_toolset(toolset: Arc<dyn Toolset>, predicate: ToolPredicate) -> Arc<dyn Toolset> {
     Arc::new(FilteredToolset { toolset, predicate })
 }
 
-/// Go `filteredToolset`.
+/// The toolset returned by `filter_toolset`.
 struct FilteredToolset {
     toolset: Arc<dyn Toolset>,
     predicate: ToolPredicate,
@@ -77,9 +76,9 @@ impl Toolset for FilteredToolset {
     }
 }
 
-/// Go `WithConfirmation`. Wraps each tool: streaming-capable → streaming-only wrapper; else
+/// Wraps each tool: streaming-capable → streaming-only wrapper; else
 /// runnable → runnable wrapper; else returned unchanged (same `Arc`). When `provider` is set it
-/// decides per call and overrides `require_confirmation`. Like Go, the toolset wrapper does not
+/// decides per call and overrides `require_confirmation`. The toolset wrapper does not
 /// forward `process_request`.
 pub fn with_confirmation(
     toolset: Arc<dyn Toolset>,
@@ -93,7 +92,7 @@ pub fn with_confirmation(
     })
 }
 
-/// Go `confirmationToolset`.
+/// The toolset returned by `with_confirmation`.
 struct ConfirmationToolset {
     toolset: Arc<dyn Toolset>,
     require_confirmation: bool,
@@ -133,8 +132,8 @@ impl Toolset for ConfirmationToolset {
     }
 }
 
-/// Go `confirmationTool` / `confirmationStreamingTool`. Go embeds the runnable (or streaming)
-/// interface, which hides every other optional capability, so `defers_response` /
+/// The confirmation wrapper of a runnable or streaming tool. It exposes only the runnable (or
+/// streaming) capability, which hides every other optional capability, so `defers_response` /
 /// `display_result_on_skip_summarization` / `wrapper_key` keep their defaults, and a
 /// streaming-wrapped tool is not runnable.
 struct ConfirmationTool {
@@ -162,7 +161,7 @@ impl Tool for ConfirmationTool {
         self.inner.declaration()
     }
 
-    /// Go forwards `ProcessRequest`. The flow packs this wrapper with `pack_tool` first (when it
+    /// Forwards to the inner tool. The flow packs this wrapper with `pack_tool` first (when it
     /// has a declaration), so `req.tools` maps the name to the wrapper.
     async fn process_request(&self, ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         self.inner.process_request(ctx, req).await
@@ -176,8 +175,7 @@ impl Tool for ConfirmationTool {
         self.streaming.then_some(self as &dyn StreamingTool)
     }
 
-    /// Go's analytics plugin unwraps `confirmationTool` through its inner field
-    /// (`plugin/agentanalytics/events.go` `unwrapToolValue`).
+    /// The agent-analytics plugin unwraps the confirmation wrapper through this.
     fn unwrap(&self) -> Option<Arc<dyn Tool>> {
         Some(self.inner.clone())
     }
@@ -189,7 +187,7 @@ impl Tool for ConfirmationTool {
 
 #[async_trait]
 impl RunnableTool for ConfirmationTool {
-    /// Go `confirmationTool.Run`.
+    /// Runs the confirmation check, then the inner tool.
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         confirm_call(
             &ctx,
@@ -209,7 +207,7 @@ impl RunnableTool for ConfirmationTool {
 }
 
 impl StreamingTool for ConfirmationTool {
-    /// Go `confirmationStreamingTool.RunStream`: the confirmation check is lazy and runs when
+    /// Streams the inner tool: the confirmation check is lazy and runs when
     /// iteration starts.
     fn run_stream(
         &self,
@@ -242,9 +240,9 @@ impl StreamingTool for ConfirmationTool {
     }
 }
 
-/// Port of Go `confirmCall`. Go wraps the sentinels as `"error tool %q %w"`; here they are returned
-/// bare and the flow adds that wrapping (gadk-engine `llm/functions.rs` `wrap_confirmation_error`,
-/// a `ToolError::Execution(NamedToolError)`).
+/// Checks the confirmation of a call. The confirmation sentinels are returned bare and the flow
+/// adds the `"error tool <name> <source>"` wrapping (gadk-engine `llm/functions.rs`
+/// `wrap_confirmation_error`, a `ToolError::Execution(NamedToolError)`).
 fn confirm_call(
     ctx: &Context,
     tool_name: &str,

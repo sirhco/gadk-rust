@@ -13,40 +13,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `resource` semantics over [`opentelemetry_sdk::Resource`]: `resource.Merge` with its
-//! schema-URL rule, `resource.NewWithAttributes`, and Go's `resource.Default()` read from the
-//! injected environment.
+//! Resource helpers over [`opentelemetry_sdk::Resource`]: merging with the schema-URL rule,
+//! building a resource from attributes, and the default resource read from the injected
+//! environment.
 
 use gadk_platform::env::EnvProvider;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{ResourceDetector as _, TelemetryResourceDetector};
 
-/// semconv v1.43.0's schema URL (Go `semconv.SchemaURL`; otel sdk v1.47.0
-/// `resource/builtin.go:16`), the schema of Go's default resource and the GCP detector's.
+/// semconv v1.43.0's schema URL, the schema of the default resource and the GCP detector's.
 pub(crate) const SCHEMA_URL: &str = "https://opentelemetry.io/schemas/1.43.0";
 
-/// Go `resourceAttrKey`.
+/// The environment variable holding extra resource attributes.
 const RESOURCE_ATTRIBUTES_ENV: &str = "OTEL_RESOURCE_ATTRIBUTES";
 
-/// Go `svcNameKey`.
+/// The environment variable that names the service.
 const SERVICE_NAME_ENV: &str = "OTEL_SERVICE_NAME";
 
-/// Go `resource.NewWithAttributes(schemaURL, attrs...)` (last value wins; an empty
+/// A resource from attributes (last value wins; an empty
 /// `schema_url` is schemaless).
 pub(crate) fn new_with_attributes(
     schema_url: &str,
     attrs: impl IntoIterator<Item = KeyValue>,
 ) -> Resource {
-    // Go drops invalid attributes: an empty key is one.
+    // Invalid attributes are dropped: an empty key is one.
     let attrs = attrs.into_iter().filter(|kv| !kv.key.as_str().is_empty());
     Resource::builder_empty()
         .with_schema_url(attrs, schema_url.to_owned())
         .build()
 }
 
-/// Go `resource.Merge(a, b)`: `b`'s attributes win; the schema URL is the non-empty one, or
-/// both when equal. Two different non-empty schema URLs fail with Go's
+/// Merges two resources: `b`'s attributes win; the schema URL is the non-empty one, or
+/// both when equal. Two different non-empty schema URLs fail with
 /// `conflicting Schema URL: <a> and <b>`.
 pub(crate) fn go_merge(a: &Resource, b: &Resource) -> Result<Resource, String> {
     let (merged, conflict) = merge(a, b);
@@ -56,8 +55,8 @@ pub(crate) fn go_merge(a: &Resource, b: &Resource) -> Result<Resource, String> {
     }
 }
 
-/// Go `resource.Merge`, returning the merged resource (schemaless on a conflict) and the
-/// conflict error, as Go does.
+/// Merges two resources, returning the merged resource (schemaless on a conflict) and the
+/// conflict error.
 fn merge(a: &Resource, b: &Resource) -> (Resource, Option<String>) {
     let attrs = a
         .iter()
@@ -75,29 +74,27 @@ fn merge(a: &Resource, b: &Resource) -> (Resource, Option<String>) {
     (new_with_attributes(schema, attrs), conflict)
 }
 
-/// Go `resource.Default()`: `service.name` (`unknown_service:<executable>`), then
-/// `OTEL_RESOURCE_ATTRIBUTES` and `OTEL_SERVICE_NAME` from `env` (Go `fromEnv`), then the
+/// The default resource: `service.name` (`unknown_service:<executable>`), then
+/// `OTEL_RESOURCE_ATTRIBUTES` and `OTEL_SERVICE_NAME` from `env`, then the
 /// `telemetry.sdk.*` attributes, under [`SCHEMA_URL`].
 ///
-/// Divergence (ledger 7a): the `telemetry.sdk.*` values are opentelemetry_sdk's
-/// (`telemetry.sdk.language` `rust`, `telemetry.sdk.version` `0.33.1`); Go's are `go` and the Go
-/// SDK's version (`1.47.0`).
+/// The `telemetry.sdk.*` values are opentelemetry_sdk's
+/// (`telemetry.sdk.language` `rust`, `telemetry.sdk.version` `0.33.1`).
 pub(crate) fn go_default_resource(env: &dyn EnvProvider) -> Resource {
     let sdk = TelemetryResourceDetector.detect();
     let telemetry_sdk = new_with_attributes(
         SCHEMA_URL,
         sdk.iter().map(|(k, v)| KeyValue::new(k.clone(), v.clone())),
     );
-    // Go `detect`: each detector's resource is merged in order; merge errors are reported to
-    // `otel.Handle` and the merged resource kept.
+    // Each detector's resource is merged in order; merge errors are ignored and the merged
+    // resource kept.
     [default_service_name(), from_env(env), telemetry_sdk]
         .iter()
         .fold(Resource::builder_empty().build(), |acc, r| merge(&acc, r).0)
 }
 
-/// Go `defaultServiceNameDetector`: `unknown_service:<executable base name>`.
-// Divergence (ledger 7a): when the executable is unknown the name is the SDK's
-// `unknown_service`, not Go's `unknown_service:go`.
+/// The default service name: `unknown_service:<executable base name>`.
+// When the executable is unknown the name is the SDK's `unknown_service`.
 fn default_service_name() -> Resource {
     let name = std::env::current_exe()
         .ok()
@@ -109,9 +106,8 @@ fn default_service_name() -> Resource {
     new_with_attributes(SCHEMA_URL, [KeyValue::new("service.name", name)])
 }
 
-/// Go `fromEnv.Detect`: the trimmed `OTEL_RESOURCE_ATTRIBUTES` pairs, then the trimmed
-/// `OTEL_SERVICE_NAME` as `service.name`; schemaless. Invalid pairs are dropped (Go's partial
-/// error goes to `otel.Handle`).
+/// The trimmed `OTEL_RESOURCE_ATTRIBUTES` pairs, then the trimmed
+/// `OTEL_SERVICE_NAME` as `service.name`; schemaless. Invalid pairs are dropped.
 fn from_env(env: &dyn EnvProvider) -> Resource {
     let attrs = env.var(RESOURCE_ATTRIBUTES_ENV).unwrap_or_default();
     let attrs = attrs.trim();
@@ -128,7 +124,7 @@ fn from_env(env: &dyn EnvProvider) -> Resource {
     merge(&from_attrs, &service).0
 }
 
-/// Go `constructOTResources`: `key=value` pairs separated by `,`, keys trimmed, values trimmed
+/// Parses `key=value` pairs separated by `,`, keys trimmed, values trimmed
 /// and percent-decoded (the raw value kept when decoding fails).
 fn construct_ot_resources(s: &str) -> Resource {
     if s.is_empty() {
@@ -142,7 +138,7 @@ fn construct_ot_resources(s: &str) -> Resource {
     new_with_attributes("", attrs)
 }
 
-/// Go `url.PathUnescape`: `%XX` escapes decoded, `+` kept; `None` on a malformed escape.
+/// Decodes `%XX` escapes, keeping `+`; `None` on a malformed escape.
 fn path_unescape(s: &str) -> Option<String> {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());

@@ -13,16 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-agent: the agent API — Agent, contexts, tools, callbacks, plugins (port of ADK-Go agent/, tool/, plugin/).
+//! gadk-agent: the agent API — agents, contexts, tools, callbacks and plugins.
 //!
-//! Beside Go's API it carries what stands in for Go's goroutines and contexts:
-//! [`fiber`] (fiber ids, spawn origins and attempt sites the engine sets where Go starts a
-//! goroutine; read by the analytics plugin's goroutine attribution), cancel causes
-//! ([`CancelCause`], [`InvocationContext::cancel_with_cause`] / [`InvocationContext::cause`]: Go's
-//! `context.Cause`, with `DeadlineExceeded` for agent timeouts), [`Context::context_path`] (Go's
-//! `contextPath`) and the per-invocation teardown registry [`Teardowns`], through which work a
-//! component was dropped with finishes before the runner's after-run callbacks, as Go's
-//! synchronous unwinding on early stop.
+//! Besides the API itself it carries the execution-identity pieces the engine and the analytics
+//! plugin rely on: [`fiber`] (fiber ids, spawn origins and attempt sites the engine sets where it
+//! starts a concurrent task; read by the analytics plugin's fiber attribution), cancel causes
+//! ([`CancelCause`], [`InvocationContext::cancel_with_cause`] / [`InvocationContext::cause`],
+//! with `DeadlineExceeded` for agent timeouts), [`Context::context_path`] and the per-invocation
+//! teardown registry [`Teardowns`], through which work a component was dropped with finishes
+//! before the runner's after-run callbacks, even when a consumer stops reading early.
 
 pub mod agent;
 pub mod callback;

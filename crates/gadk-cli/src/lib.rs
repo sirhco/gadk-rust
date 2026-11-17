@@ -13,8 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-cli: the `gadk` deploy CLI, a port of ADK-Go's `cmd/adkgo` (`adkgo deploy cloudrun`,
-//! `adkgo deploy agentengine`) and its helper package `internal/cli/util`.
+//! gadk-cli: the `gadk` deploy CLI (`gadk deploy cloudrun`, `gadk deploy agentengine`) and its
+//! helper text and console utilities. Its flags, checks, generated Dockerfile `CMD`, `gcloud`
+//! invocations and console output follow ADK's deploy CLI.
 //!
 //! The binary `gadk` deploys a gadk agent (a Cargo binary target) to Cloud Run or Vertex AI
 //! Agent Engine. Everything a command touches outside the process (child processes, stdout and
@@ -50,7 +51,7 @@ use gadk_vertexai::reasoning_engine::ReasoningEngineOptions;
 
 use crate::runner::{Cmd, CommandRunner, TokioRunner};
 
-/// A cloneable, shared output stream (Go's `os.Stdout` / `os.Stderr` as the commands use them):
+/// A cloneable, shared output stream (the commands' stdout and stderr):
 /// every clone writes to the same underlying writer, one `write` call at a time.
 #[derive(Clone)]
 pub struct SharedWriter(Arc<Mutex<dyn Write + Send>>);
@@ -66,7 +67,7 @@ impl SharedWriter {
         SharedWriter(w)
     }
 
-    /// Go `fmt.Fprint(w, s)`: writes `s`, ignoring a write error as `fmt.Println` callers do.
+    /// Writes `s`, ignoring a write error.
     pub fn write_str(&self, s: &str) {
         let mut w = self.lock();
         let _ = w.write_all(s.as_bytes());
@@ -94,23 +95,23 @@ impl fmt::Debug for SharedWriter {
     }
 }
 
-/// Everything a command reads or writes outside the process; Go reads these from globals
-/// (`os.Stdout`, `os.Getwd`, `os.Getenv`, `time.Now`, `exec.Command`).
+/// Everything a command reads or writes outside the process (stdout, stderr, the working
+/// directory, the environment, the clock and child processes).
 pub struct Env {
     /// Launches child processes (`gcloud`, `cargo metadata`).
     pub runner: Arc<dyn CommandRunner>,
-    /// Go `os.Stdout`: step banners, printer lines and child output.
+    /// Standard output: step banners, printer lines and child output.
     pub out: SharedWriter,
-    /// Go `os.Stderr`: cobra's `Error:` line and usage.
+    /// Standard error: the `Error:` line and usage.
     pub err: SharedWriter,
-    /// Go `os.Getwd()`: relative paths resolve against it.
+    /// The working directory: relative paths resolve against it.
     pub cwd: PathBuf,
-    /// Go `os.Getenv` (`PATH` for `exec.Command`'s `LookPath`, `TMPDIR` for `os.TempDir`).
+    /// The environment (`PATH` for command lookup, `TMPDIR` for the temp dir).
     pub env: Arc<dyn EnvProvider>,
-    /// Go `time.Now`.
+    /// The clock.
     pub time: Arc<dyn TimeProvider>,
-    /// How `gadk deploy agentengine` reaches Vertex AI (Go: the `aiplatform` client options;
-    /// endpoint, credentials and HTTP client are injectable for tests). An unset
+    /// How `gadk deploy agentengine` reaches Vertex AI (endpoint, credentials and HTTP client are
+    /// injectable for tests). An unset
     /// [`ReasoningEngineOptions::env`] means [`Env::env`].
     pub vertex: ReasoningEngineOptions,
 }
@@ -152,7 +153,7 @@ impl Env {
         )
     }
 
-    /// Go `filepath.Abs(path)` against [`Env::cwd`]: an absolute `path` is cleaned, a relative
+    /// Resolves `path` against [`Env::cwd`]: an absolute `path` is cleaned, a relative
     /// one is joined to the working directory and cleaned; `""` is the working directory.
     pub fn abs(&self, path: &str) -> PathBuf {
         if path.starts_with('/') {
@@ -162,7 +163,7 @@ impl Env {
         PathBuf::from(go_path_join(&[cwd.as_ref(), path]))
     }
 
-    /// Go `os.TempDir()` on Unix: `$TMPDIR`, else `/tmp`.
+    /// The temp dir on Unix: `$TMPDIR`, else `/tmp`.
     pub fn temp_dir(&self) -> PathBuf {
         match self.env.var("TMPDIR") {
             Some(dir) if !dir.is_empty() => PathBuf::from(dir),
@@ -170,14 +171,14 @@ impl Env {
         }
     }
 
-    /// Go `exec.Command(name, args...)`, its `LookPath` reading `PATH` from [`Env::env`].
+    /// A command for `name` with `args`, looked up in `PATH` read from [`Env::env`].
     pub fn command(&self, name: &str, args: &[&str]) -> Cmd {
         Cmd::new(self.env.as_ref(), &self.cwd, name, args)
     }
 }
 
 /// Runs the `gadk` command line (`args` includes the program name, as `std::env::args_os`) and
-/// returns the process exit code: 0, or 1 when a command failed (Go `root.Execute`).
+/// returns the process exit code: 0, or 1 when a command failed.
 pub async fn run<I, T>(args: I, env: &Env) -> ExitCode
 where
     I: IntoIterator<Item = T>,

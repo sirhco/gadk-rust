@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The context builder (port of Go `agent/context_mock.go`, `agent/common_context_mock.go` and
-//! `internal/context.NewInvocationContext`) and its in-crate default session.
+//! The context builder and its in-crate default session.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -41,12 +40,11 @@ use crate::services::{Artifacts, Memory};
 use crate::state::{AgentState, AgentType};
 use crate::teardown::Teardowns;
 
-/// Builder for contexts (Go `context_mock.go` / `common_context_mock.go` /
-/// `internal/context.NewInvocationContext`).
+/// Builder for contexts.
 ///
 /// Defaults: an in-crate in-memory session (app `"app"` / user `"user"` / id `"session"`),
 /// `Platform::default()`, a custom agent named `"test_agent"`, invocation id
-/// `"e-" + platform.new_uuid()` (Go `NewInvocationContext`), empty branch and isolation scope, a
+/// `"e-" + platform.new_uuid()`, empty branch and isolation scope, a
 /// fresh `CancellationToken`, `RunConfig::default()`, no resume inputs, and no artifacts, memory,
 /// plugins, parent map, session service, call limiter, compaction runtime or teardown registry.
 #[derive(Default)]
@@ -167,7 +165,7 @@ impl ContextBuilder {
         self
     }
 
-    /// Go `InvocationContextParams.ResumedInputs` (interrupt id → response).
+    /// Resume inputs (interrupt id → response).
     pub fn resumed_inputs(mut self, m: Map<String, Value>) -> Self {
         self.resumed_inputs = Some(m);
         self
@@ -188,8 +186,7 @@ impl ContextBuilder {
     }
 
     /// Builds the invocation context: no actions, not ended, every node field empty. An empty
-    /// explicit invocation id also takes the `"e-"` default, as Go's `params.InvocationID == ""`
-    /// check does.
+    /// explicit invocation id also takes the `"e-"` default.
     pub fn build_invocation(self) -> InvocationContext {
         let platform = self.platform.unwrap_or_default();
         let invocation_id = match self.invocation_id {
@@ -253,14 +250,13 @@ impl ContextBuilder {
         })
     }
 
-    /// Builds the full context (Go `Promote` of the built invocation context).
+    /// Builds the full context from the built invocation context.
     pub fn build(self) -> Context {
         self.build_invocation().into_context()
     }
 }
 
-/// In-memory session for `ContextBuilder`'s default (Go tests build invocation contexts on
-/// in-memory sessions). No service, no persistence.
+/// In-memory session for `ContextBuilder`'s default. No service, no persistence.
 pub(crate) struct LocalSession {
     pub(crate) app: String,
     pub(crate) user: String,
@@ -314,7 +310,7 @@ impl Session for LocalSession {
     }
 }
 
-/// Go session state map: `get` → `SessionError::StateKeyNotExist` when absent; `set` overwrites;
+/// Session state map: `get` → `SessionError::StateKeyNotExist` when absent; `set` overwrites;
 /// `all` snapshots. No lock is held past the call.
 #[derive(Default)]
 pub(crate) struct LocalState(parking_lot::RwLock<Map<String, Value>>);

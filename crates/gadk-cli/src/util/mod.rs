@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `internal/cli/util` (`text_helpers.go`, `oscmd.go`): the text checks and the
-//! console helpers `cmd/adkgo` prints with. Go's `flagset_helpers.go` is ported as
-//! `gadk-launcher`'s `flag_usage` (the launcher's user).
+//! The text checks and the console helpers the `gadk` commands print with. The flag-usage
+//! helper lives in `gadk-launcher` as `flag_usage` (the launcher's user).
 
 mod oscmd;
 mod text;
