@@ -13,11 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go agent/llmagent/llmagent.go (New, installTaskTools, run, RunLive,
-//! maybeSaveOutputToState) and the wrappedSession type of agent/llmagent/llm_agent_wrapper.go.
+//! The LLM agent: construction (`new`, task-tool installation), the run closure, live mode
+//! (`LlmLive`, installed as `AgentState.live`) and output-key saving, plus the `WrappedSession`
+//! used when the agent runs as a workflow node.
 //!
-//! `RunLive` is `LlmLive`, installed as `AgentState.live`. `FindAgent` is covered by the
-//! `Agent::find_agent` provided method; `RunNode` is replaced by explicit `run_llm_agent_as_node` calls.
+//! `Agent::find_agent` is the provided method; workflow nodes run an LLM agent through explicit
+//! `run_llm_agent_as_node` calls.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -42,9 +43,9 @@ use crate::tool::single_turn::SingleTurnTool;
 use crate::tool::task_agent_tool::TaskAgentTool;
 use crate::workflow::route::go_quote;
 
-/// Port of Go agent/llmagent/llmagent.go New.
+/// Builds an LLM agent from its configuration.
 pub fn new(cfg: LlmAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
-    // Go: State{Tools: slices.Clone(cfg.Tools), …}; Config = cfg.
+    // The state starts with a clone of the configured tools.
     let state = Arc::new(LlmAgentState::new(cfg.clone()));
 
     let run_state = Arc::clone(&state);
@@ -55,13 +56,13 @@ pub fn new(cfg: LlmAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
     let agent_state = AgentState {
         agent_type: AgentType::LlmAgent,
         config: Some(Arc::clone(&state) as Arc<dyn Any + Send + Sync>),
-        // Go: state.OnBeforeAgentCallbackEvent = a.maybeSaveOutputToState. A before-agent
+        // The before-agent-callback event hook. A before-agent
         // callback that returns content short-circuits the run, so its event never reaches
         // run_flow; this gives it the same output_key handling.
         on_before_agent_callback_event: Some(Arc::new(move |ev: &mut Event| {
             maybe_save_output_to_state(&hook_state, ev)
         })),
-        // Go: *llmAgent has a RunLive method (the runner's liveAgent assertion succeeds).
+        // The agent supports live mode.
         live: Some(Arc::new(LlmLive)),
     };
 
@@ -82,10 +83,11 @@ pub fn new(cfg: LlmAgentConfig) -> Result<Arc<dyn Agent>, AgentError> {
     Ok(agent)
 }
 
-/// Port of Go agent/llmagent/llmagent.go installTaskTools.
+/// Installs the task tools: for a task-mode agent its `finish_task` tool, and for each task or
+/// single_turn sub-agent a delegation tool.
 ///
-/// Go's `NewSingleTurnTool` never fails and `NewTaskAgentTool` fails only for a nil agent, which
-/// Rust cannot express, so those two Go error branches have no counterpart here.
+/// Creating a single_turn tool never fails and a task-agent tool fails only for a missing
+/// agent, which Rust cannot express, so neither has an error branch here.
 fn install_task_tools(agent: &Arc<dyn Agent>, state: &LlmAgentState) -> Result<(), AgentError> {
     if state.cfg.mode == Mode::Task {
         let finish = FinishTaskTool::new(agent.as_ref()).map_err(|e| {
@@ -118,7 +120,7 @@ fn install_task_tools(agent: &Arc<dyn Agent>, state: &LlmAgentState) -> Result<(
     Ok(())
 }
 
-/// The flow Go builds in both `run` and `RunLive` (llmagent.go:489-499). `Flow::tools` stays at
+/// The flow built by both `run` and live mode. `Flow::tools` stays at
 /// its default: the tools processor fills it.
 fn build_flow(state: &LlmAgentState) -> Arc<Flow> {
     let cfg = &state.cfg;
@@ -136,10 +138,10 @@ fn build_flow(state: &LlmAgentState) -> Arc<Flow> {
     })
 }
 
-/// Port of Go agent/llmagent/llmagent.go (*llmAgent).run.
+/// The agent's run closure: builds the flow and runs it.
 ///
-/// Go first rebinds `ctx`'s agent to itself; `CustomAgent::run` (built by `new_with_state`)
-/// already does that before calling this closure, so the rebinding is omitted.
+/// `CustomAgent::run` (built by `new_with_state`) already rebinds `ctx`'s agent to this agent
+/// before calling this closure, so no rebinding happens here.
 fn run_flow(state: Arc<LlmAgentState>, ctx: InvocationContext) -> EventStream {
     let flow = build_flow(&state);
     Box::pin(flow.run(ctx).map(move |item| {
@@ -150,15 +152,14 @@ fn run_flow(state: Arc<LlmAgentState>, ctx: InvocationContext) -> EventStream {
     }))
 }
 
-/// Go's `(*llmAgent).RunLive`, installed as `AgentState.live` by [`new`]. Stateless: it resolves
+/// Live-mode entry point, installed as `AgentState.live` by [`new`]. Stateless: it resolves
 /// the agent from `ctx.agent()` (the caller passes a context whose current agent is this agent),
 /// so it holds no reference to the agent and creates no cycle.
 pub(crate) struct LlmLive;
 
 #[async_trait]
 impl LiveAgent for LlmLive {
-    /// Port of Go agent/llmagent/llmagent.go:476 (*llmAgent).RunLive: a fresh invocation context
-    /// (Go icontext.NewInvocationContext), the agent's flow in live mode, and the output_key
+    /// A fresh invocation context, the agent's flow in live mode, and the output_key
     /// save on every event that is not an error.
     ///
     /// `ctx.agent()` must be this agent: the agent (its model, tools and output key) is resolved
@@ -175,8 +176,7 @@ impl LiveAgent for LlmLive {
                 go_quote(agent.name())
             ))
         })?;
-        // Go NewInvocationContext{Artifacts, Memory, Session, Branch, IsolationScope, Agent,
-        // UserContent, RunConfig, InvocationID}: `fresh_invocation` resets the isolation scope,
+        // `fresh_invocation` resets the isolation scope,
         // so it is set back to the caller's; the other params carry over unchanged.
         let ictx = ctx.with_delta(ContextDelta {
             agent: Some(Arc::clone(&agent)),
@@ -196,21 +196,21 @@ impl LiveAgent for LlmLive {
     }
 }
 
-/// Port of Go agent/llmagent/llmagent.go (*llmAgent).maybeSaveOutputToState: saves the model
-/// output to `state_delta[output_key]` when this agent authored a final text response. Never
+/// Saves the model output to `state_delta[output_key]` when this agent authored a final text
+/// response. Never
 /// touches `event.output` (the node wrapper stamps output). A task agent's text turns are never
-/// saved (Go 8c2e2e2a): its result is the finish_task output, which the node wrapper's
+/// saved: its result is the finish_task output, which the node wrapper's
 /// `run_task` writes to `output_key` when the agent is entered as a node.
 pub(crate) fn maybe_save_output_to_state(state: &LlmAgentState, event: &mut Event) {
     if event.author != state.cfg.name {
-        // Go TODO: log "Skipping output save for agent %s: event authored by %s"
+        // Skip: the event was authored by another agent.
         return;
     }
     // A task agent delivers its result through finish_task, which run_task writes to
     // output_key. Its text turns (a clarification question, a greeting) are not the result.
     // run_task runs only when the task agent is entered as a node, whichever agent sits above
-    // it; when it is run through Run (as the sequential, loop and parallel agents do) or
-    // RunLive, nothing writes the finish_task output, so output_key stays unset. Matches
+    // it; when it is run through `run` (as the sequential, loop and parallel agents do) or
+    // `run_live`, nothing writes the finish_task output, so output_key stays unset. Matches
     // adk-python's __maybe_save_output_to_state.
     if state.cfg.mode == Mode::Task {
         return;
@@ -235,7 +235,7 @@ pub(crate) fn maybe_save_output_to_state(state: &LlmAgentState, event: &mut Even
     if !has_text_part {
         return;
     }
-    // Go TODO: output schema validation and unmarshalling. An all-whitespace result is the
+    // Output schema validation and unmarshalling are not done here. An all-whitespace result is the
     // empty final chunk of a stream; do not save it.
     if state.cfg.output_schema.is_some() && result.trim().is_empty() {
         return;
@@ -247,7 +247,7 @@ pub(crate) fn maybe_save_output_to_state(state: &LlmAgentState, event: &mut Even
         .insert(state.cfg.output_key.clone(), Value::String(result));
 }
 
-/// Port of Go agent/llmagent/llm_agent_wrapper.go wrappedSession: a read view of `inner` with
+/// A read view of `inner` with
 /// one synthetic seed event inserted at the event count snapshotted at creation. The seed is
 /// never written to `inner`.
 pub(crate) struct WrappedSession {
@@ -257,7 +257,7 @@ pub(crate) struct WrappedSession {
 }
 
 impl WrappedSession {
-    /// Port of newWrappedSession.
+    /// A view of `inner` with `seed` inserted at the current event count.
     pub(crate) fn new(inner: Arc<dyn Session>, seed: Event) -> Self {
         let insert_at = inner.events().len();
         Self {
@@ -267,7 +267,7 @@ impl WrappedSession {
         }
     }
 
-    /// Port of (*wrappedSession).Unwrap.
+    /// The session underneath the view.
     pub(crate) fn inner(&self) -> &Arc<dyn Session> {
         &self.inner
     }
@@ -290,7 +290,7 @@ impl Session for WrappedSession {
         self.inner.state()
     }
 
-    /// Port of (*wrappedEvents).All/Len/At (collapsed, as Rust `Session::events` returns a
+    /// All of the view's events (collapsed, as Rust `Session::events` returns a
     /// `Vec`): the seed sits at `insert_at`, or at the end when the underlying session has
     /// fewer events than at the snapshot.
     fn events(&self) -> Vec<Event> {
@@ -309,7 +309,7 @@ impl Session for WrappedSession {
     }
 }
 
-/// The session underneath any [`WrappedSession`] (Go `Unwrap`). Anything that must WRITE to the
+/// The session underneath any [`WrappedSession`]. Anything that must WRITE to the
 /// session (e.g. `SessionService::append_event`, whose in-memory implementation downcasts to its
 /// own type) must pass `underlying_session(&ctx.session())`, never the wrapped view.
 pub(crate) fn underlying_session(session: &Arc<dyn Session>) -> Arc<dyn Session> {

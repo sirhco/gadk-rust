@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `AgentTool`, `AgentToolConfig`: run an agent as a tool (port of Go tool/agenttool/agent_tool.go).
+//! `AgentTool`, `AgentToolConfig`: run an agent as a tool.
 
 use std::any::Any;
 use std::collections::BTreeSet;
@@ -37,14 +37,14 @@ use crate::tool::single_turn::{input_schema_of, make_function_declaration};
 use crate::tool::utils::{go_type_name, validate_map_on_schema, validate_output_schema};
 use crate::workflow::route::go_quote;
 
-/// Port of Go `agenttool.Config`.
+/// Configuration of an [`AgentTool`].
 #[derive(Clone, Default)]
 pub struct AgentToolConfig {
     /// If true, the calling agent skips summarization after the sub-agent finishes.
     pub skip_summarization: bool,
 }
 
-/// Port of Go `agenttool`'s `agentTool`: a tool that runs an agent in a child runner over a fresh
+/// A tool that runs an agent in a child runner over a fresh
 /// in-memory session and returns its final answer.
 pub struct AgentTool {
     agent: Arc<dyn Agent>,
@@ -52,8 +52,8 @@ pub struct AgentTool {
 }
 
 impl AgentTool {
-    /// Port of Go `agenttool.New`; `None` means `skip_summarization = false`.
-    #[allow(clippy::new_ret_no_self)] // mirrors Go agenttool.New, which returns tool.Tool (C4)
+    /// Wraps `agent` as a tool; `None` means `skip_summarization = false`.
+    #[allow(clippy::new_ret_no_self)] // returns the tool as `Arc<dyn Tool>`
     pub fn new(agent: Arc<dyn Agent>, cfg: Option<AgentToolConfig>) -> Arc<dyn Tool> {
         Arc::new(AgentTool {
             agent,
@@ -62,7 +62,7 @@ impl AgentTool {
     }
 }
 
-/// The error of [`AgentTool`]'s run: Go's `fmt.Errorf("<message>: %w", source)`, so a caller can
+/// The error of [`AgentTool`]'s run: "<message>: <source>", so a caller can
 /// find the wrapped error (e.g. `AgentError::LlmCallsLimitExceeded`) in the source chain.
 #[derive(Debug)]
 struct AgentToolError {
@@ -113,30 +113,30 @@ impl Tool for AgentTool {
         self.agent.description()
     }
 
-    /// Go: `workflowinternal.MakeFunctionDeclaration(t.agent)`.
+    /// The agent's function declaration (see `make_function_declaration`).
     fn declaration(&self) -> Option<FunctionDeclaration> {
         Some(make_function_declaration(&*self.agent))
     }
 
-    // `process_request` is not overridden: Go's ProcessRequest is toolutils.PackTool, which the
+    // `process_request` is not overridden: its job is `pack_tool`, which the
     // flow runs via `gadk_agent::pack_tool` before calling `Tool::process_request`.
 
     fn as_runnable(&self) -> Option<&dyn RunnableTool> {
         Some(self)
     }
 
-    /// Go `SkipSummarizationResultDisplayer`: with skip summarization the sub-agent's result is the
+    /// With skip summarization the sub-agent's result is the
     /// final answer, so it is still shown to the user.
     fn display_result_on_skip_summarization(&self) -> bool {
         true
     }
 
-    /// Go classifies a `tool/agenttool` tool as `SUB_AGENT` (`A2A` when its agent is remote).
+    /// Classified as `SubAgent` (`A2A` when its agent is remote).
     fn origin_kind(&self) -> ToolOriginKind {
         ToolOriginKind::SubAgent
     }
 
-    /// The wrapped agent (Go `subAgentOrA2A` reads the tool's `agent` field).
+    /// The wrapped agent.
     fn origin_agent(&self) -> Option<Arc<dyn Agent>> {
         Some(self.agent.clone())
     }
@@ -146,8 +146,8 @@ impl Tool for AgentTool {
     }
 }
 
-/// Go's per-part text of the sub-agent's last content: non-empty text, else a non-empty code
-/// execution output without trailing newlines, else executable code (Go `switch` order).
+/// The text of one part of the sub-agent's last content: non-empty text, else a non-empty code
+/// execution output without trailing newlines, else executable code, in that order.
 fn part_text(p: &gadk_genai::Part) -> String {
     if !p.text.is_empty() {
         p.text.clone()
@@ -166,7 +166,7 @@ fn part_text(p: &gadk_genai::Part) -> String {
 
 #[async_trait]
 impl RunnableTool for AgentTool {
-    /// Port of Go `(*agentTool).Run`.
+    /// Runs the wrapped agent in a child runner and returns its final answer under `result`.
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let name = self.agent.name().to_string();
         let margs = match args {
@@ -179,7 +179,7 @@ impl RunnableTool for AgentTool {
             }
         };
 
-        // The same lookup as the declaration (Go 31111f89 `workflowinternal.InputSchema`), so a
+        // The same lookup as the declaration (`make_function_declaration`), so a
         // workflow agent takes the arguments of its first sub-agent's input schema. The output
         // schema is an LLM agent's own only. Cloned so no borrow of the agent state is held
         // across an await.
@@ -191,8 +191,8 @@ impl RunnableTool for AgentTool {
                 validate_map_on_schema(&margs, schema, true).map_err(|e| {
                     exec(format!("argument validation failed for agent {name}: {e}"))
                 })?;
-                // Go json.Marshal (sorted keys, HTML escaping); it cannot fail on a JSON map, so
-                // Go's "error serializing tool arguments" branch is unreachable.
+                // Compact JSON with sorted keys and HTML escaping ([`go_json_marshal`]); it cannot
+                // fail on a JSON map, so there is no "error serializing tool arguments" branch.
                 let json = go_json_marshal(&Value::Object(margs));
                 Content::from_text(json, ROLE_USER)
             }
@@ -202,13 +202,13 @@ impl RunnableTool for AgentTool {
                         "missing required argument 'request' for agent {name}"
                     ))
                 })?;
-                // Go: the string as is, else fmt.Sprint(input) of the JSON-decoded value.
+                // The string as is, else the display form of the JSON-decoded value.
                 Content::from_text(go_sprint(&as_go_floats(input)), ROLE_USER)
             }
         };
 
         // Set only once the input is valid, so an argument error goes back to the parent model
-        // instead of ending its turn (Go 4cc7ce5f).
+        // instead of ending its turn.
         if self.skip_summarization {
             ctx.update_actions(|a| a.skip_summarization = true);
         }
@@ -244,17 +244,16 @@ impl RunnableTool for AgentTool {
             .await
             .map_err(|e| exec_src(format!("failed to create session for sub-agent {name}"), e))?;
 
-        // Forward the caller's already-resolved model-call budget (Go runconfig.FromContext);
-        // 0 when the caller was not run by a runner, which gives the nested run the default.
+        // Forward the caller's already-resolved model-call budget;
         let max_llm_calls = ctx.llm_call_limiter().map_or(0, |l| l.max_llm_calls());
         let run_cfg = RunConfig {
             streaming_mode: StreamingMode::Sse,
             max_llm_calls,
             ..Default::default()
         };
-        // Dropping the stream (on return) cancels the child invocation. Go 24d33b35 (#1777):
-        // the sub-runner starts with a context marked to inherit this invocation's plugins
-        // (`plugininternal.WithInheritedPlugins(toolCtx)`), which a plugin-less runner keeps.
+        // Dropping the stream (on return) cancels the child invocation. The sub-runner starts
+        // with a context marked to inherit this invocation's plugins
+        // (`with_inherited_plugins`), which a plugin-less runner keeps.
         let mut events = runner.run_with_context(
             &ctx.as_invocation().with_inherited_plugins(),
             sub_session.user_id(),
@@ -266,10 +265,11 @@ impl RunnableTool for AgentTool {
         let mut last_content: Option<Content> = None;
         // Long-running calls that are never answered before the run ends (e.g. a tool
         // confirmation) leave the sub-agent paused. Its session is discarded, so the pause can
-        // never be resumed (Go f25d1424).
+        // never be resumed.
         let mut pending_ids: BTreeSet<String> = BTreeSet::new();
         loop {
-            // Go passes toolCtx as the child's context: cancelling the caller cancels the child.
+            // The caller's context is the child's context: cancelling the caller cancels
+            // the child.
             let next = tokio::select! {
                 biased;
                 _ = ctx.cancellation_token().cancelled() => {
@@ -318,7 +318,7 @@ impl RunnableTool for AgentTool {
             )));
         }
 
-        // Go a8a9b936: an empty reply is the result "" (also with an output schema: there is
+        // An empty reply is the result "" (also with an output schema: there is
         // nothing to validate).
         let empty_result =
             || Map::from_iter([("result".to_string(), Value::String(String::new()))]);

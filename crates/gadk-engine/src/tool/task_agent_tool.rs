@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go internal/workflowinternal/task_agent_tool.go.
+//! The task-agent tool: the parent's handle on a task-mode sub-agent.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -30,7 +30,7 @@ use crate::tool::single_turn::{input_schema_of, output_schema_of};
 
 const TASK_DESCRIPTION_SUFFIX: &str = "IMPORTANT: This tool delegates execution to a specialized agent. Do NOT call this tool in parallel with any other tools.";
 
-/// Port of Go workflowinternal.TaskAgentTool: the parent's handle on a task-mode sub-agent. The
+/// The parent's handle on a task-mode sub-agent. The
 /// delegation itself is dispatched by the chat wrapper; running the tool is a no-op.
 pub(crate) struct TaskAgentTool {
     agent: Arc<dyn Agent>,
@@ -38,16 +38,17 @@ pub(crate) struct TaskAgentTool {
 }
 
 impl TaskAgentTool {
-    /// Port of Go NewTaskAgentTool (its only error, a nil agent, cannot occur in Rust).
+    /// Creates the tool for `agent`.
     pub(crate) fn new(agent: Arc<dyn Agent>) -> Arc<TaskAgentTool> {
         let decl = create_task_agent_func_declaration(agent.as_ref());
         Arc::new(TaskAgentTool { agent, decl })
     }
 }
 
-/// Port of Go createTaskAgentFuncDeclaration.
+/// The function declaration for a task agent: its description (plus a note not to call it in
+/// parallel) and its input and output schemas.
 fn create_task_agent_func_declaration(agent: &dyn Agent) -> FunctionDeclaration {
-    // Go strings.TrimSpace; Rust `str::trim` trims the same Unicode White_Space set.
+    // `str::trim` trims the Unicode White_Space set.
     let description = format!("{}\n{}", agent.description(), TASK_DESCRIPTION_SUFFIX)
         .trim()
         .to_string();
@@ -70,10 +71,10 @@ fn create_task_agent_func_declaration(agent: &dyn Agent) -> FunctionDeclaration 
         parameters: Some(parameters),
         ..Default::default()
     };
-    // Go quirk preserved: a non-LLM composite agent gets no response schema, even though
+    // A non-LLM composite agent gets no response schema, even though
     // output_schema_of would recurse into its sub-agents.
     if let Some(state) = reveal(agent) {
-        // Go googlellm.IsGeminiAPIVariant(nil) is false, so a model-less agent gets one.
+        // A model-less agent counts as the Gemini API variant and gets one.
         let gemini_api = state
             .cfg
             .model
@@ -85,7 +86,7 @@ fn create_task_agent_func_declaration(agent: &dyn Agent) -> FunctionDeclaration 
             } else {
                 "STRING"
             };
-            // Go &genai.Schema{Type: ty} serializes to exactly this.
+            // This is exactly the schema `{"type": ty}`.
             decl.response_json_schema = Some(json!({ "type": ty }));
         }
     }
@@ -105,25 +106,25 @@ impl Tool for TaskAgentTool {
         Some(self.decl.clone())
     }
 
-    // `process_request` is not overridden: Go's ProcessRequest is toolutils.PackTool, which the
+    // `process_request` is not overridden: its job is `pack_tool`, which the
     // flow runs via `gadk_agent::pack_tool` before calling `Tool::process_request`.
 
     fn as_runnable(&self) -> Option<&dyn RunnableTool> {
         Some(self)
     }
 
-    /// Go DefersResponse: the FunctionResponse is synthesized by the chat wrapper, not by the
+    /// The FunctionResponse is synthesized by the chat wrapper, not by the
     /// standard tool-execution pipeline.
     fn defers_response(&self) -> bool {
         true
     }
 
-    /// Go classifies `workflowinternal.TaskAgentTool` as `SUB_AGENT` (`A2A` when its agent is remote).
+    /// Classified as `SubAgent` (`A2A` when its agent is remote).
     fn origin_kind(&self) -> ToolOriginKind {
         ToolOriginKind::SubAgent
     }
 
-    /// The wrapped agent (Go `subAgentOrA2A` reads the tool's `agent` field).
+    /// The wrapped agent.
     fn origin_agent(&self) -> Option<Arc<dyn Agent>> {
         Some(self.agent.clone())
     }
@@ -135,7 +136,7 @@ impl Tool for TaskAgentTool {
 
 #[async_trait]
 impl RunnableTool for TaskAgentTool {
-    /// Port of Go Run: a no-op; Go returns (nil, nil), Rust an empty map.
+    /// A no-op: returns an empty map.
     async fn run(&self, _ctx: Context, _args: Value) -> Result<Map<String, Value>, ToolError> {
         Ok(Map::new())
     }

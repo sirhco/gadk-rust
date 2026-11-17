@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Request-confirmation request processor (port of Go
-//! internal/llminternal/request_confirmation_processor.go).
+//! Request-confirmation request processor: re-dispatches the tool calls a user has confirmed.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -22,7 +21,7 @@ use std::{
 };
 
 use futures::future::BoxFuture;
-// Go toolconfirmation.FunctionCallName / OriginalCallFrom come from gadk-agent (C5 D3); no
+// The confirmation function name and `original_call_from` come from gadk-agent; no
 // private copies.
 use gadk_agent::{
     AgentError, InvocationContext, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, Tool,
@@ -39,7 +38,7 @@ use crate::{
     workflow::route::go_quote,
 };
 
-/// One Go handleFunctionCalls dispatch: the resumed original calls (role "user" content, in
+/// One dispatch of resumed calls: the resumed original calls (role "user" content, in
 /// confirmation-request order) and the confirmation for each original call ID.
 #[derive(Debug)]
 pub(crate) struct ResumeBatch {
@@ -47,7 +46,7 @@ pub(crate) struct ResumeBatch {
     pub(crate) confirmations: HashMap<String, ToolConfirmation>,
 }
 
-/// Port of Go RequestConfirmationRequestProcessor: re-dispatches the tool calls the user has
+/// Re-dispatches the tool calls the user has
 /// just confirmed.
 pub(crate) fn request_confirmation_processor<'a>(
     ctx: &'a InvocationContext,
@@ -66,13 +65,13 @@ pub(crate) fn request_confirmation_processor<'a>(
 }
 
 /// Runs each batch through handle_function_calls with its confirmations, in order, and returns
-/// the non-None response events (Go request_confirmation_processor.go:245-256).
+/// the non-None response events.
 async fn dispatch_resume_batches(
     ctx: &InvocationContext,
     f: &Flow,
     batches: Vec<ResumeBatch>,
 ) -> Result<Vec<Event>, AgentError> {
-    // Go: toolsmap built from f.Tools (set by the tools processor earlier in this step).
+    // The tool map is built from `f.tools` (set by the tools processor earlier in this step).
     let tools: HashMap<String, Arc<dyn Tool>> = f
         .tools
         .read()
@@ -81,7 +80,7 @@ async fn dispatch_resume_batches(
         .collect();
     let mut out = Vec::new();
     for b in batches {
-        // Go passes &model.LLMResponse{Content: parts}; wrap the content in a bare event.
+        // Wrap the content in a bare event.
         let call_ev = Event {
             response: LlmResponse {
                 content: Some(b.content),
@@ -99,9 +98,9 @@ async fn dispatch_resume_batches(
     Ok(out)
 }
 
-/// Port of request_confirmation_processor.go:47-257 without the dispatch. Go dispatches each
-/// batch while it scans; the scan reads only the `events` snapshot, so collecting the batches
-/// first and dispatching them in order afterwards is equivalent.
+/// Collects the batches of confirmed calls to resume, without dispatching them. The scan reads
+/// only the `events` snapshot, so collecting the batches first and dispatching them in order
+/// afterwards is equivalent to dispatching each batch as it is found.
 pub(crate) fn collect_resume_batches(
     agent_name: &str,
     events: &[Event],
@@ -114,7 +113,7 @@ pub(crate) fn collect_resume_batches(
     }
 
     // Call ID → index of the latest event holding a response to it, and confirmation-call ID →
-    // index of the user's first answer to it (Go 550bb4c2).
+    // index of the user's first answer to it.
     let mut response_latest_index: HashMap<&str, usize> = HashMap::new();
     let mut first_answer_index: HashMap<&str, usize> = HashMap::new();
     for (idx, ev) in events.iter().enumerate() {
@@ -169,7 +168,7 @@ pub(crate) fn collect_resume_batches(
         let mut resume_order: Vec<String> = Vec::new();
         let mut confirmation_id_by_call_id: HashMap<String, &str> = HashMap::new();
         for fc in calls {
-            // Only a confirmation request resumes a call (Go 51e8fe4c).
+            // Only a confirmation request resumes a call.
             if fc.name != REQUEST_CONFIRMATION_FUNCTION_CALL_NAME {
                 continue;
             }
@@ -239,7 +238,7 @@ pub(crate) fn collect_resume_batches(
 type ConfirmationResponses = HashMap<String, ToolConfirmation>;
 
 /// The confirmation responses of the latest user event, keyed by confirmation-call ID. `None`
-/// when the latest user event carries no function response (Go returns early).
+/// when the latest user event carries no function response.
 fn confirmation_responses(events: &[Event]) -> Result<Option<ConfirmationResponses>, AgentError> {
     let Some(k) = events.iter().rposition(|e| e.author == "user") else {
         return Ok(None);
@@ -257,7 +256,7 @@ fn confirmation_responses(events: &[Event]) -> Result<Option<ConfirmationRespons
         let tc: ToolConfirmation = match fr.response.get("response") {
             // ADK web client sends a request always encapsulated in a 'response' key.
             // A client that has already decoded that JSON sends the decoded value instead, which
-            // adk-python accepts too (Go 0d95aed4).
+            // adk-python accepts too.
             Some(resp) if fr.response.len() == 1 => {
                 let decoded = match resp {
                     Value::String(json) => serde_json::from_str(json),

@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go internal/llminternal/output_schema_binding.go (be529e7b, #2194): a typed
-//! workflow node's output schema bound to the invocation for the LLM agent it wraps.
+//! A typed workflow node's output schema, bound to the invocation for the LLM agent it wraps.
 //!
 //! The schema is bound to the invocation rather than set on the agent because one agent can back
 //! several nodes with different output types, and the agent's configuration is shared by all of
@@ -29,7 +28,7 @@ use crate::llm::mode::mode_for;
 use crate::llm::state::LlmAgentState;
 use crate::llm::transfer::{should_use_auto_flow, transfer_target_agents};
 
-/// Port of Go `WithBoundOutputSchema`: `ctx` in which the agent identified by `agent_name` and
+/// `ctx` in which the agent identified by `agent_name` and
 /// `state` is asked to answer with `schema`. `None` binds no schema, so an inner placement can
 /// shadow an outer one.
 pub(crate) fn with_bound_output_schema(
@@ -47,7 +46,7 @@ pub(crate) fn with_bound_output_schema(
     })
 }
 
-/// Port of Go `outputSchemaFor`: the output schema for the current agent's next request — its
+/// The output schema for the current agent's next request — its
 /// declared `output_schema`, else a copy of the schema bound by [`with_bound_output_schema`],
 /// else `None`. `state` is the current agent's.
 ///

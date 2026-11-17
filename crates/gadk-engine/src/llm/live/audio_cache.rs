@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/llminternal/audio_cache_manager.go.
+//! The audio cache manager for the live flow.
 
 use chrono::{DateTime, Utc};
 use gadk_agent::{AgentError, InvocationContext};
@@ -23,7 +23,7 @@ use gadk_session::Event;
 
 use crate::runner::wrap;
 
-/// Go AudioCacheManager's guarded fields.
+/// The guarded fields of the audio cache manager.
 struct Caches {
     input: Vec<Vec<u8>>,
     output: Vec<Vec<u8>>,
@@ -33,7 +33,7 @@ struct Caches {
     output_mime: String,
 }
 
-/// Port of Go AudioCacheManager: caches live audio and flushes it to the artifact service.
+/// Caches live audio and flushes it to the artifact service.
 pub(crate) struct AudioCacheManager {
     inner: parking_lot::Mutex<Caches>,
 }
@@ -45,7 +45,7 @@ impl Default for AudioCacheManager {
 }
 
 impl AudioCacheManager {
-    /// Go NewAudioCacheManager: both MIME types default to `audio/pcm`.
+    /// Creates a manager: both MIME types default to `audio/pcm`.
     pub(crate) fn new() -> Self {
         Self {
             inner: parking_lot::Mutex::new(Caches {
@@ -59,7 +59,7 @@ impl AudioCacheManager {
         }
     }
 
-    /// Go CacheInput: caches incoming user audio. A non-empty, non-`audio/` MIME type is ignored;
+    /// Caches incoming user audio. A non-empty, non-`audio/` MIME type is ignored;
     /// the first chunk of an empty cache stamps the start time and (when non-empty) the MIME type.
     pub(crate) fn cache_input(&self, platform: &Platform, data: &[u8], mime_type: &str) {
         if !mime_type.is_empty() && !mime_type.starts_with("audio/") {
@@ -75,7 +75,7 @@ impl AudioCacheManager {
         c.input.push(data.to_vec());
     }
 
-    /// Go CacheOutput: caches outgoing model audio, with the same rules as `cache_input`.
+    /// Caches outgoing model audio, with the same rules as `cache_input`.
     pub(crate) fn cache_output(&self, platform: &Platform, data: &[u8], mime_type: &str) {
         if !mime_type.is_empty() && !mime_type.starts_with("audio/") {
             return;
@@ -90,12 +90,12 @@ impl AudioCacheManager {
         c.output.push(data.to_vec());
     }
 
-    /// Go FlushCaches: flushes the selected caches (input first) to the artifact service and
+    /// Flushes the selected caches (input first) to the artifact service and
     /// returns the created events.
     ///
-    /// Go holds its mutex across the artifact save; a `parking_lot` guard cannot be held across
-    /// an `.await`, so each cache is copied under the lock and saved after it is released. As in
-    /// Go, a cache whose save failed is kept; on success exactly the saved chunks are removed
+    /// A `parking_lot` guard cannot be held across
+    /// an `.await`, so each cache is copied under the lock and saved after it is released. A
+    /// cache whose save failed is kept; on success exactly the saved chunks are removed
     /// (chunks cached during the save stay for the next flush).
     pub(crate) async fn flush_caches(
         &self,
@@ -112,13 +112,13 @@ impl AudioCacheManager {
             };
             if let Some((chunks, mime, start)) = snapshot {
                 let saved = chunks.len();
-                // Go: on error the cache is left as it is.
+                // On error the cache is left as it is.
                 events.push(flush_cache(ctx, chunks, "input_audio", mime, start).await?);
                 let mut c = self.inner.lock();
                 let n = saved.min(c.input.len());
                 c.input.drain(..n);
                 if !c.input.is_empty() {
-                    // Chunks cached during the save start a new cache (Go blocks them on the mutex).
+                    // Chunks cached during the save start a new cache.
                     c.input_start = ctx.platform().now();
                 }
             }
@@ -131,13 +131,13 @@ impl AudioCacheManager {
             };
             if let Some((chunks, mime, start)) = snapshot {
                 let saved = chunks.len();
-                // Go: on error the cache is left as it is.
+                // On error the cache is left as it is.
                 events.push(flush_cache(ctx, chunks, "output_audio", mime, start).await?);
                 let mut c = self.inner.lock();
                 let n = saved.min(c.output.len());
                 c.output.drain(..n);
                 if !c.output.is_empty() {
-                    // Chunks cached during the save start a new cache (Go blocks them on the mutex).
+                    // Chunks cached during the save start a new cache.
                     c.output_start = ctx.platform().now();
                 }
             }
@@ -146,7 +146,7 @@ impl AudioCacheManager {
     }
 }
 
-/// Go flushCache: saves the combined chunks as an artifact and builds the event referencing it.
+/// Saves the combined chunks as an artifact and builds the event referencing it.
 async fn flush_cache(
     ctx: &InvocationContext,
     chunks: Vec<Vec<u8>>,
@@ -166,7 +166,7 @@ async fn flush_cache(
     );
 
     let part = Part::from_bytes(combined.into(), &mime_type);
-    // Go calls ctx.Artifacts().Save unconditionally (a nil service panics); Rust reports it.
+    // A missing artifact service is reported as an error.
     let artifacts = ctx.artifacts().ok_or_else(|| {
         AgentError::other("failed to save audio artifact: artifact service is not configured")
     })?;

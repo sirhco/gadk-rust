@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mode resolution (port of Go `internal/llminternal/mode.go`; `is_untransferable_mode` is Go
-//! `agent_transfer.go` `isUntransferableMode`).
+//! Mode resolution; `is_untransferable_mode` decides from the declared mode which agents cannot
+//! be transferred to.
 //!
 //! An agent that declares no mode takes one from where it is placed: chat at a runner root,
 //! single_turn at a workflow node. The declaration (`LlmAgentConfig::mode`) is immutable, so the
@@ -38,7 +38,7 @@ use gadk_agent::{Agent, AgentState, ContextDelta, InvocationContext, Mode};
 
 use crate::llm::state::{reveal, reveal_state};
 
-/// Port of Go ResolveMode: `declared` when set, else `by_placement`.
+/// `declared` when set, else `by_placement`.
 pub(crate) fn resolve_mode(declared: Mode, by_placement: Mode) -> Mode {
     if declared == Mode::Unset {
         by_placement
@@ -47,7 +47,7 @@ pub(crate) fn resolve_mode(declared: Mode, by_placement: Mode) -> Mode {
     }
 }
 
-/// Port of Go WithBoundMode: `ctx` carrying the mode the named agent runs under for this invocation.
+/// `ctx` carrying the mode the named agent runs under for this invocation.
 /// `Mode::Unset` returns `ctx` unchanged (a clone).
 pub(crate) fn with_bound_mode(
     ctx: &InvocationContext,
@@ -64,7 +64,7 @@ pub(crate) fn with_bound_mode(
     })
 }
 
-/// Port of Go BoundMode on an explicit (name, state) identity.
+/// The mode bound on an explicit (name, state) identity, if any.
 pub(crate) fn bound_mode_for(
     ctx: &InvocationContext,
     agent_name: &str,
@@ -73,7 +73,7 @@ pub(crate) fn bound_mode_for(
     ctx.bound_modes().get(agent_name, state.key())
 }
 
-/// Port of Go ModeFor on an explicit identity: the binding, else the declaration (`Unset` for
+/// The mode on an explicit identity: the binding, else the declaration (`Unset` for
 /// non-LLM agents).
 pub(crate) fn mode_for_state(
     ctx: &InvocationContext,
@@ -84,17 +84,17 @@ pub(crate) fn mode_for_state(
         .unwrap_or_else(|| reveal_state(state).map_or(Mode::Unset, |s| s.cfg.mode))
 }
 
-/// Port of Go BoundMode: the mode bound to `agent` in `ctx`, if any.
+/// The mode bound to `agent` in `ctx`, if any.
 pub(crate) fn bound_mode(ctx: &InvocationContext, agent: &dyn Agent) -> Option<Mode> {
     bound_mode_for(ctx, agent.name(), agent.agent_state())
 }
 
-/// Port of Go ModeFor: the mode `agent` runs under in `ctx`.
+/// The mode `agent` runs under in `ctx`: the binding, else the declaration.
 pub(crate) fn mode_for(ctx: &InvocationContext, agent: &dyn Agent) -> Mode {
     mode_for_state(ctx, agent.name(), agent.agent_state())
 }
 
-/// Port of Go isUntransferableMode: reads the declaration only; `ctx` is unused, as in Go.
+/// Reads the declaration only; `ctx` is unused.
 pub(crate) fn is_untransferable_mode(_ctx: &InvocationContext, agent: &dyn Agent) -> bool {
     matches!(
         reveal(agent).map(|s| s.cfg.mode),

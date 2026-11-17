@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/llminternal/base_flow.go `liveSessionImpl` (lines 199-320).
+//! The live flow's session: input and output channels, the streaming-tool registry and the
+//! event stream.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -34,7 +35,7 @@ use crate::llm::live::audio_cache::AudioCacheManager;
 type InputMsg = (LiveRequest, oneshot::Sender<()>);
 type OutputMsg = (Result<Event, AgentError>, oneshot::Sender<()>);
 
-/// Task accounting for tests (Go's tests count goroutine stacks instead).
+/// Task accounting for tests.
 #[derive(Debug, Default)]
 pub(crate) struct LiveProbe {
     /// Tasks spawned by the live flow that are still alive.
@@ -62,13 +63,13 @@ impl Drop for LiveTaskGuard {
     }
 }
 
-/// Go activeTask.
+/// A running streaming tool: its call id and cancellation token.
 struct ActiveTask {
     call_id: String,
     cancel: CancellationToken,
 }
 
-/// Port of Go liveSessionImpl: the live flow's session.
+/// The live flow's session.
 pub(crate) struct LiveSessionImpl {
     input_tx: mpsc::Sender<InputMsg>,
     input_rx: tokio::sync::Mutex<mpsc::Receiver<InputMsg>>,
@@ -81,12 +82,12 @@ pub(crate) struct LiveSessionImpl {
 }
 
 fn eof() -> AgentError {
-    // Go io.EOF.
+    // The end-of-stream error.
     AgentError::other("EOF")
 }
 
 impl LiveSessionImpl {
-    /// Go newLiveSessionImpl.
+    /// Creates a session with empty channels.
     pub(crate) fn new() -> Arc<LiveSessionImpl> {
         let (input_tx, input_rx) = mpsc::channel(1);
         let (output_tx, output_rx) = mpsc::channel(1);
@@ -102,12 +103,12 @@ impl LiveSessionImpl {
         })
     }
 
-    /// Go `done`: cancelled by `close` (and by dropping the event stream).
+    /// Cancelled by `close` (and by dropping the event stream).
     pub(crate) fn done(&self) -> &CancellationToken {
         &self.done
     }
 
-    /// Go `audioMgr`.
+    /// The audio cache manager.
     pub(crate) fn audio(&self) -> &AudioCacheManager {
         &self.audio
     }
@@ -118,8 +119,8 @@ impl LiveSessionImpl {
     }
 
     /// Rendezvous with the event stream. `done` is checked first while queueing, so nothing is
-    /// handed over after `close`; once queued, an acknowledgement wins over `done`, because in Go
-    /// a completed channel handoff reports delivery.
+    /// handed over after `close`; once queued, an acknowledgement wins over `done`, because a
+    /// completed handoff reports delivery.
     async fn push(&self, item: Result<Event, AgentError>) -> bool {
         let (ack_tx, ack_rx) = oneshot::channel();
         tokio::select! {
@@ -134,18 +135,18 @@ impl LiveSessionImpl {
         }
     }
 
-    /// Go pushEvent: hands `ev` to the event stream; `false` once the session is done.
+    /// Hands `ev` to the event stream; `false` once the session is done.
     pub(crate) async fn push_event(&self, ev: Event) -> bool {
         self.push(Ok(ev)).await
     }
 
-    /// Go pushError: hands `err` to the event stream; `false` once the session is done.
+    /// Hands `err` to the event stream; `false` once the session is done.
     pub(crate) async fn push_error(&self, err: AgentError) -> bool {
         self.push(Err(err)).await
     }
 
-    /// Queues `req` on Go's `inputCh` for a sender task without waiting for it to be taken (the
-    /// live flow's function responses, Go 33a587e2): it is sent after the requests queued before
+    /// Queues `req` on the input channel for a sender task without waiting for it to be taken
+    /// (the live flow's function responses): it is sent after the requests queued before
     /// it. `false` once the session is done.
     pub(crate) async fn queue_input(&self, req: LiveRequest) -> bool {
         let (ack_tx, _ack_rx) = oneshot::channel();
@@ -156,7 +157,7 @@ impl LiveSessionImpl {
         }
     }
 
-    /// The receiving side of Go's `inputCh` for one connection's sender task: the next request
+    /// The receiving side of the input channel for one connection's sender task: the next request
     /// (acknowledged, so the caller's `send` returns), or `None` once `conn_token` or `done` is
     /// cancelled. Requests not yet taken stay queued for the next connection's sender.
     pub(crate) async fn next_input(&self, conn_token: &CancellationToken) -> Option<LiveRequest> {
@@ -178,9 +179,9 @@ impl LiveSessionImpl {
         }
     }
 
-    /// Go recvIter: the pushed items until `done`. Called once per session (later calls get an
+    /// The pushed items until `done`. Called once per session (later calls get an
     /// empty stream). Dropping the stream cancels `done` and detaches `task`, which finishes the
-    /// work in flight (Go `Close` only closes `done`; the session goroutine returns on its own).
+    /// work in flight (closing only cancels `done`; the session task returns on its own).
     pub(crate) fn event_stream(
         self: &Arc<Self>,
         task: Option<tokio::task::JoinHandle<()>>,
@@ -210,7 +211,7 @@ impl LiveSessionImpl {
         })
     }
 
-    /// Go RegisterStreamingTool.
+    /// Registers a running streaming tool instance.
     pub(crate) fn register_streaming_tool(
         &self,
         tool_name: &str,
@@ -227,8 +228,8 @@ impl LiveSessionImpl {
             });
     }
 
-    /// Go UnregisterStreamingTool: removes the first entry with `call_id` (without cancelling it)
-    /// and deletes an emptied name.
+    /// Removes the first entry with `call_id` (without cancelling it) and deletes an emptied
+    /// name.
     pub(crate) fn unregister_streaming_tool(&self, tool_name: &str, call_id: &str) {
         let mut tools = self.active_tools.lock();
         let Some(tasks) = tools.get_mut(tool_name) else {
@@ -242,8 +243,7 @@ impl LiveSessionImpl {
         }
     }
 
-    /// Go CancelAllStreamingTools: cancels every running instance of `tool_name`; `false` when
-    /// there was none.
+    /// Cancels every running instance of `tool_name`; `false` when there was none.
     pub(crate) fn cancel_all_streaming_tools(&self, tool_name: &str) -> bool {
         let mut tools = self.active_tools.lock();
         match tools.remove(tool_name) {
@@ -257,7 +257,7 @@ impl LiveSessionImpl {
         }
     }
 
-    /// Teardown (R9): cancels every registered streaming tool, so none outlives the flow.
+    /// Teardown: cancels every registered streaming tool, so none outlives the flow.
     pub(crate) fn cancel_every_streaming_tool(&self) {
         let drained: Vec<ActiveTask> = self
             .active_tools
@@ -273,7 +273,7 @@ impl LiveSessionImpl {
 
 #[cfg(test)]
 impl LiveSessionImpl {
-    /// How many instances of `tool_name` are registered (Go tests read `activeTools` directly).
+    /// How many instances of `tool_name` are registered.
     pub(crate) fn active_streaming_tool_count(&self, tool_name: &str) -> usize {
         self.active_tools.lock().get(tool_name).map_or(0, Vec::len)
     }
@@ -281,7 +281,7 @@ impl LiveSessionImpl {
 
 #[async_trait]
 impl LiveSession for LiveSessionImpl {
-    /// Go Send: returns once the flow's sender task has taken `req`; `EOF` after `close`. As in
+    /// Returns once the flow's sender task has taken `req`; `EOF` after `close`. As in
     /// `push`, `done` wins while queueing and a taken request reports success.
     async fn send(&self, req: LiveRequest) -> Result<(), AgentError> {
         let (ack_tx, ack_rx) = oneshot::channel();
@@ -297,7 +297,7 @@ impl LiveSession for LiveSessionImpl {
         }
     }
 
-    /// Go Close (closeOnce + close(done)), plus cancelling the streaming tools.
+    /// Closes the session and cancels every streaming tool.
     async fn close(&self) -> Result<(), AgentError> {
         self.done.cancel();
         self.cancel_every_streaming_tool();
@@ -325,9 +325,9 @@ impl Stream for GuardedStream {
 }
 
 impl Drop for GuardedStream {
-    /// Go: closing the session (or dropping its iterator) closes `done` and nothing more; the
-    /// session goroutine finishes its in-flight `handleFunctionCalls` (after-tool callbacks
-    /// included, base_flow.go:424) and returns. The task is detached, not aborted.
+    /// Closing the session (or dropping its stream) cancels `done` and nothing more; the
+    /// session task finishes its in-flight function-call handling (after-tool callbacks
+    /// included) and returns. The task is detached, not aborted.
     fn drop(&mut self) {
         self.done.cancel();
         drop(self.task.take());

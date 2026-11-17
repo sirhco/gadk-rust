@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go internal/workflowinternal/finish_task_tool.go. (task.go's TaskRequest,
-//! TaskResult and DefaultTaskInput are unused by every in-scope caller and are not ported.)
+//! The `finish_task` tool: the task agent's signal that its delegated task is complete.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -28,29 +27,31 @@ use gadk_model::LlmRequest;
 use serde_json::{Map, Value};
 
 use crate::llm::state::reveal;
-/// Go `%T` of a JSON-decoded `any` (shared with the schema utilities).
+/// The type name of a JSON-decoded value as it appears in validation error texts (`<nil>`,
+/// `bool`, `float64`, `string`, `[]interface {}`, `map[string]interface {}`); shared with the
+/// schema utilities.
 pub(crate) use crate::tool::utils::go_type_name;
 use crate::tool::utils::validate_map_on_schema;
 use crate::workflow::route::go_quote;
 
-/// Go FinishTaskToolName.
+/// The name of the finish_task tool.
 pub(crate) const FINISH_TASK_TOOL_NAME: &str = "finish_task";
-/// Go FinishTaskSuccessResult.
+/// The result string of a successful finish_task call.
 pub(crate) const FINISH_TASK_SUCCESS_RESULT: &str = "Task completed.";
-/// Go defaultWrapperKey.
+/// The default key a non-object output is wrapped under.
 const DEFAULT_WRAPPER_KEY: &str = "result";
-/// Go ProcessRequest's raw-string instructions, byte for byte (leading and trailing newline
+/// The instructions appended to the request, byte for byte (leading and trailing newline
 /// included).
 pub(crate) const FINISH_TASK_INSTRUCTIONS: &str = "\nDo NOT call 'finish_task' prematurely. Use your available tools to\nfully complete every aspect of the delegated task first. If the\ntask is unclear, ask the user for clarification before proceeding.\nOnce the task is fully complete, call 'finish_task' by itself with\nno accompanying text output.\n";
 const BASE_DESCRIPTION: &str = "Signal that this agent has completed its delegated task. Call this when you have finished your delegated task.";
 const OUTPUT_DESCRIPTION_SUFFIX: &str = " Pass the required output data in the parameters.";
 
-/// Port of Go workflowinternal.FinishTaskTool: lets the model signal that the task agent has
+/// Lets the model signal that the task agent has
 /// completed its task. The agent's output schema (or a default `result` string) validates the
 /// arguments; a non-object schema is wrapped under `result`, as function parameters must be an
 /// object.
 pub(crate) struct FinishTaskTool {
-    #[allow(dead_code)] // Go FinishTaskTool.taskAgentName; kept for parity
+    #[allow(dead_code)] // The name of the task agent; unused.
     task_agent_name: String,
     description: String,
     user_schema: Schema,
@@ -59,7 +60,7 @@ pub(crate) struct FinishTaskTool {
 }
 
 impl FinishTaskTool {
-    /// Port of Go NewFinishTaskTool.
+    /// Creates the tool for `task_agent` from its output schema.
     pub(crate) fn new(task_agent: &dyn Agent) -> Result<Arc<FinishTaskTool>, ToolError> {
         let state = reveal(task_agent).ok_or_else(|| {
             ToolError::InvalidArgument(format!(
@@ -86,7 +87,7 @@ impl FinishTaskTool {
         } else {
             // The unwrapped value becomes the task's output, and a null output reads as "the task
             // did not finish", so the delegation would never close. Declare and validate the
-            // result as non-nullable (Go bec16021); the agent's own output schema keeps the
+            // result as non-nullable; the agent's own output schema keeps the
             // nullable the user set.
             let mut result = user_schema.clone();
             result.nullable = None;
@@ -113,14 +114,14 @@ impl FinishTaskTool {
         }))
     }
 
-    /// Go WrapperKey(): `""` when the user schema is already an object.
+    /// The wrapper key: `""` when the user schema is already an object.
     pub(crate) fn wrapper_key_str(&self) -> &str {
         &self.wrapper_key
     }
 }
 
-/// Port of Go isObjectSchema: case-insensitive `OBJECT` (fixtures carry both `OBJECT` and
-/// `object`).
+/// Whether the schema is an object schema: case-insensitive `OBJECT` (fixtures carry both
+/// `OBJECT` and `object`).
 fn is_object_schema(s: &Schema) -> bool {
     match &s.r#type {
         Some(Type::Object) => true,
@@ -148,7 +149,7 @@ impl Tool for FinishTaskTool {
         })
     }
 
-    /// Port of Go ProcessRequest minus `toolutils.PackTool`: the flow's tools processor calls
+    /// Appends the instructions, without `pack_tool`: the flow's tools processor calls
     /// `pack_tool` for every tool with a declaration (this one has one) before
     /// `process_request`, so packing here would fail with a duplicate-tool error. Only the
     /// instruction append remains.
@@ -172,7 +173,7 @@ impl Tool for FinishTaskTool {
 
 #[async_trait]
 impl RunnableTool for FinishTaskTool {
-    /// Port of Go (*FinishTaskTool).Run + validateArgs. A validation failure is a successful
+    /// Validates the arguments against the schema. A validation failure is a successful
     /// result carrying `"error"`, so the model sees it and can retry.
     async fn run(&self, _ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let m = match args {

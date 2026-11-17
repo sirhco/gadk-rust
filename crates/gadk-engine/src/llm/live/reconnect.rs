@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/llminternal/live_reconnect.go, plus base_flow.go `tornDown` and
-//! `waitBeforeReconnect`.
+//! Reconnect policy for the live flow, plus `torn_down` and `wait_before_reconnect`.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -27,22 +26,22 @@ use tokio_util::sync::CancellationToken;
 
 use crate::llm::live::session::{LiveProbe, LiveSessionImpl};
 
-/// Go defaultLiveReconnectInitialBackoff.
+/// Default initial backoff.
 pub(crate) const DEFAULT_LIVE_RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
-/// Go defaultLiveReconnectMaxBackoff.
+/// Default maximum backoff.
 pub(crate) const DEFAULT_LIVE_RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(2);
-/// Go defaultLiveReconnectJitter.
+/// Default jitter fraction.
 pub(crate) const DEFAULT_LIVE_RECONNECT_JITTER: f64 = 0.2;
-/// Go defaultLiveReconnectMaxAttempts (adk-python DEFAULT_MAX_RECONNECT_ATTEMPTS).
+/// Default maximum consecutive attempts (adk-python DEFAULT_MAX_RECONNECT_ATTEMPTS).
 pub(crate) const DEFAULT_LIVE_RECONNECT_MAX_ATTEMPTS: usize = 5;
-/// Go defaultLiveReconnectMaxTotal.
+/// Default maximum short-lived connections over the invocation.
 pub(crate) const DEFAULT_LIVE_RECONNECT_MAX_TOTAL: usize = 20;
-/// Go defaultLiveReconnectHealthyUptime.
+/// Default uptime after which a connection counts as healthy.
 pub(crate) const DEFAULT_LIVE_RECONNECT_HEALTHY_UPTIME: Duration = Duration::from_secs(5);
-/// Go errLiveReconnectExhausted text.
+/// Error text when the reconnect budget is exhausted.
 pub(crate) const ERR_LIVE_RECONNECT_EXHAUSTED: &str = "live session: reconnect budget exhausted";
 
-/// Port of Go liveReconnectPolicy: bounds how hard the live flow retries a connection that keeps
+/// Bounds how hard the live flow retries a connection that keeps
 /// dropping. `max_attempts` bounds consecutive reconnects (reset by content or by a connection
 /// that outlives `healthy_uptime`); `max_total` bounds short-lived connections over the
 /// invocation and never resets. Only tests build a non-default policy, to shrink the delays.
@@ -59,7 +58,7 @@ pub(crate) struct LiveReconnectPolicy {
 }
 
 impl Default for LiveReconnectPolicy {
-    /// Go defaultLiveReconnectPolicy.
+    /// The default policy.
     fn default() -> Self {
         Self {
             initial_backoff: DEFAULT_LIVE_RECONNECT_INITIAL_BACKOFF,
@@ -73,7 +72,7 @@ impl Default for LiveReconnectPolicy {
 }
 
 impl LiveReconnectPolicy {
-    /// Go nextBackoff: the delay to grow into after waiting `d`, doubling up to `max_backoff`.
+    /// The delay to grow into after waiting `d`, doubling up to `max_backoff`.
     /// Saturating at the cap also keeps the doubling from overflowing.
     pub(crate) fn next_backoff(&self, d: Duration) -> Duration {
         if d >= self.max_backoff / 2 {
@@ -82,7 +81,7 @@ impl LiveReconnectPolicy {
         d.saturating_mul(2)
     }
 
-    /// Go jittered: spreads `d` over ±jitter.
+    /// Spreads `d` over ±jitter.
     pub(crate) fn jittered(&self, d: Duration) -> Duration {
         if d.is_zero() || self.jitter <= 0.0 {
             return d;
@@ -92,7 +91,7 @@ impl LiveReconnectPolicy {
     }
 }
 
-/// A uniformly distributed value in `[0, 1)` (Go `rand.Float64`) without a `rand` dependency: a
+/// A uniformly distributed value in `[0, 1)` without a `rand` dependency: a
 /// freshly, randomly keyed `RandomState` hasher over the current time.
 fn random_unit() -> f64 {
     let mut h = RandomState::new().build_hasher();
@@ -104,7 +103,7 @@ fn random_unit() -> f64 {
     (h.finish() >> 11) as f64 / (1u64 << 53) as f64
 }
 
-/// Port of Go liveReconnectGaveUpError's result: the live flow stopped reconnecting because a
+/// The error the live flow reports when it stopped reconnecting because a
 /// bound fired. `bound` names which one; `cause` is the failure behind the last attempt.
 #[derive(Debug)]
 pub(crate) struct LiveReconnectGaveUp {
@@ -129,7 +128,7 @@ impl std::error::Error for LiveReconnectGaveUp {
     }
 }
 
-/// Go liveReconnectGaveUpError.
+/// Builds the [`LiveReconnectGaveUp`] error.
 pub(crate) fn live_reconnect_gave_up_error(
     bound: String,
     cause: Option<Box<dyn std::error::Error + Send + Sync>>,
@@ -137,7 +136,7 @@ pub(crate) fn live_reconnect_gave_up_error(
     AgentError::Other(Box::new(LiveReconnectGaveUp { bound, cause }))
 }
 
-/// Go `errors.Is(err, errLiveReconnectExhausted)`.
+/// Whether the error is a [`LiveReconnectGaveUp`] (the reconnect budget was exhausted).
 #[cfg_attr(
     not(test),
     expect(dead_code, reason = "Go matches the sentinel only in tests")
@@ -146,12 +145,12 @@ pub(crate) fn is_live_reconnect_exhausted(err: &AgentError) -> bool {
     matches!(err, AgentError::Other(e) if e.downcast_ref::<LiveReconnectGaveUp>().is_some())
 }
 
-/// Port of Go tornDown: the session was closed or the invocation cancelled.
+/// Whether the session was closed or the invocation cancelled.
 pub(crate) fn torn_down(ctx_token: &CancellationToken, sess: &LiveSessionImpl) -> bool {
     sess.done().is_cancelled() || ctx_token.is_cancelled()
 }
 
-/// Port of Go waitBeforeReconnect: paces a reconnect, reporting whether it should go ahead.
+/// Paces a reconnect, reporting whether it should go ahead.
 /// Teardown during the wait cuts it short; the re-check after the timer matters because
 /// `select!` picks among ready branches at random, so a teardown landing as the timer fires
 /// would otherwise report "proceed" half the time.
@@ -168,8 +167,7 @@ pub(crate) async fn wait_before_reconnect(
     }
 }
 
-/// Raises `LiveProbe::in_backoff` for the lifetime of one wait (tests observe it in place of Go's
-/// goroutine-stack inspection).
+/// Raises `LiveProbe::in_backoff` for the lifetime of one wait (tests observe it).
 struct BackoffGuard(Arc<LiveProbe>);
 
 impl BackoffGuard {

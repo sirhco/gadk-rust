@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `LlmAgentState`, `reveal` (port of Go `internal/llminternal/agent.go` `State` and `Reveal`).
+//! `LlmAgentState` and `reveal`: the per-agent state of an LLM agent and access to it.
 
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ use gadk_agent::{Agent, AgentState, AgentType, Tool};
 
 use crate::llm::LlmAgentConfig;
 
-/// Port of Go internal/llminternal/agent.go `LiveModeToolInjection`: allows one successful
+/// Allows one successful
 /// live-mode tool injection per agent. Concurrent callers wait for the injection to finish; a
 /// panicking injection unwinds through the guard with the flag still false, so a later caller
 /// retries (`parking_lot` does not poison). `inject` must not re-enter `do_once` on the same
@@ -32,7 +32,7 @@ pub(crate) struct LiveModeToolInjection {
 }
 
 impl LiveModeToolInjection {
-    /// Go `Do`: runs `inject` at most once successfully, holding the lock while it runs.
+    /// Runs `inject` at most once successfully, holding the lock while it runs.
     pub(crate) fn do_once(&self, inject: impl FnOnce()) {
         let mut done = self.done.lock();
         if *done {
@@ -43,16 +43,15 @@ impl LiveModeToolInjection {
     }
 }
 
-/// Port of Go llminternal.State: the LlmAgent's state, stored as `AgentState.config`.
+/// The LLM agent's state, stored as `AgentState.config`.
 pub(crate) struct LlmAgentState {
     pub(crate) cfg: LlmAgentConfig,
-    /// `cfg.tools` plus the task tools installed for sub-agents (Go appends to `State.Tools`).
+    /// `cfg.tools` plus the task tools installed for sub-agents.
     pub(crate) tools: parking_lot::RwLock<Vec<Arc<dyn Tool>>>,
-    /// Go `State.LiveModeInjection`: guards the single live-mode tool injection; its lifetime
+    /// Guards the single live-mode tool injection; its lifetime
     /// follows the agent.
     pub(crate) live_injection: LiveModeToolInjection,
-    /// What Go appends to `State.Instruction` at run time (the live `task_completed` suffix). Kept
-    /// apart from the immutable `cfg.instruction`; [`LlmAgentState::instruction`] joins them.
+    /// What is appended to the instruction at run time (the live `task_completed` suffix). Kept
     pub(crate) instruction_suffix: parking_lot::RwLock<String>,
 }
 
@@ -68,7 +67,7 @@ impl LlmAgentState {
         }
     }
 
-    /// Go `State.Instruction`: the configured instruction plus whatever was appended to it.
+    /// The configured instruction plus whatever was appended to it.
     pub(crate) fn instruction(&self) -> String {
         let suffix = self.instruction_suffix.read();
         if suffix.is_empty() {
@@ -83,7 +82,7 @@ impl LlmAgentState {
     }
 }
 
-/// Port of Go llminternal.Reveal: the LlmAgent state of `agent`, if it is an LlmAgent.
+/// The LLM agent state of `agent`, if it is an LLM agent.
 pub(crate) fn reveal(agent: &dyn Agent) -> Option<&LlmAgentState> {
     reveal_state(agent.agent_state())
 }

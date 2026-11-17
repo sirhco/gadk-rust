@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go internal/llminternal/agent_transfer.go: the agent-transfer request processor, the
-//! `transfer_to_agent` tool and transfer-target selection.
+//! Agent transfer: the agent-transfer request processor, the `transfer_to_agent` tool and
+//! transfer-target selection.
 
 use std::{any::Any, collections::BTreeMap, sync::Arc};
 
@@ -43,7 +43,7 @@ use crate::{
 
 pub(crate) const TRANSFER_TO_AGENT_TOOL_NAME: &str = "transfer_to_agent";
 
-/// Port of agent_transfer.go:69 AgentTransferRequestProcessor.
+/// Adds the `transfer_to_agent` tool and its instructions when the agent has transfer targets.
 pub(crate) fn agent_transfer_request_processor<'a>(
     ctx: &'a InvocationContext,
     req: &'a mut LlmRequest,
@@ -60,16 +60,16 @@ pub(crate) fn agent_transfer_request_processor<'a>(
             return Ok(Vec::new());
         }
         let tool = TransferToAgentTool::new(ctx, &agent, parent.as_ref(), targets);
-        // Go appends the (possibly empty) instructions unconditionally. For task/single_turn
-        // agents this appends "" and yields a trailing "\n\n" on an existing SI; kept for wire
-        // parity.
+        // The (possibly empty) instructions are appended unconditionally. For task/single_turn
+        // agents this appends "" and yields a trailing "\n\n" on an existing SI; kept so the
+        // request text stays unchanged.
         append_instructions(req, &[tool.instructions.as_str()]);
         append_tools(req, &[Arc::new(tool) as Arc<dyn Tool>])?;
         Ok(Vec::new())
     })
 }
 
-/// Appendix C: Go transferTargets(ctx.Agent(), parents[ctx.Agent().Name()]), the parent looked
+/// The transfer targets of the current agent, with the parent looked
 /// up in `ctx.parent_map()`.
 pub(crate) fn transfer_target_agents(
     ctx: &InvocationContext,
@@ -79,7 +79,8 @@ pub(crate) fn transfer_target_agents(
     transfer_targets(ctx, agent, parent.as_ref())
 }
 
-/// Port of agent_transfer.go:188 transferTargets.
+/// The agents `cur` can transfer to: its sub-agents, its parent and its peers, as its settings
+/// allow.
 fn transfer_targets(
     ctx: &InvocationContext,
     cur: &Arc<dyn Agent>,
@@ -94,8 +95,7 @@ fn transfer_targets(
     let Some(parent) = parent.filter(|p| reveal(&***p).is_some()) else {
         return targets;
     };
-    // Go dereferences llmAgent.internal() here; a non-LLM current agent would panic in Go. Rust
-    // returns the sub-agents only.
+    // A non-LLM current agent returns the sub-agents only.
     let Some(cur_state) = reveal(&**cur) else {
         return targets;
     };
@@ -114,7 +114,8 @@ fn transfer_targets(
     targets
 }
 
-/// Port of agent_transfer.go:251 shouldUseAutoFlow.
+/// Whether the agent runs with auto-flow transfer: it has sub-agents or may transfer to its
+/// parent or peers.
 pub(crate) fn should_use_auto_flow(a: &dyn Agent) -> bool {
     reveal(a).is_some_and(|s| {
         !a.sub_agents().is_empty()
@@ -123,7 +124,7 @@ pub(crate) fn should_use_auto_flow(a: &dyn Agent) -> bool {
     })
 }
 
-/// Port of agent_transfer.go:261 appendTools (NOT pack_tool: different error texts). `req.tools`
+/// Appends tools to the request (NOT pack_tool: different error texts). `req.tools`
 /// stores `Arc::new(Arc<dyn Tool>)`, the boxing `pack_tool` uses, so `tool_from_request`
 /// recovers it.
 pub(crate) fn append_tools(
@@ -170,7 +171,7 @@ pub(crate) fn append_tools(
     Ok(())
 }
 
-/// Port of agent_transfer.go:102 TransferToAgentTool: transfers control to another agent.
+/// Transfers control to another agent.
 #[derive(Clone)]
 pub(crate) struct TransferToAgentTool {
     pub(crate) instructions: String,
@@ -178,7 +179,7 @@ pub(crate) struct TransferToAgentTool {
 }
 
 impl TransferToAgentTool {
-    /// Port of NewTransferToAgentTool (line 111) + instructionsForTransferToAgent (line 312).
+    /// Builds the tool and its instructions for `cur`.
     /// The declaration ships either way; only the instructions depend on the resolved mode.
     pub(crate) fn new(
         ctx: &InvocationContext,
@@ -186,7 +187,8 @@ impl TransferToAgentTool {
         parent: Option<&Arc<dyn Agent>>,
         targets: Vec<Arc<dyn Agent>>,
     ) -> Self {
-        // RESOLVED mode (Go ModeFor): task / single_turn agents reach callees via FC delegation.
+        // RESOLVED mode (see `mode_for`): task / single_turn agents reach callees via FC
+        // delegation.
         let instructions = match mode_for(ctx, &**cur) {
             Mode::Task | Mode::SingleTurn => String::new(),
             _ => {
@@ -241,16 +243,14 @@ impl Tool for TransferToAgentTool {
         })
     }
 
-    /// Go's `supportedAgents` field, which the analytics plugin reads by reflection
-    /// (`plugin/agentanalytics/events.go` `findAgentA2AByName`).
+    /// The supported agents, which the analytics plugin reads.
     fn origin_agents(&self) -> Vec<Arc<dyn Agent>> {
         self.supported_agents.clone()
     }
 
-    /// Port of agent_transfer.go:165 ProcessRequest (= appendTools). The flow never calls it
-    /// (the processor appends the tool itself, and toolPreprocess walks only the agent's tools);
-    /// it is ported so TestAgentTransfer_ProcessRequest is a straight port. The error text is
-    /// append_tools' text unchanged.
+    /// Equivalent to `append_tools`. The flow never calls it
+    /// (the processor appends the tool itself, and `tool_preprocess` walks only the agent's
+    /// tools). The error text is append_tools' text unchanged.
     async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         append_tools(req, &[Arc::new(self.clone()) as Arc<dyn Tool>])
             .map_err(|e| ToolError::Execution(e.to_string().into()))
@@ -260,7 +260,7 @@ impl Tool for TransferToAgentTool {
         Some(self)
     }
 
-    /// Go classifies `llminternal.TransferToAgentTool` as `TRANSFER_AGENT`; the analytics plugin
+    /// Classified as `TransferAgent`; the analytics plugin
     /// turns it into `TRANSFER_A2A` from the called target agent, so no agent is reported here.
     fn origin_kind(&self) -> ToolOriginKind {
         ToolOriginKind::TransferAgent
@@ -273,10 +273,9 @@ impl Tool for TransferToAgentTool {
 
 #[async_trait]
 impl RunnableTool for TransferToAgentTool {
-    /// Port of agent_transfer.go:170 Run. A `Value::Null` argument is Go's nil args map (the
-    /// tool's `map[string]any` parameter), so it reports `empty agent_name: map[]`. A name outside
-    /// the declared enum is a tool error the model sees and can recover from (Go c8fff670);
-    /// setting `transfer_to_agent` to it would make the flow fail the whole invocation.
+    /// A `Value::Null` argument counts as an empty args map, so it reports `empty agent_name:
+    /// map[]`. A name outside the declared enum is a tool error the model sees and can recover
+    /// from; setting `transfer_to_agent` to it would make the flow fail the whole invocation.
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let empty = Value::Object(Map::new());
         let args = if args.is_null() { empty } else { args };
@@ -299,8 +298,8 @@ impl RunnableTool for TransferToAgentTool {
                     go_sprint(&as_go_floats(&args))
                 ))
             })?;
-        // Go deliberately diverges from adk-python here, whose tool accepts any name and whose
-        // flow then raises ValueError.
+        // Unlike adk-python, whose tool accepts any name and whose
+        // flow then raises ValueError, a name outside the enum is rejected.
         let targets: Vec<&str> = self.supported_agents.iter().map(|a| a.name()).collect();
         if !targets.contains(&agent) {
             return Err(ToolError::InvalidArgument(format!(
@@ -314,9 +313,9 @@ impl RunnableTool for TransferToAgentTool {
     }
 }
 
-/// Go safehtml HTMLEscaped: control chars (U+0000-0008, U+000B, U+000E-001F, U+007F-009F) and
-/// Unicode noncharacters (U+FDD0-FDEF, U+xFFFE/U+xFFFF) → U+FFFD, then html.EscapeString
-/// (& < > ' ").
+/// Escapes `s` for HTML: control chars (U+0000-0008, U+000B, U+000E-001F, U+007F-009F) and
+/// Unicode noncharacters (U+FDD0-FDEF, U+xFFFE/U+xFFFF) become U+FFFD, then `&`, `<`, `>`, `'`
+/// and `"` become `&amp;`, `&lt;`, `&gt;`, `&#39;` and `&#34;`.
 fn html_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -335,8 +334,8 @@ fn html_escape(s: &str) -> String {
     out
 }
 
-/// Go `transferToAgentPromptTmpl` (agentTransferInstructionTemplate, line 361) rendered by
-/// `safehtml/template`, byte for byte.
+/// The transfer-to-agent instruction text, with every interpolated value HTML-escaped by
+/// [`html_escape`].
 fn render_transfer_instructions(
     targets: &[Arc<dyn Agent>],
     parent: Option<&Arc<dyn Agent>>,
@@ -361,7 +360,7 @@ fn render_transfer_instructions(
     s
 }
 
-/// Port of agent_transfer.go:345 formatTargets: names sorted, backticked, ", "-joined.
+/// Names sorted, backticked, ", "-joined.
 fn format_targets(targets: &[Arc<dyn Agent>]) -> String {
     let mut names: Vec<&str> = targets.iter().map(|t| t.name()).collect();
     names.sort_unstable();

@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `LlmAgentConfig`, `InstructionProvider`, `IncludeContents` (port of Go `agent/llmagent/llmagent.go`
-//! `Config`, `IncludeContents` and the `Mode` aliases).
+//! `LlmAgentConfig`, `InstructionProvider` and `IncludeContents`, plus the re-exported `Mode`.
 
 use std::sync::Arc;
 
@@ -29,31 +28,31 @@ use gadk_model::Llm;
 
 pub use gadk_agent::Mode;
 
-/// Port of Go llmagent.InstructionProvider: builds an instruction dynamically from the agent context.
+/// Builds an instruction dynamically from the agent context.
 pub type InstructionProvider =
     Arc<dyn Fn(ReadonlyContext) -> BoxFuture<'static, Result<String, AgentError>> + Send + Sync>;
 
-/// Port of Go llmagent.IncludeContents (`""` / `"default"` / `"none"`): what parts of prior
-/// conversation history the agent receives.
+/// What parts of prior conversation history the agent receives (`""` / `"default"` / `"none"`
+/// as strings; see [`as_str`](Self::as_str)).
 ///
-/// `Unset` is Go's zero value `""`: it acts as `Default` except under a single_turn placement, where
-/// history is hidden (Go contents_processor.go hides history when `IncludeContents !=
-/// IncludeContentsDefault`). An explicit `Default` keeps history.
+/// `Unset` acts as `Default` except under a single_turn placement, where history is hidden
+/// (the contents processor hides history whenever the value is not `Default`). An explicit
+/// `Default` keeps history.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum IncludeContents {
-    /// Not set (Go `""`).
+    /// Not set (the empty string).
     #[default]
     Unset,
     /// The agent receives the relevant conversation history, even when placed as a single_turn
-    /// workflow node (Go `IncludeContentsDefault`).
+    /// workflow node.
     Default,
     /// The agent operates solely on its current turn: latest user input plus any following agent
-    /// events (Go `IncludeContentsNone`).
+    /// events.
     None,
 }
 
 impl IncludeContents {
-    /// Go's string value.
+    /// The string form: `""`, `"default"` or `"none"`.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Unset => "",
@@ -63,7 +62,7 @@ impl IncludeContents {
     }
 }
 
-/// Port of Go llmagent.Config: the configuration of an LLM agent. Field order follows Go.
+/// The configuration of an LLM agent.
 #[derive(Clone, Default)]
 pub struct LlmAgentConfig {
     /// Name must be a non-empty string, unique within the agent tree; it cannot be "user", since
