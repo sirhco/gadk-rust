@@ -13,27 +13,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-mcp: the tools of a Model Context Protocol server as a gadk toolset (port of ADK-Go
-//! `tool/mcptoolset`), built on [`rmcp`].
+//! gadk-mcp: the tools of a Model Context Protocol server as a gadk toolset, built on [`rmcp`].
 //!
 //! [`new`] turns a [`Config`] into an [`McpToolset`]. The toolset lists the server's tools
 //! (`tools/list`, every page) and exposes each one as an [`McpTool`] whose declaration carries the
 //! server's input and output schemas unchanged; running a tool calls `tools/call` and shapes the
-//! result as ADK-Go does (`{"output": …}`, `Tool execution failed.` on `isError`, and
+//! result the way ADK does (`{"output": …}`, `Tool execution failed.` on `isError`, and
 //! [`format_mcp_content`] for text, resources, images and audio).
 //!
 //! The session connects lazily on first use. An operation that fails because the connection was
-//! lost pings the session, reconnects once and retries (Go's connection refresher). A toolset
-//! with [`Config::auth`] keeps one session per distinct credential, so a server that binds
-//! sessions to the user who opened them serves every user; idle sessions close after 10 minutes
-//! and at most 64 are kept open.
+//! lost pings the session, reconnects once and retries. A toolset with [`Config::auth`] keeps one
+//! session per distinct credential, so a server that binds sessions to the user who opened them
+//! serves every user; idle sessions close after 10 minutes and at most 64 are kept open.
 //!
 //! Transports ([`McpTransport`]): streamable HTTP ([`McpTransport::Endpoint`],
-//! [`McpTransport::StreamableHttp`]), a child process speaking stdio
-//! ([`McpTransport::Command`]), or any rmcp client transport through a [`TransportFactory`]
-//! ([`McpTransport::Custom`] with [`serve_client`]). Every HTTP request carries the ADK tracking
-//! headers (`user-agent`, `x-goog-api-client`) and, with auth, the credential's headers.
-//! Go's legacy SSE client transport has no rmcp counterpart and is not ported.
+//! [`McpTransport::StreamableHttp`]), a child process speaking stdio ([`McpTransport::Command`]),
+//! or any rmcp client transport through a [`TransportFactory`] ([`McpTransport::Custom`] with
+//! [`serve_client`]). Every HTTP request carries the ADK tracking headers (`user-agent`,
+//! `x-goog-api-client`) and, with auth, the credential's headers. The legacy SSE client transport
+//! has no rmcp counterpart and is not supported.
 //!
 //! [`Config::prefix`] exposes every tool of a toolset as `<prefix>_<name>`, so two servers'
 //! same-named tools can serve one agent; the server is still called with its own name.

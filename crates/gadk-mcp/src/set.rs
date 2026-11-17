@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The MCP toolset (port of ADK-Go `tool/mcptoolset/set.go` `set`).
+//! The MCP toolset ([`McpToolset`]).
 
 use std::any::Any;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ use crate::config::{Config, MetadataProvider};
 use crate::error::Error;
 use crate::tool::McpTool;
 
-/// Go `set`: the tools of one MCP server as a [`Toolset`] named `mcp_tool_set`. Build it with
+/// The tools of one MCP server as a [`Toolset`] named `mcp_tool_set`. Build it with
 /// [`new`](crate::new); close it with [`close`](McpToolset::close).
 pub struct McpToolset {
     client: Arc<dyn SessionClient>,
@@ -52,20 +52,19 @@ impl McpToolset {
         }
     }
 
-    /// Go `Description()`: `Connects to a MCP Server, retrieves MCP Tools into ADK Tools.`
+    /// The toolset's description.
     pub fn description(&self) -> &str {
         "Connects to a MCP Server, retrieves MCP Tools into ADK Tools."
     }
 
-    /// Go `Close`: waits for connection setup in progress, closes every MCP session, and makes
-    /// later operations fail with [`Error::ConnectionClosed`]. Idempotent and safe to call
-    /// concurrently; every call returns the first call's result.
+    /// Waits for connection setup in progress, closes every MCP session, and makes later operations
+    /// fail with [`Error::ConnectionClosed`]. Idempotent and safe to call concurrently; every call
+    /// returns the first call's result.
     pub async fn close(&self) -> Result<(), Arc<Error>> {
         self.client.close().await
     }
 
-    /// The credential session pool; panics for a toolset built without `auth` (as Go's type
-    /// assertion in export_test.go does).
+    /// The credential session pool; panics for a toolset built without `auth`.
     #[cfg(test)]
     fn credential_sessions(&self) -> &crate::sessions::CredentialSessions {
         match self.client.as_credential_sessions() {
@@ -74,13 +73,13 @@ impl McpToolset {
         }
     }
 
-    /// Go `SetSessionBoundsForTest` (export_test.go) for a toolset built with `auth`.
+    /// Sets the idle timeout and session cap of a toolset built with `auth`.
     #[cfg(test)]
     pub(crate) fn set_session_bounds_for_test(&self, idle: Duration, max: usize) {
         self.credential_sessions().set_bounds(idle, max);
     }
 
-    /// Go `SessionCountForTest` (export_test.go) for a toolset built with `auth`.
+    /// How many sessions a toolset built with `auth` keeps.
     #[cfg(test)]
     pub(crate) fn session_count_for_test(&self) -> usize {
         self.credential_sessions().len()
@@ -94,14 +93,13 @@ impl Toolset for McpToolset {
         "mcp_tool_set"
     }
 
-    /// Go `Tools`: every server tool (all pages, server order) as an [`McpTool`](crate::McpTool),
-    /// filtered by `tool_filter`, then renamed `<prefix>_<name>` when `prefix` is set. Listing stops with [`Error::Cancelled`] when `ctx`'s
-    /// invocation is cancelled; a listing error reaches the caller as
-    /// [`ToolError::Execution`] with the crate [`Error`] as its source.
+    /// Every server tool (all pages, server order) as an [`McpTool`](crate::McpTool), filtered by
+    /// `tool_filter`, then renamed `<prefix>_<name>` when `prefix` is set. Listing stops with
+    /// [`Error::Cancelled`] when `ctx`'s invocation is cancelled; a listing error reaches the
+    /// caller as [`ToolError::Execution`] with the crate [`Error`] as its source.
     ///
-    /// Go's `convertTool` can fail (`failed to convert MCP tool %q to adk tool: …`, which
-    /// [`Error::ConvertTool`] spells), but only for a nil tool; rmcp's listing never yields one,
-    /// so conversion here is infallible and `ConvertTool` is never produced.
+    /// Converting a listed tool cannot fail (rmcp's listing never yields an unusable tool), so
+    /// [`Error::ConvertTool`] is never produced here.
     async fn tools(&self, ctx: &ReadonlyContext) -> Result<Vec<Arc<dyn Tool>>, ToolError> {
         let mcp_tools = self
             .client
@@ -118,8 +116,8 @@ impl Toolset for McpToolset {
                 self.require_confirmation_provider.clone(),
                 self.metadata_provider.clone(),
             );
-            // Go filters the converted tool, so the predicate sees the ADK tool, under its
-            // server name (the prefix is applied after the filter).
+            // The filter sees the converted tool, under its server name (the prefix is applied
+            // after the filter).
             if let Some(filter) = &self.tool_filter
                 && !filter(ctx, &tool)
             {

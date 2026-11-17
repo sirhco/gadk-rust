@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Transport resolution (port of ADK-Go `tool/mcptoolset/set.go` `buildTransport` and
-//! `httpClient`): validates a [`Config`] and turns its [`McpTransport`] into a
+//! Transport resolution: validates a [`Config`] and turns its [`McpTransport`] into a
 //! [`TransportFactory`].
 
 use std::sync::Arc;
@@ -33,14 +32,13 @@ use crate::config::{CommandBuilder, Config, McpTransport, TransportFactory, serv
 use crate::error::{BoxError, Error};
 use crate::http::AdkHttpClient;
 
-/// Go `buildTransport`: validates `cfg` (R1) and returns the connector factory of its transport.
+/// Validates `cfg` and returns the connector factory of its transport.
 /// An HTTP transport's factory builds an [`AdkHttpClient`](crate::http::AdkHttpClient) with
 /// `auth: None`; with `auth`, the credential session pool instead calls [`http_factory_for`] per
 /// session, so the returned factory is unused.
 ///
-/// Errors: [`Error::NoTransport`] for `Endpoint("")` (Go: no `Transport` and an empty
-/// `Endpoint`), then [`Error::AuthRequiresHttp`] for `auth` with a `Command` or `Custom`
-/// transport. A `Custom` factory is returned as given.
+/// Errors: [`Error::NoTransport`] for `Endpoint("")`, then [`Error::AuthRequiresHttp`] for `auth`
+/// with a `Command` or `Custom` transport. A `Custom` factory is returned as given.
 pub(crate) fn build_transport(cfg: &Config) -> Result<Arc<dyn TransportFactory>, Error> {
     let factory: Arc<dyn TransportFactory> = match &cfg.transport {
         McpTransport::Endpoint(_) | McpTransport::StreamableHttp { .. } => {
@@ -63,8 +61,8 @@ pub(crate) fn build_transport(cfg: &Config) -> Result<Arc<dyn TransportFactory>,
     Ok(factory)
 }
 
-/// The HTTP factory of one pooled session: every request carries `auth`'s credential resolved
-/// for `cx`, the identity that created the session (Go `identityOnlyContext`).
+/// The HTTP factory of one pooled session: every request carries `auth`'s credential resolved for
+/// `cx`, the identity that created the session.
 pub(crate) fn http_factory_for(
     target: &HttpTarget,
     auth: Arc<dyn CredentialProvider>,
@@ -88,9 +86,8 @@ impl HttpTarget {
     /// `Some` for `Endpoint` (non-empty URL) and `StreamableHttp`, `None` otherwise.
     ///
     /// `Endpoint` gets a fresh `reqwest::Client::new()`: reqwest's default redirect policy
-    /// (follows up to 10, dropping sensitive headers cross-origin, like Go's `http.Client`) and
-    /// no cookie store. There is no process-wide default client to share (Go copies
-    /// `http.DefaultClient` without auth and starts from a zero client with it).
+    /// (follows up to 10, dropping sensitive headers cross-origin) and no cookie store. There is
+    /// no process-wide default client to share.
     pub(crate) fn from_transport(t: &McpTransport) -> Option<HttpTarget> {
         match t {
             McpTransport::Endpoint(url) if !url.is_empty() => Some(HttpTarget {
@@ -113,14 +110,13 @@ impl HttpTarget {
 }
 
 /// The streamable-HTTP transport config of every HTTP session: `reinit_on_expired_session(false)`,
-/// so an HTTP 404 on a session reaches the connection refresher, which owns recovery (R8).
-/// rmcp's default SSE `retry_config` for the standalone GET stream is kept.
+/// so an HTTP 404 on a session reaches the connection refresher, which owns recovery. rmcp's
+/// default SSE `retry_config` for the standalone GET stream is kept.
 pub(crate) fn transport_config(url: &str) -> StreamableHttpClientTransportConfig {
     StreamableHttpClientTransportConfig::with_uri(url).reinit_on_expired_session(false)
 }
 
-/// The factory of an `Endpoint` or `StreamableHttp` transport (Go: the copied
-/// `*mcp.StreamableClientTransport` with the client of `httpClient`).
+/// The factory of an `Endpoint` or `StreamableHttp` transport.
 pub(crate) struct HttpFactory {
     /// The MCP endpoint URL.
     pub(crate) url: String,
@@ -129,7 +125,7 @@ pub(crate) struct HttpFactory {
 }
 
 impl HttpFactory {
-    /// Go `httpClient`: the target's client and headers behind the tracking headers and, with
+    /// Builds the factory: the target's client and headers behind the tracking headers and, with
     /// `auth`, the credential.
     pub(crate) fn new(
         target: &HttpTarget,
@@ -160,8 +156,8 @@ impl TransportFactory for HttpFactory {
     }
 }
 
-/// The factory of a `Command` transport (Go `*mcp.CommandTransport`): every connect spawns a
-/// fresh child from the builder, since a spawned `Command` cannot be reused.
+/// The factory of a `Command` transport: every connect spawns a fresh child from the builder, since
+/// a spawned `Command` cannot be reused.
 struct CommandFactory {
     /// Builds the child's command.
     build: CommandBuilder,
@@ -178,15 +174,13 @@ impl TransportFactory for CommandFactory {
     }
 }
 
-/// How long [`ChildTransport::close`] waits for the child to exit after closing its stdin (go-sdk
-/// `CommandTransport`'s default `terminateDuration`).
+/// How long [`ChildTransport::close`] waits for the child to exit after closing its stdin.
 const CHILD_TERMINATE_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// The client side of a child process speaking MCP over stdio (go-sdk `CommandTransport` /
-/// `pipeRWC`). Unlike rmcp's `TokioChildProcess`, whose builder always sets the child's stderr
-/// (to `Stdio::inherit()` by default), it keeps every setting of the caller's command, its
-/// stderr included (Go 1a84f04f keeps `cmd.Stderr` on every connect); only stdin and stdout are
-/// replaced by pipes.
+/// The client side of a child process speaking MCP over stdio. Unlike rmcp's
+/// `TokioChildProcess`, whose builder always sets the child's stderr (to `Stdio::inherit()` by
+/// default), it keeps every setting of the caller's command, its stderr included; only stdin and
+/// stdout are replaced by pipes.
 struct ChildTransport {
     /// The running child; it is killed when the transport is dropped (`kill_on_drop`).
     child: tokio::process::Child,
@@ -197,9 +191,8 @@ struct ChildTransport {
 impl ChildTransport {
     /// Spawns `cmd` with piped stdin and stdout.
     fn spawn(mut cmd: tokio::process::Command) -> std::io::Result<Self> {
-        // Divergence (ledger 2c): a command whose stderr the caller left unset inherits the host's
-        // stderr (tokio's default), where Go's os/exec with a nil `cmd.Stderr` discards it;
-        // `tokio::process::Command` has no getter to tell an unset stderr from a set one.
+        // A command whose stderr the caller left unset inherits the host's stderr (tokio's
+        // default); `tokio::process::Command` has no getter to tell an unset stderr from a set one.
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .kill_on_drop(true);
@@ -233,10 +226,10 @@ impl Transport<RoleClient> for ChildTransport {
         self.io.receive()
     }
 
-    /// go-sdk `pipeRWC.Close`: closes the child's stdin, waits up to
-    /// [`CHILD_TERMINATE_DURATION`] for it to exit, then kills it.
-    // Divergence (ledger 2c): go-sdk sends SIGTERM and waits once more before killing; without
-    // a signal API (no `unsafe`, no libc dependency) the child is killed at once.
+    /// Closes the child's stdin, waits up to [`CHILD_TERMINATE_DURATION`] for it to exit, then
+    /// kills it.
+    // There is no SIGTERM step: without a signal API (no `unsafe`, no libc dependency) the child is
+    // killed at once when it has not exited by then.
     async fn close(&mut self) -> Result<(), Self::Error> {
         self.io.close().await?;
         match tokio::time::timeout(CHILD_TERMINATE_DURATION, self.child.wait()).await {

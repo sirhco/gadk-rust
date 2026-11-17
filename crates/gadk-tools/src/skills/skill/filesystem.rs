@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `tool/skilltoolset/skill/filesystem_source.go`: a [`Source`] over a
-//! [`SkillFs`].
+//! A [`Source`] over a [`SkillFs`].
 
 use std::io::ErrorKind;
 use std::sync::Arc;
@@ -28,10 +27,10 @@ use super::{
 };
 use crate::go_fmt::{go_lossy_utf8, valid_path};
 
-/// The directories a skill resource may live in, in Go's listing order.
+/// The directories a skill resource may live in, in listing order.
 const RESOURCE_DIRS: [&str; 3] = ["references", "assets", "scripts"];
 
-/// A [`Source`] backed by a [`SkillFs`] (Go `NewFileSystemSource`).
+/// A [`Source`] backed by a [`SkillFs`].
 ///
 /// Skills are the immediate subdirectories of the root that contain a `SKILL.md` whose
 /// frontmatter is valid and whose `name` equals the directory name:
@@ -57,7 +56,7 @@ impl FileSystemSource {
         Self { fs }
     }
 
-    /// Port of Go `readSkill` (`filesystem_source.go:208`): opens and parses
+    /// Opens and parses
     /// `<name>/SKILL.md`, and returns the frontmatter with the reader positioned at the body.
     async fn read_skill(
         &self,
@@ -97,14 +96,14 @@ impl FileSystemSource {
         Ok((frontmatter, reader))
     }
 
-    /// Go `validateSkill`.
+    /// Checks that `name` is a readable, valid skill.
     async fn validate_skill(&self, name: &str) -> Result<(), SkillError> {
         self.read_skill(name).await.map(|_| ())
     }
 
-    /// Go `fs.WalkDir(skillFS, target, ...)` collecting the non-directory paths (relative to
-    /// the skill directory) in WalkDir's lexical pre-order. A missing target, or a directory
-    /// that disappears during the walk, is skipped (Go's `fs.ErrNotExist` branch).
+    /// Walks `target` collecting the non-directory paths (relative to the skill directory) in
+    /// lexical pre-order. A missing target, or a directory that disappears during the walk, is
+    /// skipped.
     async fn walk(
         &self,
         name: &str,
@@ -141,10 +140,9 @@ impl FileSystemSource {
 
 #[async_trait]
 impl Source for FileSystemSource {
-    /// Port of Go `ListFrontmatters` (`filesystem_source.go:55`): the frontmatters of the
-    /// root's immediate subdirectories that contain a `SKILL.md`, in name order. Directories
-    /// without one are skipped; any other error (an invalid frontmatter, a name mismatch)
-    /// aborts the listing, as Go's code does (Go-parity note 3).
+    /// The frontmatters of the root's immediate subdirectories that contain a `SKILL.md`, in name
+    /// order. Directories without one are skipped; any other error (an invalid frontmatter, a name
+    /// mismatch) aborts the listing.
     async fn list_frontmatters(&self) -> Result<Vec<Frontmatter>, SkillError> {
         let entries = self
             .fs
@@ -162,7 +160,8 @@ impl Source for FileSystemSource {
         Ok(frontmatters)
     }
 
-    /// Port of Go `ListResources` (`filesystem_source.go:141`).
+    /// The resource paths of skill `name` under `subpath` (empty or `.` for all three resource
+    /// directories).
     async fn list_resources(&self, name: &str, subpath: &str) -> Result<Vec<String>, SkillError> {
         self.validate_skill(name).await?;
         let clean_path = go_path_clean(subpath);
@@ -179,7 +178,7 @@ impl Source for FileSystemSource {
                 ));
             }
         }
-        // Go `fs.Sub(f.filesystem, name)`.
+        // The skill directory must be a valid path.
         if !valid_path(name) {
             return Err(SkillError::new(
                 SkillErrorKind::Other,
@@ -189,7 +188,7 @@ impl Source for FileSystemSource {
                 ),
             ));
         }
-        // Go `fs.Stat(skillFS, cleanPath)`.
+        // The cleaned subpath must exist.
         if let Err(e) = self.fs.metadata(&go_path_join(&[name, &clean_path])).await {
             if e.kind() == ErrorKind::NotFound {
                 return Err(SkillError::sentinel_with(
@@ -211,16 +210,15 @@ impl Source for FileSystemSource {
         Ok(resources)
     }
 
-    /// Port of Go `LoadFrontmatter` (`filesystem_source.go:83`).
+    /// The frontmatter of skill `name`.
     async fn load_frontmatter(&self, name: &str) -> Result<Frontmatter, SkillError> {
         self.read_skill(name)
             .await
             .map(|(frontmatter, _)| frontmatter)
     }
 
-    /// Port of Go `LoadInstructions` (`filesystem_source.go:98`): the body after the
-    /// frontmatter, with leading and trailing whitespace removed (Go `strings.TrimSpace`; the
-    /// parser still returns the body unchanged). A body that is not UTF-8 is decoded lossily.
+    /// The body after the frontmatter, with leading and trailing whitespace removed (the parser
+    /// still returns the body unchanged). A body that is not UTF-8 is decoded lossily.
     async fn load_instructions(&self, name: &str) -> Result<String, SkillError> {
         let (_, mut reader) = self.read_skill(name).await?;
         let mut instructions = Vec::new();
@@ -231,8 +229,8 @@ impl Source for FileSystemSource {
         Ok(go_lossy_utf8(&instructions).trim().to_string())
     }
 
-    /// Port of Go `LoadResource` (`filesystem_source.go:115`): the path is cleaned with Go's
-    /// `path.Clean` and must then lie under `references/`, `assets/` or `scripts/`.
+    /// A resource of skill `name`: the path is lexically cleaned (`go_path_clean`) and must then
+    /// lie under `references/`, `assets/` or `scripts/`.
     async fn load_resource(
         &self,
         name: &str,

@@ -14,8 +14,8 @@
 // limitations under the License.
 
 //! [`HttpTestServer`]: a streamable-HTTP MCP server on `127.0.0.1` (rmcp
-//! `StreamableHttpService` behind a hyper listener), standing in for the `httptest` servers of
-//! ADK-Go's `tracking_test.go` and `auth_session_test.go`.
+//! `StreamableHttpService` behind a hyper listener), for testing header tracking and per-user
+//! sessions.
 
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
@@ -60,8 +60,8 @@ type OutBody = Pin<Box<dyn Body<Data = Chunk, Error = Infallible> + Send>>;
 /// The rmcp service, type-erased.
 type McpCall = Arc<dyn Fn(Request<String>) -> BoxFuture<'static, Response<OutBody>> + Send + Sync>;
 
-/// A local streamable-HTTP MCP server. Every request is recorded (Go `headerRecorder`), passed to
-/// the front hook, then served. Dropping it stops the listener.
+/// A local streamable-HTTP MCP server. Every request is recorded, passed to the front hook, then
+/// served. Dropping it stops the listener.
 pub struct HttpTestServer {
     addr: SocketAddr,
     state: Arc<State>,
@@ -76,8 +76,8 @@ struct State {
     users: Option<Mutex<UserBook>>,
 }
 
-/// Go `userBoundServer`'s maps, plus the user each MCP session is bound to (go-sdk's
-/// `sessInfo.userID`).
+/// Per user, the MCP sessions its requests arrived on and the ones it closed with DELETE, plus the
+/// user each MCP session is bound to.
 #[derive(Default)]
 struct UserBook {
     sessions: HashMap<String, HashSet<String>>,
@@ -102,11 +102,11 @@ impl HttpTestServer {
         Self::serve(make_server, None).await
     }
 
-    /// Go `newUserBoundServer`: every request needs `Authorization: Bearer token-of-<user>`
-    /// (else 401); the MCP session is bound to the user whose request created it, and a request
-    /// on another user's session gets 403 `session user mismatch`; the one tool `whoami`
-    /// ("returns the caller") answers the user as text. Records the sessions each user's requests
-    /// arrived on and those each user closed with DELETE.
+    /// A server where every request needs `Authorization: Bearer token-of-<user>` (else 401); the
+    /// MCP session is bound to the user whose request created it, and a request on another user's
+    /// session gets 403 `session user mismatch`; the one tool `whoami` ("returns the caller")
+    /// answers the user as text. Records the sessions each user's requests arrived on and those
+    /// each user closed with DELETE.
     pub async fn user_bound() -> Self {
         Self::serve(user_bound_server, Some(Mutex::new(UserBook::default()))).await
     }
@@ -159,14 +159,14 @@ impl HttpTestServer {
         lock(&self.state.requests).clone()
     }
 
-    /// Go `sessionsOf`: how many distinct MCP sessions `user`'s requests arrived on.
+    /// How many distinct MCP sessions `user`'s requests arrived on.
     pub fn sessions_of(&self, user: &str) -> usize {
         self.state.users.as_ref().map_or(0, |book| {
             lock(book).sessions.get(user).map_or(0, HashSet::len)
         })
     }
 
-    /// Go `deletedOf`: how many distinct MCP sessions `user` closed with DELETE.
+    /// How many distinct MCP sessions `user` closed with DELETE.
     pub fn deleted_of(&self, user: &str) -> usize {
         self.state.users.as_ref().map_or(0, |book| {
             lock(book).deleted.get(user).map_or(0, HashSet::len)
@@ -174,7 +174,7 @@ impl HttpTestServer {
     }
 
     /// Holds the `initialize` POST of any request whose `Authorization` header contains `needle`
-    /// until [`InitializeHold::release`] (Go `TestAuthConcurrentCloseWaits`'s front server).
+    /// until [`InitializeHold::release`].
     pub fn hold_initialize(&self, needle: &str) -> InitializeHold {
         let hold = Arc::new(HoldState {
             needle: needle.to_owned(),
@@ -203,15 +203,14 @@ pub struct InitializeHold {
 }
 
 impl InitializeHold {
-    /// Waits until a matching `initialize` request has arrived and is being held (Go
-    /// `<-initializing`).
+    /// Waits until a matching `initialize` request has arrived and is being held.
     pub async fn initializing(&self) {
         let mut rx = self.hold.initializing.subscribe();
         // The sender lives in `self.hold`, so this only returns once a request is held.
         let _ = rx.wait_for(|held| *held).await;
     }
 
-    /// Lets the held request (and later matching ones) through (Go `close(release)`).
+    /// Lets the held request (and later matching ones) through.
     pub fn release(&self) {
         self.hold.released.send_replace(true);
     }
@@ -247,8 +246,8 @@ async fn accept_loop(
     }
 }
 
-/// Record, hold, front hook, then (user-bound) Go's recording handler, `RequireBearerToken` and
-/// go-sdk's session-user check, then the MCP service.
+/// Record, hold, front hook, then (user-bound) the per-user recording, the bearer-token check and
+/// the session-user check, then the MCP service.
 async fn handle(state: &State, mcp: &McpCall, req: Request<Incoming>) -> Response<OutBody> {
     let (parts, mut body) = req.into_parts();
     let mut bytes = Vec::new();
@@ -293,7 +292,7 @@ async fn handle(state: &State, mcp: &McpCall, req: Request<Incoming>) -> Respons
         .map(str::to_owned);
     let mut user = None;
     if let Some(book) = &state.users {
-        // Go: the recording handler, in front of RequireBearerToken.
+        // Record the user's request before the bearer token is verified.
         let recorded = authorization
             .strip_prefix("Bearer token-of-")
             .unwrap_or(authorization);
@@ -362,8 +361,8 @@ fn record(m: &mut HashMap<String, HashSet<String>>, user: &str, id: &str) {
     m.entry(user.to_owned()).or_default().insert(id.to_owned());
 }
 
-/// go-sdk `auth.RequireBearerToken` with the `userBoundServer` verifier: the user of a
-/// `Bearer token-of-<user>` header, else 401 with go-sdk's message.
+/// Verifies the bearer token: the user of a `Bearer token-of-<user>` header, else 401 with a
+/// message.
 fn verify_bearer(authorization: &str) -> Result<String, (StatusCode, &'static str)> {
     let fields: Vec<&str> = authorization.split_whitespace().collect();
     if fields.len() != 2 || !fields[0].eq_ignore_ascii_case("bearer") {
@@ -375,7 +374,7 @@ fn verify_bearer(authorization: &str) -> Result<String, (StatusCode, &'static st
     }
 }
 
-/// Go `http.Error(w, msg, status)`.
+/// A plain-text error response: `msg` and a newline, `nosniff`, with `status`.
 fn text(status: StatusCode, msg: &str) -> Response<OutBody> {
     let mut resp = Response::new(Box::pin(format!("{msg}\n")) as OutBody);
     *resp.status_mut() = status;
@@ -391,7 +390,7 @@ fn text(status: StatusCode, msg: &str) -> Response<OutBody> {
     resp
 }
 
-/// `user_bound_server` `v1.0.0` with Go's `whoami` tool: the caller's user ID as text.
+/// `user_bound_server` `v1.0.0` with a `whoami` tool: the caller's user ID as text.
 fn user_bound_server() -> ToolServer {
     let mut schema = JsonObject::new();
     schema.insert("additionalProperties".into(), false.into());

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The built-in providers and the lazy token source (port of ADK-Go `auth/providers.go:124-291`).
+//! The built-in providers and the lazy token source.
 //!
 //! [`static_token`], [`api_key`] and [`token_source`] resolve at once. [`adc`] and
 //! [`service_account()`] build their token source lazily, on the first `credential` call: one
@@ -44,7 +44,7 @@ use crate::credential::{ApiKey, Bearer, Credential, OAuth2, Token, TokenSource};
 use crate::error::{Error, SharedError};
 use crate::provider::{AuthContext, CredentialFuture, CredentialProvider, ProviderFn};
 
-/// Go `StaticToken` (providers.go:125): a fresh `Bearer { token }` per call.
+/// A provider returning a fresh `Bearer { token }` per call.
 pub fn static_token(token: impl Into<String>) -> Arc<dyn CredentialProvider> {
     let token = token.into();
     ProviderFn::new(move |_: &AuthContext| -> CredentialFuture {
@@ -55,8 +55,7 @@ pub fn static_token(token: impl Into<String>) -> Arc<dyn CredentialProvider> {
     .into_provider()
 }
 
-/// Go `APIKey` (providers.go:133): a header API key credential, where `name` is the header (for
-/// example `X-Api-Key`).
+/// A header API key provider, where `name` is the header (for example `X-Api-Key`).
 pub fn api_key(name: impl Into<String>, value: impl Into<String>) -> Arc<dyn CredentialProvider> {
     let (name, value) = (name.into(), value.into());
     ProviderFn::new(move |_: &AuthContext| -> CredentialFuture {
@@ -68,9 +67,8 @@ pub fn api_key(name: impl Into<String>, value: impl Into<String>) -> Arc<dyn Cre
     .into_provider()
 }
 
-/// Go `TokenSourceProvider` (providers.go:142): `OAuth2 { token_source }` per call, so a fresh
-/// (self-refreshing) token is minted at apply time. This covers client-credentials (2-legged)
-/// OAuth. Go's `auth: nil token source` cannot occur: `ts` is a non-optional `Arc`.
+/// A provider returning `OAuth2 { token_source }` per call, so a fresh (self-refreshing) token is
+/// minted at apply time. This covers client-credentials (2-legged) OAuth.
 pub fn token_source(ts: Arc<dyn TokenSource>) -> Arc<dyn CredentialProvider> {
     ProviderFn::new(move |_: &AuthContext| -> CredentialFuture {
         resolved(Arc::new(OAuth2 {
@@ -85,9 +83,8 @@ fn resolved(cred: Arc<dyn Credential>) -> CredentialFuture {
     std::future::ready(Ok(cred)).boxed()
 }
 
-/// Go `ADC(scopes...)` (providers.go:168): Google Application Default Credentials, discovered
-/// lazily on the first `credential` call and reused thereafter. With no scopes the
-/// cloud-platform scope is used.
+/// Google Application Default Credentials, discovered lazily on the first `credential` call and
+/// reused thereafter. With no scopes the cloud-platform scope is used.
 pub fn adc(scopes: &[&str]) -> Arc<dyn CredentialProvider> {
     adc_with(
         AdcSource::Discover,
@@ -95,9 +92,8 @@ pub fn adc(scopes: &[&str]) -> Arc<dyn CredentialProvider> {
     )
 }
 
-/// Go `ServiceAccount` (providers.go:193): mints tokens for a service account, from an explicit
-/// key or from ADC. The token source is built lazily on the first `credential` call and reused
-/// thereafter:
+/// Mints tokens for a service account, from an explicit key or from ADC. The token source is built
+/// lazily on the first `credential` call and reused thereafter:
 /// - `audience` set: a Google-signed ID token for it (from `json_key` when given, else ADC);
 /// - `json_key` set: an access token for `scopes`, which are required;
 /// - neither: an ADC access token for `scopes` (cloud-platform when empty).
@@ -105,7 +101,7 @@ pub fn service_account(cfg: ServiceAccountConfig) -> Arc<dyn CredentialProvider>
     service_account_with(cfg, AdcSource::Discover)
 }
 
-/// Go `ServiceAccountConfig` (providers.go:177). An empty `json_key` is Go's `len(JSONKey) == 0`.
+/// The configuration of [`service_account()`]. An empty `json_key` means no explicit key.
 #[derive(Clone, Default)]
 pub struct ServiceAccountConfig {
     /// A service-account key in JSON form; empty means Application Default Credentials.
@@ -132,7 +128,7 @@ impl std::fmt::Debug for ServiceAccountConfig {
     }
 }
 
-/// providers.go:152 `scopeCloudPlatform`: the default ADC scope, as in adk-python and gcloud.
+/// The default ADC scope, as in adk-python and gcloud.
 pub(crate) const SCOPE_CLOUD_PLATFORM: &str = "https://www.googleapis.com/auth/cloud-platform";
 
 /// Where ADC is read from. `Discover` is google-cloud-auth's real lookup. `Json` stands in for a
@@ -145,9 +141,9 @@ pub(crate) enum AdcSource {
     Json(Value),
 }
 
-/// Go `adcTokenSource` (providers.go:154): an access-token source for `scopes` (cloud-platform
-/// when empty). Builder errors are exactly `Error::FindDefaultCredentials(_)`. Synchronous, but
-/// must run inside a Tokio runtime: the built credentials spawn their token-refresh task.
+/// An access-token source over Application Default Credentials for `scopes` (cloud-platform when
+/// empty). Builder errors are exactly `Error::FindDefaultCredentials(_)`. Synchronous, but must run
+/// inside a Tokio runtime: the built credentials spawn their token-refresh task.
 pub(crate) fn adc_token_source(
     source: &AdcSource,
     scopes: &[String],
@@ -172,7 +168,7 @@ pub(crate) fn adc_token_source(
                 .with_access_specifier(AccessSpecifier::from_scopes(scopes))
                 .build_access_token_credentials()
                 .map_err(SharedError::new),
-            // golang.org/x/oauth2/google/google.go:244.
+            // The injected source's error for an unrecognised credential type.
             other => Err(SharedError::from(format!(
                 "unknown credential type: {}",
                 go_quote(other)
@@ -208,7 +204,7 @@ pub(crate) fn service_account_with(
     )
 }
 
-/// The init of Go `ServiceAccount` (providers.go:194-222).
+/// The init of [`service_account`]: builds the token source its configuration asks for.
 fn service_account_token_source(
     cfg: &ServiceAccountConfig,
     source: &AdcSource,
@@ -236,9 +232,8 @@ fn service_account_token_source(
     adc_token_source(source, &cfg.scopes)
 }
 
-/// Go `idtoken.NewTokenSource(ctx, cfg.Audience, opts...)` (providers.go:196-204): from the key
-/// when one is given (Go `option.WithAuthCredentialsJSON(option.ServiceAccount, key)`), else
-/// from ADC.
+/// An ID-token source for `cfg.audience`: from the service-account key when one is given, else from
+/// ADC.
 fn id_token_source(
     cfg: &ServiceAccountConfig,
     source: &AdcSource,
@@ -255,7 +250,7 @@ fn id_token_source(
                 "service_account" => {
                     idtoken::service_account::Builder::new(audience, json.clone()).build()
                 }
-                // google.golang.org/api/idtoken/idtoken.go `unsupported credentials type`.
+                // The injected source's error for an unsupported credentials type.
                 other => {
                     return Err(SharedError::from(format!(
                         "idtoken: unsupported credentials type: {}",
@@ -269,8 +264,7 @@ fn id_token_source(
     Ok(Arc::new(IdTokenSource(creds)))
 }
 
-/// Go `google.CredentialsFromJSONWithType(…, google.ServiceAccount, …)`'s parse and type check
-/// (golang.org/x/oauth2/google/default.go:310-316).
+/// Parses a service-account key: valid JSON whose `"type"` is `service_account`.
 fn service_account_key(json_key: &[u8]) -> Result<Value, SharedError> {
     let key: Value = serde_json::from_slice(json_key).map_err(SharedError::new)?;
     let found = credential_type(&key);
@@ -284,13 +278,13 @@ fn service_account_key(json_key: &[u8]) -> Result<Value, SharedError> {
     Ok(key)
 }
 
-/// The `"type"` of a credentials JSON file; `""` when absent (Go's zero `credentialsFile.Type`).
+/// The `"type"` of a credentials JSON file; `""` when absent.
 fn credential_type(json: &Value) -> &str {
     json.get("type").and_then(Value::as_str).unwrap_or_default()
 }
 
-/// Go `creds.TokenSource`: an access-token source over google-cloud-auth credentials, which
-/// cache and refresh the token themselves.
+/// An access-token source over google-cloud-auth credentials, which cache and refresh the token
+/// themselves.
 struct AccessTokenSource(AccessTokenCredentials);
 
 #[async_trait::async_trait]
@@ -304,7 +298,7 @@ impl TokenSource for AccessTokenSource {
     }
 }
 
-/// Go `idtoken.NewTokenSource`'s source: the ID token travels as a bearer token.
+/// An ID-token source: the ID token travels as a bearer token.
 struct IdTokenSource(IDTokenCredentials);
 
 #[async_trait::async_trait]
@@ -318,34 +312,33 @@ impl TokenSource for IdTokenSource {
     }
 }
 
-// ---- Lazy token source (providers.go:226-291) ----
+// ---- Lazy token source ----
 
-/// providers.go:227 `initTimeout`: bounds a hung init so it fails and is retried, not wedged
-/// forever. A parameter of [`lazy_token_source`] in Rust, so tests pass a short bound.
+/// Bounds a hung init so it fails and is retried, not wedged forever. A parameter of
+/// [`lazy_token_source`] in Rust, so tests pass a short bound.
 pub(crate) const INIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// What a lazy init resolves to.
 pub(crate) type InitFuture = BoxFuture<'static, Result<Arc<dyn TokenSource>, Error>>;
 
-/// One init attempt (Go `*attempt`). Every waiter awaits its own clone and gets a clone of the
-/// result (Go `close(a.done)`). Dropping a clone gives up that waiter only: the attempt runs on
-/// its own task.
+/// One init attempt. Every waiter awaits its own clone and gets a clone of the result. Dropping a
+/// clone gives up that waiter only: the attempt runs on its own task.
 type Attempt = Shared<BoxFuture<'static, Result<Arc<dyn TokenSource>, Error>>>;
 
-/// Go's `mu`-guarded pair (providers.go:238-242).
+/// The lazy source's shared state: the memoized source and the in-flight attempt.
 #[derive(Default)]
 struct LazyState {
-    /// Go `ts`: the source of the first attempt that succeeded within its bound.
+    /// The source of the first attempt that succeeded within its bound.
     ts: Option<Arc<dyn TokenSource>>,
-    /// Go `cur`: the in-flight attempt, for single flight. The attempt clears it when it ends;
-    /// one whose task was dropped unfinished is marked abandoned and replaced by the next call.
+    /// The in-flight attempt, for single flight. The attempt clears it when it ends; one whose task
+    /// was dropped unfinished is marked abandoned and replaced by the next call.
     cur: Option<(Attempt, AbandonGuard)>,
 }
 
 /// Owned by an attempt's task. Dropped before it is disarmed (the runtime shut down with the
-/// attempt pending), it marks the attempt abandoned, so the next call starts a fresh one: Go's
-/// "retried, not wedged forever". A flag rather than a lock, because tokio may drop a task's
-/// future inside `spawn`, while the caller holds the state lock.
+/// attempt pending), it marks the attempt abandoned, so the next call starts a fresh one rather
+/// than waiting forever. A flag rather than a lock, because tokio may drop a task's future inside
+/// `spawn`, while the caller holds the state lock.
 #[derive(Clone, Default)]
 struct AbandonGuard(Arc<std::sync::atomic::AtomicBool>);
 
@@ -372,16 +365,16 @@ impl Drop for AbandonOnDrop {
     }
 }
 
-/// Go `lazyTokenSource`'s provider.
+/// The provider over a lazily initialised token source.
 struct LazyTokenSource<F> {
     init: Arc<F>,
     bound: Duration,
     state: Arc<Mutex<LazyState>>,
 }
 
-/// Go `lazyTokenSource` (providers.go:232). One shared attempt, `tokio::spawn`ed. The bound is a
-/// timer inside the attempt: when it fires the token is cancelled, and the attempt's result
-/// becomes `Error::InitTimeout { bound, init_error }` (the init's text when it failed); a
+/// A provider over a lazily initialised token source. One shared attempt, `tokio::spawn`ed. The
+/// bound is a timer inside the attempt: when it fires the token is cancelled, and the attempt's
+/// result becomes `Error::InitTimeout { bound, init_error }` (the init's text when it failed); a
 /// source landing past the bound is discarded. A failure resets the slot. Each success is an
 /// `OAuth2 { token_source }` over the memoized source.
 ///
@@ -403,8 +396,7 @@ impl<F> LazyTokenSource<F>
 where
     F: Fn(CancellationToken) -> InitFuture + Send + Sync + 'static,
 {
-    /// Go's `go func() { … }()` (providers.go:254-277): starts the attempt on its own task, so
-    /// no waiter giving up can stop it.
+    /// Starts the attempt on its own task, so no waiter giving up can stop it.
     fn spawn_attempt(&self) -> (Attempt, AbandonGuard) {
         let guard = AbandonGuard::default();
         let on_drop = AbandonOnDrop(Some(guard.clone()));
@@ -445,17 +437,17 @@ where
             }
             st.cur.get_or_insert_with(|| self.spawn_attempt()).0.clone()
         };
-        // Go's `select` on `a.done` and `ctx.Done()`: a caller that gives up drops this future.
+        // A caller that gives up drops this future; the attempt keeps running.
         attempt.await.map(oauth2)
     }
 }
 
-/// Go `OAuth2Credential{TokenSource: ts}`.
+/// An [`OAuth2`] credential over `token_source`.
 fn oauth2(token_source: Arc<dyn TokenSource>) -> Arc<dyn Credential> {
     Arc::new(OAuth2 { token_source })
 }
 
-/// One attempt's body (providers.go:254-277).
+/// One attempt's body: runs `init` under the bound and records the outcome.
 async fn run_attempt<F>(
     init: Arc<F>,
     state: Arc<Mutex<LazyState>>,
@@ -464,7 +456,7 @@ async fn run_attempt<F>(
 where
     F: Fn(CancellationToken) -> InitFuture + Send + Sync + 'static,
 {
-    // Go `ictx`: the token source may refresh on it, so it must outlive init. A timer bounds init
+    // The token source may refresh on this token, so it must outlive init. A timer bounds init
     // instead of a deadline because a timer can be stopped.
     let cancel = CancellationToken::new();
     let init_cancel = cancel.clone();
@@ -478,8 +470,7 @@ where
             biased;
             outcome = &mut attempt => break outcome,
             () = &mut timer, if !fired => {
-                // Go `time.AfterFunc(initTimeout, cancel)`: init keeps running and returns when
-                // it sees the cancellation.
+                // Init keeps running and returns when it sees the cancellation.
                 fired = true;
                 cancel.cancel();
             }
@@ -488,9 +479,9 @@ where
     let mut result = outcome
         .unwrap_or_else(|_panic| Err(Error::msg("auth: credential initialization panicked")));
     if fired {
-        // Go `!timer.Stop()`: the token is cancelled, so a source init returned is unusable. The
-        // init's error is kept as text (Go `%v`), not as a source: it may report the
-        // cancellation, and the caller must see a timeout.
+        // The token is cancelled, so a source init returned is unusable. The init's error is kept
+        // as text, not as a source: it may report the cancellation, and the caller must see a
+        // timeout.
         result = Err(Error::InitTimeout {
             bound,
             init_error: result.err().map(|e| e.to_string()),

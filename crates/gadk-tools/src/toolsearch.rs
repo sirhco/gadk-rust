@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! A gating toolset that hides all but a small core set of tools from the model until it calls
-//! `search_tools` to discover them (port of Go `tool/toolsearch`).
+//! `search_tools` to discover them.
 //!
 //! Gating decides which tools the model sees, not which tools a caller may use. Pass a base
 //! toolset that is already filtered for the caller, since `search_tools` can reveal any tool in it
@@ -36,21 +36,21 @@ use serde_json::{Value, json};
 use crate::go_fmt::wrap_err;
 use crate::ranksearch;
 
-/// The name of the search tool exposed to the model (Go `ToolName`).
+/// The name of the search tool exposed to the model.
 pub const TOOL_NAME: &str = "search_tools";
 
-/// Go `defaultMaxResults`.
+/// The default number of matches `search_tools` returns.
 const DEFAULT_MAX_RESULTS: i32 = 8;
-/// Go `stateKeyPrefix`.
+/// The prefix of the session-state keys that record discovered tools.
 pub(crate) const STATE_KEY_PREFIX: &str = "tool_search:discovered:";
-/// Go `maxDescLen`.
+/// The longest tool description shown in a match, in bytes (cut at a char boundary).
 const MAX_DESC_LEN: i32 = 200;
-/// Go `minScoreRatio`: matches scoring below this fraction of the top match's BM25 score are
-/// dropped, trimming the long tail of weak matches (e.g. tools that only matched a common verb
-/// like "list") so the model is not handed near-irrelevant candidates.
+/// Matches scoring below this fraction of the top match's BM25 score are dropped, trimming the long
+/// tail of weak matches (e.g. tools that only matched a common verb like "list") so the model is
+/// not handed near-irrelevant candidates.
 const MIN_SCORE_RATIO: f64 = 0.1;
 
-/// Go `toolDescription` (toolsearch.go:58-61), byte for byte.
+/// The description of the search tool, worded as ADK words it.
 const TOOL_DESCRIPTION: &str = concat!(
     "Discover tools that are not yet loaded. Describe your task in natural language, ",
     "use select:tool_a,tool_b for exact names, or a regex over tool names such as get_.*_file. ",
@@ -58,30 +58,30 @@ const TOOL_DESCRIPTION: &str = concat!(
     "After searching, finish this model response. Call discovered tools in the next model response, not alongside search_tools."
 );
 
-/// Go `skillHint`: follows [`TOOL_DESCRIPTION`] only when skill annotations are set, since no
-/// result carries a `connected_skill` otherwise.
+/// Follows [`TOOL_DESCRIPTION`] only when skill annotations are set, since no result carries a
+/// `connected_skill` otherwise.
 const SKILL_HINT: &str = " Results may include an optional connected_skill hint; load the relevant skill if your application supports it.";
 
-/// Go `searchArgs.Query`'s jsonschema description.
+/// The schema description of the `query` argument.
 const QUERY_DESCRIPTION: &str = "A natural-language task, keyword, regex pattern, or 'select:name1,name2' to load tools by exact name. Natural phrases like 'find documents' are ranked by relevance. Regex patterns like 'get_.*_file' are supported for name matching. Max 200 characters.";
 
-/// Go `searchMatch.ConnectedSkill`'s jsonschema description.
+/// The schema description of a match's `connected_skill`.
 const CONNECTED_SKILL_DESCRIPTION: &str = "Load if potentially relevant; generally load one.";
 
-/// Go executeSearch's default `next_step` (toolsearch.go:310-311).
+/// The default `next_step` of a search result.
 const NEXT_STEP: &str = concat!(
     "The matched tools are now available. ",
     "End this response now and call the appropriate tool in your next response."
 );
 
-/// Go executeSearch's `next_step` when a match carries a `connected_skill` (toolsearch.go:313-315).
+/// The `next_step` of a search result when a match carries a `connected_skill`.
 const NEXT_STEP_WITH_SKILL: &str = concat!(
     "End this model response now. In the next response, if connected_skill could be relevant to your task ",
     "and your application supports skills, load only the most relevant one unless the task requires multiple. ",
     "Then use the matched tools."
 );
 
-/// Tunes the gating toolset (Go `toolsearch.Config`).
+/// Tunes the gating toolset.
 #[derive(Debug, Clone, Default)]
 pub struct Config {
     /// Always advertised alongside `search_tools`; everything else in the base toolset is gated
@@ -105,7 +105,7 @@ pub struct Config {
 }
 
 /// Exposes `cfg.core_tool_names` up front and gates the other base tools behind `search_tools`
-/// (Go `toolsearch.New`). `search_tools` is omitted only when every base tool is already core.
+/// `search_tools` is omitted only when every base tool is already core.
 ///
 /// [`TOOL_NAME`] is reserved for the search tool: it cannot be a core tool, and a base tool by
 /// that name is never searchable or exposed. For the same reason an agent can use at most one
@@ -120,7 +120,7 @@ pub fn new(base: Arc<dyn Toolset>, cfg: Config) -> Result<Arc<dyn Toolset>, Tool
     new_gating(base, cfg).map(|g| g as Arc<dyn Toolset>)
 }
 
-/// [`new`], returning the concrete toolset (the tests' Go `mustNew` type assertion).
+/// [`new`], returning the concrete toolset.
 pub(crate) fn new_gating(
     base: Arc<dyn Toolset>,
     cfg: Config,
@@ -190,7 +190,7 @@ pub(crate) fn new_gating(
     }))
 }
 
-/// Go jsonschema-go's inferred schema for `searchArgs` (`jsonschema.For` + `Resolve`).
+/// The input schema of `search_tools`: an object with a required `query` string.
 fn input_schema() -> Value {
     json!({
         "type": "object",
@@ -202,7 +202,8 @@ fn input_schema() -> Value {
     })
 }
 
-/// Go jsonschema-go's inferred schema for `searchOutput` (`jsonschema.For` + `Resolve`).
+/// The output schema of `search_tools`: `matches` (an array, or `null` when empty), `note` and
+/// `next_step`.
 fn output_schema() -> Value {
     json!({
         "type": "object",
@@ -231,11 +232,10 @@ fn output_schema() -> Value {
     })
 }
 
-/// Adds tools to the session discovery state used by `search_tools`, so they become visible on
-/// the calling agent's next model step (Go `RevealTools`). During a live session they appear only
-/// in a later session. Discoveries are kept per agent, keyed by `ctx.agent_name()`. Empty and
-/// already revealed names are ignored. A name is callable only while the base toolset returns a
-/// tool by that name.
+/// Adds tools to the session discovery state used by `search_tools`, so they become visible on the
+/// calling agent's next model step. During a live session they appear only in a later session.
+/// Discoveries are kept per agent, keyed by `ctx.agent_name()`. Empty and already revealed names
+/// are ignored. A name is callable only while the base toolset returns a tool by that name.
 ///
 /// Each tool is stored under its own key, so reveals from several function calls in one model
 /// response are all kept. Those calls run concurrently and share the session state, so a call may
@@ -261,17 +261,17 @@ pub fn reveal_tools(ctx: &Context, names: &[&str]) -> Result<(), ToolError> {
     Ok(())
 }
 
-/// Go `discoveredKeyPrefix`: the agent name is query-escaped so it holds no colon. Both agent and
-/// tool names may contain one, and an unescaped agent "a" revealing tool "b:t" would write the
-/// key agent "a:b" reads as tool "t".
+/// The key prefix of one agent's discovered tools: the agent name is query-escaped so it holds no
+/// colon. Both agent and tool names may contain one, and an unescaped agent "a" revealing tool
+/// "b:t" would write the key agent "a:b" reads as tool "t".
 fn discovered_key_prefix(agent_name: &str) -> String {
     format!("{STATE_KEY_PREFIX}{}:", go_query_escape(agent_name))
 }
 
-/// The agent's discovered tools in discovery order (Go `discoveredNames`). Calls in one model
-/// response that each saw the same prior state can store equal positions; ties are broken by
-/// name. A position is read as an integer or a float (a store that decodes JSON returns the
-/// stored integer as a float); a tool with any other value is kept and sorted last.
+/// The agent's discovered tools in discovery order. Calls in one model response that each saw the
+/// same prior state can store equal positions; ties are broken by name. A position is read as an
+/// integer or a float (a store that decodes JSON returns the stored integer as a float); a tool
+/// with any other value is kept and sorted last.
 pub(crate) fn discovered_names(all: Vec<(String, Value)>, agent_name: &str) -> Vec<String> {
     let prefix = discovered_key_prefix(agent_name);
     let mut entries: Vec<(String, f64)> = all
@@ -292,13 +292,13 @@ pub(crate) fn discovered_names(all: Vec<(String, Value)>, agent_name: &str) -> V
     entries.into_iter().map(|(name, _)| name).collect()
 }
 
-/// Go `searchArgs`.
+/// The arguments of `search_tools`.
 #[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
 pub(crate) struct SearchArgs {
     pub(crate) query: String,
 }
 
-/// Go `searchOutput`. An empty `matches` marshals as `null`, as Go's nil slice does.
+/// The output of `search_tools`. An empty `matches` serializes as `null`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub(crate) struct SearchOutput {
     #[serde(
@@ -314,7 +314,7 @@ pub(crate) struct SearchOutput {
     pub(crate) next_step: String,
 }
 
-/// Go `searchMatch`.
+/// One match of `search_tools`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub(crate) struct SearchMatch {
     pub(crate) name: String,
@@ -323,7 +323,7 @@ pub(crate) struct SearchMatch {
     pub(crate) connected_skill: String,
 }
 
-/// Go encoding/json of a `[]searchMatch`: `null` when nil (empty), else the array.
+/// Serializes matches as `null` when empty, else as the array.
 fn nil_if_empty<S: Serializer>(matches: &[SearchMatch], s: S) -> Result<S::Ok, S::Error> {
     if matches.is_empty() {
         s.serialize_none()
@@ -332,13 +332,13 @@ fn nil_if_empty<S: Serializer>(matches: &[SearchMatch], s: S) -> Result<S::Ok, S
     }
 }
 
-/// Go encoding/json into a `[]searchMatch`: `null` decodes to a nil (empty) slice.
+/// Deserializes matches: `null` decodes to an empty list.
 fn empty_if_nil<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SearchMatch>, D::Error> {
     Ok(Option::<Vec<SearchMatch>>::deserialize(d)?.unwrap_or_default())
 }
 
-/// Go `executeSearch`: ranks the base catalog against `args.query`, reveals every match and
-/// tells the model what to do next.
+/// Ranks the base catalog against `args.query`, reveals every match and tells the model what to do
+/// next.
 pub(crate) async fn execute_search(
     ctx: &Context,
     args: SearchArgs,
@@ -408,11 +408,10 @@ pub(crate) async fn execute_search(
     })
 }
 
-/// Go `buildItems`: the catalog tools the model can call, as ranksearch items. A tool must
-/// declare a function (Go's `callable`; every Rust tool has `process_request`). A model-side
-/// built-in such as `gemini::GoogleSearch` declares none, so a call to it would be rejected as an
-/// unknown tool: search never offers one, list it in `core_tool_names` instead. A base tool named
-/// [`TOOL_NAME`] is skipped because it would collide with the search tool.
+/// The catalog tools the model can call, as ranksearch items. A tool must declare a function. A
+/// model-side built-in such as `gemini::GoogleSearch` declares none, so a call to it would be
+/// rejected as an unknown tool: search never offers one, list it in `core_tool_names` instead. A
+/// base tool named [`TOOL_NAME`] is skipped because it would collide with the search tool.
 pub(crate) fn build_items(catalog: &[Arc<dyn Tool>]) -> Vec<ranksearch::Item> {
     let mut items = Vec::with_capacity(catalog.len());
     for t in catalog {
@@ -433,9 +432,9 @@ pub(crate) fn build_items(catalog: &[Arc<dyn Tool>]) -> Vec<ranksearch::Item> {
     items
 }
 
-/// Go `argTokens`: a declaration's argument names and descriptions, for the search token bag.
-/// `parameters_json_schema` covers both Go shapes (functiontool's `*jsonschema.Schema` and the
-/// `map[string]any` MCP decodes); a `null` or non-object schema contributes nothing. The typed
+/// A declaration's argument names and descriptions, for the search token bag.
+/// `parameters_json_schema` covers function tools and MCP tools alike; a `null` or non-object
+/// schema contributes nothing. The typed
 /// `parameters` schema is read too, in case a tool sets it instead.
 fn arg_tokens(decl: &FunctionDeclaration) -> Vec<String> {
     let mut extra = Vec::new();
@@ -464,13 +463,13 @@ fn arg_tokens(decl: &FunctionDeclaration) -> Vec<String> {
     extra
 }
 
-/// Go `gatingToolset`.
+/// The gating toolset.
 pub(crate) struct GatingToolset {
     pub(crate) base: Arc<dyn Toolset>,
     pub(crate) core_names: Arc<HashSet<String>>,
     pub(crate) search_tool: Arc<dyn Tool>,
-    /// The search tool's closure holds its own clone; this one is kept for the tests, which pass
-    /// it to `execute_search` as Go's tests pass `g.skillAnnotations`.
+    /// The search tool's closure holds its own clone; this one is kept for the tests, which pass it
+    /// to `execute_search`.
     #[cfg_attr(
         not(test),
         expect(
@@ -481,12 +480,11 @@ pub(crate) struct GatingToolset {
     pub(crate) skill_annotations: Arc<BTreeMap<String, String>>,
 }
 
-/// Go `availableTools`: the base tools exposed next to the search tool, the core tools in
+/// The base tools exposed next to the search tool, the core tools in
 /// catalog order, then the discovered ones in discovery order. A discovered name that is core,
 /// that the base no longer returns, or that is [`TOOL_NAME`] (it would duplicate the search
-/// tool) is skipped. Go also skips tools the flow cannot pack; Rust keeps them (every Rust tool
-/// has a defaulted `process_request`), and the flow packs nothing for a tool without a
-/// declaration.
+/// tool) is skipped. A tool the flow cannot pack is kept (every tool has a defaulted
+/// `process_request`), and the flow packs nothing for a tool without a declaration.
 fn available_tools(
     base_tools: &[Arc<dyn Tool>],
     core_names: &HashSet<String>,
@@ -515,7 +513,7 @@ impl Toolset for GatingToolset {
         "SearchGatedToolset"
     }
 
-    /// Go `gatingToolset.Tools`: `search_tools`, the core tools, and the tools the calling agent
+    /// `search_tools`, the core tools, and the tools the calling agent
     /// has discovered. The flow calls this before every model step, so a tool discovered by
     /// `search_tools` is callable on the next step of the same invocation. A live session is the
     /// exception: it resolves its tools once, before it first connects, so tools discovered
@@ -543,9 +541,8 @@ impl Toolset for GatingToolset {
         Ok(tools)
     }
 
-    /// Go `gatingToolset.ProcessRequest`: forwards to the base toolset, so the base can still
-    /// inject its own request state, such as instructions. Tools need no help here: the flow
-    /// packs whatever `tools` returns.
+    /// Forwards to the base toolset, so the base can still inject its own request state, such as
+    /// instructions. Tools need no help here: the flow packs whatever `tools` returns.
     async fn process_request(&self, ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         self.base
             .process_request(ctx, req)

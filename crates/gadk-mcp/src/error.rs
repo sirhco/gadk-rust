@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The crate's error type. Every `Display` equals the Go `Error()` text a Go test asserts
-//! (`tool/mcptoolset/{set,client,tool}.go` and go-sdk's `mcp.ErrConnectionClosed`).
+//! The crate's error type. Each `Display` text is the one ADK's MCP toolset reports for the same
+//! failure.
 
 use std::error::Error as StdError;
 use std::sync::Arc;
@@ -29,53 +29,53 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// set.go `New`/`buildTransport`: no transport configured (an empty `Endpoint("")` counts as
-    /// none).
+    /// No transport configured (an empty `Endpoint("")` counts as none).
     #[error("mcptoolset: set Config.Transport or Config.Endpoint")]
     NoTransport,
-    /// set.go `buildTransport`: `Config::auth` with a `Command` or `Custom` transport. The
+    /// `Config::auth` set with a `Command` or `Custom` transport. The
     /// payload is [`McpTransport::variant_name`](crate::McpTransport::variant_name).
     #[error(
         "mcptoolset: Config.Auth requires a streamable HTTP transport; set Config.Endpoint or use McpTransport::StreamableHttp (got {0})"
     )]
     AuthRequiresHttp(&'static str),
-    /// go-sdk `mcp.ErrConnectionClosed`: the toolset was closed.
+    /// The toolset was closed.
     #[error("connection closed")]
     ConnectionClosed,
-    /// The caller's `CancellationToken` fired (Go `ctx.Err()` = `context.Canceled`).
+    /// The caller's `CancellationToken` fired.
     #[error("context canceled")]
     Cancelled,
-    /// client.go `getSession`: the first connect failed.
+    /// The first connect failed.
     #[error("failed to init MCP session: {0}")]
     InitSession(#[source] BoxError),
-    /// client.go `refreshConnection`: a reconnect failed.
+    /// A reconnect failed.
     #[error("failed to refresh MCP session: {0}")]
     RefreshSession(#[source] BoxError),
-    /// client.go `withRetry`: `"%w (reconnection also failed: %v)"`. Only `err` is wrapped.
+    /// An operation failed and the reconnect that followed also failed. Only `err` is the
+    /// [`source`](std::error::Error::source).
     #[error("{err} (reconnection also failed: {refresh})")]
     ReconnectFailed {
         /// The operation's error.
         #[source]
         err: Box<Error>,
-        /// The reconnect's error (Go `%v`: text only, not in the chain).
+        /// The reconnect's error (its text is in the message but it is not in the source chain).
         refresh: Box<Error>,
     },
-    /// client.go `ListTools`: any listing error.
+    /// Listing the server's tools failed.
     #[error("failed to list MCP tools: {0}")]
     ListTools(#[source] Box<Error>),
-    /// client.go `ListTools`: the connection was lost again after the one reconnect.
+    /// The connection was lost again after the one reconnect while listing tools.
     #[error("failed to list MCP tools: connection lost again after reconnection")]
     ListToolsReconnectedTwice,
     /// An rmcp request error, as is.
     #[error(transparent)]
     Service(#[from] rmcp::ServiceError),
-    /// client.go `sessionKey`: the provider failed.
+    /// The credential provider failed.
     #[error("auth: resolve credential: {0}")]
     ResolveCredential(#[source] gadk_auth::Error),
-    /// client.go `sessionKey`: the credential could not be applied.
+    /// The credential could not be applied to the request.
     #[error("auth: apply credential: {0}")]
     ApplyCredential(#[source] gadk_auth::Error),
-    /// set.go `Tools`: a server tool could not be converted.
+    /// A server tool could not be converted to a gadk tool.
     #[error(
         "failed to convert MCP tool {} to adk tool: {source}",
         gadk_agent::go_quote(name)
@@ -87,7 +87,7 @@ pub enum Error {
         #[source]
         source: BoxError,
     },
-    /// tool.go `Run`: the metadata provider failed.
+    /// The metadata provider failed.
     #[error(
         "metadata provider for MCP tool {} failed: {source}",
         gadk_agent::go_quote(name)
@@ -99,7 +99,7 @@ pub enum Error {
         #[source]
         source: BoxError,
     },
-    /// tool.go `Run`: the metadata provider returned a reserved `_meta` key.
+    /// The metadata provider returned a reserved `_meta` key.
     #[error(
         "metadata provider for MCP tool {} returned reserved _meta key {}",
         gadk_agent::go_quote(name),
@@ -111,7 +111,7 @@ pub enum Error {
         /// The first reserved key, in sorted key order.
         key: String,
     },
-    /// tool.go `Run`: the `tools/call` request failed.
+    /// The `tools/call` request failed.
     #[error(
         "failed to call MCP tool {} with err: {source}",
         gadk_agent::go_quote(name)
@@ -123,7 +123,7 @@ pub enum Error {
         #[source]
         source: Box<Error>,
     },
-    /// tool.go `Run`: the server answered `isError` (`Tool execution failed.` plus
+    /// The server answered `isError` (`Tool execution failed.` plus
     /// ` Details: <formatted content>` when that is non-empty).
     #[error("{0}")]
     ToolExecution(String),
@@ -131,8 +131,8 @@ pub enum Error {
     /// or `RefreshSession`).
     #[error(transparent)]
     Transport(BoxError),
-    /// conversion.go `ToMCPTool`: the declaration's Gemini `parameters` could not be converted to
-    /// JSON Schema.
+    /// [`to_mcp_tool`](crate::to_mcp_tool): the declaration's Gemini `parameters` could not be
+    /// converted to JSON Schema.
     #[error(
         "mcptoolset: convert parameters schema for tool {}: {reason}",
         gadk_agent::go_quote(name)
@@ -140,12 +140,11 @@ pub enum Error {
     ToMcpParametersSchema {
         /// The tool name.
         name: String,
-        /// Go's wrapped error text.
+        /// The underlying error's text.
         reason: String,
     },
-    /// conversion.go `ToMCPTool`: the input schema is not a JSON object, or its top-level type
-    /// excludes `"object"` (Go `objectInputSchema`'s texts, e.g. `schema type "string" is not
-    /// "object"`).
+    /// [`to_mcp_tool`](crate::to_mcp_tool): the input schema is not a JSON object, or its top-level
+    /// type excludes `"object"` (`reason` is e.g. `schema type "string" is not "object"`).
     #[error(
         "mcptoolset: input schema for tool {}: {reason}",
         gadk_agent::go_quote(name)
@@ -153,19 +152,18 @@ pub enum Error {
     ToMcpInputSchema {
         /// The tool name.
         name: String,
-        /// Go's wrapped error text.
+        /// The underlying error's text.
         reason: String,
     },
-    /// Close errors joined as Go `errors.Join` does (newline-separated).
+    /// Close errors joined into one message (newline-separated).
     #[error("{}", .0.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"))]
     Close(Vec<Error>),
 }
 
 impl Error {
-    /// Go `errors.Is(err, mcp.ErrConnectionClosed)`: whether [`Error::ConnectionClosed`] is this
-    /// error or anywhere in its chain (a joined [`Error::Close`] matches when any part does).
-    /// rmcp's `ServiceError::TransportClosed` counts too: go-sdk wraps `ErrConnectionClosed`
-    /// around a call in flight when its connection closes.
+    /// Whether [`Error::ConnectionClosed`] is this error or anywhere in its chain (a joined
+    /// [`Error::Close`] matches when any part does). rmcp's `ServiceError::TransportClosed` counts
+    /// too: it is what a call in flight reports when its connection closes.
     pub fn is_connection_closed(&self) -> bool {
         self.any_in_chain(&|e| {
             matches!(
@@ -175,15 +173,14 @@ impl Error {
         })
     }
 
-    /// Go `errors.Is(err, context.Canceled)`: whether [`Error::Cancelled`] is this error or
-    /// anywhere in its chain.
+    /// Whether [`Error::Cancelled`] is this error or anywhere in its chain.
     pub fn is_cancelled(&self) -> bool {
         self.any_in_chain(&|e| matches!(e, Error::Cancelled))
     }
 
-    /// Walks the wrapped errors as Go's `errors.Is` does. Variants holding a `Box<Error>` are
-    /// followed directly; a [`BoxError`] is searched for an `Error` along its `source()` chain
-    /// (a `transparent` variant's own `source()` would skip the boxed error itself).
+    /// Walks the wrapped errors looking for one `pred` accepts. Variants holding a `Box<Error>` are
+    /// followed directly; a [`BoxError`] is searched for an `Error` along its `source()` chain (a
+    /// `transparent` variant's own `source()` would skip the boxed error itself).
     fn any_in_chain(&self, pred: &dyn Fn(&Error) -> bool) -> bool {
         if pred(self) {
             return true;

@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Okapi BM25 ranking over pre-tokenized token bags, and the tokenizer and plural stemmer that
-//! build them. Port of ADK-Go `internal/ranksearch/bm25.go`.
+//! build them.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -23,12 +23,12 @@ use gadk_platform::go_to_lower;
 
 use super::go_syntax;
 
-/// Term-frequency saturation (Go `bm25K1`).
+/// Term-frequency saturation.
 const BM25_K1: f64 = 1.5;
-/// Document-length normalization (Go `bm25B`).
+/// Document-length normalization.
 const BM25_B: f64 = 0.75;
 
-/// A document index with its BM25 relevance score (Go `scoredDoc`).
+/// A document index with its BM25 relevance score.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ScoredDoc {
     pub(crate) index: usize,
@@ -37,9 +37,9 @@ pub(crate) struct ScoredDoc {
 
 /// Scores each document against the query using Okapi BM25 and returns the indices sorted by
 /// descending score (a stable sort, so equal scores keep document order). Documents with no
-/// query-term overlap (score 0) are omitted. Port of Go `rankBM25`.
+/// query-term overlap (score 0) are omitted.
 ///
-/// IDF and length statistics are rebuilt on every call, as in Go.
+/// IDF and length statistics are rebuilt on every call.
 pub(crate) fn rank_bm25<D: AsRef<[String]>>(query: &str, docs: &[D]) -> Vec<ScoredDoc> {
     let query_terms = tokenize(query);
     if query_terms.is_empty() || docs.is_empty() {
@@ -85,15 +85,15 @@ pub(crate) fn rank_bm25<D: AsRef<[String]>>(query: &str, docs: &[D]) -> Vec<Scor
             scored.push(ScoredDoc { index: i, score });
         }
     }
-    // Go sort.SliceStable with `a.score > b.score`.
+    // Stable sort by descending score.
     scored.sort_by(|a, b| b.score.total_cmp(&a.score));
     scored
 }
 
 /// Lowercases `s`, splits it on non-alphanumeric boundaries and camelCase humps (so "list_books"
 /// and "getBook" both split into their words), and applies a light plural stemmer so "books" and
-/// "book" collide. Port of Go `tokenize`; letters, digits and case use Go's `unicode` categories
-/// (L, Nd, Lu, Ll), not Rust's `char` properties.
+/// "book" collide. Letters, digits and case use the Unicode general categories L, Nd, Lu and Ll,
+/// not Rust's `char` properties.
 pub(crate) fn tokenize(s: &str) -> Vec<String> {
     fn flush(tokens: &mut Vec<String>, cur: &mut String) {
         if !cur.is_empty() {
@@ -119,8 +119,8 @@ pub(crate) fn tokenize(s: &str) -> Vec<String> {
     tokens
 }
 
-/// Maps a word and its plural to the same token. Port of Go `stem` (see its doc comment for the
-/// rules); the first matching rule wins, and lengths are in bytes, as in Go.
+/// Maps a word and its plural to the same token. The first matching rule wins (see the examples
+/// beside each rule), and lengths are in bytes.
 fn stem(tok: &str) -> String {
     let n = tok.len();
     let stripped = if n > 4 && tok.ends_with("ies") {
@@ -146,12 +146,13 @@ fn stem(tok: &str) -> String {
     stripped.unwrap_or(tok).to_string()
 }
 
-/// Reports whether `s` ends with any of the given suffixes (Go `endsWithAny`).
+/// Reports whether `s` ends with any of the given suffixes.
 fn ends_with_any(s: &str, suffixes: &[&str]) -> bool {
     suffixes.iter().any(|suf| s.ends_with(suf))
 }
 
-/// Go `unicode.L`, `unicode.Nd`, `unicode.Lu` and `unicode.Ll`, as Go-layout range pairs.
+/// The Unicode general categories L, Nd, Lu and Ll, as range pairs for
+/// [`go_syntax::in_char_class`].
 static LETTER: LazyLock<Vec<i32>> = LazyLock::new(|| general_category("L"));
 static DIGIT: LazyLock<Vec<i32>> = LazyLock::new(|| general_category("Nd"));
 static UPPER: LazyLock<Vec<i32>> = LazyLock::new(|| general_category("Lu"));
@@ -161,22 +162,22 @@ fn general_category(name: &str) -> Vec<i32> {
     go_syntax::property_ranges(&format!("gc={name}")).unwrap_or_default()
 }
 
-/// Go `unicode.IsLetter`.
+/// Whether `c` is a letter (category L).
 fn is_letter(c: char) -> bool {
     go_syntax::in_char_class(go_syntax::rune(c), &LETTER)
 }
 
-/// Go `unicode.IsDigit`.
+/// Whether `c` is a decimal digit (category Nd).
 fn is_digit(c: char) -> bool {
     go_syntax::in_char_class(go_syntax::rune(c), &DIGIT)
 }
 
-/// Go `unicode.IsUpper`.
+/// Whether `c` is an uppercase letter (category Lu).
 fn is_upper(c: char) -> bool {
     go_syntax::in_char_class(go_syntax::rune(c), &UPPER)
 }
 
-/// Go `unicode.IsLower`.
+/// Whether `c` is a lowercase letter (category Ll).
 fn is_lower(c: char) -> bool {
     go_syntax::in_char_class(go_syntax::rune(c), &LOWER)
 }

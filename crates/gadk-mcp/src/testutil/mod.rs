@@ -14,15 +14,13 @@
 // limitations under the License.
 
 //! In-process MCP servers and connectors for tests (feature `testutil`; always built for this
-//! crate's own unit tests). They stand in for go-sdk's `mcp.NewInMemoryTransports`, the fake
-//! transports of ADK-Go's `tool/mcptoolset` tests, and `httptest` servers:
-//! - [`ToolServer`] and [`weather_server`]: an rmcp server with fixed tools (Go `mcp.NewServer` +
-//!   `mcp.AddTool`);
+//! crate's own unit tests): in-memory transports, fake transports and local HTTP servers.
+//! - [`ToolServer`] and [`weather_server`]: an rmcp server with fixed tools;
 //! - [`in_memory`] and [`ScriptedFactory`]: [`TransportFactory`](crate::TransportFactory)s that
 //!   serve a fresh server over a `tokio::io::duplex` per connect, the latter observable and
 //!   steerable (connect counts, a gate, failures, killing the last connection);
 //! - [`HttpTestServer`]: a streamable-HTTP MCP server on `127.0.0.1` that records requests and can
-//!   bind sessions to bearer-token users (Go `userBoundServer`).
+//!   bind sessions to bearer-token users.
 
 mod factory;
 mod http;

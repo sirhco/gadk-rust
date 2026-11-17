@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The `load_memory` tool (port of Go `tool/loadmemorytool`), the Go-default JSON rendering of
-//! memory entries, and the Go error-shape helpers shared by this crate's tools.
+//! The `load_memory` tool, the JSON rendering of memory entries it returns (the shape ADK's
+//! `load_memory` returns), and the error helper shared by this crate's tools.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -34,18 +34,18 @@ use crate::go_fmt::wrap_err;
 const NAME: &str = "load_memory";
 const DESCRIPTION: &str = "Loads the memory for the current user.";
 
-/// Go `memoryInstructions` (tool.go:33), a raw string with one embedded newline.
+/// The memory instructions, with one embedded newline.
 const MEMORY_INSTRUCTIONS: &str = "You have memory. You can use it to answer questions. If any questions need\nyou to look up the memory, you should call load_memory function with a query.";
 
-/// Go's zero `time.Time` as `MarshalJSON` writes it.
+/// The timestamp written for an entry without one: `0001-01-01T00:00:00Z`.
 const GO_ZERO_TIME_JSON: &str = "0001-01-01T00:00:00Z";
 
-/// Port of Go `loadmemorytool.New` (tool.go:42).
+/// A `load_memory` tool.
 pub fn new() -> Arc<dyn Tool> {
     Arc::new(LoadMemoryTool)
 }
 
-/// Port of Go `loadMemoryTool` (tool.go:36).
+/// The `load_memory` tool.
 struct LoadMemoryTool;
 
 #[async_trait]
@@ -58,7 +58,7 @@ impl Tool for LoadMemoryTool {
         DESCRIPTION
     }
 
-    /// Port of Go `loadMemoryTool.Declaration` (tool.go:65).
+    /// The declaration: a required string `query`.
     fn declaration(&self) -> Option<FunctionDeclaration> {
         Some(FunctionDeclaration {
             name: NAME.into(),
@@ -80,8 +80,7 @@ impl Tool for LoadMemoryTool {
         })
     }
 
-    /// Port of Go `loadMemoryTool.ProcessRequest` (tool.go:112). The flow has already packed the
-    /// tool (Go-parity note 8), so this only appends the memory instructions.
+    /// The flow has already packed the tool, so this only appends the memory instructions.
     async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         append_instructions(req, &[MEMORY_INSTRUCTIONS]);
         Ok(())
@@ -91,7 +90,7 @@ impl Tool for LoadMemoryTool {
         Some(self)
     }
 
-    /// Go classifies a `tool/loadmemorytool` tool as `LOCAL`.
+    /// The tool is classified as [`ToolOriginKind::Local`].
     fn origin_kind(&self) -> ToolOriginKind {
         ToolOriginKind::Local
     }
@@ -103,8 +102,8 @@ impl Tool for LoadMemoryTool {
 
 #[async_trait]
 impl RunnableTool for LoadMemoryTool {
-    /// Port of Go `loadMemoryTool.Run` (tool.go:83). It returns `{"memories": [..]}`, with each
-    /// entry rendered as Go's default JSON would render a `memory.Entry`.
+    /// Searches memory with `query` and returns `{"memories": [..]}`, each entry rendered by
+    /// [`go_json_entry`].
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let Value::Object(m) = &args else {
             return Err(ToolError::InvalidArgument(format!(
@@ -134,10 +133,9 @@ impl RunnableTool for LoadMemoryTool {
     }
 }
 
-/// Go's default `encoding/json` rendering of a `memory.Entry` (memory/service.go:54). The keys
-/// are the Go field names. `Content` is genai JSON or `null`, `Timestamp` is
-/// `time.Time.MarshalJSON` (`None` is Go's zero time), and `CustomMetadata` is `null` when empty
-/// (Go-parity note 4).
+/// Renders a memory entry as a JSON object with the keys `ID`, `Content`, `Author`, `Timestamp` and
+/// `CustomMetadata`. `Content` is genai JSON or `null`, `Timestamp` is RFC 3339 with nanoseconds
+/// (`0001-01-01T00:00:00Z` when unset), and `CustomMetadata` is `null` when empty.
 pub(crate) fn go_json_entry(e: &MemoryEntry) -> Value {
     let mut m = Map::new();
     m.insert("ID".into(), Value::String(e.id.clone()));
@@ -169,7 +167,7 @@ pub(crate) fn go_json_entry(e: &MemoryEntry) -> Value {
     Value::Object(m)
 }
 
-/// A [`ToolError::Execution`] carrying Go's `errors.New(msg)` text.
+/// A [`ToolError::Execution`] carrying just the text `msg`.
 pub(crate) fn go_error(msg: impl Into<String>) -> ToolError {
     let msg: String = msg.into();
     ToolError::Execution(msg.into())

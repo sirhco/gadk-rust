@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `tool/skilltoolset/skill`: the agent-skill frontmatter, the [`Source`]
-//! abstraction over skill storage, the [`SkillFs`] file-system abstraction with [`DirFs`] and
-//! [`MemFs`], and the [`FileSystemSource`], [`MergedSource`] and preload wrappers built on them.
+//! The agent-skill frontmatter, the [`Source`] abstraction over skill storage, the [`SkillFs`]
+//! file-system abstraction with [`DirFs`] and [`MemFs`], and the [`FileSystemSource`],
+//! [`MergedSource`] and preload wrappers built on them.
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -39,41 +39,40 @@ pub use frontmatter_preload::with_frontmatter_preload;
 pub use fs::{DirFs, MemFs, SkillDirEntry, SkillFs, SkillMetadata};
 pub use merged::MergedSource;
 
-/// The most bytes a skill resource may hold (Go `maxResourceSize`, 10 MiB). A resource of
-/// exactly this size is accepted; one byte more is rejected.
+/// The most bytes a skill resource may hold (10 MiB). A resource of exactly this size is accepted;
+/// one byte more is rejected.
 pub const MAX_RESOURCE_BYTES: usize = 10 * 1024 * 1024;
 
-/// A stream over one skill resource (Go's `io.ReadCloser`; dropping it closes it).
+/// A stream over one skill resource; dropping it closes it.
 pub type ResourceReader = Pin<Box<dyn tokio::io::AsyncRead + Send>>;
 
-/// Re-reads a preloading source's backing source (the `reload` callback Go's
-/// `WithFrontmatterPreloadSource` / `WithCompletePreloadSource` return). A failed reload keeps
-/// the previous cache.
+/// Re-reads a preloading source's backing source (the `reload` callback that
+/// [`with_frontmatter_preload`] and [`with_complete_preload`] return). A failed reload keeps the
+/// previous cache.
 pub type ReloadFn = Arc<dyn Fn() -> BoxFuture<'static, Result<(), SkillError>> + Send + Sync>;
 
-/// What a [`SkillError`] is, for the checks Go makes with `errors.Is` against its sentinel
-/// errors (`skill/source.go:24-31`). Every wrapping keeps the innermost sentinel's kind.
+/// What a [`SkillError`] is: the kinds callers check for. Every wrapping keeps the innermost kind.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillErrorKind {
-    /// Go `ErrInvalidSkillName` ("invalid skill name").
+    /// An invalid skill name ("invalid skill name").
     InvalidSkillName,
-    /// Go `ErrInvalidFrontmatter` ("invalid frontmatter").
+    /// Invalid frontmatter ("invalid frontmatter").
     InvalidFrontmatter,
-    /// Go `ErrSkillNotFound` ("skill not found").
+    /// No such skill ("skill not found").
     SkillNotFound,
-    /// Go `ErrDuplicateSkill` ("duplicate skill").
+    /// Two skills with one name ("duplicate skill").
     DuplicateSkill,
-    /// Go `ErrInvalidResourcePath` ("invalid resource path").
+    /// An invalid resource path ("invalid resource path").
     InvalidResourcePath,
-    /// Go `ErrResourceNotFound` ("resource not found").
+    /// No such resource ("resource not found").
     ResourceNotFound,
-    /// Any error that wraps none of Go's sentinels.
+    /// Any error that is none of the kinds above.
     Other,
 }
 
 impl SkillErrorKind {
-    /// Go's sentinel error text, or `None` for [`SkillErrorKind::Other`].
+    /// The kind's error text, or `None` for [`SkillErrorKind::Other`].
     fn sentinel_text(self) -> Option<&'static str> {
         match self {
             Self::InvalidSkillName => Some("invalid skill name"),
@@ -89,9 +88,9 @@ impl SkillErrorKind {
 
 /// An error from a skill [`Source`], the frontmatter functions or a [`SkillFs`] wrapper.
 ///
-/// `Display` is Go's full wrapped error text (for example
+/// `Display` is the full wrapped error text (for example
 /// `invalid frontmatter: parse frontmatter: reading first line: EOF`). [`SkillError::kind`]
-/// answers what Go's `errors.Is(err, skill.ErrX)` answers, and `source()` is the wrapped cause.
+/// answers which [`SkillErrorKind`] the error is or wraps, and `source()` is the wrapped cause.
 #[derive(Debug)]
 pub struct SkillError {
     kind: SkillErrorKind,
@@ -109,17 +108,17 @@ impl SkillError {
         }
     }
 
-    /// The sentinel kind this error carries (Go `errors.Is`).
+    /// The kind this error is or wraps.
     pub fn kind(&self) -> SkillErrorKind {
         self.kind
     }
 
-    /// Go's bare sentinel (`return nil, ErrSkillNotFound`): the message is the sentinel text.
+    /// A bare error of `kind`: the message is the kind's text.
     pub(crate) fn sentinel(kind: SkillErrorKind) -> Self {
         Self::new(kind, kind.sentinel_text().unwrap_or("error"))
     }
 
-    /// Go `fmt.Errorf("%w: <detail>", ErrX)`: `"<sentinel text>: <detail>"`.
+    /// An error of `kind` with a detail: `"<kind text>: <detail>"`.
     pub(crate) fn sentinel_with(kind: SkillErrorKind, detail: impl fmt::Display) -> Self {
         Self::new(
             kind,
@@ -127,8 +126,8 @@ impl SkillError {
         )
     }
 
-    /// An error of `kind` whose `Display` is `msg` and whose `source()` is `source`. `msg`
-    /// already contains `source`'s text, as Go's `%w` formatting does.
+    /// An error of `kind` whose `Display` is `msg` and whose `source()` is `source`. `msg` already
+    /// contains `source`'s text.
     pub(crate) fn with_source(
         kind: SkillErrorKind,
         msg: impl Into<String>,
@@ -141,12 +140,12 @@ impl SkillError {
         }
     }
 
-    /// Go `fmt.Errorf("<prefix>: %w", err)` for an I/O cause: kind `Other`.
+    /// An I/O error wrapped as `"<prefix>: <err>"`: kind `Other`.
     pub(crate) fn io(prefix: impl fmt::Display, err: std::io::Error) -> Self {
         Self::with_source(SkillErrorKind::Other, format!("{prefix}: {err}"), err)
     }
 
-    /// Go `fmt.Errorf("<prefix>: %w", err)` for a skill error: the kind is kept.
+    /// A skill error wrapped as `"<prefix>: <inner>"`: the kind is kept.
     pub(crate) fn wrap(prefix: impl fmt::Display, inner: SkillError) -> Self {
         Self::with_source(inner.kind, format!("{prefix}: {inner}"), inner)
     }
@@ -166,8 +165,8 @@ impl StdError for SkillError {
     }
 }
 
-/// Access to skill components (Go `skill.Source`). Implementations must be safe for
-/// concurrent use and return [`SkillError`]s of the matching [`SkillErrorKind`].
+/// Access to skill components. Implementations must be safe for concurrent use and return
+/// [`SkillError`]s of the matching [`SkillErrorKind`].
 #[async_trait]
 pub trait Source: Send + Sync {
     /// The frontmatters of every available skill.
@@ -192,7 +191,7 @@ pub trait Source: Send + Sync {
     ) -> Result<ResourceReader, SkillError>;
 }
 
-/// Go `fmt` `%q` on a string (`strconv.Quote`).
+/// A string in double quotes with escapes (see `go_quote`).
 fn quote(s: &str) -> String {
     gadk_agent::go_quote(s)
 }

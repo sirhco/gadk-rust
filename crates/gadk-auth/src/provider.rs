@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The credential-provider seam (port of ADK-Go `auth/providers.go:31-92`): what a provider
-//! learns about the invocation, the provider traits and the closure adapter.
+//! The credential-provider seam: what a provider learns about the invocation, the provider traits
+//! and the closure adapter.
 
 use std::sync::Arc;
 
@@ -24,8 +24,8 @@ use gadk_agent::{Context, Identity, InvocationContext, ReadonlyContext};
 use crate::credential::Credential;
 use crate::error::Error;
 
-/// What a provider learns about the invocation: Go's `context.Context` carrying
-/// `agent.IdentityFromContext`. `identity: None` is Go's "no ADK invocation identity".
+/// What a provider learns about the invocation: the invocation's identity. `identity: None` means
+/// no ADK invocation identity.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AuthContext {
     /// The invocation's identity, when the call runs inside one.
@@ -33,7 +33,7 @@ pub struct AuthContext {
 }
 
 impl AuthContext {
-    /// No invocation identity (Go: a plain `context.Context`).
+    /// No invocation identity.
     pub fn anonymous() -> Self {
         Self { identity: None }
     }
@@ -70,29 +70,28 @@ impl From<Identity> for AuthContext {
     }
 }
 
-/// Go `CredentialProvider` (providers.go:31): resolves a [`Credential`] for the current
-/// invocation. A provider that needs interactive consent returns an error carrying a
-/// [`ConsentRequiredError`](crate::ConsentRequiredError); find it with
+/// Resolves a [`Credential`] for the current invocation. A provider that needs interactive consent
+/// returns an error carrying a [`ConsentRequiredError`](crate::ConsentRequiredError); find it with
 /// [`find_consent`](crate::find_consent).
 #[async_trait::async_trait]
 pub trait CredentialProvider: Send + Sync {
-    /// Go `Credential(ctx)`: a ready-to-use credential.
+    /// A ready-to-use credential.
     async fn credential(&self, cx: &AuthContext) -> Result<Arc<dyn Credential>, Error>;
 
-    /// Go's `provider.(RefreshingProvider)` assertion. A `RefreshingProvider` overrides this to
-    /// return `Some(self)`.
+    /// This provider as a [`RefreshingProvider`], when it is one. A `RefreshingProvider` overrides
+    /// this to return `Some(self)`.
     fn as_refreshing(&self) -> Option<&dyn RefreshingProvider> {
         None
     }
 }
 
-/// Go `RefreshingProvider` (providers.go:59): after a credential is rejected downstream (HTTP
-/// 401/403) and the request can be replayed, [`Transport`](crate::Transport) calls `refresh` and
-/// retries once. `rejected` is the exact `Arc` the transport applied (D4). It must not be
-/// returned, and must not be left where a later call finds it.
+/// A provider that can replace a rejected credential: after a credential is rejected downstream
+/// (HTTP 401/403) and the request can be replayed, [`Transport`](crate::Transport) calls `refresh`
+/// and retries once. `rejected` is the exact `Arc` the transport applied. It must not be returned,
+/// and must not be left where a later call finds it.
 #[async_trait::async_trait]
 pub trait RefreshingProvider: CredentialProvider {
-    /// Go `Refresh(ctx, rejected)`: a replacement for `rejected`.
+    /// A replacement for `rejected`.
     async fn refresh(
         &self,
         cx: &AuthContext,
@@ -103,8 +102,8 @@ pub trait RefreshingProvider: CredentialProvider {
 /// The future a [`ProviderFn`] closure returns.
 pub type CredentialFuture = BoxFuture<'static, Result<Arc<dyn Credential>, Error>>;
 
-/// Go `ProviderFunc` (providers.go:87). The closure clones what it needs from `cx` before its
-/// `async move` block; the future is `'static`.
+/// Adapts a closure to a [`CredentialProvider`]. The closure clones what it needs from `cx` before
+/// its `async move` block; the future is `'static`.
 pub struct ProviderFn<F>(F);
 
 impl<F> ProviderFn<F>

@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The in-crate HTTP test server (plan D6, C14) for `#[cfg(test)]` code. It is the same source
-//! as the integration tests' `tests/common/mod.rs`, included here so the two cannot drift.
+//! The in-crate HTTP test server for `#[cfg(test)]` code. It is the same source as the integration
+//! tests' `tests/common/mod.rs`, included here so the two cannot drift.
 
 #[path = "../tests/common/mod.rs"]
 mod imp;
