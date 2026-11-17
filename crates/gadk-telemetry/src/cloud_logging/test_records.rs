@@ -55,7 +55,16 @@ pub(crate) struct Warnings(Arc<Mutex<Vec<String>>>);
 impl Warnings {
     /// Installs a collecting subscriber as this thread's default until the guard drops (a
     /// current-thread Tokio test keeps every poll on this thread).
+    ///
+    /// A no-op global `Registry` is installed once first: without a global subscriber, other
+    /// tests' thread-default subscribers coming and going on parallel threads can leave the
+    /// warning callsite's cached interest (and the global max-level hint) at "off", so this
+    /// thread's subscriber never sees the event.
     pub(crate) fn capture(&self) -> tracing::subscriber::DefaultGuard {
+        static PIN: std::sync::Once = std::sync::Once::new();
+        PIN.call_once(|| {
+            let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
+        });
         tracing::subscriber::set_default(tracing_subscriber::registry().with(self.clone()))
     }
 
