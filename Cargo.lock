@@ -1275,6 +1275,7 @@ dependencies = [
  "gadk-artifact-gcs",
  "gadk-auth",
  "gadk-engine",
+ "gadk-eval",
  "gadk-gemini",
  "gadk-genai",
  "gadk-httprr",
@@ -1649,6 +1650,29 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "gadk-eval"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "gadk-agent",
+ "gadk-engine",
+ "gadk-gemini",
+ "gadk-genai",
+ "gadk-model",
+ "gadk-platform",
+ "gadk-prompts",
+ "gadk-session",
+ "regex",
+ "schemars 1.2.3",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

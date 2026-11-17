@@ -64,6 +64,10 @@ pub use gadk_artifact_gcs as artifact_gcs;
 /// (re-export of `gadk-auth`).
 pub use gadk_auth as auth;
 pub use gadk_engine as engine;
+/// Offline agent evaluation: YAML eval sets, deterministic, tool-trajectory and LLM-judge
+/// scorers, and per-variant reports (feature `eval`, not on by default; re-export of `gadk-eval`).
+#[cfg(feature = "eval")]
+pub use gadk_eval as eval;
 #[cfg(feature = "gemini")]
 pub use gadk_gemini as gemini;
 pub use gadk_genai as genai;
