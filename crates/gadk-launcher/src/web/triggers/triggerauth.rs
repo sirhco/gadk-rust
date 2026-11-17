@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/web/triggers/internal/triggerauth`: the `-oidc_audience` and
-//! `-oidc_service_accounts` flags shared by the trigger sub-launchers, and [`Trigger`], the
-//! flags, `Parse` and `SetupSubrouters` that Go's `pubsub` and `eventarc` packages each spell out
-//! in full (they differ only in the keyword, the controller and the help and log wording).
+//! The `-oidc_audience` and `-oidc_service_accounts` flags shared by the trigger sub-launchers,
+//! and [`Trigger`], the flags, parsing and route setup that the `pubsub` and `eventarc`
+//! sub-launchers share (they differ only in the keyword, the controller and the help and log
+//! wording).
 
 use std::convert::Infallible;
 use std::io::Write;
@@ -37,19 +37,19 @@ use crate::flag_usage::format_flag_usage;
 use crate::golog::Logger;
 use crate::web::WebRouter;
 
-/// Go `authn.NewGoogleOIDC`'s signature: the seam Go's tests replace (`newGoogleOIDC`) to see the
-/// config [`Flags::authenticator`] builds, which the returned authenticator does not expose.
+/// The signature of `authn::google_oidc`: the seam tests replace to see the config
+/// [`Flags::authenticator`] builds, which the returned authenticator does not expose.
 pub(crate) type NewGoogleOidc =
     dyn Fn(GoogleOidcConfig) -> Result<Arc<dyn Authenticator>, AuthnError>;
 
-/// Go `triggerauth.Flags`: the `-oidc_audience` and `-oidc_service_accounts` flags.
+/// The `-oidc_audience` and `-oidc_service_accounts` flags.
 pub(crate) struct Flags {
     audience: Flag<String>,
     service_accounts: Flag<String>,
 }
 
 impl Flags {
-    /// Go `(*Flags).Register(fs)`: adds the flags to `fs`.
+    /// Adds the flags to `fs`.
     pub(crate) fn register(fs: &mut FlagSet) -> Flags {
         let audience = fs.string(
             "oidc_audience",
@@ -67,9 +67,8 @@ impl Flags {
         }
     }
 
-    /// Go `(*Flags).Authenticator`: the authenticator the flags describe; `None` (neither flag
-    /// passed) keeps the endpoint unauthenticated. `fs` is the set the flags were registered on
-    /// (Go keeps it in `Flags.fs` for `passed`).
+    /// The authenticator the flags describe; `None` (neither flag passed) keeps the endpoint
+    /// unauthenticated. `fs` is the set the flags were registered on.
     #[cfg(test)]
     pub(crate) fn authenticator(
         &self,
@@ -84,7 +83,7 @@ impl Flags {
     }
 
     /// [`Flags::authenticator`] whose Google OIDC authenticator writes its rejection records
-    /// (Go's `log.Printf` in `authn`) to `log`.
+    /// to `log`.
     pub(crate) fn authenticator_logging_to(
         &self,
         fs: &FlagSet,
@@ -99,8 +98,8 @@ impl Flags {
     }
 }
 
-/// Go `(*Flags).Authenticator` over the flag values: `passed` is Go's `f.passed(name)` (whether
-/// the command line set the flag) and `new_google_oidc` Go's `newGoogleOIDC`.
+/// The authenticator the flag values describe: `passed` says whether the command line set a
+/// flag, and `new_google_oidc` builds the Google OIDC authenticator.
 pub(crate) fn authenticator_with(
     audience: &str,
     service_accounts: &str,
@@ -130,7 +129,6 @@ pub(crate) fn authenticator_with(
             go_quote(audience)
         )));
     }
-    // Go `strings.TrimSpace` and `str::trim` remove the same (Unicode White_Space) characters.
     if service_accounts.trim().starts_with('-') {
         return Err(Error::Config(format!(
             "-oidc_service_accounts {} starts with \"-\", as when an unset variable makes a flag take the next flag as its value",
@@ -181,8 +179,8 @@ pub(crate) fn authenticator_with(
     .map_err(|e| Error::Config(e.to_string()))
 }
 
-/// Go `pubsubLauncher`/`eventarcLauncher` without what tells them apart: the flag set with Go's
-/// `pubsubConfig`/`eventarcConfig` flags, `Parse`, `CommandLineSyntax` and `SetupSubrouters`.
+/// What the `pubsub` and `eventarc` launchers share, without what tells them apart: the flag set
+/// with the trigger flags, parsing, the syntax text and route setup.
 pub(crate) struct Trigger {
     /// The sub-launcher keyword (`pubsub` or `eventarc`), also the flag set's name and the last
     /// segment of the endpoint path.
@@ -195,20 +193,19 @@ pub(crate) struct Trigger {
     trigger_max_delay: Flag<GoDuration>,
     trigger_max_runs: Flag<i64>,
     auth_flags: Flags,
-    /// Go `config.pathPrefix` once `Parse` normalized it (Go writes it back to the flag's
-    /// variable).
+    /// The path prefix once `parse` normalized it.
     normalized_path_prefix: Option<String>,
-    /// Go `auth`: built from the flags by `parse`. `None` leaves the endpoint open.
+    /// The authenticator: built from the flags by `parse`. `None` leaves the endpoint open.
     pub(crate) auth: Option<Arc<dyn Authenticator>>,
-    /// Go's global `log` as the authenticator sees it: stderr until `setup_subrouters` hands it
+    /// The log the authenticator writes to: stderr until `setup_subrouters` hands it
     /// the launcher's [`Config::log`] (the authenticator is built by `parse`, before the config
     /// is known).
     log: Arc<Mutex<Logger>>,
 }
 
 impl Trigger {
-    /// Go `NewLauncher`'s flag set: `name` is the keyword, `endpoint` the endpoint's name in the
-    /// `-path_prefix` help (`PubSub`, `Eventarc`).
+    /// A trigger with its flag set: `keyword` is the sub-launcher keyword, `endpoint` the
+    /// endpoint's name in the `-path_prefix` help (`PubSub`, `Eventarc`).
     pub(crate) fn new(keyword: &'static str, endpoint: &str) -> Trigger {
         let mut fs = FlagSet::new(keyword);
         let path_prefix_flag = fs.string(
@@ -252,27 +249,26 @@ impl Trigger {
         }
     }
 
-    /// Go `fs.SetOutput`.
+    /// Replaces where the flag set writes its errors and usage.
     pub(crate) fn set_flag_output(&mut self, out: Arc<Mutex<dyn Write + Send>>) {
         lock(&self.flags).set_output(out);
     }
 
-    /// Go `config.pathPrefix`: the flag's value, normalized once `parse` got that far.
+    /// The flag's value, normalized once `parse` got that far.
     pub(crate) fn path_prefix(&self) -> String {
         self.normalized_path_prefix
             .clone()
             .unwrap_or_else(|| self.path_prefix_flag.get())
     }
 
-    /// Go `config.triggerMaxRetries`.
+    /// The `-trigger_max_retries` value.
     #[cfg(test)]
     pub(crate) fn trigger_max_retries(&self) -> i64 {
         self.trigger_max_retries.get()
     }
 
-    /// Go `Parse`.
+    /// Parses the flags, validates them and builds the authenticator.
     pub(crate) fn parse(&mut self, args: Vec<String>) -> Result<Vec<String>, Error> {
-        // Go also fails on `!fs.Parsed()`, which cannot hold after `Parse`.
         let rest = {
             let mut fs = lock(&self.flags);
             fs.parse(&args).map(|()| fs.args())
@@ -320,20 +316,18 @@ impl Trigger {
         Ok(rest)
     }
 
-    /// Go `CommandLineSyntax`.
+    /// The flag usage text.
     pub(crate) fn command_line_syntax(&self) -> String {
         format_flag_usage(&lock(&self.flags))
     }
 
-    /// Go `SetupSubrouters`: the controller `new_handler` builds from the launcher config and
+    /// The controller `new_handler` builds from the launcher config and
     /// the trigger flags, mounted for POST at `<prefix>/apps/{app_name}/trigger/<keyword>` behind
-    /// the authenticator (or, without one, Go's warning that the endpoint is open).
+    /// the authenticator (or, without one, a warning that the endpoint is open).
     ///
-    /// Go mounts the route on `router.PathPrefix(prefix).Subrouter()` (the whole router for an
-    /// empty or `/` prefix). A subrouter's `Path` template is the prefix with its trailing slashes
-    /// trimmed followed by the route's own, it inherits the parent's `StrictSlash`, and a method
-    /// mismatch inside it lets the parent try its later routes; that is exactly a route for the
-    /// joined template on the parent, which is what this registers.
+    /// The route's path is the prefix with its trailing slashes trimmed followed by the route's
+    /// own (just the route's own for an empty or `/` prefix), registered directly on the router.
+    /// A method mismatch lets the router try its later routes.
     pub(crate) fn setup_subrouters(
         &self,
         router: &mut WebRouter,
@@ -342,15 +336,15 @@ impl Trigger {
     ) -> Result<(), Error> {
         *lock(&self.log) = config.log.clone();
         let trigger_config = TriggerConfig {
-            // Go `int`s: saturated into the controller's `i32`s (validated > 0).
+            // Saturated into the controller's `i32`s (validated > 0).
             max_retries: saturate(self.trigger_max_retries.get()),
             base_delay: self.trigger_base_delay.get().to_std().unwrap_or_default(),
             max_delay: self.trigger_max_delay.get().to_std().unwrap_or_default(),
             max_concurrent_runs: saturate(self.trigger_max_runs.get()),
         };
         let handler = new_handler(ControllerConfig {
-            // The web launcher fills every service before setup; Go's controller would keep a
-            // nil one, this falls back to an in-memory service.
+            // The web launcher fills every service before setup; without one, this falls back to
+            // an in-memory session service.
             session_service: config
                 .session_service
                 .clone()
@@ -390,12 +384,12 @@ impl Trigger {
     }
 }
 
-/// Go `int` → the controller's `i32`.
+/// A flag integer as the controller's `i32`, saturating.
 fn saturate(v: i64) -> i32 {
     i32::try_from(v).unwrap_or(if v < 0 { i32::MIN } else { i32::MAX })
 }
 
-/// Go `authn.Middleware(a)(next)`: `next` itself when `a` is nil.
+/// `next` behind the authenticator's middleware; `next` itself when there is no authenticator.
 fn authn_middleware(auth: Option<Arc<dyn Authenticator>>, next: Handler) -> Handler {
     let Some(auth) = auth else {
         return next;

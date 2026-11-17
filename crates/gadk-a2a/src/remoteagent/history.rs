@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Remote-session history parts, isolation scope and user function-call mapping (port of ADK-Go
-//! `agent/remoteagent/v2/utils.go`).
+//! Remote-session history parts, isolation scope and user function-call mapping.
 
 use std::collections::HashSet;
 
@@ -29,12 +28,13 @@ use crate::Error;
 use crate::convert::{get_a2a_task_info, to_a2a_part};
 use gadk_engine::runner::BEFORE_RUN_REPLY_KEY;
 
-/// Whether the event is a BeforeRun reply (Go `event.CustomMetadata[BeforeRunReplyKey] == true`).
+/// Whether the event is a BeforeRun reply (its custom metadata holds `BEFORE_RUN_REPLY_KEY` =
+/// `true`).
 fn is_before_run_reply(event: &Event) -> bool {
     event.response.custom_metadata.get(BEFORE_RUN_REPLY_KEY) == Some(&Value::Bool(true))
 }
 
-/// Go `userFunctionCall`: the user event answering a function call, and the A2A task and context
+/// The user event answering a function call, and the A2A task and context
 /// IDs recorded on the call's event.
 #[derive(Debug, Clone)]
 pub(crate) struct UserFunctionCall {
@@ -46,7 +46,7 @@ pub(crate) struct UserFunctionCall {
     pub(crate) context_id: String,
 }
 
-/// Go `getUserFunctionCallAt`: `Some` when the event at `index` is a user function response
+/// `Some` when the event at `index` is a user function response
 /// answering a call this peer (`agent_name`; any author when empty) made in `scope`. A call
 /// produced by a BeforeRun callback does not resume the named peer.
 pub(crate) fn get_user_function_call_at(
@@ -61,7 +61,7 @@ pub(crate) fn get_user_function_call_at(
         return None;
     }
     let content = candidate.response.content.as_ref()?;
-    // Every function response of a mixed user event is tried (Go 7c87fdff).
+    // Every function response of a mixed user event is tried.
     for response in content
         .parts
         .iter()
@@ -89,7 +89,7 @@ pub(crate) fn get_user_function_call_at(
     None
 }
 
-/// Go `isFunctionCallEvent`: whether `event` (authored by `agent_name`, any author when empty)
+/// Whether `event` (authored by `agent_name`, any author when empty)
 /// holds a function call with ID `call_id`.
 fn is_function_call_event(event: &Event, call_id: &str, agent_name: &str) -> bool {
     let Some(content) = &event.response.content else {
@@ -109,7 +109,7 @@ fn is_function_call_event(event: &Event, call_id: &str, agent_name: &str) -> boo
     })
 }
 
-/// Go `collectRemoteFunctionCallIDs`: the call IDs this peer itself emitted in `scope` (any author
+/// The call IDs this peer itself emitted in `scope` (any author
 /// when `agent_name` is empty). A later locally produced call (a BeforeRun reply) reusing an ID
 /// takes it back.
 pub(crate) fn collect_remote_function_call_ids(
@@ -147,9 +147,9 @@ pub(crate) fn collect_remote_function_call_ids(
     ids
 }
 
-/// Go `marshalFunctionResponseJSON`: the payload as Go's `json.Encoder` with
-/// `SetEscapeHTML(false)` writes it (sorted keys, Go float format, `<`, `>` and `&` kept
-/// literal; U+2028 and U+2029 still escaped); `<unserializable>` when it cannot be encoded.
+/// The payload as compact JSON text: keys sorted, float32 values in their shortest text, `<`, `>`
+/// and `&` kept literal (U+2028 and U+2029 still escaped); `<unserializable>` when it cannot be
+/// encoded.
 pub(crate) fn marshal_function_response_json(v: &Map<String, Value>) -> String {
     let Ok(bytes) = gadk_model::to_go_json(v) else {
         return "<unserializable>".to_owned();
@@ -160,9 +160,9 @@ pub(crate) fn marshal_function_response_json(v: &Map<String, Value>) -> String {
     unescape_html(&text)
 }
 
-/// Undoes Go `json.Marshal`'s HTML escaping (`\u003c`, `\u003e`, `\u0026`) in JSON text. Every
-/// backslash in JSON text starts an escape sequence, so the scan pairs each one with what it
-/// escapes and only rewrites the three HTML escapes.
+/// Undoes the HTML escaping of [`gadk_model::to_go_json`] (`\u003c`, `\u003e`, `\u0026`) in JSON
+/// text. Every backslash in JSON text starts an escape sequence, so the scan pairs each one with
+/// what it escapes and only rewrites the three HTML escapes.
 fn unescape_html(json: &str) -> String {
     let mut out = String::with_capacity(json.len());
     let mut rest = json;
@@ -188,7 +188,8 @@ fn unescape_html(json: &str) -> String {
     out
 }
 
-/// Go `unmatchedFunctionResponseText`.
+/// The text a function response is rewritten to when this peer did not make the call:
+/// `Tool <name> returned: <JSON of the response>`.
 pub(crate) fn unmatched_function_response_text(fr: &FunctionResponse) -> String {
     let name = if fr.name.is_empty() {
         "<unnamed>"
@@ -201,7 +202,7 @@ pub(crate) fn unmatched_function_response_text(fr: &FunctionResponse) -> String 
     )
 }
 
-/// Go `toMissingRemoteSessionParts`: the parts of every in-scope event after this agent's last
+/// The parts of every in-scope event after this agent's last
 /// reply (BeforeRun replies excepted), which the remote session has not seen, and the A2A
 /// context ID recorded on that reply (`""` when there is none).
 pub(crate) async fn to_missing_remote_session_parts(
@@ -267,12 +268,12 @@ pub(crate) async fn to_missing_remote_session_parts(
     (result, context_id)
 }
 
-/// Go `hasIsolationScopeHistory`: whether the session already holds an event in `scope`.
+/// Whether the session already holds an event in `scope`.
 pub(crate) fn has_isolation_scope_history(events: &[Event], scope: &str) -> bool {
     events.iter().any(|e| e.isolation_scope == scope)
 }
 
-/// Go `presentAsUserMessage`: another agent's event retold as user context (`For context:` then
+/// Another agent's event retold as user context (`For context:` then
 /// one text part per part; thoughts dropped). No content when nothing remains to tell.
 pub(crate) fn present_as_user_message(ctx: &InvocationContext, agent_event: &Event) -> Event {
     let mut event = Event::new(ctx.platform(), ctx.invocation_id());
@@ -313,7 +314,7 @@ pub(crate) fn present_as_user_message(ctx: &InvocationContext, agent_event: &Eve
     event
 }
 
-/// Go `convertParts`: the event's parts as A2A parts. With `remote_fc_ids` (history path), a
+/// The event's parts as A2A parts. With `remote_fc_ids` (history path), a
 /// function response whose ID is not in the set is rewritten as text; `None` (resume path)
 /// rewrites nothing. A `genai_part_converter` replaces the default conversion; its `None` drops
 /// the part.

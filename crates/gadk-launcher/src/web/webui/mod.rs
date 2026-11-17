@@ -13,17 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/web/webui`: serves the embedded ADK web UI bundle under `/ui/` (Task 10).
+//! The `webui` sub-launcher: serves the embedded ADK web UI bundle under `/ui/`.
 //!
-//! The routes are Go's, registered as gorilla lays them out on the base router: the `/ui/`
+//! The routes, in registration order: the `/ui/`
 //! subrouter (the generated `assets/config/runtime-config.json`, then the single-page-app handler
 //! for everything else under the prefix), `/` → 302 `/ui/`, and the bare `/ui` → 301 `/ui/`; all of
 //! them GET and HEAD only. The single-page-app handler answers `index.html` (its `<base href>`
 //! rewritten to the prefix) for the UI root and for extension-less paths that name no file, and
-//! hands everything else to a port of Go's `http.StripPrefix` + `http.FileServer` over the bundle
-//! with directory listings suppressed, down to `http.ServeContent`'s preconditions and `Range`
-//! handling. The embedded files have no modification time, so no `Last-Modified` is sent and
-//! `If-Modified-Since`/`If-Unmodified-Since` never apply; no `ETag` is set either.
+//! hands everything else to a file server over the bundle (prefix stripped) with directory
+//! listings suppressed, including conditional-request preconditions (RFC 7232) and `Range`
+//! handling (RFC 7233). The embedded files have no modification time, so no `Last-Modified` is sent
+//! and `If-Modified-Since`/`If-Unmodified-Since` never apply; no `ETag` is set either.
 
 mod assets;
 
@@ -50,31 +50,30 @@ use crate::flag_usage::format_flag_usage;
 use crate::golog::Logger;
 use crate::web::{WebRouter, WebSublauncher};
 
-/// Go `indexFile`: the single-page app entry point inside the embedded bundle.
+/// The single-page app entry point inside the embedded bundle.
 const INDEX_FILE: &str = "index.html";
 
-/// Go `NewLauncher`'s `config.pathPrefix`.
+/// The path prefix the bundle is served under.
 const PATH_PREFIX: &str = "/ui/";
 
-/// Go `baseHrefPattern` (`(?is)<base\s[^>]*?href\s*=\s*"[^"]*"`) in RE2's terms: `\s` is
-/// `[\t\n\f\r ]` (no `\v`), the negated classes take any byte (Go reads an invalid UTF-8 byte as
-/// one rune), and `(?i)` folds Unicode simply (`s` also matches `ſ`), as RE2 does.
+/// The pattern of the `<base href="…">` tag: `\s` is `[\t\n\f\r ]` (no `\v`), the negated classes
+/// take any byte, and `(?i)` folds Unicode simply (`s` also matches `ſ`).
 const BASE_HREF_PATTERN: &str =
     r#"(?is)<base[\t\n\f\r ](?-u:[^>])*?href[\t\n\f\r ]*=[\t\n\f\r ]*"(?-u:[^"])*""#;
 
-/// Go `defaultMaxContentRanges`: a `Range` header with more ranges is ignored.
+/// A `Range` header with more ranges is ignored.
 const MAX_CONTENT_RANGES: usize = 200;
 
-/// Go `webui.webUILauncher` (with its `webUIConfig`).
+/// The `webui` web sub-launcher.
 pub struct WebUiLauncher {
     flags: Mutex<FlagSet>,
-    /// Go `config.backendAddress` (`-api_server_address`).
+    /// The REST API address the UI is pointed at (`-api_server_address`).
     backend_address: Flag<String>,
-    /// Go `config.pathPrefix`.
+    /// The path prefix the bundle is served under.
     path_prefix: String,
 }
 
-/// Go `webui.NewLauncher()`.
+/// A `webui` launcher with its flags.
 pub fn new() -> WebUiLauncher {
     let mut fs = FlagSet::new("webui");
     let backend_address = fs.string(
@@ -90,15 +89,13 @@ pub fn new() -> WebUiLauncher {
 }
 
 impl WebUiLauncher {
-    /// Sends the flag set's usage and parse errors to `out` instead of stderr (Go
-    /// `flag.FlagSet.SetOutput`).
+    /// Sends the flag set's usage and parse errors to `out` instead of stderr.
     pub fn with_flag_output(self, out: Arc<Mutex<dyn std::io::Write + Send>>) -> WebUiLauncher {
         lock(&self.flags).set_output(out);
         self
     }
 
-    /// Go's tests' `&webUILauncher{config: &webUIConfig{pathPrefix: …}}`: the launcher serving
-    /// under `path_prefix` (the backend address keeps its default, the tests' address).
+    /// The launcher serving under `path_prefix` (the backend address keeps its default).
     #[cfg(test)]
     pub(crate) fn with_path_prefix(path_prefix: &str) -> WebUiLauncher {
         WebUiLauncher {
@@ -117,7 +114,8 @@ impl WebSublauncher for WebUiLauncher {
         let mut fs = lock(&self.flags);
         match fs.parse(&args) {
             Err(e) => Err(Error::Parse(format!("failed to parse webui flags: {e}"))),
-            // Go `err != nil || !w.flags.Parsed()` with a nil error.
+            // The set was not parsed although no error was reported; the text is `<nil>`, as an
+            // ADK launcher prints it.
             Ok(()) if !fs.parsed() => Err(Error::Parse(
                 "failed to parse webui flags: <nil>".to_owned(),
             )),
@@ -150,14 +148,15 @@ impl WebSublauncher for WebUiLauncher {
     }
 }
 
-/// Go `AddSubrouter(router, pathPrefix, backendAddress)`, with Go's `log` going to `log`.
+/// Mounts the UI under `path_prefix` on `router`, pointing it at `backend_address`; log lines go
+/// to `log`.
 ///
-/// gorilla tries the `pathPrefix` subrouter (its routes in order), then `/`, then the bare prefix;
-/// the flat [`WebRouter`] gets them in that order. The bare-prefix route is Go's exact-equality
-/// `MatcherFunc`; here it is a `Path` route, which under `StrictSlash(true)` also matches the
-/// prefix itself — but every GET/HEAD there is taken by the subrouter first, and any other method
-/// is a 405 either way, so the redirect loop Go guards against cannot form. Go's `log.Fatalf` for
-/// an unreadable `index.html` is an error, returned before any route is added.
+/// Routes are tried in the order registered: the `path_prefix` routes (the runtime config, then
+/// the single-page-app handler), then `/`, then the bare prefix. The bare-prefix route is a path
+/// route, which under strict-slash routing also matches the prefix itself, but every GET/HEAD
+/// there is taken by the prefix routes first, and any other method is a 405 either way, so no
+/// redirect loop can form. An unreadable `index.html` is an error, returned before any route is
+/// added.
 fn add_subrouter(
     router: &mut WebRouter,
     path_prefix: &str,
@@ -175,8 +174,8 @@ fn add_subrouter(
     let index = Bytes::from(rewrite_base_href(&base_href, index_html, path_prefix, log));
     let ui_methods = [Method::GET, Method::HEAD];
 
-    // The subrouter: generate /assets/config/runtime-config.json at runtime (Go's `Path` inside a
-    // `PathPrefix` subrouter appends to the prefix minus its trailing slashes).
+    // Generate /assets/config/runtime-config.json at runtime, under the prefix minus its trailing
+    // slashes.
     let runtime_config = serde_json::json!({ "backendUrl": backend_address });
     router.handle(
         &ui_methods,
@@ -229,7 +228,7 @@ fn add_subrouter(
     Ok(())
 }
 
-/// Go `rewriteBaseHref`: points the `<base href>` of `index.html` at `path_prefix`, or logs that
+/// Points the `<base href>` of `index.html` at `path_prefix`, or logs that
 /// there is none and leaves the document alone.
 fn rewrite_base_href(
     pattern: &Regex,
@@ -249,14 +248,14 @@ fn rewrite_base_href(
         .into_owned()
 }
 
-/// An entry of the embedded bundle (Go `fs.Sub(content, "distr")`).
+/// An entry of the embedded bundle.
 #[derive(Clone, Copy)]
 enum Entry {
     File(&'static [u8]),
     Dir,
 }
 
-/// Go `fs.Stat(ui, name)` for a valid `fs` path (`.` is the root): a file of the bundle, or a
+/// The entry of the bundle named `name` (a slash-separated path; `.` is the root): a file, or a
 /// directory holding one.
 fn stat(name: &str) -> Option<Entry> {
     if name == "." {
@@ -272,13 +271,13 @@ fn stat(name: &str) -> Option<Entry> {
         .then_some(Entry::Dir)
 }
 
-/// Go `hasIndex`: whether `dir` contains an `index.html`.
+/// Whether `dir` contains an `index.html`.
 fn has_index(dir: &str) -> bool {
     stat(&go_path_join(&[dir, INDEX_FILE])).is_some()
 }
 
-/// Go `http.FS(noListingFS{ui}).Open(name)`: `/` is the root, a leading slash is dropped, and a
-/// directory without an `index.html` is missing.
+/// Opens `name` in the bundle without directory listings: `/` is the root, a leading slash is
+/// dropped, and a directory without an `index.html` is missing.
 fn open_no_listing(name: &str) -> Option<Entry> {
     let name = if name == "/" {
         "."
@@ -291,18 +290,20 @@ fn open_no_listing(name: &str) -> Option<Entry> {
     }
 }
 
-/// The parts of Go's `*url.URL` the file server reads, as Go's server parsed the request target.
+/// The parts of the request URL the file server reads: the decoded path, the raw path and the
+/// raw query.
 struct ReqUrl {
-    /// Go `URL.Path` (decoded).
+    /// The decoded path.
     path: String,
-    /// Go `URL.RawPath`: the path as sent when it is not the default escaping of `path`.
+    /// The path as sent when it is not the default escaping of `path`.
     raw_path: String,
-    /// Go `URL.RawQuery`.
+    /// The raw query.
     raw_query: String,
 }
 
 impl ReqUrl {
-    /// Go `url.setPath(target path)` and the raw query.
+    /// The URL of a request: its path (decoded, with the raw form kept when it differs from the
+    /// default escaping) and raw query.
     fn of(req: &Request) -> ReqUrl {
         let raw = req.uri().path();
         let decoded = go_url::unescape_path(raw).unwrap_or_else(|_| raw.as_bytes().to_vec());
@@ -318,7 +319,8 @@ impl ReqUrl {
         }
     }
 
-    /// Go `URL.EscapedPath()`.
+    /// The escaped path: the raw form when it is a valid encoding of the path, else the default
+    /// escaping.
     fn escaped_path(&self) -> String {
         if !self.raw_path.is_empty()
             && go_url::valid_encoded_path(&self.raw_path)
@@ -333,7 +335,7 @@ impl ReqUrl {
     }
 }
 
-/// Go `spaHandler`: the Angular single-page app out of the embedded bundle.
+/// The Angular single-page app out of the embedded bundle.
 struct Spa {
     prefix: String,
     /// `index.html` with its `<base href>` rewritten.
@@ -341,13 +343,14 @@ struct Spa {
 }
 
 impl Spa {
-    /// Go `spaHandler.ServeHTTP`.
+    /// Serves the index for the UI root and extension-less paths that name no file, else the
+    /// file server.
     fn serve(&self, req: &Request) -> Response {
         let url = ReqUrl::of(req);
         let name = self.fs_path(&url.path);
         match stat(&name) {
-            // noListingFS turns every other directory into a 404, so a directory is only ever
-            // served as its index.html, with the rewritten <base href>.
+            // Every other directory is a 404, so a directory is only ever served as its index.html,
+            // with the rewritten <base href>.
             Some(Entry::Dir) if has_index(&name) => return self.serve_index(req),
             None if path_ext(&name).is_empty() => return self.serve_index(req),
             _ => {}
@@ -355,7 +358,7 @@ impl Spa {
         self.file_server(req, url)
     }
 
-    /// Go `fsPath`: the request path inside the bundle; cleaning keeps `../` inside it.
+    /// The request path inside the bundle; cleaning keeps `../` inside it.
     fn fs_path(&self, url_path: &str) -> String {
         let trimmed = url_path.strip_prefix(&self.prefix).unwrap_or(url_path);
         let cleaned = go_path_clean(&format!("/{trimmed}"));
@@ -365,12 +368,13 @@ impl Spa {
         }
     }
 
-    /// Go `serveIndex`: `http.ServeContent(w, r, "index.html", time.Time{}, index)`.
+    /// Serves the rewritten `index.html`.
     fn serve_index(&self, req: &Request) -> Response {
         serve_content(req, INDEX_FILE, self.index.clone())
     }
 
-    /// Go `http.StripPrefix(prefix, http.FileServer(http.FS(noListingFS{ui})))`.
+    /// The file server over the no-listing bundle: the prefix is stripped from the path (a path
+    /// without it is a 404).
     fn file_server(&self, req: &Request, url: ReqUrl) -> Response {
         let p = url.path.strip_prefix(&self.prefix).unwrap_or(&url.path);
         let rp = url
@@ -381,7 +385,7 @@ impl Spa {
         {
             return not_found();
         }
-        // fileHandler.ServeHTTP: the path made absolute, then cleaned for the file system.
+        // The path is made absolute, then cleaned for the file system.
         let mut stripped = ReqUrl {
             path: p.to_owned(),
             raw_path: rp.to_owned(),
@@ -395,9 +399,9 @@ impl Spa {
     }
 }
 
-/// Go `serveFile(w, r, fs, name, redirect=true)` over the no-listing bundle.
+/// Serves the bundle entry `name`, redirecting to the canonical path.
 fn serve_file(req: &Request, url: &ReqUrl, name: &str) -> Response {
-    // Redirect .../index.html to .../ (relative, as this runs under StripPrefix).
+    // Redirect .../index.html to .../ (relative, as the prefix is already stripped).
     if url.path.ends_with("/index.html") {
         return local_redirect(url, "./");
     }
@@ -428,7 +432,7 @@ fn serve_file(req: &Request, url: &ReqUrl, name: &str) -> Response {
     }
     match entry {
         Entry::File(bytes) => serve_content(req, &go_path_base(name), Bytes::from_static(bytes)),
-        // A directory reaches here only with an index.html (noListingFS), which is served.
+        // A directory reaches here only with an index.html, which is served.
         Entry::Dir => {
             let index = format!("{}/{INDEX_FILE}", name.strip_suffix('/').unwrap_or(name));
             match open_no_listing(&index) {
@@ -445,7 +449,7 @@ fn serve_file(req: &Request, url: &ReqUrl, name: &str) -> Response {
     }
 }
 
-/// Go `localRedirect`: a 301 to `new_path` as given (relative), with the query; a 404 when the
+/// A 301 to `new_path` as given (relative), with the query; a 404 when the
 /// escaped path holds an encoded slash.
 fn local_redirect(url: &ReqUrl, new_path: &str) -> Response {
     let escaped = url.escaped_path();
@@ -465,10 +469,10 @@ fn local_redirect(url: &ReqUrl, new_path: &str) -> Response {
     resp
 }
 
-/// Go `http.ServeContent(w, r, name, time.Time{}, content)` (`serveContent` with a zero
-/// modification time and no `ETag`): preconditions, the content type from `name`'s extension or
-/// sniffed, `Range` (one range → 206 with `Content-Range`, several → `multipart/byteranges`),
-/// `Accept-Ranges: bytes` and `Content-Length`; HEAD gets the headers only.
+/// Serves `content` as `name`, with no modification time and no `ETag`: preconditions, the content
+/// type from `name`'s extension or sniffed, `Range` (one range → 206 with `Content-Range`, several
+/// → `multipart/byteranges`), `Accept-Ranges: bytes` and `Content-Length`; HEAD gets the headers
+/// only.
 fn serve_content(req: &Request, name: &str, content: Bytes) -> Response {
     let range_header = match check_preconditions(req) {
         Ok(range) => range,
@@ -542,12 +546,12 @@ fn ascii_value(s: &str) -> HeaderValue {
     HeaderValue::from_str(s).unwrap_or_else(|_| HeaderValue::from_static(""))
 }
 
-/// Go `fmt.Sprintf("bytes */%d", size)`.
+/// The `Content-Range` value of an unsatisfiable range: `bytes */<size>`.
 fn format_no_overlap(size: usize) -> String {
     format!("bytes */{size}")
 }
 
-/// Go `condResult`.
+/// The result of a conditional-request check: absent, true or false.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Cond {
     None,
@@ -555,19 +559,19 @@ enum Cond {
     False,
 }
 
-/// The response's `ETag`: ServeContent's caller never sets one here.
+/// The response's `ETag`: none is ever set here.
 const ETAG_VALUE: &[u8] = b"";
 
-/// Go `checkPreconditions` (RFC 7232 § 6) with a zero modification time: the `Range` header to
-/// honor (empty for none), or the 412/304 answer. The date preconditions (`If-Unmodified-Since`,
-/// `If-Modified-Since`) never apply to a zero modification time.
+/// Checks the request's preconditions (RFC 7232 § 6) for content with no modification time: the
+/// `Range` header to honor (empty for none), or the 412/304 answer. The date preconditions
+/// (`If-Unmodified-Since`, `If-Modified-Since`) never apply to a zero modification time.
 fn check_preconditions(req: &Request) -> Result<String, Box<Response>> {
     if check_if_match(req) == Cond::False {
         return Err(Box::new(status_only(StatusCode::PRECONDITION_FAILED)));
     }
     if check_if_none_match(req) == Cond::False {
         let status = if req.method() == Method::GET || req.method() == Method::HEAD {
-            // Go `writeNotModified`: none of the representation headers were set yet.
+            // A 304 carries none of the representation headers (none were set yet).
             StatusCode::NOT_MODIFIED
         } else {
             StatusCode::PRECONDITION_FAILED
@@ -581,12 +585,12 @@ fn check_preconditions(req: &Request) -> Result<String, Box<Response>> {
     Ok(String::from_utf8_lossy(range).into_owned())
 }
 
-/// Go `r.Header.Get(name)`: the first value, or empty.
+/// The first value of the request header, or empty.
 fn header<'a>(req: &'a Request, name: &HeaderName) -> &'a [u8] {
     req.headers().get(name).map_or(&[], HeaderValue::as_bytes)
 }
 
-/// Go `checkIfMatch`.
+/// Evaluates `If-Match`.
 fn check_if_match(req: &Request) -> Cond {
     let mut im = header(req, &IF_MATCH);
     if im.is_empty() {
@@ -615,7 +619,7 @@ fn check_if_match(req: &Request) -> Cond {
     Cond::False
 }
 
-/// Go `checkIfNoneMatch`.
+/// Evaluates `If-None-Match`.
 fn check_if_none_match(req: &Request) -> Cond {
     let mut buf = header(req, &IF_NONE_MATCH);
     if buf.is_empty() {
@@ -644,7 +648,7 @@ fn check_if_none_match(req: &Request) -> Cond {
     Cond::True
 }
 
-/// Go `checkIfRange` with a zero modification time: an `If-Range` date never matches.
+/// Evaluates `If-Range` for content with no modification time: an `If-Range` date never matches.
 fn check_if_range(req: &Request) -> Cond {
     if req.method() != Method::GET && req.method() != Method::HEAD {
         return Cond::None;
@@ -660,7 +664,7 @@ fn check_if_range(req: &Request) -> Cond {
     Cond::False
 }
 
-/// Go `scanETag`: a syntactically valid `W/"…"` or `"…"` at the start of `s`, and the rest.
+/// A syntactically valid `W/"…"` or `"…"` at the start of `s`, and the rest.
 fn scan_etag(s: &[u8]) -> (&[u8], &[u8]) {
     let s = trim(s);
     let start = if s.starts_with(b"W/") { 2 } else { 0 };
@@ -677,17 +681,17 @@ fn scan_etag(s: &[u8]) -> (&[u8], &[u8]) {
     (&[], &[])
 }
 
-/// Go `etagStrongMatch`.
+/// Whether two entity tags match strongly (equal, and not weak).
 fn etag_strong_match(a: &[u8], b: &[u8]) -> bool {
     a == b && a.first() == Some(&b'"')
 }
 
-/// Go `etagWeakMatch`.
+/// Whether two entity tags match weakly (equal ignoring a `W/` prefix).
 fn etag_weak_match(a: &[u8], b: &[u8]) -> bool {
     a.strip_prefix(b"W/").unwrap_or(a) == b.strip_prefix(b"W/").unwrap_or(b)
 }
 
-/// Go `textproto.TrimString`: ASCII space, tab, CR and LF off both ends.
+/// `s` without ASCII space, tab, CR and LF at both ends.
 fn trim(s: &[u8]) -> &[u8] {
     let is_space = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r');
     let start = s.iter().position(|b| !is_space(b)).unwrap_or(s.len());
@@ -698,12 +702,12 @@ fn trim(s: &[u8]) -> &[u8] {
     &s[start..end]
 }
 
-/// Go `textproto.TrimString` on a string.
+/// [`trim`] on a string.
 fn trim_str(s: &str) -> &str {
     s.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r'))
 }
 
-/// Go `httpRange`.
+/// A byte range of the content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct HttpRange {
     start: usize,
@@ -711,7 +715,7 @@ struct HttpRange {
 }
 
 impl HttpRange {
-    /// Go `httpRange.contentRange`.
+    /// The `Content-Range` value of this range: `bytes <first>-<last>/<size>`.
     fn content_range(self, size: usize) -> String {
         format!(
             "bytes {}-{}/{size}",
@@ -721,14 +725,16 @@ impl HttpRange {
     }
 }
 
-/// Go `parseRange`'s errors: `errors.New("invalid range")` and `errNoOverlap`.
+/// The errors of [`parse_range`]: a malformed header, and a header none of whose ranges overlap
+/// the content.
 #[derive(Debug, PartialEq, Eq)]
 enum RangeError {
     Invalid,
     NoOverlap,
 }
 
-/// Go `parseRange(s, size)` (RFC 7233), with Go's default limit of 200 ranges.
+/// Parses a `Range` header (RFC 7233) against content of `size` bytes, ignoring a header with
+/// more than 200 ranges.
 fn parse_range(s: &str, size: usize) -> Result<Vec<HttpRange>, RangeError> {
     if s.is_empty() {
         return Ok(Vec::new());
@@ -739,7 +745,7 @@ fn parse_range(s: &str, size: usize) -> Result<Vec<HttpRange>, RangeError> {
     if specs.matches(',').count() + 1 > MAX_CONTENT_RANGES {
         return Ok(Vec::new());
     }
-    // Sizes fit an i64 (the bundle's files are small); Go's arithmetic is int64.
+    // Sizes fit an i64 (the bundle's files are small).
     let size_i = i64::try_from(size).map_err(|_| RangeError::Invalid)?;
     let mut ranges = Vec::new();
     let mut no_overlap = false;
@@ -791,12 +797,12 @@ fn parse_range(s: &str, size: usize) -> Result<Vec<HttpRange>, RangeError> {
     Ok(ranges)
 }
 
-/// Go `strconv.ParseInt(s, 10, 64)` (an optional sign, decimal digits, no overflow).
+/// A decimal integer (an optional sign, digits, no overflow).
 fn parse_int(s: &str) -> Option<i64> {
     s.parse().ok()
 }
 
-/// The `multipart/byteranges` body Go's `mime/multipart.Writer` writes for `ranges`: each part's
+/// The `multipart/byteranges` body for `ranges`: each part's
 /// `Content-Range` and `Content-Type` headers (sorted by name), its bytes, and the closing
 /// boundary.
 fn multipart_byteranges(
@@ -822,7 +828,7 @@ fn multipart_byteranges(
     out
 }
 
-/// Go `multipart.randomBoundary`: 30 random bytes in lower-case hex. The bytes come from the
+/// A multipart boundary: 30 random bytes in lower-case hex. The bytes come from the
 /// standard library's randomly keyed hasher (gadk-launcher has no RNG dependency).
 fn random_boundary() -> String {
     let nanos = std::time::SystemTime::now()
@@ -839,9 +845,9 @@ fn random_boundary() -> String {
     out
 }
 
-/// Go `serveError`: `http.Error(w, text, code)` keeping the headers set so far except
-/// `Cache-Control`, `Content-Encoding`, `ETag`, `Last-Modified` (and `http.Error`'s own
-/// `Content-Length`/`Content-Type` resets).
+/// A plain-text error response keeping the headers set so far except `Cache-Control`,
+/// `Content-Encoding`, `ETag` and `Last-Modified` (`Content-Length` and `Content-Type` are
+/// reset).
 fn serve_error(set: &HeaderMap, status: StatusCode, text: &str) -> Response {
     let mut resp = http_error(status, text);
     for (name, value) in set {
@@ -862,15 +868,14 @@ fn serve_error(set: &HeaderMap, status: StatusCode, text: &str) -> Response {
     resp
 }
 
-/// A response with only a status (Go `w.WriteHeader(code)`; the server adds `Content-Length: 0`
-/// where a body is allowed).
+/// A response with only a status (the server adds `Content-Length: 0` where a body is allowed).
 fn status_only(status: StatusCode) -> Response {
     let mut resp = Response::new(Body::empty());
     *resp.status_mut() = status;
     resp
 }
 
-/// Go `path.Ext`: the suffix from the last `.` in the final element, or empty.
+/// The suffix from the last `.` in the final element, or empty.
 fn path_ext(p: &str) -> &str {
     for (i, b) in p.bytes().enumerate().rev() {
         match b {

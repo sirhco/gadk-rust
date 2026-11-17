@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Launcher errors; `Display` is ADK-Go's error text.
+//! Launcher errors; `Display` is the error text ADK launchers print.
 
-/// A launcher failure (Go's `error` values from `cmd/launcher`); `Display` is Go's text.
+/// A launcher failure; `Display` is the text ADK launchers print.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// A command-line parsing or routing failure (Go `Parse` errors, the universal launcher's
-    /// routing errors).
+    /// A command-line parsing or routing failure (sub-launcher parse errors, the universal
+    /// launcher's routing errors).
     #[error("{0}")]
     Parse(String),
     /// An unusable configuration (sub-launcher setup, flag validation).
@@ -31,7 +31,7 @@ pub enum Error {
     /// Telemetry setup failed.
     #[error("{0}")]
     Telemetry(String),
-    /// Go `fmt.Errorf("<context>: %w", source)`.
+    /// A source error with a context prefix, displayed as `<context>: <source>`.
     #[error("{context}: {source}")]
     Wrapped {
         /// The text before `: `.

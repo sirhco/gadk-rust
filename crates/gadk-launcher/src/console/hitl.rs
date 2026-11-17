@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `cmd/launcher/console/hitl.go`: prompting for pending interrupts (tool confirmations,
+//! Human-in-the-loop prompting: prompting for pending interrupts (tool confirmations,
 //! workflow input requests and other long-running calls) and answering them with function
 //! responses.
 
@@ -26,9 +26,9 @@ use gadk_genai::{FunctionCall, FunctionResponse, Part};
 use gadk_session::Event;
 use serde_json::{Map, Value};
 
-/// Go `pendingInterrupt`: one HITL prompt the agent emitted on the previous turn that still needs
+/// One HITL prompt the agent emitted on the previous turn that still needs
 /// a user reply on the next. The id and name come from a `FunctionCall` part whose ID appears in
-/// `Event::long_running_tool_ids`. Go's nil `args` is an empty map.
+/// `Event::long_running_tool_ids`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PendingInterrupt {
     pub(crate) id: String,
@@ -36,7 +36,7 @@ pub(crate) struct PendingInterrupt {
     pub(crate) args: Map<String, Value>,
 }
 
-/// Go `collectPendingInterrupts`: the `FunctionCall` parts referenced from
+/// The `FunctionCall` parts referenced from
 /// `long_running_tool_ids` on the same event, in order of appearance. Partial events are skipped
 /// (only the final aggregated event represents a settled interrupt) and call IDs are deduplicated
 /// (SSE streaming emits the same function-call event more than once).
@@ -70,9 +70,9 @@ pub(crate) fn collect_pending_interrupts(events: &[Event]) -> Vec<PendingInterru
     out
 }
 
-/// Go `renderInterruptPrompt`: prints the pending interrupt and a `User -> ` input prompt. The
+/// Prints the pending interrupt and a `User -> ` input prompt. The
 /// caller reads the user's reply and passes it to [`build_interrupt_response`]. Write errors are
-/// ignored, as Go's `fmt.Print*` results are.
+/// ignored.
 pub(crate) fn render_interrupt_prompt(out: &mut dyn Write, p: &PendingInterrupt) {
     match p.name.as_str() {
         WORKFLOW_INPUT_FUNCTION_CALL_NAME => render_workflow_input_prompt(out, &p.args),
@@ -82,7 +82,7 @@ pub(crate) fn render_interrupt_prompt(out: &mut dyn Write, p: &PendingInterrupt)
     let _ = out.write_all(b"User -> ");
 }
 
-/// Go `buildInterruptResponse`: the operator's one-line input as a `FunctionResponse` part keyed
+/// The operator's one-line input as a `FunctionResponse` part keyed
 /// by the interrupt's id and name, with the same per-name dispatch as
 /// [`render_interrupt_prompt`].
 pub(crate) fn build_interrupt_response(p: &PendingInterrupt, user_input: &str) -> Part {
@@ -103,8 +103,8 @@ pub(crate) fn build_interrupt_response(p: &PendingInterrupt, user_input: &str) -
     }
 }
 
-/// Go `renderWorkflowInputPrompt`: the workflow request prompt. The args carry the fields
-/// `workflow.NewRequestInputEvent` sets: `interruptId`, `message`, `payload`, `responseSchema`.
+/// The workflow request prompt. The args carry the fields of a workflow input request:
+/// `interruptId`, `message`, `payload`, `responseSchema`.
 pub(crate) fn render_workflow_input_prompt(out: &mut dyn Write, args: &Map<String, Value>) {
     let msg = match args.get("message").and_then(Value::as_str) {
         Some(m) if !m.is_empty() => m,
@@ -113,7 +113,7 @@ pub(crate) fn render_workflow_input_prompt(out: &mut dyn Write, args: &Map<Strin
     let _ = writeln!(out, "Agent -> {msg}");
     if let Some(payload) = args.get("payload").filter(|v| !v.is_null()) {
         // Strings print raw; other values as pretty JSON aligned under the "  Payload: " label
-        // (Go json.MarshalIndent(payload, "  ", "  ")).
+        // (indented with a two-space prefix and unit).
         match payload.as_str() {
             Some(s) => {
                 let _ = writeln!(out, "  Payload: {s}");
@@ -128,22 +128,21 @@ pub(crate) fn render_workflow_input_prompt(out: &mut dyn Write, args: &Map<Strin
     }
 }
 
-/// Go `workflowInputResponseFromUserInput`: a JSON object reply is returned verbatim, other JSON
+/// A JSON object reply is returned verbatim, other JSON
 /// values are wrapped under `payload`, and unparseable input is passed through under `payload`.
 fn workflow_input_response_from_user_input(line: &str) -> Map<String, Value> {
     wrap_reply(line, "payload")
 }
 
-/// Go `renderToolConfirmationPrompt`: `Agent -> Confirm <original tool>?` (`unknown` when the
+/// `Agent -> Confirm <original tool>?` (`unknown` when the
 /// original call cannot be read) and the answer hint.
 ///
-/// Go prints `args["toolConfirmation"]`'s hint when that value is a `map[string]any`. On the events
-/// the runner yields it never is: Go's flow stores the `toolconfirmation.ToolConfirmation` struct
-/// itself there (`internal/llminternal/functions.go`), so the assertion fails and Go always prints
-/// the fallback (the probe's `hitl_*` fixtures record `Confirm transfer_funds?` for a tool whose
-/// hint is `Please approve or reject the tool call transfer_funds() …`). gadk's args are JSON, so
-/// the hint is skipped here to print what Go prints. Go does print the hint when the args were
-/// decoded from JSON into a map (e.g. a remote A2A sub-agent's events); gadk never does (ledger 6).
+/// The `toolConfirmation` hint in the args is not printed, so the prompt is always this fallback
+/// (`Confirm transfer_funds?` even for a tool whose hint reads `Please approve or reject the tool
+/// call transfer_funds() …`). That is the text an ADK console prints for the events its runner
+/// yields, where the hint is not a JSON map; gadk's args are JSON, so skipping the hint
+/// reproduces it. An ADK console does print the hint when the args were decoded from JSON into a
+/// map (for example a remote A2A sub-agent's events); this one never does.
 fn render_tool_confirmation_prompt(out: &mut dyn Write, args: &Map<String, Value>) {
     let call = FunctionCall {
         args: args.clone(),
@@ -157,7 +156,7 @@ fn render_tool_confirmation_prompt(out: &mut dyn Write, args: &Map<String, Value
     let _ = writeln!(out, "  Type 'yes' to confirm, anything else to reject.");
 }
 
-/// Go `toolConfirmationResponseFromUserInput`: `y`/`yes`/`true`/`confirm` (case-insensitive,
+/// `y`/`yes`/`true`/`confirm` (case-insensitive,
 /// surrounding space ignored) → `{"confirmed": true}`; anything else, a blank line included,
 /// → `{"confirmed": false}`.
 fn tool_confirmation_response_from_user_input(line: &str) -> Map<String, Value> {
@@ -166,7 +165,7 @@ fn tool_confirmation_response_from_user_input(line: &str) -> Map<String, Value> 
     Map::from_iter([("confirmed".to_owned(), Value::Bool(confirmed))])
 }
 
-/// Go `renderGenericInterruptPrompt`: the fallback for kinds the launcher does not recognize; the
+/// The fallback for kinds the launcher does not recognize; the
 /// kind name and the raw args.
 fn render_generic_interrupt_prompt(out: &mut dyn Write, name: &str, args: &Map<String, Value>) {
     let _ = writeln!(out, "Agent -> waiting for response (kind: {name})");
@@ -179,14 +178,14 @@ fn render_generic_interrupt_prompt(out: &mut dyn Write, name: &str, args: &Map<S
     }
 }
 
-/// Go `genericResponseFromUserInput`: a JSON object reply is returned verbatim, other JSON values
+/// A JSON object reply is returned verbatim, other JSON values
 /// and raw text are wrapped under `result`.
 fn generic_response_from_user_input(line: &str) -> Map<String, Value> {
     wrap_reply(line, "result")
 }
 
-/// The shared body of Go's two JSON-or-text reply parsers. Numbers keep serde's integer/float
-/// distinction where Go decodes every JSON number as `float64`.
+/// The shared body of the two JSON-or-text reply parsers. Numbers keep serde's integer/float
+/// distinction.
 fn wrap_reply(line: &str, key: &str) -> Map<String, Value> {
     let value = match serde_json::from_str::<Value>(line) {
         Ok(Value::Object(m)) => return m,
@@ -196,8 +195,7 @@ fn wrap_reply(line: &str, key: &str) -> Map<String, Value> {
     Map::from_iter([(key.to_owned(), value)])
 }
 
-/// Go console.go `renderOutput`: a node's `Output` value for the console; strings as they are,
-/// anything else as compact JSON (Go `json.Marshal`).
+/// A node's output value for the console; strings as they are, anything else as compact JSON.
 pub(crate) fn render_output(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -205,9 +203,9 @@ pub(crate) fn render_output(v: &Value) -> String {
     }
 }
 
-/// Go `json.Marshal` (`indent == None`) or `json.MarshalIndent(v, prefix, indent)` of a decoded
-/// JSON value: [`gadk_model::to_go_json`] (map keys sorted, `<`, `>`, `&`, U+2028 and U+2029
-/// escaped, floats in Go's format), then Go's `json.Indent` when indenting.
+/// A decoded JSON value as compact text (`indent == None`) or indented with `(prefix, unit)`:
+/// [`gadk_model::to_go_json`] (map keys sorted, `<`, `>`, `&`, U+2028 and U+2029 escaped, float32
+/// values in their shortest text), then [`go_indent`] when indenting.
 fn go_json(v: &Value, indent: Option<(&str, &str)>) -> String {
     let compact = gadk_model::to_go_json(v).unwrap_or_default();
     let bytes = match indent {
@@ -217,7 +215,7 @@ fn go_json(v: &Value, indent: Option<(&str, &str)>) -> String {
     String::from_utf8(bytes).unwrap_or_default()
 }
 
-/// Go `json.Indent(dst, src, prefix, indent)` of compact JSON: a line break (newline, `prefix`,
+/// Indents compact JSON: a line break (newline, `prefix`,
 /// one `indent` per nesting level) after `{`, `[` and `,` and before the closing bracket, a space
 /// after `:`; `{}` and `[]` stay as they are.
 fn go_indent(src: &[u8], prefix: &str, indent: &str) -> Vec<u8> {

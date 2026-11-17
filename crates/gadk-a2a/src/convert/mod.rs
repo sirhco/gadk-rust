@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! ADK ↔ A2A conversions shared by the server and the remote agent (port of ADK-Go
-//! `server/adka2a/v2` `parts.go`, `events.go`, `metadata.go`, `extension.go` and the
-//! `WithoutPartialArtifacts` helper of `utils.go`). Pure functions; no I/O.
+//! ADK ↔ A2A conversions shared by the server and the remote agent (parts, events,
+//! metadata and the ADK extension marker). Pure functions; no I/O.
 
 mod events;
 mod extension;
@@ -35,23 +34,22 @@ pub use parts::*;
 
 use crate::Error;
 
-/// Go `A2APartConverter`: converts one A2A part to a genai part; `Ok(None)` drops the part (Go's
-/// `nil` return).
+/// Converts one A2A part to a genai part; `Ok(None)` drops the part.
 pub type A2APartConverter = Arc<
     dyn Fn(StreamResponseRef<'_>, &a2a::Part) -> BoxFuture<'static, Result<Option<Part>, Error>>
         + Send
         + Sync,
 >;
 
-/// Go `GenAIPartConverter`: converts one genai part (of `event`, when there is one) to an A2A
-/// part; `Ok(None)` drops the part (Go's `nil` return).
+/// Converts one genai part (of `event`, when there is one) to an A2A part; `Ok(None)` drops the
+/// part.
 pub type GenAIPartConverter = Arc<
     dyn Fn(Option<&Event>, &Part) -> BoxFuture<'static, Result<Option<a2a::Part>, Error>>
         + Send
         + Sync,
 >;
 
-/// The A2A event a part came from (Go passes the `a2a.Event`); `None` for a bare message
+/// The A2A event a part came from (an event or a bare message); `None` for a bare message
 /// conversion.
 #[derive(Debug, Clone, Copy)]
 pub enum StreamResponseRef<'a> {

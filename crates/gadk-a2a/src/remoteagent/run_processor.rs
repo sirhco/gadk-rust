@@ -14,8 +14,7 @@
 // limitations under the License.
 
 //! The remote agent's per-invocation processor: partial-artifact aggregation, response
-//! conversion and the request callbacks (port of ADK-Go
-//! `agent/remoteagent/v2/a2a_agent_run_processor.go`).
+//! conversion and the request callbacks.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,10 +34,10 @@ use crate::convert::{
     to_adk_meta_key, to_map_structure, to_session_event_with_parts,
 };
 
-/// Go `converters.ToMapStructure`'s result (`None` = Go's nil map).
+/// The result of [`to_map_structure`] (`None` = a `null` value).
 type MapStructure = Option<Map<String, Value>>;
 
-/// Go `artifactAggregation`: the partial chunks of one artifact seen so far.
+/// The partial chunks of one artifact seen so far.
 #[derive(Debug, Default)]
 pub(crate) struct ArtifactAggregation {
     pub(crate) parts: Vec<Part>,
@@ -54,11 +53,12 @@ pub(crate) struct ToEmit {
     /// The event.
     pub(crate) event: Event,
     /// Whether it is the event passed in (its after-request callbacks already ran), not one
-    /// synthesized from buffered chunks (Go compares the pointers).
+    /// synthesized from buffered chunks.
     pub(crate) passthrough: bool,
 }
 
-/// Go `a2aAgentRunProcessor`.
+/// The state of one remote agent invocation: its config, the request and the partial-artifact
+/// aggregations.
 pub(crate) struct RunProcessor {
     config: Arc<A2AConfig>,
     request: a2a::SendMessageRequest,
@@ -69,7 +69,7 @@ pub(crate) struct RunProcessor {
 }
 
 impl RunProcessor {
-    /// Go `newRunProcessor`.
+    /// A processor for one invocation's `request`.
     pub(crate) fn new(config: Arc<A2AConfig>, request: a2a::SendMessageRequest) -> Self {
         Self {
             config,
@@ -79,7 +79,7 @@ impl RunProcessor {
         }
     }
 
-    /// Go `aggregatePartial`: stores the contents of partial artifact chunks so that they are
+    /// Stores the contents of partial artifact chunks so that they are
     /// emitted as one non-partial event with the last chunk or the terminal status update. It
     /// may modify `event` or add synthesized events before or after it.
     pub(crate) fn aggregate_partial(
@@ -163,18 +163,19 @@ impl RunProcessor {
         }
     }
 
-    /// Go `removeAggregation`.
+    /// Drops the aggregation of artifact `aid`.
     fn remove_aggregation(&mut self, aid: &str) {
         self.aggregations.remove(aid);
         self.remove_from_order(aid);
     }
 
-    /// Go `removeFromOrder`.
+    /// Drops `aid` from the emit order.
     fn remove_from_order(&mut self, aid: &str) {
         self.aggregation_order.retain(|id| id != aid);
     }
 
-    /// Go `updateAggregation`.
+    /// Adds the parts and metadata of `event` to the aggregation of artifact `aid` and moves it to
+    /// the end of the emit order.
     fn update_aggregation(&mut self, aid: &str, agg: &mut ArtifactAggregation, event: &Event) {
         if let Some(content) = &event.response.content {
             for part in &content.parts {
@@ -204,8 +205,7 @@ impl RunProcessor {
                 .citations
                 .extend(citation.citations.iter().cloned());
         }
-        // Go copies a non-nil map; gadk's `Map` cannot tell empty from nil, so an empty one is
-        // skipped (copying nothing either way).
+        // An empty map is skipped: copying it would add nothing.
         if !event.response.custom_metadata.is_empty() {
             agg.custom_meta.get_or_insert_with(Map::new).extend(
                 event
@@ -227,9 +227,9 @@ impl RunProcessor {
         self.aggregation_order.push(aid.to_owned());
     }
 
-    /// Go `convertToSessionEvent`: the session event for one remote response; a transport error
-    /// or a conversion failure is returned as the error (Go 4d841aba); `None` when nothing
-    /// should be emitted.
+    /// The session event for one remote response; a transport error
+    /// or a conversion failure is returned as the error; `None` when nothing should be
+    /// emitted.
     pub(crate) async fn convert_to_session_event(
         &self,
         ctx: &InvocationContext,
@@ -261,7 +261,7 @@ impl RunProcessor {
         }))
     }
 
-    /// Go `runBeforeA2ARequestCallbacks`: the first callback returning an event or an error
+    /// The first callback returning an event or an error
     /// decides.
     pub(crate) async fn run_before_request_callbacks(
         &self,
@@ -276,7 +276,7 @@ impl RunProcessor {
         Ok(None)
     }
 
-    /// Go `runAfterA2ARequestCallbacks`: `Ok(None)` when there is nothing to report or no
+    /// `Ok(None)` when there is nothing to report or no
     /// callback returned an event or an error; otherwise the first callback's answer.
     pub(crate) async fn run_after_request_callbacks(
         &self,
@@ -296,7 +296,7 @@ impl RunProcessor {
         Ok(None)
     }
 
-    /// Go `updateCustomMetadata`: records the request (on the turn-complete event only, to avoid
+    /// Records the request (on the turn-complete event only, to avoid
     /// duplicating it on every streamed event) and the response under `a2a:request` /
     /// `a2a:response`, or the encode error under `a2a:<key>_codec_error`.
     pub(crate) fn update_custom_metadata(
@@ -330,11 +330,10 @@ impl RunProcessor {
     }
 }
 
-/// The A2A event as Go's default conversion leaves it once it produced a session event: Go's
-/// `processA2AMeta` merges an artifact update's artifact metadata into the update's own
-/// metadata map in place when that map exists, so every later `Meta()` read (the partial flag,
-/// the transfer-to-agent value, the `a2a:response` dump) sees the merged keys. `None` when the
-/// event is unchanged.
+/// The A2A event as the default conversion leaves it once it produced a session event: the
+/// conversion merges an artifact update's artifact metadata into the update's own metadata map
+/// when that map exists, so every later metadata read (the partial flag, the transfer-to-agent
+/// value, the `a2a:response` dump) sees the merged keys. `None` when the event is unchanged.
 pub(crate) fn converted_view(a2a_event: &a2a::StreamResponse) -> Option<a2a::StreamResponse> {
     let a2a::StreamResponse::ArtifactUpdate(update) = a2a_event else {
         return None;
@@ -350,7 +349,7 @@ pub(crate) fn converted_view(a2a_event: &a2a::StreamResponse) -> Option<a2a::Str
     Some(a2a::StreamResponse::ArtifactUpdate(update))
 }
 
-/// Go `converters.ToMapStructure(event)` of an `a2a.Event`: the task, message or update itself,
+/// The map of the stream event: the task, message or update itself,
 /// not a2a-rs's `StreamResponse` wrapper object.
 fn stream_response_map(response: &a2a::StreamResponse) -> Result<MapStructure, Error> {
     match response {
@@ -361,7 +360,7 @@ fn stream_response_map(response: &a2a::StreamResponse) -> Result<MapStructure, E
     }
 }
 
-/// Go `buildNonPartialAggregation`.
+/// The non-partial event that carries an artifact's aggregated parts and metadata.
 fn build_non_partial_aggregation(ctx: &InvocationContext, agg: &ArtifactAggregation) -> Event {
     let mut result = new_remote_agent_event(ctx);
     result.response.content = Some(Content::from_parts(agg.parts.clone(), ROLE_MODEL));
@@ -372,7 +371,7 @@ fn build_non_partial_aggregation(ctx: &InvocationContext, agg: &ArtifactAggregat
     result
 }
 
-/// Go `icontext.NewCallbackContext(ctx)`: the invocation as a callback context with fresh
+/// The invocation as a callback context with fresh
 /// actions.
 pub(crate) fn callback_context(ctx: &InvocationContext) -> Context {
     ctx.clone().into_context().with_delta(ContextDelta {

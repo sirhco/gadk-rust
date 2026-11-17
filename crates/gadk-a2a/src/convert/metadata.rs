@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Metadata conversions (port of ADK-Go `server/adka2a/v2/metadata.go`). Go's
-//! `toInvocationMeta` reads the a2a-rs request context and belongs to the executor; its pure
-//! counterpart [`to_event_meta`] takes the invocation metadata map as `base`.
+//! Metadata conversions between session events and A2A metadata maps. Reading the invocation
+//! metadata from the a2a-rs request context belongs to the executor; [`to_event_meta`] takes the
+//! resulting invocation metadata map as `base`.
 
 use std::collections::HashMap;
 
@@ -28,41 +28,41 @@ use serde_json::{Map, Value};
 use super::events::to_custom_metadata;
 use crate::Error;
 
-/// Go `customMetaTaskIDKey`: the session event custom-metadata key of the A2A task ID.
+/// The session event custom-metadata key of the A2A task ID.
 pub(crate) const CUSTOM_META_TASK_ID_KEY: &str = "a2a:task_id";
-/// Go `customMetaContextIDKey`: the session event custom-metadata key of the A2A context ID.
+/// The session event custom-metadata key of the A2A context ID.
 pub(crate) const CUSTOM_META_CONTEXT_ID_KEY: &str = "a2a:context_id";
 
-/// Go `metadataEscalateKey`.
+/// A2A metadata key of the `escalate` action.
 pub(crate) const METADATA_ESCALATE_KEY: &str = "adk_escalate";
-/// Go `metadataTransferToAgentKey`.
+/// A2A metadata key of the `transfer_to_agent` action.
 pub(crate) const METADATA_TRANSFER_TO_AGENT_KEY: &str = "adk_transfer_to_agent";
-/// Go `metadataErrorCodeKey`.
+/// A2A metadata key of the event's error code.
 pub(crate) const METADATA_ERROR_CODE_KEY: &str = "adk_error_code";
-/// Go `metadataCitationKey`.
+/// A2A metadata key of the citation metadata.
 pub(crate) const METADATA_CITATION_KEY: &str = "adk_citation_metadata";
-/// Go `metadataGroundingKey`.
+/// A2A metadata key of the grounding metadata.
 pub(crate) const METADATA_GROUNDING_KEY: &str = "adk_grounding_metadata";
-/// Go `metadataUsageKey`.
+/// A2A metadata key of the usage metadata.
 pub(crate) const METADATA_USAGE_KEY: &str = "adk_usage_metadata";
-/// Go `metadataCustomMetaKey`.
+/// A2A metadata key of the event's custom metadata.
 pub(crate) const METADATA_CUSTOM_META_KEY: &str = "adk_custom_metadata";
-/// Go `metadataPartialKey`.
+/// A2A metadata key of the partial flag.
 pub(crate) const METADATA_PARTIAL_KEY: &str = "adk_partial";
-/// Go `metadataIsErrMessageKey`.
+/// A2A metadata key marking a failed task's status text part as the error message.
 pub(crate) const METADATA_IS_ERR_MESSAGE_KEY: &str = "adk_is_error_message";
 
-/// Go `ToA2AMetaKey`: adds the prefix that marks ADK values in A2A metadata.
+/// Adds the prefix that marks ADK values in A2A metadata.
 pub fn to_a2a_meta_key(key: &str) -> String {
     format!("adk_{key}")
 }
 
-/// Go `ToADKMetaKey`: adds the prefix that marks A2A values in session event custom metadata.
+/// Adds the prefix that marks A2A values in session event custom metadata.
 pub fn to_adk_meta_key(key: &str) -> String {
     format!("a2a:{key}")
 }
 
-/// Go `TransferToAgentFromMeta`: the `transfer_to_agent` value a remote peer set on its response
+/// The `transfer_to_agent` value a remote peer set on its response
 /// metadata. The conversions never restore it (it drives the local orchestrator's control flow);
 /// a caller that trusts the peer restores it explicitly with this.
 pub fn transfer_to_agent_from_meta(meta: Option<&HashMap<String, Value>>) -> Option<String> {
@@ -72,7 +72,7 @@ pub fn transfer_to_agent_from_meta(meta: Option<&HashMap<String, Value>>) -> Opt
     }
 }
 
-/// Go `toEventActions`: only `escalate` is restored from peer metadata; `transfer_to_agent` is
+/// Only `escalate` is restored from peer metadata; `transfer_to_agent` is
 /// intentionally not.
 pub(crate) fn to_event_actions(meta: Option<&HashMap<String, Value>>) -> EventActions {
     let escalate = matches!(
@@ -85,8 +85,9 @@ pub(crate) fn to_event_actions(meta: Option<&HashMap<String, Value>>) -> EventAc
     }
 }
 
-/// Go `toEventMeta(meta, event)`, where `base` is Go's `invocationMeta.eventMeta` (empty for
-/// [`super::event_to_message`], as Go passes `invocationMeta{}`).
+/// The A2A metadata of `event`: `base` (the invocation metadata; empty for
+/// [`super::event_to_message`]) plus the event's identifiers, citation, grounding, usage and custom
+/// metadata and error code.
 pub(crate) fn to_event_meta(
     base: &HashMap<String, Value>,
     event: &Event,
@@ -132,8 +133,8 @@ pub(crate) fn to_event_meta(
     Ok(result)
 }
 
-/// Go `setActionsMeta`: writes `escalate` and `transfer_to_agent`. Go returns a nil map unchanged
-/// when neither is set; callers here keep `None` for an empty map.
+/// Writes `escalate` and `transfer_to_agent`; nothing is written when neither is set. Callers
+/// keep `None` for an empty map.
 pub(crate) fn set_actions_meta(meta: &mut HashMap<String, Value>, actions: &EventActions) {
     if actions.escalate {
         meta.insert(METADATA_ESCALATE_KEY.to_owned(), Value::Bool(true));
@@ -146,7 +147,7 @@ pub(crate) fn set_actions_meta(meta: &mut HashMap<String, Value>, actions: &Even
     }
 }
 
-/// Go `processA2AMeta`: restores citation, grounding and usage metadata, the custom metadata
+/// Restores citation, grounding and usage metadata, the custom metadata
 /// (with the A2A task and context IDs), the error code and the actions from an A2A event.
 pub(crate) fn process_a2a_meta(
     a2a_event: &a2a::StreamResponse,
@@ -166,8 +167,8 @@ pub(crate) fn process_a2a_meta(
     )
 }
 
-/// `processA2AMeta` over the pieces of an A2A event: its task info, its own metadata and, for an
-/// artifact update, the artifact's metadata. Lets a bare message (a task status message) be
+/// [`process_a2a_meta`] over the pieces of an A2A event: its task info, its own metadata and, for
+/// an artifact update, the artifact's metadata. Lets a bare message (a task status message) be
 /// processed without building a [`a2a::StreamResponse`].
 pub(crate) fn process_meta_view(
     task_id: &str,
@@ -193,7 +194,7 @@ pub(crate) fn process_meta_view(
 
     event.response.custom_metadata = to_custom_metadata(task_id, context_id);
     if let Some(Value::Object(user_meta)) = meta.and_then(|m| m.get(METADATA_CUSTOM_META_KEY)) {
-        // Through Go's JSON text, so protobuf-decoded integral floats (`12.0`) are integers again.
+        // Through JSON text, so protobuf-decoded integral floats (`12.0`) are integers again.
         let user_meta: Map<String, Value> = from_map_structure(user_meta)?;
         event.response.custom_metadata.extend(user_meta);
         event.response.custom_metadata.remove(BEFORE_RUN_REPLY_KEY);
@@ -203,17 +204,16 @@ pub(crate) fn process_meta_view(
         event.response.error_code = code.clone();
     }
 
-    // Go merges the artifact metadata into the event's own map in place when that map exists,
-    // so `a2aEvent.Meta()` (read for the actions) then sees the merged keys; without an own map
-    // the merge goes to a fresh map and the actions see none.
+    // When the event has its own metadata map, the artifact metadata is merged into it, so the
+    // actions are read from the merged keys; without an own map the actions see none.
     let actions_meta = if own_meta.is_some() { meta } else { None };
     event.actions = to_event_actions(actions_meta);
     Ok(())
 }
 
-/// The metadata Go's `processA2AMeta` leaves visible through an artifact update's `Meta()`: the
-/// update's own map with the artifact's metadata merged in, or `None` when the update has no map
-/// of its own. Go reads the partial flag of an artifact update from this view.
+/// The metadata [`process_a2a_meta`] leaves visible on an artifact update: the update's own map
+/// with the artifact's metadata merged in, or `None` when the update has no map of its own. The
+/// partial flag of an artifact update is read from this view.
 pub(crate) fn artifact_update_visible_meta(
     update: &a2a::TaskArtifactUpdateEvent,
 ) -> Option<HashMap<String, Value>> {
@@ -236,7 +236,7 @@ fn merge_artifact_meta(
     Some(merged)
 }
 
-/// Go `a2a.Event.TaskInfo()`: `(task_id, context_id)`; a message without them yields `""`.
+/// `(task_id, context_id)`; a message without them yields `""`.
 pub(crate) fn stream_task_info(event: &a2a::StreamResponse) -> (&str, &str) {
     match event {
         a2a::StreamResponse::Task(task) => (&task.id, &task.context_id),
@@ -249,7 +249,7 @@ pub(crate) fn stream_task_info(event: &a2a::StreamResponse) -> (&str, &str) {
     }
 }
 
-/// Go `a2a.Event.Meta()`.
+/// The metadata map of the stream event, whichever variant it is.
 pub(crate) fn stream_meta(event: &a2a::StreamResponse) -> Option<&HashMap<String, Value>> {
     match event {
         a2a::StreamResponse::Task(task) => task.metadata.as_ref(),
@@ -259,9 +259,9 @@ pub(crate) fn stream_meta(event: &a2a::StreamResponse) -> Option<&HashMap<String
     }
 }
 
-/// Go `converters.ToMapStructure`: `json.Marshal` then `json.Unmarshal` into a
-/// `map[string]any`. Marshalling through [`gadk_model::to_go_json`] keeps Go's float32 text
-/// (`23.3`, not `23.299999237060547`). `Ok(None)` is Go's nil map (`null`).
+/// Serializes `data` to JSON and decodes it as a JSON object map. Serializing through
+/// [`gadk_model::to_go_json`] writes float32 values in their shortest text (`23.3`, not
+/// `23.299999237060547`). `Ok(None)` is a `null` value.
 pub(crate) fn to_map_structure<T: Serialize + ?Sized>(
     data: &T,
 ) -> Result<Option<Map<String, Value>>, Error> {
@@ -273,7 +273,8 @@ pub(crate) fn to_map_structure<T: Serialize + ?Sized>(
     }
 }
 
-/// Go `json.Unmarshal`'s error for a non-object JSON value decoded into `map[string]any`.
+/// The error for a non-object JSON value decoded into a map, byte-identical to an ADK server's
+/// error text; see the literal in this function.
 pub(crate) fn unmarshal_into_map_error(value: &Value) -> Error {
     let kind = match value {
         Value::Bool(_) => "bool",
@@ -288,7 +289,7 @@ pub(crate) fn unmarshal_into_map_error(value: &Value) -> Error {
     ))
 }
 
-/// Go `addMeta`: stores `data` under `key` as a JSON object; absent or `null` data is skipped.
+/// Stores `data` under `key` as a JSON object; absent or `null` data is skipped.
 fn add_meta<T: Serialize>(
     result: &mut HashMap<String, Value>,
     key: &str,
@@ -303,7 +304,7 @@ fn add_meta<T: Serialize>(
     Ok(())
 }
 
-/// Go `processMeta`: decodes the JSON object under `key`, when there is one, into `target`.
+/// Decodes the JSON object under `key`, when there is one, into `target`.
 fn process_meta<T: DeserializeOwned>(
     key: &str,
     meta: Option<&HashMap<String, Value>>,
@@ -315,10 +316,10 @@ fn process_meta<T: DeserializeOwned>(
     Ok(())
 }
 
-/// Go `converters.FromMapStructure`: `json.Marshal` then `json.Unmarshal` into `T`. Going
-/// through Go's JSON text matters: a2a-rs's JSON-RPC and REST clients decode metadata through
-/// protobuf `Struct`, so every number arrives as an `f64` (`12.0`), which serde refuses for an
-/// integer field; Go's marshaller writes an integral float as `12`, which decodes.
+/// Serializes `data` to JSON text and decodes it as `T`. Going through JSON text matters:
+/// a2a-rs's JSON-RPC and REST clients decode metadata through protobuf `Struct`, so every number
+/// arrives as an `f64` (`12.0`), which serde refuses for an integer field;
+/// [`gadk_model::to_go_json`] writes an integral float as `12`, which decodes.
 pub(crate) fn from_map_structure<T: DeserializeOwned>(
     data: &Map<String, Value>,
 ) -> Result<T, Error> {

@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `cmd/launcher/web/a2a`: the sub-launcher that serves the root agent over A2A
+//! The sub-launcher that serves the root agent over A2A
 //! JSON-RPC v1 at `/a2a/v1/invoke`, with its agent card at `/.well-known/agent-card.json`.
 //!
-//! Go also serves A2A 0.3 at `/a2a/invoke` and publishes a card that is the union of the v1 and
-//! 0.3 shapes; a2a-rs implements v1 only, so neither is served here (parity ledger 6).
+//! ADK launchers also serve A2A 0.3 at `/a2a/invoke` and publish a card that is the union of the
+//! v1 and 0.3 shapes; a2a-rs implements v1 only, so neither is served here.
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -52,18 +52,18 @@ use crate::error::Error;
 use crate::flag_usage::format_flag_usage;
 use crate::web::{WebRouter, WebSublauncher, axum_handler};
 
-/// Go `apiPath`: the suffix of the A2A v1 invocation URL.
+/// The suffix of the A2A v1 invocation URL.
 const API_PATH: &str = "/a2a/v1/invoke";
 
-/// Go `a2aLauncher`.
+/// The `a2a` web sub-launcher.
 pub struct A2ALauncher {
-    /// Go `flags` (behind a mutex: `WebSublauncher` is `Sync`).
+    /// The `a2a` flags (behind a mutex: `WebSublauncher` is `Sync`).
     flags: Mutex<FlagSet>,
-    /// Go `config.agentURL`: the A2A host URL the agent card advertises.
+    /// The A2A host URL the agent card advertises.
     agent_url: Flag<String>,
 }
 
-/// Go `a2a.NewLauncher()`.
+/// An `a2a` launcher with its `a2a_agent_url` flag.
 pub fn new() -> A2ALauncher {
     let mut fs = FlagSet::new("a2a");
     let agent_url = fs.string(
@@ -78,16 +78,16 @@ pub fn new() -> A2ALauncher {
 }
 
 impl A2ALauncher {
-    /// Replaces where the `a2a` flag set writes its errors and usage (Go `fs.SetOutput`; default
+    /// Replaces where the `a2a` flag set writes its errors and usage (default
     /// stderr), for tests and the CLI replay.
     pub fn with_flag_output(self, out: Arc<Mutex<dyn Write + Send>>) -> A2ALauncher {
         lock(&self.flags).set_output(out);
         self
     }
 
-    /// The JSON-RPC v1 router over the request handler `config` makes of the default one (Go
-    /// `a2asrv.NewHandler(executor, config.A2AOptions...)`): every option in order, then every
-    /// wrapper in order; without wrappers the configured default handler is served directly.
+    /// The JSON-RPC v1 router over the request handler `config` makes of the default one : every
+    /// option in order, then every wrapper in order; without wrappers the configured default
+    /// handler is served directly.
     fn jsonrpc_routes(config: &Config, default: DefaultRequestHandler) -> axum::Router {
         let configured = config
             .a2a_options
@@ -107,12 +107,12 @@ impl A2ALauncher {
 }
 
 impl WebSublauncher for A2ALauncher {
-    /// Go `Keyword()`.
+    /// The keyword `a2a`.
     fn keyword(&self) -> String {
         "a2a".to_owned()
     }
 
-    /// Go `Parse`.
+    /// Parses the `a2a` flags.
     fn parse(&mut self, args: Vec<String>) -> Result<Vec<String>, Error> {
         let fs = self.flags.get_mut().unwrap_or_else(|e| e.into_inner());
         if let Err(e) = fs.parse(&args) {
@@ -121,22 +121,22 @@ impl WebSublauncher for A2ALauncher {
         Ok(fs.args())
     }
 
-    /// Go `CommandLineSyntax()`.
+    /// The flag usage text.
     fn command_line_syntax(&self) -> String {
         format_flag_usage(&lock(&self.flags))
     }
 
-    /// Go `SimpleDescription()`.
+    /// A one-line description.
     fn simple_description(&self) -> String {
         format!("starts A2A server which handles jsonrpc requests on {API_PATH} path")
     }
 
-    /// Go `SetupSubrouters`: refuses a compaction config this surface cannot serve, then mounts
+    /// Refuses a compaction config this surface cannot serve, then mounts
     /// the agent card and the JSON-RPC v1 endpoint (no authentication).
     fn setup_subrouters(&self, router: &mut WebRouter, config: &mut Config) -> Result<(), Error> {
         let root_agent = config.agent_loader.root_agent();
         // The web launcher fills in the services before it builds its router; called on its own,
-        // an unset session service gets an in-memory one (Go passes nil and fails each request).
+        // an unset session service gets an in-memory one.
         let session_service: Arc<dyn SessionService> = match &config.session_service {
             Some(s) => Arc::clone(s),
             None => Arc::new(InMemorySessionService::new()),
@@ -153,7 +153,7 @@ impl WebSublauncher for A2ALauncher {
             compaction: config.compaction.clone(),
         };
 
-        // Go's dry run: a compaction config can pass its own shape check and still be
+        // A dry run: a compaction config can pass its own shape check and still be
         // unservable, and without this the process starts healthy and then fails every request.
         gadk_engine::compactionvalidate::against_root_agent(
             config.compaction.as_ref(),
@@ -162,7 +162,7 @@ impl WebSublauncher for A2ALauncher {
         )
         .map_err(|e| Error::Config(e.to_string()))?;
 
-        // Go also joins `/a2a/invoke` (0.3) here; a2a-rs serves v1 only (parity ledger 6).
+        // Only the v1 URL is advertised: a2a-rs serves v1 only.
         let public_url = join_url(&self.agent_url.get(), API_PATH)?;
         let card = agent_card(root_agent.as_ref(), public_url);
         router.handle(
@@ -184,7 +184,7 @@ impl WebSublauncher for A2ALauncher {
         Ok(())
     }
 
-    /// Go `UserMessage`.
+    /// The startup line for this sub-launcher.
     fn user_message(&self, web_url: &str, printer: &mut dyn FnMut(&str)) {
         printer(&format!(
             "       a2a:  you can access A2A using jsonrpc protocol: {web_url}"
@@ -192,7 +192,7 @@ impl WebSublauncher for A2ALauncher {
     }
 }
 
-/// Go `url.JoinPath(base, elem)`.
+/// `elem` joined onto the path of `base` (path elements cleaned and joined with `/`).
 fn join_url(base: &str, elem: &str) -> Result<String, Error> {
     let base = go_url::parse(base).map_err(|e| Error::Config(e.to_string()))?;
     Ok(base
@@ -201,7 +201,7 @@ fn join_url(base: &str, elem: &str) -> Result<String, Error> {
         .to_go_string())
 }
 
-/// The card Go's `SetupSubrouters` builds, without its 0.3 interface (parity ledger 6).
+/// The agent card of the root agent, with the v1 interface only.
 fn agent_card(root_agent: &dyn Agent, public_url: String) -> AgentCard {
     AgentCard {
         name: root_agent.name().to_owned(),

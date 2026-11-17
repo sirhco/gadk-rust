@@ -13,15 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-a2a: the Agent2Agent (A2A) protocol for gadk agents (port of ADK-Go `server/adka2a/v2`,
-//! `agent/remoteagent/v2` and `internal/agent/remoteagent`), built on the official A2A Rust SDK
-//! (`a2a-lf`, `a2a-server-lf`, `a2a-client-lf`).
+//! gadk-a2a: the Agent2Agent (A2A) protocol for gadk agents, built on the official A2A Rust SDK
+//! (`a2a-lf`, `a2a-server-lf`, `a2a-client-lf`). Wire-compatible with ADK A2A servers and clients:
+//! the metadata keys, extension marker and error texts are the ones ADK uses.
 //!
 //! - [`convert`] (always built): ADK ↔ A2A part, event, metadata and extension conversions.
 //! - `server` (feature `server`): an `a2a_server::AgentExecutor` that runs a gadk agent, the
 //!   agent-card skill builder and the identity header bridge.
-//! - `remoteagent` (feature `client`): a gadk agent backed by a remote A2A agent, with ADK-Go's
-//!   card resolution, credential scoping and remote-task cleanup.
+//! - `remoteagent` (feature `client`): a gadk agent backed by a remote A2A agent, with
+//!   agent-card resolution, credential scoping and remote-task cleanup.
 //!
 //! The a2a-rs crates are re-exported unwrapped: [`a2a`], `a2a_client` (feature `client`) and
 //! `a2a_server` (feature `server`).

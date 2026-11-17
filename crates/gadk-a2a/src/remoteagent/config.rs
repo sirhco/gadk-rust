@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The remote agent's server config and state (port of ADK-Go `internal/agent/remoteagent`
-//! `a2a_config.go`).
+//! The remote agent's server config and state.
 
 use std::sync::Arc;
 
@@ -22,7 +21,7 @@ use super::card::AgentCardProvider;
 use super::client::A2AClientProvider;
 use crate::Error;
 
-/// Go `A2AServerConfig`: how to reach the remote agent.
+/// How to reach the remote agent.
 #[derive(Clone)]
 pub struct A2AServerConfig {
     /// A fixed card (takes precedence over `agent_card_provider`).
@@ -31,22 +30,22 @@ pub struct A2AServerConfig {
     pub agent_card_provider: Option<AgentCardProvider>,
     /// Creates the client for a card.
     pub client_provider: Arc<dyn A2AClientProvider>,
-    /// Go `OwnsAuthScope`: the remote agent enters the credential scope around its calls.
+    /// The remote agent enters the credential scope around its calls.
     pub owns_auth_scope: bool,
-    /// Go `WithCardFetchClient`: overrides the card-fetch HTTP client.
+    /// Overrides the card-fetch HTTP client.
     pub card_fetch_client: Option<reqwest::Client>,
-    /// The credential provider (Go `A2AConfig.Auth`).
+    /// The credential provider (`A2AConfig::auth`).
     pub auth: Option<Arc<dyn gadk_auth::CredentialProvider>>,
 }
 
-/// Go `RemoteAgentState`: stored as the remote agent's `AgentState.config`.
+/// Stored as the remote agent's `AgentState.config`.
 #[derive(Clone)]
 pub struct RemoteAgentState {
     /// The server config.
     pub a2a: Arc<A2AServerConfig>,
 }
 
-/// Go `ResolveAgentCard`: the fixed card, else the provider's.
+/// The fixed card, else the provider's.
 pub(crate) async fn resolve_agent_card(cfg: &A2AServerConfig) -> Result<a2a::AgentCard, Error> {
     if let Some(card) = &cfg.agent_card {
         return Ok(card.clone());
@@ -59,7 +58,7 @@ pub(crate) async fn resolve_agent_card(cfg: &A2AServerConfig) -> Result<a2a::Age
     ))
 }
 
-/// Go `CreateA2AClient`: the resolved card and a client for it. The caller enters the auth
+/// The resolved card and a client for it. The caller enters the auth
 /// scope around it when `cfg.owns_auth_scope` (the card fetch reads it).
 // The server cleanup (child-task cancel) is the only non-test caller.
 #[cfg(any(test, feature = "server"))]

@@ -13,14 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The web launcher's HTTP server (Go `http.Server` as `buildHTTPServer` configures it): a TCP
-//! listener on `host:port`, HTTP/1 only or HTTP/1 plus prior-knowledge cleartext HTTP/2 (`-h2c`),
-//! Go's timeouts, and graceful shutdown.
+//! The web launcher's HTTP server: a TCP listener on `host:port`, HTTP/1 only or HTTP/1 plus
+//! prior-knowledge cleartext HTTP/2 (`-h2c`), per-connection timeouts, and graceful shutdown.
 //!
-//! Timeouts (spec R8), per connection as Go's `net/http` sets its deadlines:
+//! Timeouts, per connection:
 //! - `-read-timeout`: an HTTP/1 request's headers must arrive within it, counted from the accept
 //!   (first request) or from the first byte after an idle period; its body must be read within
-//!   it from the same start. Under `-h2c` the first request's count starts once Go's preface
+//!   it from the same start. Under `-h2c` the first request's count starts once the HTTP/2 preface
 //!   peek has its 14 bytes (the peek has no deadline), and an HTTP/2 connection waits for its
 //!   first stream under `-idle-timeout`. An HTTP/2 stream's body must be read within it from
 //!   the stream's start. A late read fails with `i/o timeout` (headers: the connection is
@@ -28,16 +27,15 @@
 //! - `-write-timeout`: from the end of an HTTP/1 request's headers, every write of the response
 //!   must happen before it, or the connection is aborted; an HTTP/2 stream is reset instead. A
 //!   handler may move or clear its response's deadline through the request's
-//!   [`WriteDeadline`] (Go `ResponseController.SetWriteDeadline`, as `RunSSEHandler` does).
+//!   [`WriteDeadline`] (as the SSE handler does).
 //!   An HTTP/1 response's deadline lasts until it is flushed; hyper's answer to a request it
 //!   cannot read gets `-write-timeout` from its first write.
 //! - `-idle-timeout` (`-read-timeout` when zero): a keep-alive connection waiting for its next
 //!   request is closed after it.
 //!
-//! A zero or negative timeout is none. Divergences from `net/http` (ledger 6): an expired
-//! HTTP/2 idle connection is dropped without GOAWAY; an HTTP/2 handler still running at the
-//! write deadline is cancelled (Go lets it finish and resets the stream); a handler that does
-//! not read the body is not cancelled when the read deadline passes (Go cancels its context).
+//! A zero or negative timeout is none. An expired HTTP/2 idle connection is dropped without
+//! GOAWAY; an HTTP/2 handler still running at the write deadline is cancelled; a handler that
+//! does not read the body is not cancelled when the read deadline passes.
 
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -67,21 +65,21 @@ use crate::golog::Logger;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-/// The server settings from the web launcher's flags (Go `http.Server` fields).
+/// The server settings from the web launcher's flags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Options {
-    /// Go `ReadTimeout`.
+    /// The read timeout.
     pub(crate) read_timeout: Option<Duration>,
-    /// Go `WriteTimeout`.
+    /// The write timeout.
     pub(crate) write_timeout: Option<Duration>,
-    /// Go `srv.idleTimeout()`: `IdleTimeout`, or `ReadTimeout` when that is zero.
+    /// The idle timeout, or the read timeout when that is zero.
     pub(crate) idle_timeout: Option<Duration>,
-    /// Go `Protocols` with unencrypted HTTP/2 (`-h2c`).
+    /// Whether unencrypted HTTP/2 is accepted (`-h2c`).
     pub(crate) h2c: bool,
 }
 
 impl Options {
-    /// The options for Go's `ReadTimeout`, `WriteTimeout`, `IdleTimeout` and `-h2c`.
+    /// The options for the read, write and idle timeouts and `-h2c`.
     pub(crate) fn new(read: GoDuration, write: GoDuration, idle: GoDuration, h2c: bool) -> Options {
         let idle = if idle.0 != 0 { idle } else { read };
         Options {
@@ -93,16 +91,14 @@ impl Options {
     }
 }
 
-/// A Go deadline duration: `None` unless positive.
+/// A deadline duration: `None` unless positive.
 fn positive(d: GoDuration) -> Option<Duration> {
     if d.0 > 0 { d.to_std() } else { None }
 }
 
-/// Go `net.Listen("tcp", addr)` (`ListenAndServe`): the error is Go's text for the common bind
-/// failures (`listen tcp <addr>: bind: address already in use`).
-///
-/// Divergence (ledger 6): any other failure carries Rust's I/O error text after
-/// `listen tcp <addr>: `.
+/// Listens on `addr`: the error text for the common bind failures is
+/// `listen tcp <addr>: bind: address already in use` (or `bind: permission denied`), as an ADK
+/// server prints it; any other failure carries Rust's I/O error text after `listen tcp <addr>: `.
 pub(crate) async fn listen(addr: &str) -> Result<TcpListener, String> {
     TcpListener::bind(addr).await.map_err(|e| {
         let cause = match e.kind() {
@@ -124,15 +120,14 @@ pub(crate) struct Draining {
     conns: Conns,
 }
 
-/// The server's connections (Go `srv.activeConn`), for [`Draining::shutdown`]'s idle check.
+/// The server's connections, for [`Draining::shutdown`]'s idle check.
 type Conns = Arc<Mutex<Vec<Weak<ConnState>>>>;
 
 impl Draining {
-    /// Go `srv.Shutdown(ctx)` with a `timeout` context: idle connections close at once, active
-    /// ones after their current response; `context deadline exceeded` when they have not all
-    /// closed within `timeout` (they keep running, as in Go). As Go's `closeIdleConns` runs
-    /// before its context check, the shutdown succeeds when every connection left is idle,
-    /// even with a zero `timeout`.
+    /// Graceful shutdown bounded by `timeout`: idle connections close at once, active ones after
+    /// their current response; `context deadline exceeded` when they have not all closed within
+    /// `timeout` (they keep running). The idle check runs before the timeout check, so the
+    /// shutdown succeeds when every connection left is idle, even with a zero `timeout`.
     pub(crate) async fn shutdown(self, timeout: GoDuration) -> Result<(), String> {
         let timeout = timeout.to_std().unwrap_or_default();
         let _ = self.shutdown.send(true);
@@ -143,7 +138,7 @@ impl Draining {
         }
     }
 
-    /// Go `closeIdleConns`' result: every open connection is idle (and closing).
+    /// Every open connection is idle (and closing).
     fn quiescent(&self) -> bool {
         let conns = self.conns.lock().unwrap_or_else(|e| e.into_inner());
         conns
@@ -172,12 +167,10 @@ macro_rules! spawn_connection {
     }};
 }
 
-/// Go `srv.Serve(listener)` until `cancel` fires: every accepted connection served by `router`
-/// with `opts`. Accept errors are retried after Go's backoff (5ms doubling to 1s), logged as Go
-/// logs them. Returns once cancelled, with the listener closed.
-///
-/// Divergence (ledger 6): every accept error is retried; Go retries only temporary ones
-/// (`net.Error.Temporary`) and returns any other from `Serve`.
+/// Serves `listener` until `cancel` fires: every accepted connection served by `router` with
+/// `opts`. Accept errors are retried after a backoff (5ms doubling to 1s) and logged as
+/// `http: Accept error: <err>; retrying in <delay>`. Every accept error is retried. Returns once
+/// cancelled, with the listener closed.
 pub(crate) async fn serve(
     listener: TcpListener,
     router: WebRouter,
@@ -231,7 +224,7 @@ pub(crate) async fn serve(
         let io = TokioIo::new(DeadlineIo::new(stream, Arc::clone(&state)));
         let service = connection_service(router.clone(), state, local);
         // A connection error (timeouts, resets, a malformed request answered by hyper) ends that
-        // connection only; Go's server does not log these either.
+        // connection only and is not logged.
         match &builder {
             Builder::Http1(b) => spawn_connection!(
                 b.serve_connection(io, service).with_upgrades(),
@@ -248,9 +241,9 @@ pub(crate) async fn serve(
     Draining { shutdown, conns }
 }
 
-/// The connection builder: HTTP/1 only, or HTTP/1 and prior-knowledge HTTP/2 with `-h2c` (Go
-/// `Protocols{HTTP1, UnencryptedHTTP2}`; no `Upgrade: h2c`). HTTP/1 header names are written in
-/// Go's canonical case; the header-read timeout is the connection's own read deadline.
+/// The connection builder: HTTP/1 only, or HTTP/1 and prior-knowledge HTTP/2 with `-h2c` (no
+/// `Upgrade: h2c`). HTTP/1 header names are written in title case; the header-read timeout is the
+/// connection's own read deadline.
 enum Builder {
     Http1(hyper::server::conn::http1::Builder),
     Auto(auto::Builder<TokioExecutor>),
@@ -273,8 +266,8 @@ fn builder(opts: Options) -> Builder {
     }
 }
 
-/// The per-connection service: the router with Go's per-request deadlines and the accepted
-/// address as `ConnectInfo<LocalAddr>` (Go `http.LocalAddrContextKey`, read by the origin guard).
+/// The per-connection service: the router with the per-request deadlines and the accepted
+/// address as `ConnectInfo<LocalAddr>` (read by the origin guard).
 fn connection_service(
     router: WebRouter,
     state: Arc<ConnState>,
@@ -324,10 +317,9 @@ fn connection_service(
     })
 }
 
-/// Go `w.closeAfterReply` for an HTTP/1 request that asks to close the connection
-/// (`req.wantsClose()`: HTTP/1.1 `Connection: close`, HTTP/1.0 without `keep-alive`): the
-/// `Connection` value Go writes in place of the handler's (`close` for HTTP/1.1, none for
-/// HTTP/1.0). `None` when the connection stays open.
+/// For an HTTP/1 request that asks to close the connection (HTTP/1.1 `Connection: close`,
+/// HTTP/1.0 without `keep-alive`): the `Connection` value written in place of the handler's
+/// (`close` for HTTP/1.1, none for HTTP/1.0). `None` when the connection stays open.
 fn close_after_reply<B>(req: &http::Request<B>) -> Option<Option<http::HeaderValue>> {
     let has_token = |token: &str| {
         req.headers()
@@ -346,8 +338,8 @@ fn close_after_reply<B>(req: &http::Request<B>) -> Option<Option<http::HeaderVal
     }
 }
 
-/// Go `chunkWriter.writeHeader` when closing after the reply: a handler's `Connection` header
-/// without a `close` token is dropped and Go's own value (if any) written instead.
+/// When closing after the reply: a handler's `Connection` header without a `close` token is
+/// dropped and `connection` (if any) written instead.
 fn set_close_connection(headers: &mut http::HeaderMap, connection: Option<http::HeaderValue>) {
     let has_close = headers
         .get_all(http::header::CONNECTION)
@@ -364,7 +356,7 @@ fn set_close_connection(headers: &mut http::HeaderMap, connection: Option<http::
     }
 }
 
-/// Go's `os.ErrDeadlineExceeded` (`i/o timeout`).
+/// The deadline-exceeded error (`i/o timeout`).
 fn timed_out() -> io::Error {
     io::Error::new(io::ErrorKind::TimedOut, "i/o timeout")
 }
@@ -377,12 +369,12 @@ struct ConnState {
     times: Mutex<Times>,
 }
 
-/// The prefix Go peeks (`maybeServeUnencryptedHTTP2`, under the accept-time read deadline) to
-/// tell an `-h2c` connection's HTTP/2 preface from an HTTP/1 request.
+/// The prefix peeked, under the accept-time read deadline, to tell an `-h2c` connection's HTTP/2
+/// preface from an HTTP/1 request.
 const H2_PREFACE_PREFIX: &[u8] = b"PRI * HTTP/2.0";
 
 struct Times {
-    /// When the current HTTP/1 request started (Go's `t0`): the accept, or the first byte after
+    /// When the current HTTP/1 request started : the accept, or the first byte after
     /// an idle period.
     request_start: Instant,
     /// The deadline [`DeadlineIo`] applies to reads: headers (`ReadTimeout`) or idle
@@ -396,9 +388,9 @@ struct Times {
     idle: bool,
     /// A request arrived over HTTP/2.
     h2: bool,
-    /// The connection was upgraded (101): no deadlines (Go clears them on hijack).
+    /// The connection was upgraded (101): no deadlines.
     hijacked: bool,
-    /// No byte has been read yet (Go `StateNew`).
+    /// No byte has been read yet.
     fresh: bool,
     /// `-h2c`: the first bytes, until [`H2_PREFACE_PREFIX`]'s length has arrived.
     preface: Option<Vec<u8>>,
@@ -417,7 +409,7 @@ struct Started {
 }
 
 impl Started {
-    /// The request's [`WriteDeadline`] (Go `ResponseController.SetWriteDeadline`): the HTTP/1
+    /// The request's [`WriteDeadline`]: the HTTP/1
     /// connection's write deadline, or the HTTP/2 stream's.
     fn write_deadline_hook(&self) -> WriteDeadline {
         match &self.stream_deadline {
@@ -443,7 +435,7 @@ impl ConnState {
             accepted: now,
             times: Mutex::new(Times {
                 request_start: now,
-                // Go sets `readHeaderTimeout()` at accept, before an `-h2c` preface peek too.
+                // The header read deadline starts at accept, before an `-h2c` preface peek too.
                 read_deadline: opts.read_timeout.map(|d| now + d),
                 write_deadline: None,
                 in_flight: 0,
@@ -457,7 +449,7 @@ impl ConnState {
         })
     }
 
-    /// Go `closeIdleConns`' test for one connection: idle (`StateIdle`), upgraded (no longer
+    /// The test for one connection: idle, upgraded (no longer
     /// tracked), or new for more than 5 seconds. An HTTP/2 connection is never idle to it.
     fn quiescent(&self) -> bool {
         let t = self.times();
@@ -475,13 +467,13 @@ impl ConnState {
         if t.hijacked { None } else { t.read_deadline }
     }
 
-    /// `bytes` arrived: on an idle HTTP/1 connection a new request starts (Go: the read
-    /// deadline is reset to `ReadTimeout` from now). The previous response's write deadline is
+    /// `bytes` arrived: on an idle HTTP/1 connection a new request starts (the read
+    /// deadline is reset to the read timeout from now). The previous response's write deadline is
     /// left to [`ConnState::on_flushed`]: its tail may still be buffered.
     ///
-    /// Under `-h2c` the first bytes are Go's preface peek, under the accept-time `ReadTimeout`:
-    /// an HTTP/2 preface starts HTTP/2's idle timer (`IdleTimeout`), anything else an HTTP/1
-    /// request whose `ReadTimeout` counts again from the end of the peek (Go `readRequest`).
+    /// Under `-h2c` the first bytes are the preface peek, under the accept-time read timeout:
+    /// an HTTP/2 preface starts HTTP/2's idle timer (the idle timeout), anything else an HTTP/1
+    /// request whose read timeout counts again from the end of the peek.
     fn on_bytes_read(&self, bytes: &[u8]) {
         let mut t = self.times();
         t.fresh = false;
@@ -514,8 +506,8 @@ impl ConnState {
     }
 
     /// Everything written so far was flushed: on an idle HTTP/1 connection the last response
-    /// is complete and its write deadline no longer applies (Go sets the next one when
-    /// `readRequest` returns).
+    /// is complete and its write deadline no longer applies (the next one is set when the next
+    /// request's headers have been read).
     fn on_flushed(&self) {
         let mut t = self.times();
         if t.idle && t.in_flight == 0 && !t.h2 {
@@ -524,8 +516,7 @@ impl ConnState {
     }
 
     /// The HTTP/1 write deadline, set first when hyper writes with no request in flight: its
-    /// answer to a request it could not read (Go: `readRequest` sets `WriteTimeout` from its
-    /// return, error or not).
+    /// answer to a request it could not read.
     fn write_deadline_for_write(&self) -> Option<Instant> {
         let mut t = self.times();
         if t.hijacked {
@@ -544,7 +535,7 @@ impl ConnState {
         }
     }
 
-    /// A request's headers were read (Go `readRequest` returned).
+    /// A request's headers were read.
     fn begin_request(self: &Arc<Self>, version: Version) -> Started {
         let now = Instant::now();
         let mut t = self.times();
@@ -567,8 +558,8 @@ impl ConnState {
         }
     }
 
-    /// A response finished: with nothing else in flight the connection is idle (Go: read
-    /// deadline `idleTimeout()` from now).
+    /// A response finished: with nothing else in flight the connection is idle (the read
+    /// deadline is the idle timeout from now).
     fn end_request(&self) {
         let waker = {
             let mut t = self.times();
@@ -619,8 +610,7 @@ fn deadline_passed(timer: &mut Pin<Box<Sleep>>, deadline: Instant, cx: &mut Cont
     timer.as_mut().poll(cx).is_ready()
 }
 
-/// The TCP stream with the connection's read and write deadlines (Go `SetReadDeadline` /
-/// `SetWriteDeadline`).
+/// The TCP stream with the connection's read and write deadlines.
 struct DeadlineIo {
     inner: TcpStream,
     state: Arc<ConnState>,

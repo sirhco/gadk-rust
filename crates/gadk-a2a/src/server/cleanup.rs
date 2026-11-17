@@ -13,17 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The cleanup guard around the execute and cancel streams: runs Go `Executor.Cleanup` exactly
-//! once (spec R4).
+//! The cleanup guard around the execute and cancel streams: runs [`Executor`]'s cleanup
+//! exactly once.
 //!
-//! a2a-go calls `Cleanup` after an execution or cancellation finished; a2a-rs's
+//! The cleanup is due after an execution or cancellation finished; a2a-rs's
 //! `AgentExecutor` has no such hook, and its `DefaultRequestHandler` stops polling the stream
 //! after the first terminal event and drops it. The guard therefore starts the cleanup on the
 //! first of: a terminal event, an error, the end of the stream, or the stream being dropped.
 //! The cleanup runs as a task spawned on the current Tokio runtime, so it may start before
-//! a2a-rs stores the terminal event (Go runs it after); it reads only the snapshot folded here
+//! a2a-rs stores the terminal event; it reads only the snapshot folded here
 //! and the ADK session. An execute stream that a cancel stopped ends without a terminal event
-//! of its own; its snapshot gets the cancel's `canceled` update, as Go's execution result does.
+//! of its own; its snapshot gets the cancel's `canceled` update, as an execution result would.
 
 use std::collections::HashMap;
 use std::pin::Pin;
