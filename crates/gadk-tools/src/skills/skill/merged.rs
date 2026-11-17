@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `tool/skilltoolset/skill/merged_source.go`: several [`Source`]s as one.
+//! [`MergedSource`]: several [`Source`]s as one.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -22,8 +22,7 @@ use async_trait::async_trait;
 
 use super::{Frontmatter, ResourceReader, SkillError, SkillErrorKind, Source, quote};
 
-/// A [`Source`] combining several sources, queried in the order given (Go
-/// `NewMergedSource`).
+/// A [`Source`] combining several sources, queried in the order given.
 ///
 /// Listing concatenates every source's frontmatters and fails with
 /// [`SkillErrorKind::DuplicateSkill`] when a name appears twice. A lookup returns the first
@@ -41,7 +40,7 @@ impl MergedSource {
     }
 }
 
-/// Go's per-lookup loop: the first success wins, `SkillNotFound` falls through.
+/// The per-lookup loop: the first success wins, `SkillNotFound` falls through.
 macro_rules! first_found {
     ($self:ident, |$source:ident| $call:expr) => {{
         for $source in &$self.sources {

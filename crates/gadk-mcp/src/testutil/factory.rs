@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! In-memory [`TransportFactory`]s: [`in_memory`] and the observable [`ScriptedFactory`] (Go
-//! `mcp.NewInMemoryTransports`, and the `spyTransport`, `reconnectableTransport`,
-//! `gatedSessionTransport` and `connectFunc` fakes of ADK-Go's tests).
+//! In-memory [`TransportFactory`]s: [`in_memory`] and the observable [`ScriptedFactory`], which
+//! counts connects, can gate or fail them, and can end the last connection's server side.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -56,7 +55,7 @@ where
 }
 
 /// Each connect spawns `make_server()` on one half of a `tokio::io::duplex` and serves the client
-/// on the other (Go `mcp.NewInMemoryTransports` + `server.Connect`).
+/// on the other.
 pub fn in_memory<S, F>(make_server: F) -> Arc<dyn TransportFactory>
 where
     F: Fn() -> S + Send + Sync + 'static,
@@ -67,10 +66,10 @@ where
 
 /// A [`TransportFactory`] over in-memory servers that a test can observe and steer.
 ///
-/// Every connect counts itself and announces itself to [`entered`](ScriptedFactory::entered);
-/// while the gate is closed it then waits for [`open_gate`](ScriptedFactory::open_gate) (a
-/// dropped connect future stops waiting: Go's `ctx.Done()` branch); then it fails if a failure
-/// is set, else serves a fresh server over a duplex.
+/// Every connect counts itself and announces itself to [`entered`](ScriptedFactory::entered); while
+/// the gate is closed it then waits for [`open_gate`](ScriptedFactory::open_gate) (a dropped
+/// connect future stops waiting); then it fails if a failure is set, else serves a fresh server
+/// over a duplex.
 pub struct ScriptedFactory {
     serve: Option<ServeFn>,
     connects: AtomicUsize,
@@ -115,14 +114,12 @@ impl ScriptedFactory {
         Self::build(Some(serve_fn(make_server)), None)
     }
 
-    /// Every connect fails with a `BoxError` whose text is `msg` (Go's `connectFunc` returning
-    /// `errors.New(msg)`).
+    /// Every connect fails with a `BoxError` whose text is `msg`.
     pub fn failing(msg: &str) -> Arc<Self> {
         Self::build(None, Some(msg.to_owned()))
     }
 
-    /// How many times `connect` was called (Go `spyTransport.connectCount`,
-    /// `gatedSessionTransport.calls`).
+    /// How many times `connect` was called.
     pub fn connects(&self) -> usize {
         self.connects.load(Ordering::SeqCst)
     }
@@ -132,13 +129,12 @@ impl ScriptedFactory {
         self.gate.send_replace(false);
     }
 
-    /// Releases every waiting connect and lets later ones through (Go `close(transport.gate)`).
+    /// Releases every waiting connect and lets later ones through.
     pub fn open_gate(&self) {
         self.gate.send_replace(true);
     }
 
-    /// Waits until a connect has entered; each entry satisfies one call (Go
-    /// `<-transport.entered`).
+    /// Waits until a connect has entered; each entry satisfies one call.
     pub async fn entered(&self) {
         if let Ok(permit) = self.entered.acquire().await {
             permit.forget();
@@ -150,8 +146,8 @@ impl ScriptedFactory {
         *lock(&self.failure) = msg.map(str::to_owned);
     }
 
-    /// Go `spyTransport.lastConn.Close()`: ends the most recent connection's server side and waits
-    /// for it, so the client's next request on it fails with a closed transport.
+    /// Ends the most recent connection's server side and waits for it, so the client's next request
+    /// on it fails with a closed transport.
     pub async fn kill_last(&self) {
         let last = lock(&self.last).take();
         if let Some((ct, task)) = last {
@@ -160,8 +156,7 @@ impl ScriptedFactory {
         }
     }
 
-    /// How many server sessions are still running (Go `server.Sessions()`): a closed client
-    /// session ends its server session.
+    /// How many server sessions are still running: a closed client session ends its server session.
     pub fn open_sessions(&self) -> usize {
         self.open.load(Ordering::SeqCst)
     }

@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! One MCP server tool as a gadk tool (port of ADK-Go `tool/mcptoolset/tool.go` `convertTool`,
-//! `mcpTool`).
+//! One MCP server tool as a gadk tool ([`McpTool`]).
 
 use std::any::Any;
 use std::sync::Arc;
@@ -31,13 +30,13 @@ use crate::config::MetadataProvider;
 use crate::error::Error;
 use crate::format::format_mcp_content;
 
-/// Go `mcpTool`: an MCP server tool. Its declaration carries the server's input and output
-/// schemas unchanged; running it calls `tools/call` on the toolset's session, with the server's
-/// tool name even when the toolset exposes it under a prefix ([`Config::prefix`](crate::Config::prefix)).
+/// An MCP server tool. Its declaration carries the server's input and output schemas unchanged;
+/// running it calls `tools/call` on the toolset's session, with the server's tool name even when
+/// the toolset exposes it under a prefix ([`Config::prefix`](crate::Config::prefix)).
 pub struct McpTool {
-    /// The exposed name (Go `name`): the server's name, or `<prefix>_<name>`.
+    /// The exposed name: the server's name, or `<prefix>_<name>`.
     name: String,
-    /// The server's name (Go `originalName`), sent in `tools/call`.
+    /// The server's name, sent in `tools/call`.
     original_name: String,
     description: String,
     declaration: FunctionDeclaration,
@@ -48,7 +47,7 @@ pub struct McpTool {
 }
 
 impl McpTool {
-    /// Go `convertTool`.
+    /// Wraps a server tool as a gadk tool.
     pub(crate) fn new(
         tool: rmcp::model::Tool,
         client: Arc<dyn McpClient>,
@@ -62,8 +61,8 @@ impl McpTool {
             .as_deref()
             .map(str::to_string)
             .unwrap_or_default();
-        // rmcp always decodes `inputSchema` (it is required on the wire), so Go's
-        // `InputSchema != nil` always holds; `outputSchema` is optional in both.
+        // rmcp always decodes `inputSchema` (it is required on the wire); `outputSchema` is
+        // optional.
         let declaration = FunctionDeclaration {
             name: name.clone(),
             description: description.clone(),
@@ -86,25 +85,25 @@ impl McpTool {
         }
     }
 
-    /// The server's tool name (Go `originalName`).
+    /// The server's tool name.
     pub(crate) fn original_name(&self) -> &str {
         &self.original_name
     }
 
-    /// Go `set.Tools` with a `ToolNamePrefix`: the tool and its declaration take `name`; calls
-    /// still use the server's name.
+    /// Exposes the tool under `name` (a [`Config::prefix`](crate::Config::prefix)ed name): the tool
+    /// and its declaration take it; calls still use the server's name.
     pub(crate) fn expose_as(&mut self, name: String) {
         self.declaration.name.clone_from(&name);
         self.name = name;
     }
 
-    /// Go's `fmt.Errorf("… %w", err)` texts reach the flow as `ToolError::Execution` sources.
+    /// Wraps `err` as the `ToolError::Execution` source the flow receives.
     fn execution(err: Error) -> ToolError {
         ToolError::Execution(Box::new(err))
     }
 
-    /// Go `mcpTool.Run`'s `MetadataProvider` step: the provider's map, checked for reserved keys
-    /// in sorted order and copied. `None` (and an empty map) contribute nothing.
+    /// The `_meta` for the call: the metadata provider's map, checked for reserved keys in sorted
+    /// order. `None` (and an empty map) contribute nothing.
     fn request_meta(&self, ctx: &Context) -> Result<Option<RequestMetaObject>, Error> {
         let Some(provider) = &self.metadata else {
             return Ok(None);
@@ -127,7 +126,7 @@ impl McpTool {
                 key: key.clone(),
             });
         }
-        // Go `maps.Clone`: the provider's map is never written to. go-sdk omits an empty `_meta`.
+        // An empty `_meta` is omitted from the request.
         if meta.is_empty() {
             return Ok(None);
         }
@@ -155,7 +154,7 @@ impl Tool for McpTool {
         Some(self)
     }
 
-    /// Go classifies a `tool/mcptoolset` tool as `MCP`.
+    /// An MCP toolset tool is classified as [`ToolOriginKind::Mcp`].
     fn origin_kind(&self) -> ToolOriginKind {
         ToolOriginKind::Mcp
     }
@@ -167,7 +166,7 @@ impl Tool for McpTool {
 
 #[async_trait::async_trait]
 impl RunnableTool for McpTool {
-    /// Go `mcpTool.Run`: confirmation, metadata, `tools/call`, result shaping.
+    /// Runs the tool: confirmation, metadata, `tools/call`, result shaping.
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         match ctx.tool_confirmation() {
             Some(confirmation) => {
@@ -182,7 +181,7 @@ impl RunnableTool for McpTool {
                     None => self.require_confirmation,
                 };
                 if require {
-                    // `request_confirmation` also sets `skip_summarization` (Go sets it here).
+                    // `request_confirmation` also sets `skip_summarization`.
                     ctx.request_confirmation(
                         &format!(
                             "Please approve or reject the tool call {}() by responding with a FunctionResponse with an expected ToolConfirmation payload.",
@@ -195,7 +194,7 @@ impl RunnableTool for McpTool {
             }
         }
 
-        // Go (#1821): the server is called with its own name, not the exposed one.
+        // The server is called with its own name, not the exposed one.
         let mut params = CallToolRequestParams::new(self.original_name.clone());
         // rmcp's `arguments` is a JSON object; a non-object `args` (never produced by the flow,
         // which decodes function-call args as an object) is sent as no arguments.
@@ -223,7 +222,7 @@ impl RunnableTool for McpTool {
         }
 
         let output = match res.structured_content {
-            // Go `StructuredContent != nil`: a JSON `null` decodes to nil.
+            // A JSON `null` counts as no structured content.
             Some(structured) if !structured.is_null() => structured,
             _ => Value::String(format_mcp_content(&res.content)),
         };

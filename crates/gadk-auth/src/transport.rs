@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The refresh-and-retry transport (port of ADK-Go `auth/transport.go`) as a
-//! `reqwest_middleware::Middleware`.
+//! The refresh-and-retry transport as a `reqwest_middleware::Middleware`.
 //!
 //! [`Transport`] resolves a credential per request through a [`CredentialProvider`] and applies
 //! it to the outgoing request's headers. The provider runs on every request, so per-user
@@ -41,9 +40,9 @@ use crate::credential::Credential;
 use crate::error::{ConsentRequiredError, Error, find_consent};
 use crate::provider::{AuthContext, CredentialProvider, RefreshingProvider};
 
-/// Go `Transport` (transport.go:39) as a `reqwest_middleware::Middleware`. Go's per-request
-/// context is the `AuthContext` fixed at construction, so a transport for a per-user provider
-/// (such as the gcp one) must be built per invocation identity and not shared across users.
+/// A `reqwest_middleware::Middleware` that applies a provider's credential to every request. Its
+/// [`AuthContext`] is fixed at construction, so a transport for a per-user provider (such as the
+/// gcp one) must be built per invocation identity and not shared across users.
 ///
 /// Errors reach the caller as `reqwest_middleware::Error::Middleware` wrapping a
 /// [`crate::Error`]: `auth: resolve credential: …` when the provider fails, `auth: apply
@@ -75,7 +74,7 @@ impl std::fmt::Debug for Transport {
 
 #[async_trait::async_trait]
 impl Middleware for Transport {
-    /// Go `RoundTrip` (transport.go:47).
+    /// Applies the credential, sends, and on an auth rejection refreshes and retries once.
     async fn handle(
         &self,
         mut req: reqwest::Request,
@@ -84,7 +83,7 @@ impl Middleware for Transport {
     ) -> reqwest_middleware::Result<reqwest::Response> {
         // The replay snapshot: the caller's request as it arrived, taken before anything is
         // applied or sent, so a retry cannot inherit a header the first credential set. Only a
-        // refreshing provider can retry, so only then is it taken (Go calls GetBody only then).
+        // refreshing provider can retry, so only then is it taken.
         // `None` is a streamed body, which cannot be replayed.
         let refresher = self.provider.as_refreshing();
         let replay = match refresher {
@@ -92,8 +91,8 @@ impl Middleware for Transport {
             None => None,
         };
 
-        // On an error return `req` and `replay` are dropped, which closes their bodies (Go's
-        // deferred Close), and nothing is sent.
+        // On an error return `req` and `replay` are dropped, which closes their bodies, and nothing
+        // is sent.
         let cred = apply_credential(self.provider.as_ref(), &self.cx, req.headers_mut())
             .await
             .map_err(middleware_error)?;
@@ -115,8 +114,8 @@ impl Middleware for Transport {
                 next.run(replay, extensions).await
             }
             Err(RefreshFailure::Apply(err)) => {
-                // Go `applyAndSend` on the fresh credential: the replay (with its body) is
-                // dropped, nothing is sent, and the apply error is returned.
+                // Applying the fresh credential failed: the replay (with its body) is dropped,
+                // nothing is sent, and the apply error is returned.
                 drop(replay);
                 drain(resp).await;
                 Err(middleware_error(err))
@@ -139,8 +138,8 @@ impl Middleware for Transport {
     }
 }
 
-/// Go `isAuthRejected` (transport.go:143): whether a response status means the credential was
-/// rejected (401 or 403), the condition for one refresh-and-retry.
+/// Whether a response status means the credential was rejected (401 or 403), the condition for one
+/// refresh-and-retry.
 pub fn is_auth_rejected(status: StatusCode) -> bool {
     status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN
 }
@@ -173,10 +172,10 @@ pub async fn apply_credential(
 ///
 /// The two failures are folded into one `Err`, so a caller cannot tell them apart when the
 /// provider's refresh error is itself an [`Error::ApplyCredential`]. Callers that need
-/// [`Transport`]'s (Go `auth.Transport`'s) semantics, where a refresh error other than consent
-/// degrades to the rejected response but an apply error is returned, must call
-/// [`RefreshingProvider::refresh`] (via [`CredentialProvider::as_refreshing`]) and apply the
-/// fresh credential separately, as gadk-mcp's HTTP client does.
+/// [`Transport`]'s semantics, where a refresh error other than consent degrades to the rejected
+/// response but an apply error is returned, must call [`RefreshingProvider::refresh`] (via
+/// [`CredentialProvider::as_refreshing`]) and apply the fresh credential separately, as gadk-mcp's
+/// HTTP client does.
 pub async fn refresh_credential(
     provider: &dyn CredentialProvider,
     cx: &AuthContext,
@@ -220,7 +219,7 @@ async fn refresh_and_apply(
     Ok(fresh)
 }
 
-/// Go `applyAndSend`'s apply step (transport.go:135): `cred` applied to `headers`, an error
+/// `cred` applied to `headers`, an error
 /// wrapped as [`Error::ApplyCredential`] (`auth: apply credential: …`).
 async fn apply(cred: &dyn Credential, headers: &mut http::HeaderMap) -> Result<(), Error> {
     cred.apply(headers)
@@ -228,14 +227,13 @@ async fn apply(cred: &dyn Credential, headers: &mut http::HeaderMap) -> Result<(
         .map_err(|e| Error::ApplyCredential(Box::new(e)))
 }
 
-/// transport.go:164 `maxDrainBytes`.
+/// The most bytes read when draining a response body.
 pub(crate) const MAX_DRAIN_BYTES: usize = 4 << 10;
 
-/// Go `drain` (transport.go:169): reads the body so the connection can be reused, then closes
-/// it by dropping the response. The read is capped: an auth-rejection body is small, and a
-/// pathological oversized one simply is not drained (and so its connection is not reused)
-/// rather than read whole. Reads stop at a chunk boundary, so the last chunk may carry the
-/// total past `MAX_DRAIN_BYTES` (Go's `io.LimitReader` stops at exactly 4096).
+/// Reads the body so the connection can be reused, then closes it by dropping the response. The
+/// read is capped: an auth-rejection body is small, and a pathological oversized one simply is not
+/// drained (and so its connection is not reused) rather than read whole. Reads stop at a chunk
+/// boundary, so the last chunk may carry the total past `MAX_DRAIN_BYTES`.
 async fn drain(mut resp: reqwest::Response) {
     let mut read = 0usize;
     while read < MAX_DRAIN_BYTES {

@@ -13,15 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The few-shot `example_tool` (port of Go `tool/exampletool`).
+//! The few-shot `example_tool`.
 //!
 //! The tool adds few-shot examples to the system instruction of every model request that has
 //! user text. The examples are either a static list ([`ExampleToolConfig::examples`]) or fetched
 //! for each user query from a [`Provider`] ([`ExampleToolConfig::provider`]). The tool has no
 //! declaration, so the flow never packs it.
 //!
-//! A provider that picks the stored examples sharing a word with the user query (Go
-//! `ExampleNew_provider`):
+//! A provider that picks the stored examples sharing a word with the user query:
 //!
 //! ```
 //! use std::sync::Arc;
@@ -100,8 +99,7 @@ use serde_json::Value;
 
 use crate::go_fmt::wrap_err;
 
-/// Port of Go `exampletool.Example` (tool.go:34): one few-shot example, an input and its expected
-/// output.
+/// One few-shot example: an input and its expected output.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Example {
     /// The example's user input.
@@ -110,7 +108,7 @@ pub struct Example {
     pub output: Vec<Content>,
 }
 
-/// Port of Go `exampletool.Provider` (tool.go:43): fetches few-shot examples for a user query.
+/// Fetches few-shot examples for a user query.
 ///
 /// `examples` takes the invocation context and returns an error because providers may perform
 /// I/O.
@@ -120,9 +118,8 @@ pub trait Provider: Send + Sync {
     async fn examples(&self, ctx: &Context, query: &str) -> Result<Vec<Example>, ToolError>;
 }
 
-/// Port of Go `exampletool.ExampleToolConfig` (tool.go:49). Set either `examples` or
-/// `provider`, not both: [`new`] rejects a config that sets both, even with `Some(vec![])` (Go
-/// checks `Examples != nil`).
+/// Configures the example tool. Set either `examples` or `provider`, not both: [`new`] rejects a
+/// config that sets both, even with `Some(vec![])`.
 #[derive(Clone, Default)]
 pub struct ExampleToolConfig {
     /// The static few-shot examples to add.
@@ -140,11 +137,11 @@ impl std::fmt::Debug for ExampleToolConfig {
     }
 }
 
-/// The error [`new`] returns, with Go's text.
+/// The error [`new`] returns.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExampleToolError {
-    /// Go `New`: both `Examples` and `Provider` are set.
+    /// Both `examples` and `provider` are set.
     BothExamplesAndProvider,
 }
 
@@ -160,8 +157,8 @@ impl std::fmt::Display for ExampleToolError {
 
 impl std::error::Error for ExampleToolError {}
 
-/// Port of Go `exampletool.New` (tool.go:62): an example tool that adds the configured few-shot
-/// examples to the LLM request. It fails when both `examples` and `provider` are set.
+/// An example tool that adds the configured few-shot examples to the LLM request. It fails when
+/// both `examples` and `provider` are set.
 pub fn new(config: ExampleToolConfig) -> Result<Arc<dyn Tool>, ExampleToolError> {
     if config.examples.is_some() && config.provider.is_some() {
         return Err(ExampleToolError::BothExamplesAndProvider);
@@ -172,7 +169,7 @@ pub fn new(config: ExampleToolConfig) -> Result<Arc<dyn Tool>, ExampleToolError>
     }))
 }
 
-/// Port of Go `exampleTool` (tool.go:55).
+/// The example tool.
 struct ExampleTool {
     examples: Vec<Example>,
     provider: Option<Arc<dyn Provider>>,
@@ -188,9 +185,9 @@ impl Tool for ExampleTool {
         "example tool"
     }
 
-    /// Port of Go `exampleTool.ProcessRequest` (tool.go:83). With a provider, it fetches the
-    /// examples for the joined non-thought user text and does nothing when that text is empty;
-    /// with a static list, it does nothing unless the first user part has text.
+    /// Adds the examples to the system instruction. With a provider, it fetches the examples for
+    /// the joined non-thought user text and does nothing when that text is empty; with a static
+    /// list, it does nothing unless the first user part has text.
     async fn process_request(&self, ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         let Some(user_content) = ctx.user_content() else {
             return Ok(());
@@ -231,8 +228,7 @@ impl Tool for ExampleTool {
     }
 }
 
-/// Port of Go `userQuery` (tool.go:121): the non-empty, non-thought text parts of `c` joined
-/// with single spaces.
+/// The non-empty, non-thought text parts of `c` joined with single spaces.
 fn user_query(c: &Content) -> String {
     c.parts
         .iter()
@@ -242,7 +238,7 @@ fn user_query(c: &Content) -> String {
         .join(" ")
 }
 
-// Go tool.go:136-148.
+// The fixed text and fences of the examples instruction.
 const EXAMPLES_INTRO: &str = "<EXAMPLES>\nBegin few-shot\nThe following are examples of user queries and model responses using the available tools.\n\n";
 const EXAMPLES_END: &str = "End few-shot\n<EXAMPLES>";
 const EXAMPLE_END: &str = "End example\n\n";
@@ -254,20 +250,19 @@ const FUNCTION_CALL_SUFFIX: &str = "\n```\n";
 const FUNCTION_RESPONSE_PREFIX: &str = "```tool_outputs\n";
 const FUNCTION_RESPONSE_SUFFIX: &str = "\n```\n";
 
-/// Go's boundary-tag sanitization: `"End few-shot"` in example text becomes `"[PROTECTED]"`.
+/// Sanitizes the boundary tag: `"End few-shot"` in example text becomes `"[PROTECTED]"`.
 fn protect(text: &str) -> String {
     text.replace("End few-shot", "[PROTECTED]")
 }
 
-/// Port of Go `buildExamplesSystemInstruction` (tool.go:151).
+/// Builds the examples system instruction for a request to `model`.
 fn build_examples_system_instruction(examples: &[Example], model: &str) -> String {
     let mut sb = String::from(EXAMPLES_INTRO);
-    // Go 5199d9fe (adk-python's convert_examples_to_text): Gemini models, and a request that
-    // names no model, take plain fences; the tool_code and tool_outputs fences are for other
-    // models.
+    // As in adk-python's convert_examples_to_text: Gemini models, and a request that names no
+    // model, take plain fences; the tool_code and tool_outputs fences are for other models.
     let is_gemini = model.is_empty() || model.contains("gemini-");
     for (example_num, example) in examples.iter().enumerate() {
-        // Go exampleStart = "EXAMPLE %d:\nBegin example\n" (1-based). Writing to a String cannot fail.
+        // Examples are numbered from 1. Writing to a String cannot fail.
         let _ = write!(sb, "EXAMPLE {}:\nBegin example\n", example_num + 1);
         sb.push_str(USER_PREFIX);
         for part in &example.input.parts {
@@ -319,8 +314,8 @@ fn build_examples_system_instruction(examples: &[Example], model: &str) -> Strin
     sb
 }
 
-/// Go's function-call args loop (tool.go:184-193). Strings are written `k='v'` and other values
-/// `k=<Go %v>`, joined with `", "` in ascending key order (Go e342d2f6 `slices.Sorted`).
+/// Formats a function call's arguments. Strings are written `k='v'` and other values as `k=<v>` by
+/// [`go_sprint_value`], joined with `", "` in ascending key order.
 fn format_function_call_args(fc: &FunctionCall) -> String {
     let mut args: Vec<(&String, &Value)> = fc.args.iter().collect();
     args.sort_by(|a, b| a.0.cmp(b.0));
@@ -333,11 +328,11 @@ fn format_function_call_args(fc: &FunctionCall) -> String {
         .join(", ")
 }
 
-/// Go `fmt.Sprintf("%v", fr)` for a `*genai.FunctionResponse` (genai v1.77.0 field order):
-/// `&{<WillContinue> <Scheduling> <Parts> <ID> <Name> <Response>}`. An unset `WillContinue` is
-/// `<nil>`, an unset `Scheduling` is the empty string, empty `Parts` are `[]`, and `Response` is
-/// the Go map form with sorted keys. Where Go would print a pointer address (a set
-/// `WillContinue`, each element of `Parts`), the pointed-to value is printed instead.
+/// Renders a function response as `&{<will_continue> <scheduling> [<parts>] <id> <name>
+/// <response>}`, the text ADK writes into the examples instruction. An unset `will_continue` is
+/// `<nil>`, an unset `scheduling` is the empty string, empty `parts` are `[]`, and `response` is
+/// in map form (`map[k:v]`) with sorted keys. A set `will_continue` and each element of `parts`
+/// are printed as their values.
 fn go_sprint_function_response(fr: &FunctionResponse) -> String {
     let will_continue = fr
         .will_continue
@@ -356,8 +351,8 @@ fn go_sprint_function_response(fr: &FunctionResponse) -> String {
     )
 }
 
-/// Go `%v` of a `*genai.FunctionResponsePart` shown as its value:
-/// `&{<InlineData> <FileData> <MediaProcessing>}` (an unset `MediaProcessing` is the empty string).
+/// Renders a function response part as `&{<inline_data> <file_data> <media_processing>}` (an unset
+/// `media_processing` is the empty string).
 fn go_sprint_response_part(p: &FunctionResponsePart) -> String {
     let inline = p.inline_data.as_ref().map_or_else(
         || "<nil>".to_string(),

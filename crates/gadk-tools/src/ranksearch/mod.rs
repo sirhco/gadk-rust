@@ -13,13 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A generic BM25 ranked search over named items, with exact selection, regex matching, a
-//! relevance floor, result limits, and optional name-list advertisement. Port of ADK-Go
-//! `internal/ranksearch/ranksearch.go`.
+//! A generic BM25 ranked search over named items, with exact selection, regex matching, a relevance
+//! floor, result limits, and optional name-list advertisement.
 //!
-//! Go strings may hold invalid UTF-8, and Go's classification treats such bytes specially, so the
-//! core works on byte strings ([`rank_bytes`], [`compile_query`]); [`rank`] is the `&str` entry
-//! point every caller uses.
+//! Pattern classification treats invalid UTF-8 bytes specially (an invalid byte can hide a pattern
+//! marker), so the core works on byte strings ([`rank_bytes`], [`compile_query`]); [`rank`] is the
+//! `&str` entry point every caller uses. Patterns follow the regular-expression syntax of ADK's
+//! tool search (see [`go_syntax`]).
 
 pub(crate) mod bm25;
 pub(crate) mod go_syntax;
@@ -33,19 +33,19 @@ use regex::bytes::Regex as BytesRegex;
 use bm25::{rank_bm25, tokenize};
 use go_syntax::{Error as SyntaxError, ErrorCode, Op, PERL, Regexp};
 
-/// Caps the query length in runes (Go `maxQueryLen`).
+/// Caps the query length in chars.
 pub(crate) const MAX_QUERY_LEN: usize = 200;
-/// Caps the estimated compiled size of a regex query (Go `maxPatternSize`).
+/// Caps the estimated compiled size of a regex query.
 const MAX_PATTERN_SIZE: i64 = 256;
-/// Marks the exact-name query form: `select:name1,name2` (Go `selectPrefix`).
+/// Marks the exact-name query form: `select:name1,name2`.
 const SELECT_PREFIX: &[u8] = b"select:";
-/// How many times an item's name tokens are repeated in its token bag (Go `nameRepeat`).
+/// How many times an item's name tokens are repeated in its token bag.
 const NAME_REPEAT: usize = 3;
-/// Bounds the search in [`any_balancing`] (Go `maxBalancingSteps`).
+/// Bounds the search in [`any_balancing`].
 const MAX_BALANCING_STEPS: usize = 256;
 
 /// A searchable named entity: a tool or a skill. `tokens` is the pre-built BM25 token bag (use
-/// [`build_tokens`]). Go `Item`.
+/// [`build_tokens`]).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Item {
     pub name: String,
@@ -53,14 +53,14 @@ pub(crate) struct Item {
     pub tokens: Vec<String>,
 }
 
-/// A ranked result: name and (possibly truncated) description. Go `Match`.
+/// A ranked result: name and (possibly truncated) description.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub(crate) struct Match {
     pub name: String,
     pub description: String,
 }
 
-/// Tunes a [`rank`] call. Go `Config`.
+/// Tunes a [`rank`] call.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Config {
     /// The singular word used in notes ("tool", "skill"); plurals append "s".
@@ -82,9 +82,14 @@ impl Config {
     }
 }
 
-/// Dispatches on the query form and returns ranked matches plus a UX note (empty for none).
-/// Items whose name is in `already_available` are excluded. Port of Go `Rank`; see its doc
-/// comment for the query forms.
+/// Dispatches on the query form and returns ranked matches plus a UX note (empty for none). Items
+/// whose name is in `already_available` are excluded.
+///
+/// Query forms: an empty query or one over [`MAX_QUERY_LEN`] chars gets a note and no matches;
+/// `select:name1,name2` loads items by exact name; a query with regex metacharacters is matched
+/// against item names (as a pattern, or as a literal substring when it reads as a keyword or
+/// prose) and falls back to BM25 keyword ranking when no new name matches; any other query is
+/// ranked by BM25 over names, descriptions and extra tokens.
 pub(crate) fn rank(
     items: &[Item],
     query: &str,
@@ -94,7 +99,7 @@ pub(crate) fn rank(
     rank_bytes(items, query.as_bytes(), already_available, cfg)
 }
 
-/// [`rank`] on a Go byte string, which may hold invalid UTF-8.
+/// [`rank`] on a byte string, which may hold invalid UTF-8.
 pub(crate) fn rank_bytes(
     items: &[Item],
     query: &[u8],
@@ -126,8 +131,7 @@ pub(crate) fn rank_bytes(
         return (Vec::new(), q.not_run);
     }
 
-    // BM25 sees the query as Go's range loop does: each invalid byte is a RuneError, which is
-    // a separator.
+    // BM25 sees each invalid byte as U+FFFD, which is a separator.
     let words = go_syntax::to_valid_utf8(query, "\u{FFFD}");
     let (available, eligible): (Vec<&Item>, Vec<&Item>) = items
         .iter()
@@ -198,7 +202,7 @@ pub(crate) fn rank_bytes(
     (all, note)
 }
 
-/// A query prepared once per [`rank`] call (Go `compiledQuery`).
+/// A query prepared once per [`rank`] call.
 pub(crate) struct CompiledQuery {
     /// Set for a query with regex metacharacters, which is matched against names first.
     pub(crate) has_meta: bool,
@@ -215,7 +219,7 @@ pub(crate) struct CompiledQuery {
 }
 
 impl CompiledQuery {
-    /// Go `nameMatches`: the items whose name the query matches, sorted by name.
+    /// The items whose name the query matches, sorted by name.
     fn name_matches(&self, items: &[&Item], cfg: &Config) -> Vec<Match> {
         let Some(re) = &self.match_name else {
             return Vec::new();
@@ -230,8 +234,11 @@ impl CompiledQuery {
     }
 }
 
-/// Go `compileQuery`: prepares a query with regex metacharacters. See the Go doc comment for
-/// the classification.
+/// Prepares a query with regex metacharacters. A query with a pattern marker (a bracket, `|`,
+/// `^`, `$`, an escape, a group flag, a counted repeat, …), or whose parse uses a repeat, is a
+/// pattern; one containing whitespace is prose; anything else is a punctuated keyword. Prose and
+/// keywords match names as literal substrings and fall back to BM25; a pattern that does not
+/// parse, or compiles too large, is not run and gets an explanatory note.
 pub(crate) fn compile_query(query: &[u8]) -> CompiledQuery {
     let mut q = CompiledQuery {
         has_meta: looks_like_regex(query),
@@ -246,7 +253,7 @@ pub(crate) fn compile_query(query: &[u8]) -> CompiledQuery {
     let prose = go_syntax::contains_space(query);
     // An invalid byte would hide a marker, as in .\xff+.
     let markers = has_pattern_marker(go_syntax::to_valid_utf8(query, "").as_bytes());
-    // Size a parse without the (?i) the compile adds (see Go's comment).
+    // Size a parse without the (?i) the compile adds.
     let parsed = go_syntax::parse(query, PERL);
     let is_pattern = markers || repeats_once_parsed(query, &parsed);
     match &parsed {
@@ -266,17 +273,18 @@ pub(crate) fn compile_query(query: &[u8]) -> CompiledQuery {
     q.keyword_fallback = prose || !is_pattern;
     q.regex_hint = !is_pattern && !prose && parsed.is_ok();
     if q.keyword_fallback {
-        // Go QuoteMeta keeps invalid UTF-8, which regexp rejects even in a literal.
+        // Invalid UTF-8 is replaced first: the regex crate rejects it even in a literal.
         let literal = regex::escape(&go_syntax::to_valid_utf8(query, "\u{FFFD}"));
         q.match_name = Regex::new(&format!("(?i){literal}")).ok();
     } else if q.not_run.is_empty() {
-        // A query that parses also parses with (?i) in front. Matching follows Go's parse of
-        // it, so Go-only syntax such as \Q...\E and {,n} means what it means in Go.
+        // A query that parses also parses with (?i) in front. Matching follows this module's parse
+        // of it, so syntax that differs between regex dialects, such as \Q...\E and {,n}, keeps the
+        // meaning it has in ADK's tool search.
         let folded = [b"(?i)".as_slice(), query].concat();
         match go_syntax::parse(&folded, PERL) {
             Ok(re) => match Regex::new(&go_syntax::to_hir(&re).to_string()) {
                 Ok(re) => q.match_name = Some(re),
-                // The regex crate's size limit is the only way here; Go would compile it.
+                // The regex crate's size limit is the only way here.
                 Err(_) => {
                     q.not_run = not_run_note(&SyntaxError {
                         code: ErrorCode::Large,
@@ -290,7 +298,7 @@ pub(crate) fn compile_query(query: &[u8]) -> CompiledQuery {
     q
 }
 
-/// Go `notRunNote`: explains why a pattern that does not parse was not run.
+/// Explains why a pattern that does not parse was not run.
 fn not_run_note(perr: &SyntaxError) -> String {
     if perr.expr.is_empty() {
         return format!(
@@ -305,8 +313,9 @@ fn not_run_note(perr: &SyntaxError) -> String {
     )
 }
 
-/// Go `patternMarkers`: syntax that keywords rarely contain but patterns do (see the Go doc
-/// comment). Go's `\d` and `\w` are ASCII, so they are spelled as ASCII classes here.
+/// Syntax that keywords rarely contain but patterns do: `[`, `|`, `^`, `$`, any backslash escape,
+/// group flags, `.+`, a possessive-looking repeat, a counted repeat, a repeat after an underscore,
+/// and a `)` followed by a word character. The word class is spelled as ASCII.
 static PATTERN_MARKERS: LazyLock<Option<BytesRegex>> = LazyLock::new(|| {
     BytesRegex::new(r"[\[|^$]|\(\?|\(\*|\\.|\.\+|[*?]\+|\{,?[0-9]|_.*[?+]|\)[0-9A-Za-z_]").ok()
 });
@@ -315,8 +324,8 @@ fn has_pattern_marker(text: &[u8]) -> bool {
     PATTERN_MARKERS.as_ref().is_some_and(|re| re.is_match(text))
 }
 
-/// Go `repeatsOnceParsed`: whether a query with none of the pattern markers is a pattern by
-/// its parse tree, fixing a query that does not parse first (see the Go doc comment).
+/// Whether a query with none of the pattern markers is a pattern by its parse tree. A query that
+/// does not parse is first repaired: a trailing backslash dropped and stray parentheses balanced.
 fn repeats_once_parsed(query: &[u8], parsed: &Result<Regexp, SyntaxError>) -> bool {
     if let Ok(re) = parsed {
         return uses_repeat(re);
@@ -334,8 +343,8 @@ fn repeats_once_parsed(query: &[u8], parsed: &Result<Regexp, SyntaxError>) -> bo
     balanced_is_pattern(&closed) || any_balancing(b, opens, closes, balanced_is_pattern)
 }
 
-/// Go `balancedIsPattern`: whether `b`, with balanced parentheses, is a pattern once its stray
-/// repeats are deleted, or still does not parse.
+/// Whether `b`, with balanced parentheses, is a pattern once its stray repeats are deleted, or
+/// still does not parse.
 fn balanced_is_pattern(b: &[u8]) -> bool {
     let text = delete_stray_repeats(b);
     if has_pattern_marker(&text) {
@@ -347,7 +356,7 @@ fn balanced_is_pattern(b: &[u8]) -> bool {
     }
 }
 
-/// Go `unbalanced`: how many of the `(` and how many of the `)` in `b` have no partner.
+/// How many of the `(` and how many of the `)` in `b` have no partner.
 fn unbalanced(b: &[u8]) -> (usize, usize) {
     let (mut opens, mut closes) = (0, 0);
     for &c in b {
@@ -361,9 +370,8 @@ fn unbalanced(b: &[u8]) -> (usize, usize) {
     (opens, closes)
 }
 
-/// Go `anyBalancing`: whether `f` returns true for `b` with any fewest set of parentheses
-/// deleted that balances it. Reports true once the search takes more than
-/// [`MAX_BALANCING_STEPS`] steps.
+/// Whether `f` returns true for `b` with any fewest set of parentheses deleted that balances it.
+/// Reports true once the search takes more than [`MAX_BALANCING_STEPS`] steps.
 fn any_balancing(b: &[u8], opens: usize, closes: usize, f: fn(&[u8]) -> bool) -> bool {
     struct Walk<'a> {
         b: &'a [u8],
@@ -409,8 +417,8 @@ fn any_balancing(b: &[u8], opens: usize, closes: usize, f: fn(&[u8]) -> bool) ->
     walk(&mut w, 0, 0, opens, closes)
 }
 
-/// Go `deleteStrayRepeats`: deletes each `++`, then each run of `*`, `+` and `?` with nothing to
-/// repeat, at the start or after a `(` (keeping a `?` of a run after a `(`).
+/// Deletes each `++`, then each run of `*`, `+` and `?` with nothing to repeat, at the start or
+/// after a `(` (keeping a `?` of a run after a `(`).
 fn delete_stray_repeats(b: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(b.len());
     let mut run = Vec::new();
@@ -427,9 +435,9 @@ fn delete_stray_repeats(b: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Go `keptOfRun`: appends to `out` what [`delete_stray_repeats`] keeps of `run`.
+/// Appends to `out` what [`delete_stray_repeats`] keeps of `run`.
 fn kept_of_run(out: &mut Vec<u8>, run: &[u8]) {
-    // bytes.ReplaceAll(run, "++", nil): non-overlapping, left to right.
+    // Remove each `++`: non-overlapping, left to right.
     let mut kept = Vec::with_capacity(run.len());
     let mut i = 0;
     while i < run.len() {
@@ -455,12 +463,12 @@ fn is_repeat_op(c: u8) -> bool {
     c == b'*' || c == b'+' || c == b'?'
 }
 
-/// Go `looksLikeRegex`: whether the query contains regex metacharacters.
+/// Whether the query contains regex metacharacters.
 pub(crate) fn looks_like_regex(query: &[u8]) -> bool {
     query.iter().any(|c| b".*+?[]()|^$\\{}".contains(c))
 }
 
-/// Go `usesRepeat`: whether `re` uses a repeat other than a trailing `?` or `+` on a literal.
+/// Whether `re` uses a repeat other than a trailing `?` or `+` on a literal.
 fn uses_repeat(re: &Regexp) -> bool {
     if is_trailing_punctuation(re) {
         return false;
@@ -474,18 +482,18 @@ fn uses_repeat(re: &Regexp) -> bool {
     has_repeat(re)
 }
 
-/// Go `isTrailingPunctuation`: whether `re` is a `?` or `+` on a literal.
+/// Whether `re` is a `?` or `+` on a literal.
 fn is_trailing_punctuation(re: &Regexp) -> bool {
     matches!(re.op, Op::Quest | Op::Plus) && re.sub.first().is_some_and(|s| s.op == Op::Literal)
 }
 
-/// Go `hasRepeat`: whether `re` or any part of it is a `*`, `+` or `?` repeat.
+/// Whether `re` or any part of it is a `*`, `+` or `?` repeat.
 fn has_repeat(re: &Regexp) -> bool {
     matches!(re.op, Op::Star | Op::Plus | Op::Quest) || re.sub.iter().any(has_repeat)
 }
 
-/// Go `patternSize`: estimates how many instructions `re` compiles to, stopping once the
-/// estimate passes [`MAX_PATTERN_SIZE`]. A counted repeat multiplies the size of its operand.
+/// Estimates how many instructions `re` compiles to, stopping once the estimate passes
+/// [`MAX_PATTERN_SIZE`]. A counted repeat multiplies the size of its operand.
 fn pattern_size(re: &Regexp) -> i64 {
     let mut n: i64 = 1;
     if re.op == Op::Literal {
@@ -503,7 +511,7 @@ fn pattern_size(re: &Regexp) -> i64 {
     n
 }
 
-/// Go `noMatchNote`.
+/// The note for a query that matched nothing.
 pub(crate) fn no_match_note(cfg: &Config) -> String {
     format!(
         "no {}s matched; try broader keywords or a different term",
@@ -511,7 +519,7 @@ pub(crate) fn no_match_note(cfg: &Config) -> String {
     )
 }
 
-/// Go `alreadyAvailableNote`: the query matched, but only items the caller can already use.
+/// The query matched, but only items the caller can already use.
 fn already_available_note(had: &[Match], cfg: &Config) -> String {
     let mut names: Vec<&str> = had.iter().map(|m| m.name.as_str()).collect();
     if let Some(max) = cfg.cap() {
@@ -525,8 +533,8 @@ fn already_available_note(had: &[Match], cfg: &Config) -> String {
     )
 }
 
-/// Go `selectByName`: loads items by exact name, skipping duplicates, and reporting unknown and
-/// already-available names.
+/// Loads items by exact name, skipping duplicates, and reporting unknown and already-available
+/// names.
 fn select_by_name(
     items: &[Item],
     names: &[u8],
@@ -547,7 +555,7 @@ fn select_by_name(
             had.push(name);
             continue;
         }
-        // Go's map keeps the last item of a name.
+        // When several items share a name, the last one wins.
         match items.iter().rev().find(|it| it.name == name) {
             Some(it) => matches.push(to_match(it, cfg)),
             None => not_found.push(name),
@@ -571,8 +579,7 @@ fn select_by_name(
     (matches, notes.join(". "))
 }
 
-/// Go `bm25Matches`: ranks eligible items by BM25 and trims the tail below `min_score_ratio`
-/// of the top score.
+/// Ranks eligible items by BM25 and trims the tail below `min_score_ratio` of the top score.
 fn bm25_matches(eligible: &[&Item], query: &str, cfg: &Config) -> Vec<Match> {
     let docs: Vec<&[String]> = eligible.iter().map(|it| it.tokens.as_slice()).collect();
     let ranked = rank_bm25(query, &docs);
@@ -596,7 +603,7 @@ fn to_match(it: &Item, cfg: &Config) -> Match {
 }
 
 /// Builds an item's BM25 token bag: its name (repeated to weight name matches highest), its
-/// description, and any extra strings (e.g. argument names and descriptions). Go `BuildTokens`.
+/// description, and any extra strings (e.g. argument names and descriptions).
 pub(crate) fn build_tokens(name: &str, description: &str, extra: &[&str]) -> Vec<String> {
     let name_toks = tokenize(name);
     let mut toks = Vec::with_capacity(name_toks.len() * NAME_REPEAT + 8);
@@ -611,7 +618,7 @@ pub(crate) fn build_tokens(name: &str, description: &str, extra: &[&str]) -> Vec
 }
 
 /// Appends the sorted, deduplicated item names to a search tool's base description. Returns
-/// `base` unchanged when there are no names. Go `DescribeSearch`.
+/// `base` unchanged when there are no names.
 pub(crate) fn describe_search(base: &str, item_names: &[String]) -> String {
     if item_names.is_empty() {
         return base.to_string();
@@ -625,8 +632,8 @@ pub(crate) fn describe_search(base: &str, item_names: &[String]) -> String {
     )
 }
 
-/// Go `truncateRunes`: caps `s` at `max_bytes` without splitting a multi-byte rune. A
-/// non-positive `max_bytes` leaves `s` untouched.
+/// Caps `s` at `max_bytes` without splitting a multi-byte char. A non-positive `max_bytes` leaves
+/// `s` untouched.
 fn truncate_runes(s: &str, max_bytes: i32) -> &str {
     let Ok(max) = usize::try_from(max_bytes) else {
         return s;

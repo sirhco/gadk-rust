@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `tool/skilltoolset/skill/frontmatter_preload.go`: a [`Source`] proxy that
-//! keeps every frontmatter in memory.
+//! A [`Source`] proxy that keeps every frontmatter in memory.
 
 use std::collections::HashMap;
 use std::sync::{Arc, PoisonError, RwLock};
@@ -36,8 +35,7 @@ struct FrontmatterPreloadSource {
 }
 
 impl FrontmatterPreloadSource {
-    /// Port of Go `reload` (`frontmatter_preload.go:62`). The cache is swapped only on
-    /// success.
+    /// Reloads the frontmatters. The cache is swapped only on success.
     async fn reload(&self) -> Result<(), SkillError> {
         let mut sorted = self
             .base
@@ -59,10 +57,9 @@ impl FrontmatterPreloadSource {
     }
 }
 
-/// Port of Go `WithFrontmatterPreloadSource` (`frontmatter_preload.go:37`): wraps `source`,
-/// loads every frontmatter now, and serves [`Source::list_frontmatters`] (sorted by name) and
-/// [`Source::load_frontmatter`] from memory. The other methods go to `source`. The returned
-/// [`ReloadFn`] reloads the frontmatters; a failed reload keeps the previous cache.
+/// Wraps `source`, loads every frontmatter now, and serves [`Source::list_frontmatters`] (sorted by
+/// name) and [`Source::load_frontmatter`] from memory. The other methods go to `source`. The
+/// returned [`ReloadFn`] reloads the frontmatters; a failed reload keeps the previous cache.
 pub async fn with_frontmatter_preload(
     source: Arc<dyn Source>,
 ) -> Result<(Arc<dyn Source>, ReloadFn), SkillError> {

@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Per-user Google Cloud credentials from the Agent Identity and IAM Connector credential
-//! services (port of ADK-Go `auth/gcp`).
+//! Per-user Google Cloud credentials from the Agent Identity and IAM Connector credential services.
 //!
 //! Given a resource name, a [`Client`] retrieves an end-user credential and maps it to a
 //! [`crate::Credential`], polling while the service reports a non-interactive "pending" state and
@@ -41,19 +40,20 @@ pub use provider::{ProviderConfig, ProviderScheme, new_provider};
 use std::fmt;
 use std::sync::Arc;
 
-/// Go's five sentinels; `Display`/`as_str` is the sentinel's exact text.
+/// The five failures an [`Error`] can match directly; `Display`/`as_str` is the exact text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    /// client.go:111 `ErrConsentRejected`: "gcp: user consent rejected"
+    /// The user rejected consent: "gcp: user consent rejected"
     ConsentRejected,
-    /// client.go:128 `ErrMalformedResponse`: "gcp: credentials service returned an undecodable response"
+    /// The service's response could not be decoded: "gcp: credentials service returned an
+    /// undecodable response"
     MalformedResponse,
-    /// client.go:131 `ErrPollTimeout`: "gcp: timed out waiting for credentials"
+    /// Polling a pending retrieval timed out: "gcp: timed out waiting for credentials"
     PollTimeout,
-    /// provider.go:114 `ErrClientUnavailable`: "gcp: default credentials client unavailable"
+    /// The default client could not be built: "gcp: default credentials client unavailable"
     ClientUnavailable,
-    /// provider.go:127 `ErrNoActingUser`: "gcp: no acting user"
+    /// The call carries no acting user: "gcp: no acting user"
     NoActingUser,
 }
 
@@ -78,9 +78,9 @@ impl fmt::Display for ErrorKind {
     }
 }
 
-/// Go `APIError` (client.go:136): a credential service answered with a non-2xx status. Branch
-/// on `status_code`; `body` is already redacted and capped (see `redact.rs`) and is diagnostic
-/// text for a human, not something to match on.
+/// A credential service answered with a non-2xx status. Branch on `status_code`; `body` is already
+/// redacted and capped (see `redact.rs`) and is diagnostic text for a human, not something to match
+/// on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiError {
     /// The HTTP status code of the response.
@@ -90,7 +90,7 @@ pub struct ApiError {
 }
 
 impl fmt::Display for ApiError {
-    // %q, not %s: the body is service-controlled and can carry control bytes.
+    // The body is quoted, not printed raw: it is service-controlled and can carry control bytes.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -103,8 +103,8 @@ impl fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
-/// The gcp error: Go's wrapped error chain flattened to one message, the sentinel it matches
-/// (if any) and the error it wraps (if any). `Display` is the whole Go `Error()` text.
+/// The gcp error: a chain of wrapped errors flattened to one message, the [`ErrorKind`] it matches
+/// (if any) and the error it wraps (if any). `Display` is the whole message.
 #[derive(Clone)]
 pub struct Error {
     kind: Option<ErrorKind>,
@@ -113,12 +113,12 @@ pub struct Error {
 }
 
 impl Error {
-    /// The sentinel this error matches directly (Go `errors.Is` against one of the five).
+    /// The [`ErrorKind`] this error matches directly.
     pub fn kind(&self) -> Option<ErrorKind> {
         self.kind
     }
 
-    /// `errors.New(message)`.
+    /// An error with only a message.
     pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             kind: None,
@@ -136,7 +136,7 @@ impl Error {
         }
     }
 
-    /// `fmt.Errorf("%w: …", ErrX)`: kind plus a full message the caller formats.
+    /// An error of `kind` with a full message the caller formats.
     pub(crate) fn with_kind(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
             kind: Some(kind),
@@ -145,7 +145,7 @@ impl Error {
         }
     }
 
-    /// Attach the wrapped error (Go `%w` of an `APIError`, a `ConsentRequiredError`, an inner
+    /// Attach the wrapped error (an [`ApiError`], a `ConsentRequiredError`, an inner
     /// `gcp::Error`, a `reqwest::Error` …). Message and kind are unchanged.
     pub(crate) fn caused_by<E: std::error::Error + Send + Sync + 'static>(
         mut self,
@@ -155,13 +155,13 @@ impl Error {
         self
     }
 
-    /// `fmt.Errorf("<prefix>: %w", err)`: message = "{prefix}: {message}"; kind and source kept.
+    /// Prefixes the message: "{prefix}: {message}"; kind and source are kept.
     pub(crate) fn prefixed(mut self, prefix: &str) -> Self {
         self.message = format!("{prefix}: {}", self.message);
         self
     }
 
-    /// client.go:390 `fmt.Errorf("%w (resource %q)", err, req.Resource)`.
+    /// Appends the resource to the message: `<message> (resource "<resource>")`.
     pub(crate) fn with_resource(mut self, resource: &str) -> Self {
         self.message = format!(
             "{} (resource {})",
@@ -202,8 +202,8 @@ impl From<Error> for crate::Error {
     }
 }
 
-/// The `errors.Is(err, ErrX)` analogue: true when any `gcp::Error` in `err`'s `source()` chain
-/// (the start included) has `kind`. Works through `crate::Error` wrapping.
+/// True when any `gcp::Error` in `err`'s `source()` chain (the start included) has `kind`. Works
+/// through `crate::Error` wrapping.
 pub fn is_kind(err: &(dyn std::error::Error + 'static), kind: ErrorKind) -> bool {
     let mut cur = Some(err);
     while let Some(e) = cur {
@@ -215,7 +215,7 @@ pub fn is_kind(err: &(dyn std::error::Error + 'static), kind: ErrorKind) -> bool
     false
 }
 
-/// The `errors.As(err, &*APIError)` analogue over the same chain.
+/// The first [`ApiError`] in `err`'s `source()` chain, if any.
 pub fn find_api_error<'a>(err: &'a (dyn std::error::Error + 'static)) -> Option<&'a ApiError> {
     let mut cur = Some(err);
     while let Some(e) = cur {

@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The toolset configuration and constructor (port of ADK-Go `tool/mcptoolset/set.go`:
-//! `Config`, `MetadataProvider`, `New`).
+//! The toolset configuration and constructor: [`Config`], [`MetadataProvider`] and [`new`].
 
 use std::sync::Arc;
 
@@ -30,8 +29,7 @@ use crate::sessions::CredentialSessions;
 use crate::set::McpToolset;
 use crate::transport::{HttpTarget, build_transport};
 
-/// Go `MetadataProvider`: request-scoped metadata for MCP tool calls, sent in the `_meta` field of
-/// `tools/call`.
+/// Request-scoped metadata for MCP tool calls, sent in the `_meta` field of `tools/call`.
 ///
 /// It runs once per call that proceeds to the server: when a tool requires confirmation, only for
 /// the confirmed call, with the context carrying the confirmation. It may be called concurrently.
@@ -77,17 +75,16 @@ where
         .map_err(|e| Box::new(e) as BoxError)
 }
 
-/// How the toolset reaches the MCP server (Go `Config.Transport` / `Config.Endpoint`).
+/// How the toolset reaches the MCP server.
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum McpTransport {
-    /// Streamable HTTP to this URL with a default `reqwest::Client` (Go `Config.Endpoint`). An
-    /// empty URL counts as no transport.
+    /// Streamable HTTP to this URL with a default `reqwest::Client`. An empty URL counts as no
+    /// transport.
     Endpoint(String),
-    /// Streamable HTTP with the caller's client and extra headers (Go
-    /// `*mcp.StreamableClientTransport`). `user-agent` and `x-goog-api-client` in `headers` are
-    /// sent after the ADK tracking tokens; a `user-agent` among the client's own default headers
-    /// is not merged (an accepted divergence).
+    /// Streamable HTTP with the caller's client and extra headers. `user-agent` and
+    /// `x-goog-api-client` in `headers` are sent after the ADK tracking tokens; a `user-agent`
+    /// among the client's own default headers is not merged with them.
     StreamableHttp {
         /// The MCP endpoint URL.
         url: String,
@@ -96,7 +93,7 @@ pub enum McpTransport {
         /// Headers added to every request.
         headers: http::HeaderMap,
     },
-    /// A child process speaking MCP over stdio (Go `*mcp.CommandTransport`).
+    /// A child process speaking MCP over stdio.
     Command(CommandBuilder),
     /// Any other transport.
     Custom(Arc<dyn TransportFactory>),
@@ -115,28 +112,27 @@ impl McpTransport {
     }
 }
 
-/// Go `Config`: the MCP toolset configuration.
+/// The MCP toolset configuration.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct Config {
     /// How to reach the server.
     pub transport: McpTransport,
-    /// The client's `initialize` parameters (Go `Config.Client`); `None` means client name
-    /// `adk-mcp-client` with this crate's version and default capabilities.
+    /// The client's `initialize` parameters; `None` means client name `adk-mcp-client` with this
+    /// crate's version and default capabilities.
     pub client_info: Option<ClientConfig>,
     /// Resolves and applies a credential to every MCP HTTP request; requires a streamable HTTP
     /// transport. Each distinct credential gets its own MCP session; a session idle for 10
     /// minutes is closed, and at most 64 are kept open unless more are in use at once.
     pub auth: Option<Arc<dyn gadk_auth::CredentialProvider>>,
-    /// When non-empty, each tool is exposed as `<prefix>_<name>` (Go `Config.ToolNamePrefix`,
-    /// #1821): `"docs"` turns `search` into `docs_search`. The `tools/call` request still uses
-    /// the server's name. Tool callbacks, confirmation providers and the predicates of
+    /// When non-empty, each tool is exposed as `<prefix>_<name>`: `"docs"` turns `search` into
+    /// `docs_search`. The `tools/call` request still uses the
+    /// server's name. Tool callbacks, confirmation providers and the predicates of
     /// [`filter_toolset`](gadk_agent::filter_toolset) see the exposed name; `tool_filter` runs
     /// before the prefix is applied, so it sees the server's name. Empty leaves names unchanged.
     pub prefix: String,
-    /// Which tools to expose (Go `Config.ToolFilter`, deprecated there in favor of
-    /// `tool.FilterToolset`, kept for parity). It sees the server's tool names, before
-    /// [`prefix`](Config::prefix) is applied.
+    /// Which tools to expose. It sees the server's tool names, before [`prefix`](Config::prefix) is
+    /// applied; [`filter_toolset`](gadk_agent::filter_toolset) filters by the exposed name instead.
     pub tool_filter: Option<gadk_agent::tool::ToolPredicate>,
     /// Whether every tool call needs user confirmation.
     pub require_confirmation: bool,
@@ -162,8 +158,8 @@ impl Config {
     }
 }
 
-/// Go `New`: validates `cfg` and returns the toolset. The MCP session connects lazily, on the
-/// first `tools` or tool call.
+/// Validates `cfg` and returns the toolset. The MCP session connects lazily, on the first `tools`
+/// or tool call.
 ///
 /// Errors: [`Error::NoTransport`] without a transport (or with `Endpoint("")`), and
 /// [`Error::AuthRequiresHttp`] when `auth` is set with a `Command` or `Custom` transport.
@@ -187,8 +183,7 @@ pub fn new(cfg: Config) -> Result<McpToolset, Error> {
     Ok(McpToolset::from_parts(client, &cfg))
 }
 
-/// Go `orDefaultClient`: `Implementation{Name: "adk-mcp-client", Version: version.Version}` with
-/// default capabilities.
+/// The default client identity: name `adk-mcp-client`, this crate's version, default capabilities.
 pub(crate) fn default_client_info() -> ClientConfig {
     ClientConfig::new(
         ClientCapabilities::default(),

@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! Skills: folders of instructions and resources that extend an agent's capabilities, and the
-//! [`SkillToolset`] that lets an agent discover and use them (port of Go `tool/skilltoolset`).
+//! [`SkillToolset`] that lets an agent discover and use them.
 //!
 //! [`skill`] holds the frontmatter parser and the skill sources; this module holds the toolset.
 //!
@@ -43,11 +43,10 @@ use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{Context, ReadonlyContext, Tool, ToolError, Toolset};
 use gadk_model::LlmRequest;
 
-/// Go `defaultName`.
+/// The default toolset name.
 const DEFAULT_NAME: &str = "SkillToolset";
 
-/// Go `defaultSkillSystemInstruction` (tool/skilltoolset/toolset.go:34-47), byte-for-byte,
-/// including the trailing newline.
+/// The default system instruction (worded as ADK words it), including the trailing newline.
 pub(crate) const DEFAULT_SKILL_SYSTEM_INSTRUCTION: &str = "You can use specialized 'skills' to help you with complex tasks. You MUST use the skill tools to interact with these skills.
 
 Skills are folders of instructions and resources that extend your capabilities for specialized tasks. Each skill folder contains:
@@ -63,11 +62,10 @@ This is very important:
 3. The `load_skill_resource` tool is for viewing files within a skill's directory (e.g., `references/*`, `assets/*`, `scripts/*`). Do NOT use other tools to access these files.
 ";
 
-/// Port of Go `skilltoolset.Config`.
+/// Configures a [`SkillToolset`].
 #[derive(Clone)]
 pub struct SkillToolsetConfig {
-    /// Where the skills come from. Required by the type, so Go's "skill source must be provided"
-    /// check has no Rust counterpart.
+    /// Where the skills come from. Required by the type.
     pub source: Arc<dyn skill::Source>,
     /// The toolset name. `None` or an empty string means `"SkillToolset"`.
     pub name: Option<String>,
@@ -76,27 +74,27 @@ pub struct SkillToolsetConfig {
     pub system_instruction: Option<String>,
 }
 
-/// Port of Go `skilltoolset.SkillToolset`: the `list_skills`, `load_skill` and
+/// The `list_skills`, `load_skill` and
 /// `load_skill_resource` tools over one [`skill::Source`], plus a request processor that tells
 /// the model which skills exist.
 pub struct SkillToolset {
     name: String,
-    /// The three tools, or the construction error Go's `New` would have returned (it cannot occur
-    /// with the fixed schemas; [`SkillToolset::new`] cannot fail, so `tools()` reports it).
+    /// The three tools, or the construction error (it cannot occur with the fixed schemas;
+    /// [`SkillToolset::new`] cannot fail, so `tools()` reports it).
     tools: Result<Vec<Arc<dyn Tool>>, String>,
     source: Arc<dyn skill::Source>,
     system_instruction: String,
 }
 
-/// Go's `cfg.X != ""` defaulting.
+/// `v` unless it is `None` or empty, else `default`.
 fn non_empty_or(v: Option<String>, default: &str) -> String {
     v.filter(|s| !s.is_empty())
         .unwrap_or_else(|| default.to_string())
 }
 
 impl SkillToolset {
-    /// Port of Go `skilltoolset.New`. The three tools are built once; [`Toolset::tools`] returns
-    /// the same instances on every call.
+    /// Builds the toolset. The three tools are built once; [`Toolset::tools`] returns the same
+    /// instances on every call.
     pub fn new(cfg: SkillToolsetConfig) -> Arc<SkillToolset> {
         let tools = build_tools(&cfg.source);
         Arc::new(SkillToolset {
@@ -111,7 +109,7 @@ impl SkillToolset {
     }
 }
 
-/// Go `New`'s three constructor calls, with its error wrapping texts.
+/// Builds the three tools, wrapping a failure with the name of the tool that failed.
 fn build_tools(source: &Arc<dyn skill::Source>) -> Result<Vec<Arc<dyn Tool>>, String> {
     let list =
         tools::list_skills(source.clone()).map_err(|e| format!("create list skills tool: {e}"))?;
@@ -128,14 +126,13 @@ impl Toolset for SkillToolset {
         &self.name
     }
 
-    /// Port of Go `SkillToolset.Tools`: always `[list_skills, load_skill, load_skill_resource]`.
+    /// Always `[list_skills, load_skill, load_skill_resource]`.
     async fn tools(&self, _ctx: &ReadonlyContext) -> Result<Vec<Arc<dyn Tool>>, ToolError> {
         self.tools.clone().map_err(ToolError::InvalidArgument)
     }
 
-    /// Port of Go `SkillToolset.ProcessRequest` (toolset.go:110-120): with at least one skill,
-    /// appends the system instruction and the skill list as one instruction (joined by
-    /// `"\n\n"`). A listing error is returned unwrapped, as in Go.
+    /// With at least one skill, appends the system instruction and the skill list as one
+    /// instruction (joined by `"\n\n"`). A listing error is returned unwrapped.
     async fn process_request(&self, _ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         let skills = self
             .source

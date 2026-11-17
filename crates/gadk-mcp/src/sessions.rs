@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The per-credential session pool (port of ADK-Go `tool/mcptoolset/client.go`
-//! `credentialSessions`, `pooledSession`, `sessionKey`).
+//! The per-credential session pool: [`CredentialSessions`] keeps one MCP session per distinct
+//! credential, keyed by a hash of the headers the credential applies.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -33,11 +33,11 @@ use crate::config::TransportFactory;
 use crate::error::Error;
 use crate::transport::{HttpTarget, http_factory_for};
 
-/// client.go `sessionIdleTimeout`: a session unused this long is closed on the next acquire.
+/// A session unused this long is closed on the next acquire.
 pub(crate) const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// client.go `maxSessions`: the most sessions kept open while none are in use. Sessions in use
-/// are never evicted, so the cap is exceeded only while more than that many are busy.
+/// The most sessions kept open while none are in use. Sessions in use are never evicted, so the cap
+/// is exceeded only while more than that many are busy.
 pub(crate) const MAX_SESSIONS: usize = 64;
 
 /// A session key: the SHA-256 of the credential's headers ([`CredentialSessions::session_key`]).
@@ -46,8 +46,8 @@ pub(crate) type SessionKey = [u8; 32];
 /// Builds the transport factory of a new session from the identity of the caller creating it.
 type MakeFactory = Arc<dyn Fn(AuthContext) -> Arc<dyn TransportFactory> + Send + Sync>;
 
-/// Go `pooledSession` as handed to a caller by [`CredentialSessions::acquire`]: one credential's
-/// connection. Two handles are the same session when their `conn`s are the same `Arc`
+/// One credential's connection, as handed to a caller by [`CredentialSessions::acquire`]. Two
+/// handles are the same session when their `conn`s are the same `Arc`
 /// ([`same`](PooledSession::same)). Its use count and last use live in the pool.
 #[derive(Clone)]
 pub(crate) struct PooledSession {
@@ -59,32 +59,32 @@ pub(crate) struct PooledSession {
 
 #[cfg(test)]
 impl PooledSession {
-    /// Go `==` on `*pooledSession`.
+    /// Whether both handles are the same pooled session.
     pub(crate) fn same(&self, other: &PooledSession) -> bool {
         Arc::ptr_eq(&self.conn, &other.conn)
     }
 }
 
-/// A pooled session's use (Go `pooledSession.inUse`, `.lastUsed`), guarded by the pool mutex.
+/// A pooled session's use count and last use, guarded by the pool mutex.
 struct Entry {
     conn: Arc<ConnectionRefresher>,
     in_use: usize,
     last_used: Instant,
 }
 
-/// What the pool mutex guards (Go `credentialSessions.mu` and the fields under it, plus the
-/// test-adjustable bounds, which Go keeps in package variables).
+/// What the pool mutex guards: the sessions, the evicted ones still closing, and the idle timeout
+/// and session cap (adjustable in tests).
 struct Pool {
     closed: bool,
     sessions: HashMap<SessionKey, Entry>,
-    /// Go `evicting`: evicted sessions still closing, so `close` can wait for them.
+    /// Evicted sessions still closing, so `close` can wait for them.
     evicting: JoinSet<()>,
     idle_timeout: Duration,
     max_sessions: usize,
 }
 
 impl Pool {
-    /// Go `evictIdleLocked`: closes sessions unused for the idle timeout.
+    /// Closes sessions unused for the idle timeout.
     fn evict_idle(&mut self, now: Instant) {
         let idle_timeout = self.idle_timeout;
         let expired: Vec<SessionKey> = self
@@ -98,9 +98,9 @@ impl Pool {
         }
     }
 
-    /// Go `makeRoomLocked`: closes least recently used idle sessions until there is room for
-    /// one more, or no idle session is left. A burst of concurrent callers can leave the pool
-    /// over the cap, so this may close more than one.
+    /// Closes least recently used idle sessions until there is room for one more, or no idle
+    /// session is left. A burst of concurrent callers can leave the pool over the cap, so this may
+    /// close more than one.
     fn make_room(&mut self) {
         while self.sessions.len() >= self.max_sessions {
             let lru = self
@@ -116,8 +116,8 @@ impl Pool {
         }
     }
 
-    /// Go `evictSessionLocked`: removes the session from the pool and closes it in the
-    /// background, since closing sends a request to the server.
+    /// Removes the session from the pool and closes it in the background, since closing sends a
+    /// request to the server.
     fn evict(&mut self, key: &SessionKey) {
         let Some(entry) = self.sessions.remove(key) else {
             return;
@@ -139,7 +139,7 @@ impl Pool {
     }
 }
 
-/// Go `credentialSessions`: one [`ConnectionRefresher`] per distinct credential, keyed by
+/// One [`ConnectionRefresher`] per distinct credential, keyed by
 /// [`session_key`](CredentialSessions::session_key).
 ///
 /// It is used when `Config::auth` is set. An MCP server that binds a session to the user who
@@ -153,11 +153,10 @@ impl Pool {
 pub(crate) struct CredentialSessions {
     client_info: ClientConfig,
     provider: Arc<dyn CredentialProvider>,
-    /// Each session's factory, bound to the identity of the caller that created it (Go
-    /// `identityOnlyConnect`).
+    /// Each session's factory, bound to the identity of the caller that created it.
     make: MakeFactory,
     pool: Mutex<Pool>,
-    /// Go `closeOnce` + `closeErr`.
+    /// The first `close`'s result, shared by every call.
     close_result: OnceCell<Result<(), Arc<Error>>>,
 }
 
@@ -175,8 +174,8 @@ impl CredentialSessions {
         Self::with_factory(client_info, provider, make)
     }
 
-    /// A pool whose sessions connect through `make(identity)` (tests whose sessions do not speak
-    /// HTTP, as `client_test.go`'s do not).
+    /// A pool whose sessions connect through `make(identity)` (for tests whose sessions do not
+    /// speak HTTP).
     pub(crate) fn with_factory(
         client_info: ClientConfig,
         provider: Arc<dyn CredentialProvider>,
@@ -197,14 +196,12 @@ impl CredentialSessions {
         }
     }
 
-    /// Go `sessionKey`: SHA-256 over the length-prefixed, sorted headers the credential resolved
-    /// for `cx` applies.
+    /// SHA-256 over the length-prefixed, sorted headers the credential resolved for `cx` applies.
     ///
     /// Every header name (lowercase, as `http::HeaderName` keeps it) is encoded as
     /// `{len(name)}:{name}{len(values)}:` followed by `{len(v)}:{v}` per value, so no two header
-    /// sets encode alike. Errors are Go's `auth: resolve credential: …` and
-    /// `auth: apply credential: …`; Go's `auth: provider returned nil credential` cannot occur
-    /// (a provider returns an `Arc`).
+    /// sets encode alike. Errors are [`Error::ResolveCredential`] and
+    /// [`Error::ApplyCredential`].
     pub(crate) async fn session_key(&self, cx: &CallContext) -> Result<[u8; 32], Error> {
         let cred = self
             .provider
@@ -235,9 +232,8 @@ impl CredentialSessions {
         self.pool.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Go `acquire`: the session for the credential of the caller in `cx`, created on first use
-    /// and marked in use until [`release`](CredentialSessions::release). The session itself
-    /// connects lazily.
+    /// The session for the credential of the caller in `cx`, created on first use and marked in use
+    /// until [`release`](CredentialSessions::release). The session itself connects lazily.
     pub(crate) async fn acquire(&self, cx: &CallContext) -> Result<PooledSession, Error> {
         if self.lock_pool().closed {
             return Err(Error::ConnectionClosed);
@@ -276,9 +272,9 @@ impl CredentialSessions {
         Ok(PooledSession { key, conn })
     }
 
-    /// Go `release`: ends a use of `s` that finished with `err`. A session that never connected,
-    /// or lost its connection and could not reconnect, is dropped so the pool does not keep
-    /// entries for credentials the server refuses.
+    /// Ends a use of `s` that finished with `err`. A session that never connected, or lost its
+    /// connection and could not reconnect, is dropped so the pool does not keep entries for
+    /// credentials the server refuses.
     pub(crate) fn release(&self, s: &PooledSession, err: Option<&Error>) {
         let mut pool = self.lock_pool();
         // A session no longer pooled (evicted or closed) has no use count left to update.
@@ -297,7 +293,7 @@ impl CredentialSessions {
         }
     }
 
-    /// Replaces the idle timeout and the session cap (Go `SetSessionBoundsForTest`).
+    /// Replaces the idle timeout and the session cap.
     #[cfg(test)]
     pub(crate) fn set_bounds(&self, idle_timeout: Duration, max_sessions: usize) {
         let mut pool = self.lock_pool();
@@ -305,13 +301,13 @@ impl CredentialSessions {
         pool.max_sessions = max_sessions;
     }
 
-    /// How many sessions the pool keeps (Go `SessionCountForTest`).
+    /// How many sessions the pool keeps.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.lock_pool().sessions.len()
     }
 
-    /// Whether `s` is the session the pool keeps for its key (Go `p.sessions[s.key] == s`).
+    /// Whether `s` is the session the pool keeps for its key.
     #[cfg(test)]
     pub(crate) fn is_pooled(&self, s: &PooledSession) -> bool {
         self.lock_pool()
@@ -321,9 +317,8 @@ impl CredentialSessions {
     }
 }
 
-/// One use of a pooled session: released when dropped, as Go's deferred `release`. A use whose
-/// future is dropped before it finishes counts as failed (Go's operation would return the
-/// context's error).
+/// One use of a pooled session: released when dropped. A use whose future is dropped before it
+/// finishes counts as failed with [`Error::Cancelled`].
 struct Use<'a> {
     pool: &'a CredentialSessions,
     session: PooledSession,
@@ -339,7 +334,7 @@ impl Drop for Use<'_> {
 
 #[async_trait::async_trait]
 impl McpClient for CredentialSessions {
-    /// Go `CallTool`: `tools/call` on the session for the caller's credential.
+    /// `tools/call` on the session for the caller's credential.
     async fn call_tool(
         &self,
         cx: &CallContext,
@@ -355,7 +350,7 @@ impl McpClient for CredentialSessions {
         result
     }
 
-    /// Go `ListTools`: lists tools on the session for the caller's credential.
+    /// Lists tools on the session for the caller's credential.
     async fn list_tools(&self, cx: &CallContext) -> Result<Vec<Tool>, Error> {
         let mut u = Use {
             pool: self,
@@ -376,10 +371,10 @@ fn unshare(err: Arc<Error>) -> Error {
 
 #[async_trait::async_trait]
 impl SessionClient for CredentialSessions {
-    /// Go `Close`: closes every session, waiting for connection setup in progress as
-    /// [`ConnectionRefresher`]'s `close` does, then for evicted sessions still closing.
-    /// Idempotent and concurrency-safe: every call returns the first call's result. Later
-    /// operations fail with [`Error::ConnectionClosed`].
+    /// Closes every session, waiting for connection setup in progress as [`ConnectionRefresher`]'s
+    /// `close` does, then for evicted sessions still closing. Idempotent and concurrency-safe:
+    /// every call returns the first call's result. Later operations fail with
+    /// [`Error::ConnectionClosed`].
     async fn close(&self) -> Result<(), Arc<Error>> {
         self.close_result
             .get_or_init(|| async {
@@ -483,7 +478,8 @@ mod tests {
             ("authorization", "Bearer tok"),
         ]))));
         let key = p.session_key(&CallContext::background()).await.unwrap();
-        // python3 -c 'import hashlib;print(hashlib.sha256(b"13:authorization1:10:Bearer tok5:x-key2:1:a1:b").hexdigest())'
+        // python3 -c 'import hashlib;print(hashlib.sha256(b"13:authorization1:10:Bearer
+        // tok5:x-key2:1:a1:b").hexdigest())'
         assert_eq!(
             hex(&key),
             "d9e95cf300f5d0ea355c9eb4ca1c3d213316a909475280c92150e37486761f50"
@@ -495,7 +491,8 @@ mod tests {
             .session_key(&CallContext::background())
             .await
             .unwrap();
-        // python3 -c 'import hashlib;print(hashlib.sha256(b"13:authorization1:10:Bearer tok").hexdigest())'
+        // python3 -c 'import hashlib;print(hashlib.sha256(b"13:authorization1:10:Bearer
+        // tok").hexdigest())'
         assert_eq!(
             hex(&key),
             "441eef59307dba3d96411653b3d294c3fbfb8e1335d4d489565c9ef3e66f96a4"

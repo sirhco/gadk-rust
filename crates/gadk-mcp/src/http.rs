@@ -13,10 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The HTTP client of MCP streamable-HTTP sessions (port of ADK-Go
-//! `tool/mcptoolset/tracking.go` `trackingTransport` and set.go `httpClient`): the ADK tracking
-//! headers on every request and, with auth, the credential's headers with one refresh on an
-//! auth rejection.
+//! The HTTP client of MCP streamable-HTTP sessions: the ADK tracking headers on every request and,
+//! with auth, the credential's headers with one refresh on an auth rejection.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -33,7 +31,7 @@ use rmcp::transport::streamable_http_client::{
     StreamableHttpClient, StreamableHttpError, StreamableHttpPostResponse,
 };
 
-/// The header that carries the ADK tracking tokens next to `user-agent` (Go `trackingTransport`).
+/// The header that carries the ADK tracking tokens next to `user-agent`.
 const X_GOOG_API_CLIENT: HeaderName = HeaderName::from_static("x-goog-api-client");
 
 /// What every delegated `reqwest::Client` call returns on error.
@@ -71,11 +69,11 @@ impl AdkHttpClient {
         headers
     }
 
-    /// Go `trackingTransport.RoundTrip`'s header step: `custom_headers` (rmcp's own) extended
-    /// with the configured headers, then `user-agent` and `x-goog-api-client` set to the ADK
-    /// tracking tokens followed by the tokens of the request's values (rmcp's and the configured
-    /// ones; see [`tracked`]), without duplicates. A name the configured headers repeat is sent
-    /// once, its values joined with `", "`. No credential is applied.
+    /// The tracking step: `custom_headers` (rmcp's own) extended with the configured headers, then
+    /// `user-agent` and `x-goog-api-client` set to the ADK tracking tokens followed by the tokens
+    /// of the request's values (rmcp's and the configured ones; see [`tracked`]), without
+    /// duplicates. A name the configured headers repeat is sent once, its values joined with `",
+    /// "`. No credential is applied.
     // `send` applies the credential between the two steps, so only tests call this seam.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn tracked_headers(
@@ -85,17 +83,16 @@ impl AdkHttpClient {
         tracked(&self.request_headers(custom_headers))
     }
 
-    /// Sends one request through `call` with, in Go's order (set.go `httpClient` wraps
-    /// `auth.Transport` around `trackingTransport`), the credential's headers applied to the
-    /// request's headers and then the tracking step, so a `user-agent` or `x-goog-api-client`
-    /// the credential writes is merged after the ADK tokens, on the first send and the replay.
+    /// Sends one request through `call` with the credential's headers applied to the request's
+    /// headers and then the tracking step, so a `user-agent` or `x-goog-api-client` the credential
+    /// writes is merged after the ADK tokens, on the first send and the replay.
     ///
     /// On an auth rejection ([`is_rejection`]) by a refreshing provider, the credential is
     /// refreshed once and the request replayed with the fresh one applied to the request's
-    /// headers as they were before the stale credential (Go `applyAndSend`); a second rejection
-    /// is returned as is. As in Go `auth.Transport.RoundTrip`, any refresh error degrades to the
-    /// original rejection unless it carries interactive consent (then it is returned), and only
-    /// an error applying the fresh credential is returned as an apply error. Refresh and apply
+    /// headers as they were before the stale credential; a second rejection is returned as is.
+    /// Any refresh error degrades to the original rejection unless it carries interactive
+    /// consent (then it is returned), and only an error applying the fresh credential is
+    /// returned as an apply error. Refresh and apply
     /// run as separate steps, so a provider's refresh error that is itself an
     /// `Error::ApplyCredential` still degrades. Credential errors are [`credential_error`]s.
     async fn send<T, F, Fut>(
@@ -130,7 +127,7 @@ impl AdkHttpClient {
             Err(err) if find_consent(&err).is_some() => return Err(credential_error(err)),
             Err(_) => return Err(rejection),
         };
-        // Go `applyAndSend` on the fresh credential: its apply error is returned.
+        // Applying the fresh credential: its apply error is returned.
         let mut replay = request;
         fresh
             .apply(&mut replay)
@@ -251,9 +248,8 @@ impl StreamableHttpClient for AdkHttpClient {
     }
 }
 
-/// Go `trackingTransport` for one header name: the ADK tracking tokens, then the whitespace-split
-/// tokens of `existing` (the request's values, in order) not already present, joined by one
-/// space.
+/// The tracked value of one header name: the ADK tracking tokens, then the whitespace-split tokens
+/// of `existing` (the request's values, in order) not already present, joined by one space.
 pub(crate) fn merge_tracking_tokens(existing: &[&str]) -> String {
     let tracking = gadk_platform::tracking_header();
     let mut tokens: Vec<&str> = tracking.split_whitespace().collect();
@@ -287,10 +283,9 @@ fn credential_error(err: gadk_auth::Error) -> HttpError {
     StreamableHttpError::Io(std::io::Error::other(err))
 }
 
-/// Go `trackingTransport.RoundTrip` over a request's final headers: each name sent once, its
-/// values joined with `", "`, and `user-agent`/`x-goog-api-client` set to the ADK tracking tokens
-/// followed by the tokens of the request's values (configured or credential-written), without
-/// duplicates.
+/// The tracking step over a request's final headers: each name sent once, its values joined with
+/// `", "`, and `user-agent`/`x-goog-api-client` set to the ADK tracking tokens followed by the
+/// tokens of the request's values (configured or credential-written), without duplicates.
 fn tracked(headers: &HeaderMap) -> HashMap<HeaderName, HeaderValue> {
     let mut out = HashMap::new();
     for name in headers.keys() {

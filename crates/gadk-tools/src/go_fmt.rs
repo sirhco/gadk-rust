@@ -13,17 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go standard-library formatting and path helpers the tools reproduce byte-for-byte: `html`
-//! `EscapeString`, `io/fs` `ValidPath` and `encoding/json` of a Go
-//! `string(bytes)` (`url.QueryEscape` is [`gadk_platform::go_query_escape`], `path.Clean`
-//! [`gadk_platform::go_path_clean`], `fmt` `%v` of a
-//! JSON-decoded value [`gadk_platform::go_sprint_value`]); plus the crate's one
-//! `fmt.Errorf("<msg>: %w", err)` wrapper, [`wrap_err`]. Private to the crate (the engine's and
-//! gadk-session's copies are private to those crates).
+//! Text and path helpers whose output the tools keep identical to ADK's: [`html_escape_string`],
+//! [`valid_path`] and [`go_lossy_utf8`]. Query escaping is [`gadk_platform::go_query_escape`],
+//! lexical path cleaning [`gadk_platform::go_path_clean`] and the plain-text rendering of a JSON
+//! value [`gadk_platform::go_sprint_value`]. The module also holds the crate's one error wrapper,
+//! [`wrap_err`]. Private to the crate (the engine's and gadk-session's copies are private to those
+//! crates).
 
 use gadk_agent::ToolError;
 
-/// Go `html.EscapeString`: `&`, `'`, `<`, `>` and `"` become `&amp;`, `&#39;`, `&lt;`, `&gt;` and
+/// Escapes HTML text: `&`, `'`, `<`, `>` and `"` become `&amp;`, `&#39;`, `&lt;`, `&gt;` and
 /// `&#34;`; every other character is kept.
 pub(crate) fn html_escape_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -40,14 +39,14 @@ pub(crate) fn html_escape_string(s: &str) -> String {
     out
 }
 
-/// Go `fs.ValidPath`: an unrooted, slash-separated path whose elements are all non-empty and
-/// neither `.` nor `..`; the single path `.` is also valid. Go also rejects invalid UTF-8, which
-/// a Rust `&str` cannot hold.
+/// Whether `p` is a valid slash-separated path: unrooted, with elements that are all non-empty and
+/// neither `.` nor `..`; the single path `.` is also valid. (A Rust `&str` cannot hold the invalid
+/// UTF-8 that would also make a path invalid.)
 pub(crate) fn valid_path(p: &str) -> bool {
     p == "." || p.split('/').all(|e| !matches!(e, "" | "." | ".."))
 }
 
-/// A [`ToolError::Execution`] wrapping `source` as Go's `fmt.Errorf("<msg>: %w", source)` does.
+/// A [`ToolError::Execution`] whose text is `"<msg>: <source>"` and whose source is `source`.
 pub(crate) fn wrap_err(
     msg: impl Into<String>,
     source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -55,9 +54,9 @@ pub(crate) fn wrap_err(
     ToolError::Execution(Box::new(gadk_platform::GoWrapped::new(msg, source)))
 }
 
-/// Go `string(bytes)` as `encoding/json` encodes it: valid UTF-8 is copied, and each byte that
-/// `utf8.DecodeRune` rejects (size 1) becomes one U+FFFD. Unlike [`String::from_utf8_lossy`],
-/// which emits one U+FFFD per maximal invalid subpart, this emits one per invalid byte.
+/// Converts bytes to a string: valid UTF-8 is copied, and each invalid byte becomes one U+FFFD.
+/// Unlike [`String::from_utf8_lossy`], which emits one U+FFFD per maximal invalid subpart, this
+/// emits one per invalid byte.
 pub(crate) fn go_lossy_utf8(mut bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len());
     loop {

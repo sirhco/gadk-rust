@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `tool/skilltoolset/skill/complete_preload.go`: a [`Source`] proxy that
-//! keeps every skill's frontmatter, instructions and resources in memory.
+//! A [`Source`] proxy that keeps every skill's frontmatter, instructions and resources in memory.
 
 use std::collections::HashMap;
 use std::sync::{Arc, PoisonError, RwLock};
@@ -28,7 +27,7 @@ use super::{
     quote,
 };
 
-/// One preloaded skill (Go `completePreloadSkillData`).
+/// One preloaded skill.
 struct SkillData {
     frontmatter: Frontmatter,
     instructions: String,
@@ -60,7 +59,7 @@ impl CompletePreloadSource {
             .ok_or_else(|| SkillError::sentinel(SkillErrorKind::SkillNotFound))
     }
 
-    /// Port of Go `reload` (`complete_preload.go:138`). The cache is swapped only on success.
+    /// Reloads everything. The cache is swapped only on success.
     async fn reload(&self) -> Result<(), SkillError> {
         let mut frontmatters = self
             .base
@@ -103,7 +102,7 @@ impl CompletePreloadSource {
                         )
                     })?;
                 let mut data = Vec::new();
-                // Go `io.ReadAll(io.LimitReader(resource, maxResourceSize+1))`.
+                // Read at most `MAX_RESOURCE_BYTES + 1` bytes, so an oversized resource is seen.
                 reader
                     .take(MAX_RESOURCE_BYTES as u64 + 1)
                     .read_to_end(&mut data)
@@ -154,11 +153,10 @@ impl CompletePreloadSource {
     }
 }
 
-/// Port of Go `WithCompletePreloadSource` (`complete_preload.go:56`): wraps `source` and loads
-/// every skill's frontmatter, instructions and resources (each at most
-/// [`MAX_RESOURCE_BYTES`]) now; every [`Source`] method is then served from memory. `source`
-/// must list all of a skill's resources for the subpath `"."`. The returned [`ReloadFn`]
-/// reloads everything; a failed reload keeps the previous cache.
+/// Wraps `source` and loads every skill's frontmatter, instructions and resources (each at most
+/// [`MAX_RESOURCE_BYTES`]) now; every [`Source`] method is then served from memory. `source` must
+/// list all of a skill's resources for the subpath `"."`. The returned [`ReloadFn`] reloads
+/// everything; a failed reload keeps the previous cache.
 ///
 /// Lookups of an unknown skill fail with a bare `skill not found`, and of an unknown resource
 /// with a bare `resource not found` (no path validation at this layer). `list_resources`
@@ -192,7 +190,7 @@ impl Source for CompletePreloadSource {
             .clone())
     }
 
-    /// Port of Go `ListResources` (`complete_preload.go:105`).
+    /// The resource paths of skill `name` under `subpath`, from memory.
     async fn list_resources(&self, name: &str, subpath: &str) -> Result<Vec<String>, SkillError> {
         let data = self.skill(name)?;
         let clean_path = go_path_clean(subpath);

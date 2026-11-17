@@ -13,14 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! MCP result content as model-facing text (port of ADK-Go `tool/mcptoolset/tool.go`
-//! `formatMCPContent` and its helpers).
+//! MCP result content as model-facing text ([`format_mcp_content`]); the `[MCP …]` labels match the
+//! text ADK servers and clients produce.
 //!
-//! Go's go-sdk decodes image, audio and blob payloads from base64 with `encoding/json` before
-//! formatting; rmcp keeps them as base64 strings, so sizes here are the decoded byte counts.
-//! The decoder follows Go's `base64.StdEncoding` (padding required, `\r`/`\n` ignored, trailing
-//! bits allowed). Where Go would fail the whole call on invalid base64, a payload here counts as
-//! 0 bytes (an accepted divergence).
+//! rmcp keeps image, audio and blob payloads as base64 strings, so sizes here are the decoded
+//! byte counts. The decoder uses the standard alphabet with padding required, ignores `\r` and
+//! `\n`, and allows non-zero trailing bits. Invalid base64 does not fail the call: such a payload
+//! counts as 0 bytes.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -35,14 +34,14 @@ use crate::go_mime::{
     MediaTypeError, go_to_lower, has_mime_charset_parameter, is_text_media_type, parse_media_type,
 };
 
-/// Go `base64.StdEncoding` for decoding: standard alphabet, padding required, non-zero trailing
-/// bits accepted.
+/// The base64 decoding configuration: standard alphabet, padding required, non-zero trailing bits
+/// accepted.
 const GO_STD_ENCODING: GeneralPurpose = GeneralPurpose::new(
     &alphabet::STANDARD,
     PAD.with_decode_allow_trailing_bits(true),
 );
 
-/// One rendered block (Go `formattedMCPContent`).
+/// One rendered block.
 struct FormattedBlock<'a> {
     text: Cow<'a, str>,
     is_plain: bool,
@@ -57,9 +56,9 @@ impl<'a> FormattedBlock<'a> {
     }
 }
 
-/// Go `formatMCPContent`: text as is; embedded resources, resource links, images and audio as
-/// `[MCP …]` labels (with a decoded text body where Go shows one); blocks joined by Go's
-/// newline rule.
+/// Formats MCP content: text as is; embedded resources, resource links, images and audio as
+/// `[MCP …]` labels (with a decoded text body for a text resource or a text blob); blocks joined
+/// by a newline unless both are plain text or the boundary already has a newline.
 pub fn format_mcp_content(contents: &[ContentBlock]) -> String {
     let formatted: Vec<FormattedBlock<'_>> = contents
         .iter()
@@ -112,9 +111,9 @@ pub fn format_mcp_content(contents: &[ContentBlock]) -> String {
     result
 }
 
-/// Go `formatEmbeddedResource`. rmcp splits text and blob contents, so Go's "text with an
-/// accompanying blob" path cannot occur: text contents with a non-empty `text` render label and
-/// body; with an empty `text` they take Go's path for no blob (label only).
+/// Formats an embedded resource. rmcp splits text and blob contents, so a resource never has both:
+/// text contents with a non-empty `text` render label and body; with an empty `text` only the
+/// label.
 fn format_embedded_resource(resource: &ResourceContents) -> String {
     match resource {
         ResourceContents::TextResourceContents {
@@ -146,12 +145,12 @@ fn format_embedded_resource(resource: &ResourceContents) -> String {
             }
             format_content_label("embedded resource", &attributes)
         }
-        // A resource kind this port cannot read: Go's text for a resource it cannot show.
+        // A resource kind this crate cannot read.
         _ => "[MCP embedded resource: unavailable]".to_owned(),
     }
 }
 
-/// Go `formatResourceLink`: empty strings are omitted, as Go omits them.
+/// Formats a resource link; empty attributes are omitted.
 fn format_resource_link(
     uri: &str,
     mime_type: &str,
@@ -176,7 +175,7 @@ fn format_resource_link(
     format_content_label("resource link", &attributes)
 }
 
-/// Go `formatMediaContent`.
+/// Formats an image or audio block: its optional MIME type and decoded size.
 fn format_media_content(kind: &str, mime_type: &str, size: usize) -> String {
     let mut attributes = Vec::with_capacity(2);
     if !mime_type.is_empty() {
@@ -186,7 +185,7 @@ fn format_media_content(kind: &str, mime_type: &str, size: usize) -> String {
     format_content_label(kind, &attributes)
 }
 
-/// Go `resourceAttributes`.
+/// The `uri` and `mimeType` attributes of a resource, each omitted when empty.
 fn resource_attributes(uri: &str, mime_type: &str) -> Vec<String> {
     let mut attributes = Vec::with_capacity(2);
     if !uri.is_empty() {
@@ -198,12 +197,12 @@ fn resource_attributes(uri: &str, mime_type: &str) -> Vec<String> {
     attributes
 }
 
-/// Go `formatContentWithBody`.
+/// A label followed by a newline and `body`.
 fn format_content_with_body(kind: &str, attributes: &[String], body: &str) -> String {
     format_content_label(kind, attributes) + "\n" + body
 }
 
-/// Go `formatContentLabel`.
+/// The `[MCP <kind>: <attributes>]` label, or `[MCP <kind>]` without attributes.
 fn format_content_label(kind: &str, attributes: &[String]) -> String {
     if attributes.is_empty() {
         return format!("[MCP {kind}]");
@@ -211,8 +210,7 @@ fn format_content_label(kind: &str, attributes: &[String]) -> String {
     format!("[MCP {kind}: {}]", attributes.join(", "))
 }
 
-/// The bytes of a base64 payload as Go's `encoding/json` decodes a `[]byte` field; invalid
-/// base64 is empty (0 bytes).
+/// The bytes of a base64 payload; invalid base64 is empty (0 bytes).
 fn decode_base64(data: &str) -> Vec<u8> {
     let data: Cow<'_, str> = if data.contains(['\r', '\n']) {
         Cow::Owned(data.replace(['\r', '\n'], ""))
@@ -222,8 +220,8 @@ fn decode_base64(data: &str) -> Vec<u8> {
     GO_STD_ENCODING.decode(data.as_bytes()).unwrap_or_default()
 }
 
-/// Go `decodeTextBlob`: `blob` as text when `mime_type` is a text type with an acceptable
-/// charset and the bytes are valid UTF-8 (or ASCII for an ASCII charset).
+/// Decodes `blob` as text when `mime_type` is a text type with an acceptable charset and the bytes
+/// are valid UTF-8 (or ASCII for an ASCII charset).
 pub(crate) fn decode_text_blob(blob: &[u8], mime_type: &str) -> Option<String> {
     if blob.is_empty() {
         return None;
@@ -232,8 +230,8 @@ pub(crate) fn decode_text_blob(blob: &[u8], mime_type: &str) -> Option<String> {
     let declares_charset = has_mime_charset_parameter(mime_type);
     let (media_type, params) = match parse_media_type(mime_type) {
         Ok(parsed) => parsed,
-        // Go tolerates ErrInvalidMediaParameter (media type, no parameters) unless the value
-        // declares a charset.
+        // An invalid parameter is tolerated (media type, no parameters) unless the value declares a
+        // charset.
         Err((MediaTypeError::InvalidParameter, media_type)) if !declares_charset => {
             (media_type, BTreeMap::new())
         }

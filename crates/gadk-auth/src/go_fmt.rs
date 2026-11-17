@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go standard-library formatting the auth error texts reproduce byte for byte:
-//! `hex.EncodeToString`. Go's `time.Duration.String()` is `gadk_platform::go_format_duration`
-//! and Go's `%q` is `gadk_agent::go_quote`.
+//! Formatting helpers for the auth error texts: [`hex_encode`]. Durations in those texts are
+//! formatted by `gadk_platform::go_format_duration` (e.g. `30s`, `1m30s`) and quoted strings by
+//! `gadk_agent::go_quote` (double-quoted with backslash escapes).
 
-/// Lowercase hex of `bytes` (Go `hex.EncodeToString`), replacing the `hex` crate.
+/// Lowercase hex of `bytes`; it replaces a dependency on the `hex` crate.
 #[cfg_attr(not(feature = "gcp"), allow(dead_code))] // only the gcp module calls it
 pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";

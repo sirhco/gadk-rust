@@ -1,0 +1,1 @@
+crates/gadk-tools/src/ranksearch/go_syntax.rs	the dialect of Go's `regexp/syntax`	The query-pattern dialect is the contract: classification and 'pattern not run' notes must agree with ADK's tool search.

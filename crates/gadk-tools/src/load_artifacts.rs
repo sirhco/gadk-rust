@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The `load_artifacts` tool (port of Go `tool/loadartifactstool`).
+//! The `load_artifacts` tool.
 //!
 //! The tool tells the model which artifacts the session has. When the model asks for them with a
 //! `load_artifacts` function call, the next request receives their content. The call itself only
@@ -38,12 +38,12 @@ use crate::load_memory::go_error;
 const NAME: &str = "load_artifacts";
 const DESCRIPTION: &str = "Loads the artifacts and adds them to the session.";
 
-/// Port of Go `loadartifactstool.New` (load_artifacts_tool.go:42).
+/// A `load_artifacts` tool.
 pub fn new() -> Arc<dyn Tool> {
     Arc::new(ArtifactsTool)
 }
 
-/// Port of Go `artifactsTool` (load_artifacts_tool.go:36).
+/// The `load_artifacts` tool.
 struct ArtifactsTool;
 
 #[async_trait]
@@ -56,8 +56,7 @@ impl Tool for ArtifactsTool {
         DESCRIPTION
     }
 
-    /// Port of Go `artifactsTool.Declaration` (load_artifacts_tool.go:69). The schema is typed,
-    /// with no `required` and no property description.
+    /// The schema is typed, with no `required` and no property description.
     fn declaration(&self) -> Option<FunctionDeclaration> {
         Some(FunctionDeclaration {
             name: NAME.into(),
@@ -81,9 +80,8 @@ impl Tool for ArtifactsTool {
         })
     }
 
-    /// Port of Go `artifactsTool.ProcessRequest` (load_artifacts_tool.go:120). Go packs the tool
-    /// after the service check; in Rust the flow has already packed it (Go-parity note 8). Either
-    /// way a missing service fails the request.
+    /// Lists the session's artifacts in the instructions and loads those the model asked for. The
+    /// flow has already packed the tool by now; a missing artifact service fails the request.
     async fn process_request(&self, ctx: &Context, req: &mut LlmRequest) -> Result<(), ToolError> {
         let Some(artifacts) = ctx.artifacts() else {
             return Err(go_error(
@@ -105,8 +103,7 @@ impl Tool for ArtifactsTool {
 
 #[async_trait]
 impl RunnableTool for ArtifactsTool {
-    /// Port of Go `artifactsTool.Run` (load_artifacts_tool.go:88): echoes
-    /// `{"artifact_names": [..]}`.
+    /// Echoes `{"artifact_names": [..]}`.
     async fn run(&self, _ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let Value::Object(m) = &args else {
             return Err(ToolError::InvalidArgument(format!(
@@ -116,9 +113,9 @@ impl RunnableTool for ArtifactsTool {
         };
         let names = match m.get("artifact_names") {
             None => Vec::new(),
-            // Go (f1f0d2de), like adk-python: arguments the model can correct are answered with
-            // a result, not a tool error. A JSON null element would decode to "", which names
-            // no artifact, so it is rejected as well.
+            // As in adk-python, arguments the model can correct are answered with a result, not a
+            // tool error. A JSON null element would decode to "", which names no artifact, so it is
+            // rejected as well.
             Some(raw) => match decode_string_slice(raw) {
                 Ok(names) if !has_null_element(raw) => names,
                 _ => {
@@ -144,14 +141,13 @@ impl RunnableTool for ArtifactsTool {
     }
 }
 
-/// Go `hasNullElement`: whether `v` is a list that holds a JSON null.
+/// Whether `v` is a list that holds a JSON null.
 fn has_null_element(v: &Value) -> bool {
     matches!(v, Value::Array(items) if items.iter().any(Value::is_null))
 }
 
-/// Go `json.Unmarshal(json.Marshal(raw), &[]string)`. `null` decodes to an empty list and a
-/// `null` element to `""`. A type mismatch returns Go's `UnmarshalTypeError` text for the first
-/// offending value.
+/// Decodes a JSON list of strings. `null` decodes to an empty list and a `null` element to `""`. A
+/// type mismatch returns the "cannot unmarshal" error text for the first offending value.
 fn decode_string_slice(raw: &Value) -> Result<Vec<String>, String> {
     match raw {
         Value::Null => Ok(Vec::new()),
@@ -167,7 +163,8 @@ fn decode_string_slice(raw: &Value) -> Result<Vec<String>, String> {
     }
 }
 
-/// Go `encoding/json` `UnmarshalTypeError.Error()` without a struct field (decode.go:136).
+/// The "cannot unmarshal" error text for a JSON value of the wrong kind; `go_type` is the expected
+/// type (`string` or `[]string`).
 fn unmarshal_type_error(v: &Value, go_type: &str) -> String {
     let kind = match v {
         Value::Null => "null",
@@ -180,7 +177,7 @@ fn unmarshal_type_error(v: &Value, go_type: &str) -> String {
     format!("json: cannot unmarshal {kind} into Go value of type {go_type}")
 }
 
-/// Port of Go `appendInitialInstructions` (load_artifacts_tool.go:133).
+/// Appends the instruction listing the session's artifacts, when there are any.
 async fn append_initial_instructions(
     artifacts: &dyn Artifacts,
     req: &mut LlmRequest,
@@ -202,8 +199,8 @@ async fn append_initial_instructions(
     Ok(())
 }
 
-/// Go `json.Marshal`'s default HTML escaping, applied to serde_json's compact output: `<`, `>`,
-/// `&`, U+2028 and U+2029 become `\u003c`, `\u003e`, `\u0026`, `\u2028` and `\u2029`.
+/// HTML-safe JSON text: in serde_json's compact output `<`, `>`, `&`, U+2028 and U+2029 become
+/// `\u003c`, `\u003e`, `\u0026`, `\u2028` and `\u2029`.
 fn go_html_safe(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -219,9 +216,8 @@ fn go_html_safe(s: &str) -> String {
     out
 }
 
-/// Port of Go `processLoadArtifactsFunctionCall` (load_artifacts_tool.go:157). Every part of the
-/// last content is scanned, as in Go (adk-python checks only `parts[0]`). The first
-/// `load_artifacts` response wins.
+/// Loads the artifacts a `load_artifacts` function response names. Every part of the last content
+/// is scanned (adk-python checks only `parts[0]`). The first `load_artifacts` response wins.
 async fn process_load_artifacts_function_call(
     artifacts: &dyn Artifacts,
     req: &mut LlmRequest,
@@ -243,7 +239,7 @@ async fn process_load_artifacts_function_call(
     if names.is_empty() {
         return Ok(());
     }
-    // Go errgroup.WithContext: concurrent loads, results kept in input order, first error aborts.
+    // Concurrent loads, results kept in input order, first error aborts.
     let results = try_join_all(
         names
             .iter()
@@ -254,7 +250,8 @@ async fn process_load_artifacts_function_call(
     Ok(())
 }
 
-/// Go's `[]string` / `[]any` switch (load_artifacts_tool.go:185-202), on a JSON value.
+/// The artifact names in a function response's `artifact_names` value, which must be a list of
+/// strings.
 fn artifact_names_from_response(raw: &Value) -> Result<Vec<String>, ToolError> {
     let Value::Array(items) = raw else {
         return Err(go_error(format!(
@@ -275,9 +272,9 @@ fn artifact_names_from_response(raw: &Value) -> Result<Vec<String>, ToolError> {
         .collect()
 }
 
-/// Port of Go `loadIndividualArtifact` (load_artifacts_tool.go:227). The load error is wrapped,
-/// so the artifact service's not-found error stays in the source chain. Go appends a nil part
-/// when the response has none; Rust appends only the header part.
+/// Loads one artifact as a user content: a header part and the artifact's part. The load error is
+/// wrapped, so the artifact service's not-found error stays in the source chain. A response without
+/// a part appends only the header part.
 async fn load_individual_artifact(
     artifacts: &dyn Artifacts,
     name: &str,

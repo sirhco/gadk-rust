@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `tool/skilltoolset/skill/frontmatter.go`: the SKILL.md YAML frontmatter.
+//! The SKILL.md YAML frontmatter: parsing, validating and building it.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -29,18 +29,18 @@ use crate::go_fmt::go_lossy_utf8;
 const FRONTMATTER_SEPARATOR: &[u8] = b"---\n";
 const FRONTMATTER_SEPARATOR_WIN: &[u8] = b"---\r\n";
 
-/// Go `allowedToolsFormat`.
+/// The error text for a malformed `allowed-tools` string.
 const ALLOWED_TOOLS_FORMAT: &str = "allowed-tools must be a whitespace- or comma-separated list of Tool or Tool(well-balanced expression)";
-/// Go's `allowedToolsYAML.UnmarshalYAML` error for a non-string scalar or a mapping.
+/// The error text for an `allowed-tools` value that is a non-string scalar or a mapping.
 const ALLOWED_TOOLS_KIND: &str = "allowed-tools must be a string or a sequence of strings";
 
-/// The YAML metadata at the top of a SKILL.md file (Go `skill.Frontmatter`); see
+/// The YAML metadata at the top of a SKILL.md file; see
 /// <https://agentskills.io/specification#frontmatter>.
 ///
 /// Serialization uses the YAML/JSON key `allowed-tools` and omits an empty `license`,
-/// `compatibility`, `metadata` or `allowed-tools`, as Go's `omitempty` tags do. [`parse`] and
-/// [`parse_bytes`] do not use this type's `Deserialize`: they decode through a private mirror
-/// that rejects unknown keys and accepts Go's three `allowed-tools` forms.
+/// `compatibility`, `metadata` or `allowed-tools`. [`parse`] and [`parse_bytes`] do not use this
+/// type's `Deserialize`: they decode through a private mirror that rejects unknown keys and
+/// accepts three `allowed-tools` forms (a sequence of strings, a string, or `null`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Frontmatter {
@@ -62,8 +62,8 @@ pub struct Frontmatter {
     pub allowed_tools: Vec<String>,
 }
 
-/// Go `frontmatterYAML`: the decoding mirror. Every key is optional; a YAML `null` value
-/// decodes to the zero value, as with Go's yaml.v3.
+/// The decoding mirror of [`Frontmatter`]. Every key is optional; a YAML `null` value decodes to
+/// the zero value.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct FrontmatterYaml {
@@ -71,7 +71,7 @@ struct FrontmatterYaml {
     description: Option<String>,
     license: Option<String>,
     compatibility: Option<String>,
-    /// A `null` value decodes to `""`, as yaml.v3 does for a Go `string`.
+    /// A `null` value decodes to `""`.
     metadata: Option<BTreeMap<String, Option<String>>>,
     #[serde(rename = "allowed-tools")]
     allowed_tools: AllowedToolsYaml,
@@ -95,11 +95,11 @@ impl FrontmatterYaml {
     }
 }
 
-/// Go `allowedToolsYAML` with its `UnmarshalYAML`: a sequence of strings, `null`, or a
-/// `!!str` scalar split by [`split_allowed_tools`]. serde-saphyr reports a plain or `!!int`
-/// scalar such as `5` as an integer, `true` as a bool and `1.5` as a float, so those reach
-/// the non-string visitor methods and get Go's "must be a string or a sequence" error, as
-/// Go's `node.Tag != "!!str"` check gives; a quoted or `!!str`-tagged scalar is a string.
+/// The `allowed-tools` value: a sequence of strings, `null`, or a `!!str` scalar split by
+/// [`split_allowed_tools`]. serde-saphyr reports a plain or `!!int` scalar such as `5` as an
+/// integer, `true` as a bool and `1.5` as a float, so those reach the non-string visitor methods
+/// and get the "must be a string or a sequence" error; a quoted or `!!str`-tagged scalar is a
+/// string.
 #[derive(Debug, Default)]
 struct AllowedToolsYaml(Vec<String>);
 
@@ -179,8 +179,7 @@ impl<'de> Visitor<'de> for AllowedToolsVisitor {
     }
 }
 
-/// Port of Go `splitAllowedTools` (`frontmatter.go:91`): splits on whitespace (Go
-/// `unicode.IsSpace`) and commas outside balanced parentheses.
+/// Splits on whitespace and commas outside balanced parentheses.
 fn split_allowed_tools(value: &str) -> Result<Vec<String>, String> {
     let mut tools = Vec::new();
     let mut current = String::new();
@@ -215,19 +214,19 @@ fn split_allowed_tools(value: &str) -> Result<Vec<String>, String> {
     Ok(tools)
 }
 
-/// Go `unicode.IsSpace`: `\t \n \v \f \r`, space, U+0085, U+00A0 and the Unicode `White_Space`
-/// characters, which is exactly Rust's `char::is_whitespace`.
+/// Whether `r` is white space: `\t \n \v \f \r`, space, U+0085, U+00A0 and the Unicode
+/// `White_Space` characters, which is exactly `char::is_whitespace`.
 fn go_is_space(r: char) -> bool {
     r.is_whitespace()
 }
 
-/// Go `Parse`'s separator checks on one line read with `ReadBytes('\n')`.
+/// Whether a line (read up to and including its newline) is a frontmatter separator.
 fn is_separator(line: &[u8]) -> bool {
     line == FRONTMATTER_SEPARATOR || line == FRONTMATTER_SEPARATOR_WIN
 }
 
-/// The text of Go's `io.EOF` (`"EOF"`), the error a `ReadBytes` that hits the end of input
-/// before a newline reports.
+/// The text (`"EOF"`) of the error for input that ends before a newline, or a block with no YAML
+/// document.
 const EOF: &str = "EOF";
 
 fn first_line_eof() -> SkillError {
@@ -248,13 +247,13 @@ fn missing_closing_separator() -> SkillError {
     )
 }
 
-/// Port of Go `Parse` (`frontmatter.go:148`): reads and validates the YAML frontmatter of a
-/// SKILL.md stream. On success `r` is positioned at the start of the Markdown body.
+/// Reads and validates the YAML frontmatter of a SKILL.md stream. On success `r` is positioned at
+/// the start of the Markdown body.
 ///
-/// The first line must be exactly `---\n` or `---\r\n`, and the frontmatter ends at the next
-/// line that is exactly one of those. Unknown keys are rejected (Go `KnownFields(true)`), an
-/// empty YAML block is an error (Go's `io.EOF`, shown as `parse frontmatter: EOF`), and the
-/// result must pass [`validate`]. Read errors keep the `std::io::Error` as the `source()`.
+/// The first line must be exactly `---\n` or `---\r\n`, and the frontmatter ends at the next line
+/// that is exactly one of those. Unknown keys are rejected, an empty YAML block is an error (shown
+/// as `parse frontmatter: EOF`), and the result must pass [`validate`]. Read errors keep the
+/// `std::io::Error` as the `source()`.
 pub async fn parse<R: AsyncBufRead + Unpin + Send>(r: &mut R) -> Result<Frontmatter, SkillError> {
     let mut line = Vec::new();
     r.read_until(b'\n', &mut line)
@@ -283,7 +282,7 @@ pub async fn parse<R: AsyncBufRead + Unpin + Send>(r: &mut R) -> Result<Frontmat
     decode(&yaml)
 }
 
-/// Go's `decoder.Decode(&fmYAML)` + `Validate` tail of `Parse`.
+/// Decodes the YAML block and validates the result.
 fn decode(yaml: &[u8]) -> Result<Frontmatter, SkillError> {
     let mut options = serde_saphyr::Options::default();
     options.with_snippet = false;
@@ -294,8 +293,8 @@ fn decode(yaml: &[u8]) -> Result<Frontmatter, SkillError> {
     let fm_yaml = match decoded {
         Some(fm_yaml) => fm_yaml,
         // serde-saphyr reports both "no document" and a document that is only `null` as
-        // `None`. yaml.v3 returns io.EOF only for the former and decodes the latter to the
-        // zero value, which then fails validation.
+        // `None`. Only the former is the "EOF" error; the latter decodes to the zero value,
+        // which then fails validation.
         None if has_document_content(yaml) => FrontmatterYaml::default(),
         None => {
             return Err(SkillError::new(
@@ -309,8 +308,8 @@ fn decode(yaml: &[u8]) -> Result<Frontmatter, SkillError> {
     Ok(fm)
 }
 
-/// Whether the YAML block holds anything besides blank lines, comments and document-end
-/// markers, i.e. whether yaml.v3 would see a document in it.
+/// Whether the YAML block holds anything besides blank lines, comments and document-end markers,
+/// i.e. whether a YAML parser would see a document in it.
 fn has_document_content(yaml: &[u8]) -> bool {
     String::from_utf8_lossy(yaml).lines().any(|l| {
         let t = l.trim();
@@ -318,9 +317,9 @@ fn has_document_content(yaml: &[u8]) -> bool {
     })
 }
 
-/// Port of Go `ParseBytes` (`frontmatter.go:186`): splits and validates the frontmatter of an
-/// in-memory SKILL.md and returns it with the Markdown body. Errors carry Go's extra
-/// `parse frontmatter: ` prefix. A body that is not UTF-8 is decoded lossily.
+/// Splits and validates the frontmatter of an in-memory SKILL.md and returns it with the Markdown
+/// body. Errors carry an extra `parse frontmatter: ` prefix. A body that is not UTF-8 is decoded
+/// lossily.
 pub fn parse_bytes(content: &[u8]) -> Result<(Frontmatter, String), SkillError> {
     // A slice read never returns `Pending`, so the async parser completes on its first poll.
     let mut rest: &[u8] = content;
@@ -337,9 +336,9 @@ pub fn parse_bytes(content: &[u8]) -> Result<(Frontmatter, String), SkillError> 
     Ok((fm, go_lossy_utf8(body)))
 }
 
-/// Port of Go `Validate` (`frontmatter.go:203`): the specification's field rules, checked in
-/// Go's order with Go's texts. Lengths of `name` are in bytes; `description` and
-/// `compatibility` are counted in characters (Go `utf8.RuneCountInString`).
+/// Checks the specification's field rules in a fixed order (name, then description, then
+/// compatibility). Lengths of `name` are in bytes; `description` and `compatibility` are counted in
+/// characters.
 pub fn validate(fm: &Frontmatter) -> Result<(), SkillError> {
     let fail = |msg: &str| Err(SkillError::new(SkillErrorKind::Other, msg));
     if fm.name.is_empty() || fm.name.len() > 64 {
@@ -369,7 +368,7 @@ pub fn validate(fm: &Frontmatter) -> Result<(), SkillError> {
     Ok(())
 }
 
-/// Port of Go `Build` (`frontmatter.go:239`): validates `fm`, then returns
+/// Validates `fm`, then returns
 /// `---\n<yaml>---\n<markdown>`. The YAML text is serde-saphyr's; it round-trips through
 /// [`parse_bytes`].
 pub fn build(fm: &Frontmatter, markdown: &str) -> Result<Vec<u8>, SkillError> {
