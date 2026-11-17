@@ -13,9 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The GCS JSON API client behind [`GcsArtifactService::new`] (the counterpart of Go's
-//! `gcsClientWrapper`, `gcsBucketWrapper` and `gcsObjectWrapper` over
-//! `cloud.google.com/go/storage`).
+//! The GCS JSON API client behind [`GcsArtifactService::new`].
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -144,8 +142,8 @@ impl RestBucket {
         })
     }
 
-    /// `{objects_url}/{escaped object name}`, escaped as Go's `googleapi.Expand` expands
-    /// `b/{bucket}/o/{object}`.
+    /// `{objects_url}/{escaped object name}`, with the object name escaped as a URI-template
+    /// path segment (see `go_uri_template_escape`).
     fn object_url(&self, name: &str) -> String {
         format!("{}/{}", self.objects_url, go_uri_template_escape(name))
     }
@@ -181,8 +179,9 @@ impl RestBucket {
     }
 }
 
-/// Go `googleapi.CheckResponse` (and, for metadata, download and delete calls, storage's 404 →
-/// `ErrObjectNotExist`): the JSON error body's `error.message` and the whole body.
+/// Maps a non-2xx status to a [`GcsError`] carrying the JSON error body's `error.message` and
+/// the whole body. For `object` calls (metadata, download and delete) a 404 is
+/// [`GcsError::ObjectNotExist`].
 fn status_error(status: u16, body: &[u8], object: bool) -> GcsError {
     if object && status == 404 {
         return GcsError::ObjectNotExist;
@@ -284,8 +283,8 @@ fn multipart_body(boundary: &str, metadata: &[u8], content_type: &str, data: &[u
     Bytes::from(out)
 }
 
-/// A listing's query string, form-encoded: `prefix`, the name-only field selection (Go
-/// `Query.SetAttrSelection([]string{"Name"})`), and the next page's token.
+/// A listing's query string, form-encoded: `prefix`, the name-only field selection, and the next
+/// page's token.
 fn list_query(prefix: &str, names_only: bool, page_token: Option<&str>) -> String {
     let mut query = url::form_urlencoded::Serializer::new(String::new());
     query.append_pair("prefix", prefix);
@@ -345,7 +344,7 @@ impl GcsBucket for RestBucket {
             "{}?uploadType=multipart&ifGenerationMatch=0",
             self.upload_url
         );
-        // Go's storage client reports a writer's errors unmapped: a 404 stays a googleapi error.
+        // An upload's errors are reported unmapped: a 404 stays a [`GcsError::Http`].
         self.call(
             &self.transport,
             Method::POST,
@@ -399,14 +398,14 @@ impl GcsBucket for RestBucket {
 }
 
 impl GcsArtifactService {
-    /// Port of Go `NewService`: a service storing artifacts in bucket `bucket`, reached as
+    /// A service storing artifacts in bucket `bucket`, reached as
     /// `config` says.
     ///
     /// Requests go to `{base}/storage/v1/…` and `{base}/upload/storage/v1/…`, where `base` is
     /// [`GcsConfig::endpoint`], else `http://{STORAGE_EMULATOR_HOST}` (its scheme kept when it
     /// has one) when that variable is non-empty, else `https://storage.googleapis.com`. They
     /// carry [`GcsConfig::credentials`] or Application Default Credentials, except that a
-    /// non-empty `STORAGE_EMULATOR_HOST` turns authentication off (as Go's storage client does).
+    /// non-empty `STORAGE_EMULATOR_HOST` turns authentication off.
     ///
     /// # Errors
     ///

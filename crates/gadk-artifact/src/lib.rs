@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-artifact: artifact storage service (port of ADK-Go artifact/).
+//! gadk-artifact: artifact storage service.
 
 mod artifact_util;
 pub mod inmemory;

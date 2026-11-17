@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `agentregistry/factory.go`, MCP part: `MCPToolset` and `mcpEndpointURI`.
+//! [`Client::mcp_toolset`] and the MCP endpoint resolution behind it.
 
 use std::collections::BTreeMap;
 
@@ -25,23 +25,23 @@ use crate::error::Error;
 use crate::resolve::{TRANSPORT_HTTP_JSON, TRANSPORT_JSONRPC, connection_uri};
 use crate::types::McpServer;
 
-/// Go `MCPToolsetOption`: customizes [`Client::mcp_toolset`]; applied in order.
+/// Customizes [`Client::mcp_toolset`]; applied in order.
 #[derive(Debug, Clone)]
 pub enum McpToolsetOption {
-    /// Go `WithMCPHTTPClient`: the HTTP client used to reach the MCP server, overriding the
+    /// The HTTP client used to reach the MCP server, overriding the
     /// default (the registry's authentication for `*.googleapis.com`, else a default client).
     HttpClient(reqwest::Client),
-    /// Go `WithMCPHeaders`: headers added to (or overwriting) every MCP request; repeated
+    /// Headers added to (or overwriting) every MCP request; repeated
     /// options accumulate, a later value wins on a key conflict.
     Headers(BTreeMap<String, String>),
 }
 
-/// Go `WithMCPHTTPClient`.
+/// Builds [`McpToolsetOption::HttpClient`].
 pub fn with_mcp_http_client(client: reqwest::Client) -> McpToolsetOption {
     McpToolsetOption::HttpClient(client)
 }
 
-/// Go `WithMCPHeaders`.
+/// Builds [`McpToolsetOption::Headers`].
 pub fn with_mcp_headers<K, V>(headers: impl IntoIterator<Item = (K, V)>) -> McpToolsetOption
 where
     K: Into<String>,
@@ -55,7 +55,7 @@ where
     )
 }
 
-/// Go `applyMCPToolsetOptions`.
+/// Resolves the options into one [`EgressConfig`], applied in order.
 pub(crate) fn apply_mcp_toolset_options(opts: &[McpToolsetOption]) -> EgressConfig {
     let mut ec = EgressConfig::default();
     for opt in opts {
@@ -68,7 +68,7 @@ pub(crate) fn apply_mcp_toolset_options(opts: &[McpToolsetOption]) -> EgressConf
 }
 
 impl Client {
-    /// Go `MCPToolset`: resolves the registered MCP server `name` (full resource name) into a
+    /// Resolves the registered MCP server `name` (full resource name) into a
     /// streamable-HTTP MCP toolset: [`Client::get_mcp_server`], `mcp_endpoint_uri` (none →
     /// [`Error::NoEndpoint`]), `Client::egress`, `Client::mcp_config`, `gadk_mcp::new`.
     /// Close the toolset as `gadk_mcp::McpToolset::close` describes.
@@ -102,7 +102,7 @@ impl Client {
         };
         let mut headers = HeaderMap::new();
         for (name, value) in &egress.headers {
-            // Go's `Header.Set` would send any value; one `http` cannot represent is skipped.
+            // A header `http` cannot represent is skipped.
             let (Ok(name), Ok(value)) = (
                 HeaderName::from_bytes(name.as_bytes()),
                 HeaderValue::from_str(value),
@@ -121,7 +121,7 @@ impl Client {
     }
 }
 
-/// Go `mcpEndpointURI`: the server's connection URI preferring the JSONRPC binding, then
+/// The server's connection URI preferring the JSONRPC binding, then
 /// HTTP_JSON (over its protocols and top-level interfaces).
 pub(crate) fn mcp_endpoint_uri(server: &McpServer) -> Option<String> {
     [TRANSPORT_JSONRPC, TRANSPORT_HTTP_JSON]

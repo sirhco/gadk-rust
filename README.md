@@ -1,14 +1,10 @@
 # gadk — Agent Development Kit for Rust
 
-gadk is a Rust port of Google's [Agent Development Kit for Go](https://github.com/google/adk-go)
-(ADK-Go). You use it to build, run, serve and deploy AI agents: LLM agents with tools, multi-agent
-workflows, live (bidirectional streaming) sessions, persistent sessions and memory, an ADK REST
-API server, the Agent2Agent (A2A) protocol, a launcher and a deploy CLI, and OpenTelemetry and
-BigQuery observability.
-
-gadk started as a parity port of ADK-Go (final parity commit `0990f9e`): the same behaviour, wire
-formats, error texts and outputs, checked against ADK-Go's own tests (see
-[Parity with ADK-Go](#parity-with-adk-go)). New functionality beyond ADK-Go will follow.
+gadk is an agent development kit for Rust, modelled on Google's
+[Agent Development Kit](https://google.github.io/adk-docs/) (ADK). You use it to build, run, serve
+and deploy AI agents: LLM agents with tools, multi-agent workflows, live (bidirectional streaming)
+sessions, persistent sessions and memory, an ADK REST API server, the Agent2Agent (A2A) protocol, a
+launcher and a deploy CLI, and OpenTelemetry and BigQuery observability.
 
 - Rust: edition 2024, MSRV 1.95 (developed on the toolchain in `rust-toolchain.toml`)
 - License: Apache-2.0 (see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE))
@@ -43,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     })?;
 
-    // In-memory session, artifact and memory services (Go `runner.NewInMemory`).
+    // In-memory session, artifact and memory services.
     let runner = Runner::in_memory("quickstart", agent)?;
     let msg = Content::from_text("What is the capital of France?", gadk::genai::ROLE_USER);
     let mut events = runner.run("user", "session-1", Some(msg), RunConfig::default(), RunOptions::default());
@@ -61,8 +57,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 `gadk::prelude` also brings in tools (`FunctionTool`, `AgentTool`), workflow agents
 (`sequential_agent`, `parallel_agent`, `loop_agent`), graph workflows (`workflow_agent`,
-`function_node`, `Edge`) and the session, artifact and memory services. The API follows ADK-Go's
-names, so ADK-Go's documentation and samples map directly onto it.
+`function_node`, `Edge`) and the session, artifact and memory services. The API follows ADK's
+names, so ADK's documentation and samples map directly onto it.
 
 ## Façade features
 
@@ -81,7 +77,7 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 | `vertexai` | | Sessions and memory in Vertex AI Agent Engine (`gadk::vertexai`) |
 | `server` | | ADK REST API server with authn/authz (`gadk::server`) |
 | `a2a` | | Agent2Agent protocol: serve agents and call remote agents (`gadk::a2a`) |
-| `launcher` | | ADK-Go launcher: console and web (REST, A2A, web UI, triggers) (`gadk::launcher`) |
+| `launcher` | | Launcher: console and web (REST, A2A, web UI, triggers) (`gadk::launcher`) |
 | `agentengine` | | Agent Engine server and launcher (`gadk::agentengine`) |
 | `telemetry` | | OpenTelemetry export (`gadk::telemetry`) |
 | `agentregistry` | | Google Cloud Agent Registry client (`gadk::agentregistry`) |
@@ -90,53 +86,45 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 
 ## Crates
 
-| Crate | What it is | ADK-Go source |
-|---|---|---|
-| `gadk` | Façade: re-exports, features, `prelude` | — |
-| `gadk-genai` | Gemini-compatible content and config types | `google.golang.org/genai` |
-| `gadk-platform` | Time, UUID and task seams; Go formatting helpers | `platform` |
-| `gadk-model` | `Llm` trait, model registry, HTTP seam, REST transport, SSE parser | `model` |
-| `gadk-gemini` | Gemini API / Vertex AI models, live (WebSocket) connections | `model/gemini` |
-| `gadk-anthropic` | Claude models | `model/anthropicmodel` |
-| `gadk-openai` | OpenAI models | `model/openaimodel` |
-| `gadk-session` | Sessions, events, in-memory session service, compaction config | `session` |
-| `gadk-session-database` | sqlite / PostgreSQL session service | `session/database` |
-| `gadk-artifact` | Artifact service API and in-memory service | `artifact` |
-| `gadk-artifact-gcs` | GCS artifact service | `artifact/gcsartifact` |
-| `gadk-memory` | Long-term memory service | `memory` |
-| `gadk-vertexai` | Vertex AI Agent Engine sessions and memory | `session/vertexai`, `memory/vertexai` |
-| `gadk-agent` | Agent API: agents, contexts, tools, callbacks, plugins, fibers, cancel causes | `agent`, `tool`, `plugin` |
-| `gadk-engine` | LLM agent and flow, workflows, workflow agents, runner, built-in tools | `agent/llmagent`, `internal/llminternal`, `workflow`, `runner` |
-| `gadk-tools` | Built-in tools that need no auth (Gemini tools, artifacts, memory, tool search, skills) | `tool/*` |
-| `gadk-auth` | Credentials, providers, credential store, refresh-and-retry transport | `auth` |
-| `gadk-mcp` | MCP toolset (on `rmcp`) | `tool/mcptoolset` |
-| `gadk-server` | ADK REST API server, authn, authz, Agent Engine server | `server/adkrest`, `server/authn`, `server/authz`, `server/agentengine` |
-| `gadk-a2a` | Agent2Agent server and remote agent (on the A2A Rust SDK) | `server/adka2a/v2`, `agent/remoteagent/v2` |
-| `gadk-launcher` | Console and web launchers, web UI, triggers | `cmd/launcher` |
-| `gadk-cli` | `gadk` deploy CLI (Cloud Run, Agent Engine) | `cmd/adkgo` |
-| `gadk-agentregistry` | Agent Registry client | `agentregistry` |
-| [`gadk-telemetry`](crates/gadk-telemetry/README.md) | OpenTelemetry providers, OTLP and GCP export (Cloud Trace, Cloud Monitoring, Cloud Logging) | `telemetry` |
-| `gadk-agentanalytics` | BigQuery Agent Analytics plugin ([README](crates/gadk-agentanalytics/README.md)) | `plugin/agentanalytics` |
-| `gadk-goyaml` | Byte-identical port of `gopkg.in/yaml.v3` (internal) ([README](crates/gadk-goyaml/README.md)) | `gopkg.in/yaml.v3` |
-| `gadk-configurable` | YAML agent configs, conformance record/replay, `adkcli` (internal) ([README](crates/gadk-configurable/README.md)) | `internal/configurable`, `cmd/internal/adkcli` |
-| `gadk-httprr` | HTTP record/replay for deterministic tests | `internal/httprr` |
-| [`gadk-console`](crates/gadk-console/README.md) | Local web console: Cloud Trace traces with their Cloud Logging entries, and the prompt registry | — |
-| [`gadk-eval`](crates/gadk-eval/README.md) | Offline agent evaluation: YAML eval sets, deterministic, tool-trajectory and LLM-judge scorers, per-variant reports | — |
+| Crate | What it is |
+|---|---|
+| `gadk` | Façade: re-exports, features, `prelude` |
+| `gadk-genai` | Gemini-compatible content and config types |
+| `gadk-platform` | Time, UUID, task and environment seams; shared helpers |
+| `gadk-model` | `Llm` trait, model registry, HTTP seam, REST transport, SSE parser |
+| `gadk-gemini` | Gemini API / Vertex AI models, live (WebSocket) connections |
+| `gadk-anthropic` | Claude models |
+| `gadk-openai` | OpenAI models |
+| `gadk-session` | Sessions, events, in-memory session service, compaction config |
+| `gadk-session-database` | sqlite / PostgreSQL session service |
+| `gadk-artifact` | Artifact service API and in-memory service |
+| `gadk-artifact-gcs` | GCS artifact service |
+| `gadk-memory` | Long-term memory service |
+| `gadk-vertexai` | Vertex AI Agent Engine sessions and memory |
+| `gadk-agent` | Agent API: agents, contexts, tools, callbacks, plugins, fibers, cancel causes |
+| `gadk-engine` | LLM agent and flow, workflows, workflow agents, runner, built-in tools |
+| `gadk-tools` | Built-in tools that need no auth (Gemini tools, artifacts, memory, tool search, skills) |
+| `gadk-auth` | Credentials, providers, credential store, refresh-and-retry transport |
+| `gadk-mcp` | MCP toolset (on `rmcp`) |
+| `gadk-server` | ADK REST API server, authn, authz, Agent Engine server |
+| `gadk-a2a` | Agent2Agent server and remote agent (on the A2A Rust SDK) |
+| `gadk-launcher` | Console and web launchers, web UI, triggers |
+| `gadk-cli` | `gadk` deploy CLI (Cloud Run, Agent Engine) |
+| `gadk-agentregistry` | Agent Registry client |
+| [`gadk-telemetry`](crates/gadk-telemetry/README.md) | OpenTelemetry providers, OTLP and GCP export (Cloud Trace, Cloud Monitoring, Cloud Logging) |
+| `gadk-agentanalytics` | BigQuery Agent Analytics plugin ([README](crates/gadk-agentanalytics/README.md)) |
+| `gadk-goyaml` | YAML library that reads and writes YAML exactly as ADK does (internal) ([README](crates/gadk-goyaml/README.md)) |
+| `gadk-configurable` | YAML agent configs, conformance record/replay, `adkcli` (internal) ([README](crates/gadk-configurable/README.md)) |
+| `gadk-httprr` | HTTP record/replay for deterministic tests |
+| [`gadk-console`](crates/gadk-console/README.md) | Local web console: Cloud Trace traces with their Cloud Logging entries, and the prompt registry |
+| [`gadk-eval`](crates/gadk-eval/README.md) | Offline agent evaluation: YAML eval sets, deterministic, tool-trajectory and LLM-judge scorers, per-variant reports |
 
 Binaries: `gadk` (the deploy CLI, [README](crates/gadk-cli/README.md)), `gadk-console` (the
 local web console, [README](crates/gadk-console/README.md)) and `adkcli` (the conformance CLI in
 `gadk-configurable`).
 
-Not ported: ADK-Go's `exp/` packages, the deprecated A2A v1 packages and symbols ADK-Go marks
-deprecated.
-
-## Parity with ADK-Go
-
-The port was built in sub-projects against ADK-Go commit `0990f9e`. ADK-Go's in-scope tests were
-ported to Rust and remain part of the test suite (`src/parity_tests/` and `tests/` in each
-crate), alongside golden fixtures recorded from ADK-Go itself: wire exchanges, rows, YAML bytes
-and CLI output. Places where gadk deliberately behaves differently from Go are marked in the
-source with `// Divergence (ledger <name>)`.
+Not included: ADK's experimental (`exp`) packages, the deprecated A2A v1 packages and the symbols
+ADK marks deprecated.
 
 ## Development
 
@@ -155,7 +143,8 @@ RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_l
 ```
 
 Conventions:
-- Every source file has the Apache-2.0 header, and a ported file names its ADK-Go source.
+- Every source file has the Apache-2.0 header, and a file with code derived from ADK carries a
+  `Portions derived from` line.
 - Non-test code uses no `unsafe`, `unwrap`, `expect` or `panic`.
 - Dependencies come from `[workspace.dependencies]`, and `scripts/check-workspace-deps.py`
   enforces the allowed crate-to-crate edges.
@@ -163,5 +152,5 @@ Conventions:
 
 ## License
 
-Apache-2.0. gadk contains code derived from ADK-Go and the Google Gen AI Go SDK, and vendors
-the ADK web UI and googleapis protocol buffers; see [`NOTICE`](NOTICE).
+Apache-2.0. gadk contains code derived from ADK-Go (Apache-2.0) and vendors the ADK web UI and
+googleapis protocol buffers; see [`NOTICE`](NOTICE).

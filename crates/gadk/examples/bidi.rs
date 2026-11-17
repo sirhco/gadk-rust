@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// parity: adapted: Go example is an HTTP server on RunLiveHandler (sub-project 5)
-
 //! Live (bidi streaming) quickstart: one LLM agent driven through `Runner::run_live`, with text
 //! typed on stdin as the user's turns and the model's audio transcribed to stdout.
 //!
@@ -62,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
         FunctionToolConfig::new("camera_toggle", "Turns the camera on or off."),
         camera_toggle,
     )?;
-    // Go also passes geminitool.GoogleSearch{}; gadk has no Google Search tool yet.
+    // No Google Search tool is configured: gadk has no Google Search tool yet.
     let agent = gadk::engine::llm::agent::new(LlmAgentConfig {
         name: "bidi-demo".to_string(),
         description: "Agent optimized for real-time bidirectional streaming.".to_string(),

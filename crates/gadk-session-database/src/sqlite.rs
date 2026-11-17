@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The sqlite dialect (Go glebarez/sqlite + gorm): the exact DDL ADK-Go creates, the SQL each
-//! service operation issues, and the go-sqlite timestamp codec.
+//! The sqlite dialect: the exact DDL of the ADK database session schema, the SQL each service
+//! operation issues, and the timestamp codec.
 
 use std::str::FromStr;
 
@@ -28,7 +28,7 @@ use crate::rows::{
     session_row, user_state_row,
 };
 
-/// ADK-Go's gorm DDL on glebarez/sqlite, byte for byte, in `AutoMigrate` order.
+/// The sqlite DDL of the ADK database session schema, byte for byte, in migration order.
 pub(crate) static TABLES: [TableDef; 4] = [
     TableDef {
         name: "sessions",
@@ -99,8 +99,8 @@ pub(crate) static TABLES: [TableDef; 4] = [
 const EVENT_COLUMNS: &str = "`id`, `app_name`, `user_id`, `session_id`, `invocation_id`, `author`, `actions`, `long_running_tool_ids_json`, `routes_json`, `output_json`, `node_info_json`, `requested_input_json`, `branch`, `isolation_scope`, `timestamp`, `content`, `grounding_metadata`, `custom_metadata`, `usage_metadata`, `citation_metadata`, `input_transcription`, `output_transcription`, `partial`, `turn_complete`, `error_code`, `error_message`, `interrupted`";
 const SESSION_COLUMNS: &str = "`app_name`, `user_id`, `id`, `state`, `create_time`, `update_time`";
 
-/// Opens a pool like ADK-Go's sqlite dialector: the file is created when missing and foreign
-/// keys are not enforced (go-sqlite never turns them on). An in-memory database lives in its
+/// Opens a pool: the file is created when missing and foreign keys are not enforced (as in
+/// ADK's database session service). An in-memory database lives in its
 /// single connection, so that connection is never closed.
 pub(crate) async fn connect(url: &str) -> sqlx::Result<SqlitePool> {
     let opts = SqliteConnectOptions::from_str(url)?
@@ -124,13 +124,13 @@ fn is_memory(url: &str) -> bool {
     rest.starts_with(":memory:") || rest.contains("mode=memory")
 }
 
-/// gorm's sqlite `AddColumn`.
+/// The `ALTER TABLE … ADD` statement for one column.
 pub(crate) fn add_column_sql(table: &str, column: &str, ty: &str) -> String {
     format!("ALTER TABLE `{table}` ADD `{column}` {ty}")
 }
 
-/// go-sqlite's write layout, `2006-01-02 15:04:05.999999999-07:00`, for a UTC time: trailing
-/// fraction zeros trimmed, no fraction when zero, offset `+00:00`. The time is written at the
+/// The text layout written for a UTC time: `YYYY-MM-DD HH:MM:SS[.fraction]+00:00`, with
+/// trailing fraction zeros trimmed and no fraction when it is zero. The time is written at the
 /// precision it carries.
 pub(crate) fn encode_time(t: &DateTime<Utc>) -> String {
     let mut s = t.format("%Y-%m-%d %H:%M:%S").to_string();
@@ -144,8 +144,10 @@ pub(crate) fn encode_time(t: &DateTime<Utc>) -> String {
     s
 }
 
-/// go-sqlite `parseTime`: first the `time.Time.String()` form (`… -0700 MST [m=±…]`), then,
-/// with one trailing `Z` removed, each `parseTimeFormats` layout (offset-less ones are UTC).
+/// Parses a stored time: first the `YYYY-MM-DD HH:MM:SS.fraction -0700 MST [m=±…]` form (a
+/// zone abbreviation and an optional monotonic-clock suffix, which ADK's sqlite storage can
+/// contain), then, with one trailing `Z` removed, the date-time layouts with or without an
+/// offset (offset-less ones are UTC), down to a bare date.
 pub(crate) fn decode_time(s: &str) -> Result<DateTime<Utc>, String> {
     let cut = match s.find("m=") {
         Some(x) if x > 0 => s.get(..x).unwrap_or(s),
@@ -202,7 +204,8 @@ impl ColumnReader for SqliteRow {
         self.try_get_unchecked(col)
     }
 
-    /// A `datetime` column in go-sqlite's text layout; NULL is Go's zero time.
+    /// A `datetime` column in the text layout of [`encode_time`]; NULL reads as
+    /// [`gadk_session::zero_time`].
     fn time(&self, col: &str) -> sqlx::Result<DateTime<Utc>> {
         match self.opt_text(col)? {
             None => Ok(gadk_session::zero_time()),
@@ -210,7 +213,7 @@ impl ColumnReader for SqliteRow {
         }
     }
 
-    /// A `numeric` boolean column (Go binds bools as 0/1).
+    /// A `numeric` boolean column (booleans are stored as 0/1).
     fn flag(&self, col: &str) -> sqlx::Result<Option<bool>> {
         Ok(self
             .try_get_unchecked::<Option<i64>, _>(col)?
@@ -279,7 +282,7 @@ pub(crate) async fn insert_session(c: &mut Conn, row: &SessionRow) -> sqlx::Resu
         .map(|_| ())
 }
 
-/// Go `Save` of a read session: every column rewritten.
+/// Rewrites every column of an existing session row.
 pub(crate) async fn update_session(c: &mut Conn, row: &SessionRow) -> sqlx::Result<()> {
     sqlx::query(
         "UPDATE `sessions` SET `state` = ?, `create_time` = ?, `update_time` = ? WHERE `app_name` = ? AND `user_id` = ? AND `id` = ?",
@@ -407,7 +410,7 @@ pub(crate) async fn insert_user_state_if_absent(
     .map(|_| ())
 }
 
-/// Go `Save`: insert, or rewrite every column of the existing row.
+/// Inserts the app state row, or rewrites every column of the existing row.
 pub(crate) async fn save_app_state(c: &mut Conn, row: &AppStateRow) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO `app_states` (`app_name`, `state`, `update_time`) VALUES (?, ?, ?) ON CONFLICT (`app_name`) DO UPDATE SET `state` = excluded.`state`, `update_time` = excluded.`update_time`",
@@ -420,7 +423,7 @@ pub(crate) async fn save_app_state(c: &mut Conn, row: &AppStateRow) -> sqlx::Res
     .map(|_| ())
 }
 
-/// Go `Save`: insert, or rewrite every column of the existing row.
+/// Inserts the user state row, or rewrites every column of the existing row.
 pub(crate) async fn save_user_state(c: &mut Conn, row: &UserStateRow) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO `user_states` (`app_name`, `user_id`, `state`, `update_time`) VALUES (?, ?, ?, ?) ON CONFLICT (`app_name`, `user_id`) DO UPDATE SET `state` = excluded.`state`, `update_time` = excluded.`update_time`",
@@ -471,7 +474,7 @@ pub(crate) async fn insert_event(c: &mut Conn, row: &EventRow) -> sqlx::Result<(
         .map(|_| ())
 }
 
-/// `after` is compared as text in the stored layout, as Go binds it.
+/// `after` is compared as text in the stored layout.
 pub(crate) async fn select_events(
     c: &mut Conn,
     app_name: &str,

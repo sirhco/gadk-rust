@@ -13,16 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `artifact://` reference URIs (port of Go artifact/artifact_util.go): one artifact naming a
-//! stored version of another. Crate-private, as Go's are unexported; only
-//! [`crate::InMemoryArtifactService`] understands references.
+//! `artifact://` reference URIs: one artifact naming a stored version of another. Crate-private;
+//! only [`crate::InMemoryArtifactService`] understands references.
 
 use gadk_genai::Part;
 
-/// Port of Go artifactURIScheme: the URI scheme used to reference one artifact from another.
+/// The URI scheme used to reference one artifact from another.
 pub(crate) const ARTIFACT_URI_SCHEME: &str = "artifact://";
 
-/// Port of Go parsedArtifactURI: the result of parsing an artifact reference URI.
+/// The result of parsing an artifact reference URI.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ParsedArtifactUri {
     pub(crate) app_name: String,
@@ -33,14 +32,14 @@ pub(crate) struct ParsedArtifactUri {
     pub(crate) version: i64,
 }
 
-/// One `[^/]+` segment of Go's regexes followed by `/`: the segment and the rest.
+/// One non-empty segment without `/`, followed by `/`: the segment and the rest.
 fn segment(s: &str) -> Option<(&str, &str)> {
     let (seg, rest) = s.split_once('/')?;
     (!seg.is_empty()).then_some((seg, rest))
 }
 
-/// Go's `artifacts/(.+)/versions/([1-9][0-9]*)$` tail: the file name (no `\n`, which Go's `.`
-/// does not match) and the positive version. `(.+)` is greedy and the version holds no `/`, so
+/// The `artifacts/<file>/versions/<version>` tail: the file name (non-empty, no `\n`) and the
+/// positive version (no leading zero). The file name may hold `/` and the version does not, so
 /// the split is at the last `/versions/`.
 fn file_and_version(s: &str) -> Option<(&str, i64)> {
     let rest = s.strip_prefix("artifacts/")?;
@@ -55,13 +54,13 @@ fn file_and_version(s: &str) -> Option<(&str, i64)> {
     Some((file, version.parse().ok()?))
 }
 
-/// Port of Go parseArtifactURI: parses
+/// Parses
 /// `artifact://apps/{app}/users/{user}/sessions/{session}/artifacts/{file}/versions/{version}`
 /// or its user-scoped variant (without the sessions segment); `None` when `uri` is not a
 /// well-formed artifact URI.
 ///
-/// The app, user and session segments match Go's `[^/]+` (stricter than adk-python, whose
-/// regex lets a segment hold `/`). A reference names a stored version, so the version must be
+/// The app, user and session segments are non-empty and hold no `/` (stricter than adk-python,
+/// whose regex lets a segment hold `/`). A reference names a stored version, so the version must be
 /// positive: version 0 is the "latest" sentinel here, and following a reference to
 /// `versions/0` would resolve to whatever the target's newest version is at load time.
 pub(crate) fn parse_artifact_uri(uri: &str) -> Option<ParsedArtifactUri> {
@@ -69,8 +68,8 @@ pub(crate) fn parse_artifact_uri(uri: &str) -> Option<ParsedArtifactUri> {
     let (app, rest) = segment(rest)?;
     let rest = rest.strip_prefix("users/")?;
     let (user, rest) = segment(rest)?;
-    // Go tries the session-scoped regex first; a URI it fails cannot match the user-scoped one
-    // (that one needs `artifacts/` right after the user segment).
+    // A URI with a `sessions/` segment is session-scoped; one without it must have `artifacts/`
+    // right after the user segment.
     let (session, rest) = match rest.strip_prefix("sessions/") {
         Some(rest) => {
             let (session, rest) = segment(rest)?;
@@ -88,8 +87,8 @@ pub(crate) fn parse_artifact_uri(uri: &str) -> Option<ParsedArtifactUri> {
     })
 }
 
-/// Port of Go buildArtifactURI: a user-scoped URI when `session_id` is empty. The segments are
-/// not escaped. Go calls it from its tests only.
+/// Builds a reference URI: a user-scoped one when `session_id` is empty. The segments are not
+/// escaped. Used by tests only.
 #[cfg(test)]
 pub(crate) fn build_artifact_uri(
     app_name: &str,
@@ -109,15 +108,15 @@ pub(crate) fn build_artifact_uri(
     }
 }
 
-/// Port of Go isArtifactRef: whether `part`'s `file_data.file_uri` uses the `artifact://`
+/// Whether `part`'s `file_data.file_uri` uses the `artifact://`
 /// scheme.
 pub(crate) fn is_artifact_ref(part: Option<&Part>) -> bool {
     part.and_then(|p| p.file_data.as_ref())
         .is_some_and(|f| f.file_uri.starts_with(ARTIFACT_URI_SCHEME))
 }
 
-/// Port of Go validateArtifactReferenceScope: a reference cannot escape the caller's app and
-/// user, and a session-scoped one cannot escape the caller's session. The error text is Go's.
+/// Checks that a reference cannot escape the caller's app and user, and that a session-scoped
+/// one cannot escape the caller's session.
 pub(crate) fn validate_artifact_reference_scope(
     app_name: &str,
     user_id: &str,

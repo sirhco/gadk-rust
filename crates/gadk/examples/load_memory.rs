@@ -14,7 +14,7 @@
 // limitations under the License.
 
 //! An agent that recalls a previous conversation through the `preload_memory` and `load_memory`
-//! tools (port of Go examples/tools/loadmemory/main.go).
+//! tools.
 //!
 //! `GOOGLE_API_KEY=... cargo run -p gadk --example load_memory`, then ask
 //! "What do you remember about my trip?".
@@ -37,7 +37,7 @@ use gadk::session::{
 const USER_ID: &str = "test_user";
 const APP_NAME: &str = "memory_app";
 
-/// Go `createPreviousSessionWithHistory`'s events: a conversation about a trip to Tokyo.
+/// The events of the previous session: a conversation about a trip to Tokyo.
 const HISTORY: [(&str, &str); 8] = [
     ("user", "I just got back from an amazing trip to Tokyo!"),
     (
@@ -135,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Port of Go `createPreviousSessionWithHistory`. Returns the session as stored, events included.
+/// Creates the previous session with its history. Returns the session as stored, events included.
 async fn create_previous_session_with_history(
     session_service: &InMemorySessionService,
 ) -> anyhow::Result<Arc<dyn Session>> {
@@ -163,7 +163,7 @@ async fn create_previous_session_with_history(
         .await?)
 }
 
-/// Go's stdin loop: one line per turn, printing the streamed (partial) model text.
+/// Reads stdin, one line per turn, printing the streamed (partial) model text.
 async fn repl(runner: &Runner, user_id: &str, session_id: &str) -> anyhow::Result<()> {
     let stdin = std::io::stdin();
     loop {

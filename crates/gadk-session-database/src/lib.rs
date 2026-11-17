@@ -13,20 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A [`SessionService`](gadk_session::SessionService) backed by a relational database (port of
-//! ADK-Go `session/database`): sqlite (feature `sqlite`, default) and PostgreSQL (feature
-//! `postgres`), through sqlx.
+//! A [`SessionService`](gadk_session::SessionService) backed by a relational database: sqlite
+//! (feature `sqlite`, default) and PostgreSQL (feature `postgres`), through sqlx.
 //!
-//! The tables, their columns and the rows written are the ones ADK-Go's gorm models produce, so
-//! a gadk service and an ADK-Go service can share one database.
+//! The tables, their columns and the rows written are the ones ADK's database session service
+//! produces, so a gadk service and an ADK service can share one database.
 //!
 //! The service never creates or alters its tables on its own. Call
 //! [`DatabaseSessionService::auto_migrate`] after constructing it, on every startup: a release
 //! of this crate may add columns, and writes fail until they exist.
 //!
-//! As in ADK-Go, a sqlite connection opened by [`DatabaseSessionService::connect`] does not
-//! enforce foreign keys, so deleting a session leaves its event rows in the `events` table;
-//! on PostgreSQL the foreign key's `ON DELETE CASCADE` removes them.
+//! As in ADK's database session service, a sqlite connection opened by
+//! [`DatabaseSessionService::connect`] does not enforce foreign keys, so deleting a session
+//! leaves its event rows in the `events` table; on PostgreSQL the foreign key's
+//! `ON DELETE CASCADE` removes them.
 //!
 //! ```no_run
 //! # async fn demo() -> Result<(), gadk_session::SessionError> {
@@ -64,7 +64,7 @@ use gadk_session::SessionError;
 use crate::backend::{Backend, StatementLog};
 
 /// A [`SessionService`](gadk_session::SessionService) storing sessions, events and app/user
-/// state in a relational database (ADK-Go `database.NewSessionService`).
+/// state in a relational database.
 pub struct DatabaseSessionService {
     pub(crate) backend: Backend,
     pub(crate) platform: Platform,
@@ -72,7 +72,7 @@ pub struct DatabaseSessionService {
 }
 
 impl DatabaseSessionService {
-    /// Opens a pool for `url` (Go `NewSessionService` with a dialector): `sqlite:` URLs (feature
+    /// Opens a pool for `url`: `sqlite:` URLs (feature
     /// `sqlite`; the file is created when missing; `sqlite::memory:` keeps its single connection
     /// open for the pool's lifetime) and `postgres:` / `postgresql:` URLs (feature `postgres`).
     /// Creates no tables: see [`Self::auto_migrate`].
@@ -91,14 +91,14 @@ impl DatabaseSessionService {
         Ok(Self::from_backend(backend))
     }
 
-    /// Wraps an existing sqlite pool, shared with the caller (Go `NewSessionServiceFromDB`).
+    /// Wraps an existing sqlite pool, shared with the caller.
     /// The pool is used as configured.
     #[cfg(feature = "sqlite")]
     pub fn from_sqlite_pool(pool: sqlx::SqlitePool) -> Self {
         Self::from_backend(Backend::Sqlite(pool))
     }
 
-    /// Wraps an existing PostgreSQL pool, shared with the caller (Go `NewSessionServiceFromDB`).
+    /// Wraps an existing PostgreSQL pool, shared with the caller.
     #[cfg(feature = "postgres")]
     pub fn from_pg_pool(pool: sqlx::PgPool) -> Self {
         Self::from_backend(Backend::Postgres(pool))
@@ -111,8 +111,8 @@ impl DatabaseSessionService {
         self
     }
 
-    /// Creates any missing table and adds any missing column (Go `AutoMigrate`, restricted to
-    /// additions: existing columns are never altered or dropped). Idempotent; meant to run on
+    /// Creates any missing table and adds any missing column (additions only:
+    /// existing columns are never altered or dropped). Idempotent; meant to run on
     /// every startup. Errors are `auto migrate failed: <cause>`.
     pub async fn auto_migrate(&self) -> Result<(), SessionError> {
         migrate::auto_migrate(&self.backend).await
@@ -140,7 +140,7 @@ impl DatabaseSessionService {
 
     /// Test hook: records into the returned log the app/user state statements the service
     /// issues: `select <table>`, `select <table> for update` and
-    /// `insert <table> on conflict do nothing`, the statements ADK-Go's test observes.
+    /// `insert <table> on conflict do nothing`, the statements a locking test observes.
     #[cfg(feature = "testutil")]
     #[doc(hidden)]
     pub fn with_statement_log(mut self) -> (Self, std::sync::Arc<parking_lot::Mutex<Vec<String>>>) {

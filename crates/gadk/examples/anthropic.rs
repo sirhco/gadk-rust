@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An `LlmAgent` on Claude with a function tool (port of ADK-Go `examples/anthropic/main.go`).
-//! As in Go, the first turn sends an inline PNG image and the agent calls `get_palette_info`
-//! while answering; afterwards the example reads follow-up turns from stdin (one line per turn,
-//! until end of input) in the same session, like the other gadk examples.
+//! An `LlmAgent` on Claude with a function tool. The first turn sends an inline PNG image and the
+//! agent calls `get_palette_info` while answering; afterwards the example reads follow-up turns
+//! from stdin (one line per turn, until end of input) in the same session, like the other gadk
+//! examples.
 //!
 //! Anthropic API: `ANTHROPIC_API_KEY=... cargo run -p gadk --example anthropic --features anthropic`
 //! Vertex AI:     `GOOGLE_CLOUD_PROJECT=... GOOGLE_CLOUD_LOCATION=us-east5 cargo run -p gadk --example anthropic --features anthropic`
@@ -37,11 +37,11 @@ use gadk::model::ModelError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Go `defaultModel`: a versioned Claude model ID served on both Vertex AI and the first-party
+/// A versioned Claude model ID served on both Vertex AI and the first-party
 /// Anthropic API. Vertex AI does not serve `-latest` aliases.
 const DEFAULT_MODEL: &str = "claude-sonnet-4-5-20250929";
 
-/// Go `sampleBluePNG`: a 1x1 solid blue PNG image embedded directly so the sample runs without
+/// A 1x1 solid blue PNG image embedded directly so the sample runs without
 /// external asset files.
 const SAMPLE_BLUE_PNG: [u8; 73] = [
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, //
@@ -60,14 +60,15 @@ const APP_NAME: &str = "anthropic_example";
 const USER_ID: &str = "example_user";
 const SESSION_ID: &str = "session_1";
 
-// Go `paletteInput` (plain comments: a doc comment would become the schema's description).
+// The input of `get_palette_info` (a plain comment: a doc comment would become the schema's
+// description).
 #[derive(Deserialize, JsonSchema)]
 struct PaletteInput {
     /// The dominant color name in lowercase, such as blue, red, or green.
     color: String,
 }
 
-// Go `paletteOutput`.
+// The output of `get_palette_info`.
 #[derive(Serialize, JsonSchema)]
 struct PaletteOutput {
     color: String,
@@ -75,7 +76,7 @@ struct PaletteOutput {
     family: String,
 }
 
-/// Go `getPaletteInfo`.
+/// Looks up the hex code and color family of a color name.
 async fn get_palette_info(_ctx: Context, input: PaletteInput) -> Result<PaletteOutput, ToolError> {
     let color = input.color.trim().to_lowercase();
     let (hex_code, family) = match color.as_str() {
@@ -131,7 +132,7 @@ async fn run() -> anyhow::Result<()> {
     })
     .map_err(|e| anyhow::Error::new(e).context("create agent"))?;
 
-    // The in-memory runner creates the session on its first run (Go creates it up front).
+    // The in-memory runner creates the session on its first run.
     let runner = Runner::in_memory(APP_NAME, agent)
         .map_err(|e| anyhow::Error::new(e).context("create runner"))?;
 
@@ -171,7 +172,7 @@ async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Go's event loop: prints tool calls, tool results and the agent's (non-thought) text.
+/// Runs one turn: prints tool calls, tool results and the agent's (non-thought) text.
 async fn run_turn(runner: &Runner, msg: Content) -> anyhow::Result<()> {
     let mut events = runner.run(
         USER_ID,
@@ -186,7 +187,7 @@ async fn run_turn(runner: &Runner, msg: Content) -> anyhow::Result<()> {
             continue;
         };
         for part in content.parts {
-            // Tool args and results print as JSON, not Go's `%v` map formatting.
+            // Tool args and results print as JSON.
             if let Some(fc) = part.function_call {
                 println!(
                     "Tool Call -> {}({})",
@@ -207,7 +208,7 @@ async fn run_turn(runner: &Runner, msg: Content) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Go `resolveClientConfig`: the backend from `ANTHROPIC_BACKEND`, else Vertex AI when a Google
+/// Resolves the backend: from `ANTHROPIC_BACKEND`, else Vertex AI when a Google
 /// Cloud project or location is set, else the Anthropic API when `ANTHROPIC_API_KEY` is set.
 fn resolve_client_config() -> anyhow::Result<ClientConfig> {
     let var = |k: &str| {
@@ -275,7 +276,7 @@ fn resolve_client_config() -> anyhow::Result<ClientConfig> {
     }
 }
 
-/// Go `explain`: a Claude API error as its status, type and message; anything else as its
+/// Describes an error: a Claude API error as its status, type and message; anything else as its
 /// text. A model error reaches the runner's stream as `AgentError::Model(ModelError::Other(_))`.
 fn explain(err: &anyhow::Error) -> String {
     let anthropic = err.chain().find_map(|e| {

@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The `mcp` example: an agent using the tools of an MCP server (port of ADK-Go
-//! `examples/mcp/main.go`). It shows two ways to reach a server; set `AGENT_MODE` to choose
-//! (`local` is the default):
+//! The `mcp` example: an agent using the tools of an MCP server. It shows two ways to
+//! reach a server; set `AGENT_MODE` to choose (`local` is the default):
 //!
 //! 1. An in-memory MCP server: `get_weather` is an rmcp tool (`#[tool_router]`), served over a
 //!    `tokio::io::duplex` pipe by a [`TransportFactory`] given as [`McpTransport::Custom`].
@@ -23,7 +22,7 @@
 //!    (<https://github.com/github/github-mcp-server>) over streamable HTTP, authenticated with a
 //!    GitHub personal access token from `GITHUB_PAT` as a static bearer token.
 //!
-//! It runs through the launcher, as Go's does.
+//! It runs through the launcher.
 //!
 //! `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example mcp [console | web webui
 //! api]`, then ask "What is the weather in Paris?"; or `AGENT_MODE=github GITHUB_PAT=...
@@ -46,27 +45,28 @@ use gadk::mcp::{BoxError, Config, McpToolset, McpTransport, TransportFactory, se
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Go `Input`.
+// The input of `get_weather` (a plain comment: a doc comment would become the schema's
+// description).
 #[derive(Deserialize, JsonSchema)]
 struct Input {
     #[schemars(description = "city name")]
     city: String,
 }
 
-/// Go `Output`.
+// The output of `get_weather`.
 #[derive(Serialize, JsonSchema)]
 struct Output {
     #[schemars(description = "weather summary in the given city")]
     weather_summary: String,
 }
 
-/// Go's in-memory `weather_server` (`v1.0.0`): one tool, `get_weather`.
+/// The in-memory `weather_server` (`v1.0.0`): one tool, `get_weather`.
 #[derive(Clone)]
 struct WeatherServer;
 
 #[tool_router]
 impl WeatherServer {
-    /// Go `GetWeather`.
+    /// Returns a canned weather summary for the city.
     #[tool(
         name = "get_weather",
         description = "returns weather in the given city"
@@ -81,8 +81,8 @@ impl WeatherServer {
 #[tool_handler(name = "weather_server", version = "v1.0.0")]
 impl ServerHandler for WeatherServer {}
 
-/// Go `localMCPTransport`: every (re)connect serves a fresh [`WeatherServer`] on one end of an
-/// in-memory pipe and opens the client session on the other.
+/// The transport of the in-memory server: every (re)connect serves a fresh [`WeatherServer`] on one
+/// end of an in-memory pipe and opens the client session on the other.
 struct LocalWeather;
 
 #[async_trait::async_trait]
@@ -104,7 +104,7 @@ impl TransportFactory for LocalWeather {
     }
 }
 
-/// Go `githubMCPTransport`: GitHub's MCP endpoint with the `GITHUB_PAT` bearer token.
+/// The transport of GitHub's MCP endpoint with the `GITHUB_PAT` bearer token.
 fn github_config() -> Config {
     let mut cfg = Config::new(McpTransport::Endpoint(
         "https://api.githubcopilot.com/mcp/".to_string(),
@@ -153,7 +153,7 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("closing the MCP tool set: {e}");
     }
     if let Err(e) = result {
-        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        // Print the error and the command-line syntax, then exit.
         Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
         std::process::exit(1);
     }

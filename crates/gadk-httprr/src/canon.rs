@@ -35,7 +35,7 @@ pub(crate) fn key(method: &str, url: &str, body: &[u8]) -> Key {
 ///
 /// A JSON body is re-serialized compactly with object keys sorted and numbers
 /// normalized (an integral number that fits in `i64` is written as an integer, so
-/// Rust's `0.0` matches Go's `0`). Any other body is returned unchanged.
+/// a body with `0.0` matches one with `0`). Any other body is returned unchanged.
 pub fn canonical_body(body: &[u8]) -> Vec<u8> {
     match serde_json::from_slice::<Value>(body) {
         Ok(v) => serde_json::to_vec(&canonical_value(v)).unwrap_or_else(|_| body.to_vec()),

@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Serves a weather agent over the Agent2Agent protocol and calls it through a remote A2A agent
-//! (port of ADK-Go `examples/a2a`):
+//! Serves a weather agent over the Agent2Agent protocol and calls it through a remote A2A agent:
 //!
 //! `cargo run -p gadk --example a2a --features a2a`
 //!
@@ -73,7 +72,7 @@ impl Llm for ScriptedWeatherModel {
     }
 }
 
-/// Go `newWeatherAgent`.
+/// The weather agent served over A2A.
 fn new_weather_agent() -> anyhow::Result<Arc<dyn Agent>> {
     Ok(gadk::engine::llm_agent::new(LlmAgentConfig {
         name: "weather_time_agent".into(),
@@ -106,7 +105,7 @@ async fn authenticate(
     next.run(req).await
 }
 
-/// Go `startWeatherAgentServer`: serves the weather agent over A2A on a loopback port; returns
+/// Serves the weather agent over A2A on a loopback port; returns
 /// the base URL.
 async fn start_weather_agent_server() -> anyhow::Result<String> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -192,9 +191,8 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     })?;
 
-    // Go hands the remote agent to the launcher (`full.NewLauncher()`); here one turn runs through
-    // a runner, so the example stays self-contained. `examples/launcher.rs` shows an agent run
-    // through `gadk::launcher::full::new()` (feature `launcher`).
+    // One turn runs through a runner, so the example stays self-contained. `examples/launcher.rs`
+    // shows an agent run through `gadk::launcher::full::new()` (feature `launcher`).
     let session_service: Arc<dyn SessionService> = Arc::new(InMemorySessionService::new());
     let runner = Runner::new(RunnerConfig {
         app_name: "a2a_example".into(),

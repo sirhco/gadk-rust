@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An LLM agent with sliding-window context compaction (port of Go examples/compaction/main.go).
+//! An LLM agent with sliding-window context compaction.
 //!
 //! Setting `compaction` on the launcher's [`Config`] enables compaction on every surface that
 //! reads that config. The launcher used here, `full::new()`, serves the console, the web UI, A2A,
@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
     let mut l = full::new();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(e) = l.execute(CancellationToken::new(), config, args).await {
-        // Go `log.Fatalf("Run failed: %v\n\n%s", err, l.CommandLineSyntax())`.
+        // Print the error and the command-line syntax, then exit.
         Logger::stderr().print(&format!("Run failed: {e}\n\n{}", l.command_line_syntax()));
         std::process::exit(1);
     }

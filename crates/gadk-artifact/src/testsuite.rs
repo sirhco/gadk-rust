@@ -15,8 +15,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! A reusable, backend-agnostic conformance suite for [`ArtifactService`] implementations
-//! (port of ADK-Go `internal/artifact/tests/service_suite.go`).
+//! A reusable, backend-agnostic conformance suite for [`ArtifactService`] implementations.
 //!
 //! Enabled by the `testsuite` feature. Call [`run`] from a backend's tests with a factory that
 //! returns a fresh service.
@@ -34,25 +33,25 @@ use crate::service::{
     ListRequest, LoadRequest, SaveRequest, VersionsRequest,
 };
 
-/// Go `t.Errorf`/`t.Fatalf`: fails the suite with the scenario/sub-step prefix.
+/// Fails the suite with the scenario/sub-step prefix.
 macro_rules! fail {
     ($step:expr, $($arg:tt)*) => {
         panic!("artifact testsuite/{}: {}", $step, format!($($arg)*))
     };
 }
 
-/// Runs the ADK-Go artifact conformance suite (Go tests.TestArtifactService) against fresh services
-/// from `factory`, one per scenario; panics with `artifact testsuite/<scenario>: <message>` on failure.
+/// Runs the artifact conformance suite against fresh services from `factory`, one per scenario;
+/// panics with `artifact testsuite/<scenario>: <message>` on failure.
 pub async fn run<F, Fut>(factory: F)
 where
     F: Fn() -> Fut,
     Fut: Future<Output = Arc<dyn ArtifactService>>,
 {
-    basic(factory().await).await; // Go testArtifactService
-    empty(factory().await).await; // Go testArtifactService_Empty
-    user_scoped(factory().await).await; // Go testArtifactService_UserScoped
-    list_session_named_user(factory().await).await; // Go testArtifactService_ListSessionNamedUser
-    get_artifact_version(factory().await).await; // Go testArtifactService_GetArtifactVersion
+    basic(factory().await).await;
+    empty(factory().await).await;
+    user_scoped(factory().await).await;
+    list_session_named_user(factory().await).await;
+    get_artifact_version(factory().await).await;
 }
 
 fn bytes(data: &str, mime_type: &str) -> Part {
@@ -130,14 +129,14 @@ fn gav_req(session_id: &str, file_name: &str, version: i64) -> GetArtifactVersio
     }
 }
 
-/// Go `srv.Delete(...)` followed by `t.Fatalf` on error.
+/// Deletes, failing the suite on error.
 async fn must_delete(srv: &dyn ArtifactService, step: &str, req: DeleteRequest) {
     if let Err(e) = srv.delete(req).await {
         fail!(step, "Delete failed: {e}");
     }
 }
 
-/// Port of Go testArtifactService.
+/// Scenario: save, load, list, version and delete session-scoped artifacts.
 async fn basic(srv: Arc<dyn ArtifactService>) {
     let srv = srv.as_ref();
     let s = "ArtifactService";
@@ -266,7 +265,7 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
     must_delete(srv, s, delete_req(SESSION, "file3", 0)).await;
 }
 
-/// Port of Go testArtifactService_UserScoped.
+/// Scenario: `user:` artifacts are shared across sessions of one user.
 async fn user_scoped(srv: Arc<dyn ArtifactService>) {
     let srv = srv.as_ref();
     let s = "ArtifactService_UserScoped";
@@ -450,7 +449,7 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
     must_delete(srv, s, delete_req(SESSION, "user:file3", 0)).await;
 }
 
-/// Port of Go testArtifactService_Empty.
+/// Scenario: operations on an empty service.
 async fn empty(srv: Arc<dyn ArtifactService>) {
     let srv = srv.as_ref();
     let s = "ArtifactService_Empty";
@@ -530,7 +529,8 @@ async fn empty(srv: Arc<dyn ArtifactService>) {
     }
 }
 
-/// Port of Go testArtifactService_ListSessionNamedUser.
+/// Scenario: a session literally named `user` keeps its private files, which other sessions do
+/// not see, and lists each file name once however many versions it has.
 async fn list_session_named_user(srv: Arc<dyn ArtifactService>) {
     let srv = srv.as_ref();
     let s = "ArtifactService_ListSessionNamedUser";
@@ -589,7 +589,7 @@ async fn list_session_named_user(srv: Arc<dyn ArtifactService>) {
     }
 }
 
-/// Port of Go testArtifactService_GetArtifactVersion.
+/// Scenario: metadata of specific versions, the latest version, and missing versions or files.
 async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
     let srv = srv.as_ref();
     let s = "ArtifactService_GetArtifactVersion";
@@ -739,7 +739,7 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
     }
 }
 
-/// Port of Go assertArtifactVersion.
+/// Asserts the version, media type and custom metadata of an [`ArtifactVersion`].
 fn assert_artifact_version(
     step: &str,
     got: Option<&ArtifactVersion>,

@@ -13,12 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An `LlmAgent` on an OpenAI (or OpenAI-compatible) model with a function tool (port of
-//! ADK-Go `examples/openai/responses/main.go` and `examples/openai/completions/main.go`, which
-//! differ only in `ClientConfig.API`). Go hands the agent to its launcher (`full.NewLauncher()`);
-//! this example reads turns from stdin (one line per turn, until end of input) in one session, so
-//! it builds without the `launcher` feature. To run the agent through the launcher instead, give
-//! it to `gadk::launcher::full::new()` as `examples/launcher.rs` does.
+//! An `LlmAgent` on an OpenAI (or OpenAI-compatible) model with a function tool (the Responses and
+//! Chat Completions APIs differ only in `ClientConfig.API`). This example reads turns from stdin
+//! (one line per turn, until end of input) in one session, so it builds without the `launcher`
+//! feature. To run the agent through the launcher instead, give it to `gadk::launcher::full::new()`
+//! as `examples/launcher.rs` does.
 //!
 //! OpenAI:            `OPENAI_API_KEY=... cargo run -p gadk --example openai --features openai`
 //! Compatible server: `OPENAI_BASE_URL=http://localhost:11434/v1/ cargo run -p gadk --example openai --features openai`
@@ -39,26 +38,27 @@ use gadk::openai::{Api, ClientConfig, OpenAiError, new_model};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Go `defaultModel`: used when `OPENAI_MODEL` is unset; cheap, and serves both APIs.
+/// Used when `OPENAI_MODEL` is unset; cheap, and serves both APIs.
 const DEFAULT_MODEL: &str = "gpt-4o-mini";
 
 const APP_NAME: &str = "openai_example";
 const USER_ID: &str = "example_user";
 const SESSION_ID: &str = "session_1";
 
-// Go `weatherInput` (plain comments: a doc comment would become the schema's description).
+// The input of `get_weather` (a plain comment: a doc comment would become the schema's
+// description).
 #[derive(Deserialize, JsonSchema)]
 struct WeatherInput {
     city: String,
 }
 
-// Go `weatherOutput`.
+// The output of `get_weather`.
 #[derive(Serialize, JsonSchema)]
 struct WeatherOutput {
     report: String,
 }
 
-/// Go `getWeather`: a stand-in for a real weather API, so the sample needs nothing beyond the
+/// A stand-in for a real weather API, so the sample needs nothing beyond the
 /// model call.
 async fn get_weather(_ctx: Context, input: WeatherInput) -> Result<WeatherOutput, ToolError> {
     Ok(WeatherOutput {
