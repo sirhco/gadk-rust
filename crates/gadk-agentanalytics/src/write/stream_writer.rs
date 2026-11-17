@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/batch_processor.go`'s `streamWriter`: the persistent
-//! AppendRows stream with per-request send/receive, Go's error classes
-//! (`isPermanentWriteError`, `isTransientInBandError`, `isAmbiguousSendError`), committed-stream
-//! rotation (`rotateCommittedStream`) with its cooldown and background finalization of retired
-//! streams, exactly-once offsets (`handleExactlyOnceError`), `newAppendRowsRequestLocked` /
-//! `serializedRequestSize`, `createCommittedWriteStream` and `streamWriterTraceID[ForVersion]`.
+//! The persistent AppendRows stream writer: per-request send/receive, the error classes
+//! (`is_permanent_write_error`, `is_transient_in_band_error`, `is_ambiguous_send_error`),
+//! committed-stream rotation with its cooldown and background finalization of retired streams,
+//! exactly-once offsets, the request builders ([`append_rows_request`],
+//! `serialized_request_size`), the committed-stream creation and the trace id
+//! ([`stream_writer_trace_id`], [`stream_writer_trace_id_for_version`]).
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -43,25 +43,23 @@ use crate::write::arrow_batch::serialize_record;
 use crate::write::gapic::{REQUEST_PARAMS_KEY, WriteClient};
 use crate::write::{AppendRowsClient, code_from_rpc, is_eof};
 
-/// Go `streamWriterTraceIDPrefix`, gadk's own (Go: `google-adk-bq-logger-go`).
-// Divergence (ledger 7b-2): the AppendRows trace id names gadk and the gadk-agentanalytics
-// crate version instead of ADK-Go's prefix and module version.
+/// The prefix of the AppendRows trace id, which names gadk (not the upstream ADK) and the
+/// gadk-agentanalytics crate version.
 pub const STREAM_WRITER_TRACE_ID_PREFIX: &str = "gadk-bq-logger-rust";
 
-/// Go `defaultRotateTimeout`: bounds `CreateWriteStream` of a rotation and the finalization of
-/// a retired stream.
+/// Bounds `CreateWriteStream` of a rotation and the finalization of a retired stream.
 pub(crate) const DEFAULT_ROTATE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Go `streamWriterTraceID` (a `sync.OnceValue`).
+/// The trace id, computed once.
 static TRACE_ID: LazyLock<String> =
     LazyLock::new(|| stream_writer_trace_id_for_version(env!("CARGO_PKG_VERSION")));
 
-/// Go `streamWriterTraceID()`: `gadk-bq-logger-rust/<CARGO_PKG_VERSION>`.
+/// The AppendRows trace id: `gadk-bq-logger-rust/<CARGO_PKG_VERSION>`.
 pub fn stream_writer_trace_id() -> &'static str {
     TRACE_ID.as_str()
 }
 
-/// Go `streamWriterTraceIDForVersion(v)`: the prefix, and `/<v>` unless `v` is empty.
+/// The trace id for `version`: the prefix, and `/<version>` unless `version` is empty.
 pub fn stream_writer_trace_id_for_version(version: &str) -> String {
     if version.is_empty() {
         return STREAM_WRITER_TRACE_ID_PREFIX.to_owned();
@@ -69,13 +67,12 @@ pub fn stream_writer_trace_id_for_version(version: &str) -> String {
     format!("{STREAM_WRITER_TRACE_ID_PREFIX}/{version}")
 }
 
-/// Go `newAppendRowsRequestLocked`'s request: `write_stream`, `trace_id` and
-/// `arrow_rows.writer_schema` always, `arrow_rows.rows` (`serialized_record_batch`,
-/// `row_count`), `offset` only when `Some` (exactly-once; offset 0 is a present, empty
-/// `Int64Value`).
-// Divergence (ledger 7b-2): prost encodes the `rows` oneof (field 5) after `trace_id` (field
-// 6), Go's `proto.Marshal` in field-number order; the fields, their bytes and the encoded size
-// are Go's (parsers accept any field order).
+/// Builds the AppendRows request: `write_stream`, `trace_id` and `arrow_rows.writer_schema`
+/// always, `arrow_rows.rows` (`serialized_record_batch`, `row_count`), `offset` only when
+/// `Some` (exactly-once; offset 0 is a present, empty `Int64Value`).
+// prost encodes the `rows` oneof (field 5) after `trace_id` (field 6), not in field-number
+// order; the fields, their bytes and the encoded size are the same (parsers accept any field
+// order).
 pub fn append_rows_request(
     write_stream: &str,
     trace_id: &str,
@@ -84,7 +81,7 @@ pub fn append_rows_request(
     num_rows: i64,
     offset: Option<i64>,
 ) -> AppendRowsRequest {
-    // Go sets the deprecated `ArrowRecordBatch.RowCount` too.
+    // The deprecated `ArrowRecordBatch.row_count` is set too.
     #[allow(deprecated)]
     let rows = ArrowRecordBatch {
         serialized_record_batch: batch_bytes.to_vec(),
@@ -104,8 +101,7 @@ pub fn append_rows_request(
     }
 }
 
-/// Go `createCommittedWriteStream(ctx, writeClient, config)`: a `COMMITTED` stream on
-/// `projects/<p>/datasets/<d>/tables/<t>`, returning its name.
+/// Creates a `COMMITTED` stream on `projects/<p>/datasets/<d>/tables/<t>` and returns its name.
 ///
 /// # Errors
 ///
@@ -138,7 +134,7 @@ pub(crate) async fn create_committed_write_stream(
     Ok(ws.name)
 }
 
-/// Go `isTransientInBandError(code)`: Unavailable, ResourceExhausted, Internal,
+/// Whether an in-band error `code` is transient: Unavailable, ResourceExhausted, Internal,
 /// DeadlineExceeded, Aborted.
 pub(crate) fn is_transient_in_band_error(code: Code) -> bool {
     matches!(
@@ -151,8 +147,8 @@ pub(crate) fn is_transient_in_band_error(code: Code) -> bool {
     )
 }
 
-/// Go `isAmbiguousSendError(code)`: Unavailable, DeadlineExceeded, Canceled, Aborted, Internal,
-/// Unknown.
+/// Whether a send error `code` leaves the batch's outcome ambiguous: Unavailable,
+/// DeadlineExceeded, Canceled, Aborted, Internal, Unknown.
 pub(crate) fn is_ambiguous_send_error(code: Code) -> bool {
     matches!(
         code,
@@ -165,62 +161,59 @@ pub(crate) fn is_ambiguous_send_error(code: Code) -> bool {
     )
 }
 
-/// The fields of Go's `streamWriter` that its `mu` guards (and the test hooks Go tests set on
-/// it directly).
+/// The fields of a [`StreamWriter`] guarded by its `state` mutex (tests set some of them
+/// directly).
 pub(crate) struct StreamState {
-    /// Go `streamName`.
+    /// The name of the current write stream.
     pub(crate) stream_name: String,
-    /// Go `stream`: the open AppendRows stream, if any.
+    /// The open AppendRows stream, if any.
     pub(crate) stream: Option<Box<dyn AppendRowsClient>>,
-    /// Go `streamCtx` / `streamCancel`: the open stream's context (`cancel()` is Go's
-    /// `streamCancel`).
+    /// The open stream's context (`cancel()` ends the stream).
     pub(crate) stream_ctx: Option<Context>,
-    /// Go `offsetDesynced`.
+    /// The stream offset can no longer be trusted (an earlier batch's outcome is unknown).
     pub(crate) offset_desynced: bool,
-    /// Go `freshlyRotated`.
+    /// The stream was just rotated.
     pub(crate) freshly_rotated: bool,
-    /// Go `rotateRetryAt`; `None` is Go's zero time (no cooldown).
+    /// The earliest instant of the next rotation; `None` means no cooldown.
     pub(crate) rotate_retry_at: Option<Instant>,
-    /// Go `rotateTimeout` (tests shorten it); zero means [`DEFAULT_ROTATE_TIMEOUT`].
+    /// How long a rotation may take (tests shorten it); zero means [`DEFAULT_ROTATE_TIMEOUT`].
     pub(crate) rotate_timeout: Duration,
-    /// Go `now` (tests pin the clock); `None` reads [`Instant::now`].
+    /// The clock (tests pin it); `None` reads [`Instant::now`].
     pub(crate) now: Option<Arc<dyn Fn() -> Instant + Send + Sync>>,
-    /// A request was handed to `stream` and its response not yet received (no Go
-    /// counterpart: Go's `append` cannot be abandoned mid-request). Still set when `append`
-    /// starts, an earlier `append` future was dropped in between, so `stream` holds an unread
-    /// response and is not reused.
+    /// A request was handed to `stream` and its response not yet received. Still set when
+    /// `append` starts, an earlier `append` future was dropped in between, so `stream` holds an
+    /// unread response and is not reused.
     pub(crate) request_in_flight: bool,
 }
 
-/// Go `streamWriter`: a persistent AppendRows stream on one write stream.
+/// A persistent AppendRows stream on one write stream.
 pub(crate) struct StreamWriter {
-    /// Go `writeClient`; `None` is Go's nil client (rotation then fails with `writeClient is
-    /// nil`, opening a stream is not possible).
+    /// The client rotation and stream opening use; `None` makes rotation fail with
+    /// `writeClient is nil` (opening a stream is not possible).
     pub(crate) write_client: Option<WriteClient>,
-    /// Go `schemaBytes`: the serialized Arrow writer schema of every request.
+    /// The serialized Arrow writer schema of every request.
     pub(crate) schema_bytes: Vec<u8>,
-    /// Go `config`.
+    /// The writer configuration.
     pub(crate) config: Config,
-    /// Go `baseCtx`: `without_cancel` of the constructor's context (keeps its outgoing
-    /// metadata).
+    /// `without_cancel` of the constructor's context (keeps its outgoing metadata).
     pub(crate) base_ctx: Context,
-    /// Go `finalizeCtx` (`cancel()` is Go's `finalizeCancel`): parent of retired-stream
-    /// finalizations.
+    /// Parent of retired-stream finalizations (`cancel()` abandons them).
     pub(crate) finalize_ctx: Context,
-    /// Go `finalizeWg`: the running finalizations of retired streams.
+    /// The running finalizations of retired streams.
     pub(crate) finalizations: TaskTracker,
-    /// Go `streamOffset`.
+    /// The offset of the next request under exactly-once delivery.
     pub(crate) stream_offset: AtomicI64,
-    /// Go `mu` and the fields it guards.
+    /// The mutable stream state, behind a mutex.
     pub(crate) state: tokio::sync::Mutex<StreamState>,
 }
 
-/// Go's `stop := context.AfterFunc(ctx, streamCancel)` that is also stopped when dropped (an
-/// `append` future dropped mid-call leaves no watcher behind to cancel a reused stream).
+/// A watcher that cancels the stream's context when the request's context ends, and is also
+/// stopped when dropped (an `append` future dropped mid-call leaves no watcher behind to cancel
+/// a reused stream).
 struct StopOnDrop(AfterFunc);
 
 impl StopOnDrop {
-    /// Go `stop()`.
+    /// Stops the watcher; whether it was stopped before it ran.
     fn stop(&self) -> bool {
         self.0.stop()
     }
@@ -232,26 +225,26 @@ impl Drop for StopOnDrop {
     }
 }
 
-/// Go `context.AfterFunc(ctx, streamCancel)`: cancels `stream_ctx` once `ctx` ends.
+/// Cancels `stream_ctx` once `ctx` ends.
 fn cancel_stream_after(ctx: &Context, stream_ctx: &Context) -> StopOnDrop {
     let stream_ctx = stream_ctx.clone();
     StopOnDrop(ctx.after_func(move || stream_ctx.cancel()))
 }
 
-/// Go `ctx.Err()` of a context known to have ended.
+/// The error of a context known to have ended.
 fn context_error(ctx: &Context) -> Error {
     Error::Context(ctx.err().unwrap_or(ContextError::Canceled))
 }
 
-/// Go `now.Add(d)` (saturating far in the future instead of overflowing).
+/// `now + d` (saturating far in the future instead of overflowing).
 fn instant_after(now: Instant, d: Duration) -> Instant {
     now.checked_add(d)
         .or_else(|| now.checked_add(Duration::from_secs(1 << 32)))
         .unwrap_or(now)
 }
 
-/// Go `fmt.Errorf("committed write stream rotation in cooldown until %s",
-/// rotateRetryAt.Format(time.RFC3339Nano))`: the instant as local wall-clock time.
+/// The error for a rotation attempted during its cooldown, naming the instant (as local
+/// wall-clock time, RFC 3339 with nanoseconds) the cooldown ends.
 fn rotation_cooldown_error(at: Instant) -> Error {
     let now = Instant::now();
     let wall = chrono::Local::now();
@@ -270,12 +263,12 @@ fn rotation_cooldown_error(at: Instant) -> Error {
     ))
 }
 
-/// A Go `time.Duration` (nanoseconds) of `d`.
+/// `d` in whole nanoseconds, saturating at `i64::MAX`.
 fn go_nanos(d: Duration) -> i64 {
     i64::try_from(d.as_nanos()).unwrap_or(i64::MAX)
 }
 
-/// The `google.rpc.Status` of an in-band `AppendRowsResponse.error` (Go `res.GetError()`).
+/// The `google.rpc.Status` of an in-band `AppendRowsResponse.error`, if any.
 fn in_band_error(res: &AppendRowsResponse) -> Option<&crate::storagepb::google::rpc::Status> {
     match &res.response {
         Some(Response::Error(status)) => Some(status),
@@ -284,7 +277,7 @@ fn in_band_error(res: &AppendRowsResponse) -> Option<&crate::storagepb::google::
 }
 
 impl StreamWriter {
-    /// Go `newStreamWriter(ctx, client, streamName, schemaBytes, config)`.
+    /// Creates a writer for `stream_name` over `client` (which may be `None`).
     pub(crate) fn new(
         ctx: &Context,
         client: Option<WriteClient>,
@@ -294,8 +287,8 @@ impl StreamWriter {
     ) -> StreamWriter {
         let base_ctx = ctx.without_cancel();
         let finalize_ctx = base_ctx.with_cancel();
-        // Go's WaitGroup: closed from the start, so `wait` resolves whenever no finalization
-        // runs (a closed tracker still accepts tasks).
+        // Closed from the start, so `wait` resolves whenever no finalization runs (a closed
+        // tracker still accepts tasks).
         let finalizations = TaskTracker::new();
         finalizations.close();
         StreamWriter {
@@ -320,16 +313,15 @@ impl StreamWriter {
         }
     }
 
-    /// Go `append(ctx, recordBatch, batchBytes, rotatedInBatch)`: sends `record` (as
-    /// `batch_bytes` when given, else serialized once and reused) and returns BigQuery's
-    /// response, retrying per `config.retry_config`; `rotated_in_batch` is the rotation budget
-    /// the chunks of one batch share.
+    /// Sends `record` (as `batch_bytes` when given, else serialized once and reused) and returns
+    /// BigQuery's response, retrying per `config.retry_config`; `rotated_in_batch` is the
+    /// rotation budget the chunks of one batch share.
     ///
     /// # Errors
     ///
-    /// Go's texts: `max retries exceeded: …`, `failed to open append rows stream: …`, `failed to
-    /// send row batch: …`, `failed to receive response for row batch: …`, the exactly-once
-    /// rotation errors, the context's error.
+    /// `max retries exceeded: …`, `failed to open append rows stream: …`, `failed to send row
+    /// batch: …`, `failed to receive response for row batch: …`, the exactly-once rotation
+    /// errors, the context's error.
     pub(crate) async fn append(
         &self,
         ctx: &Context,
@@ -341,8 +333,8 @@ impl StreamWriter {
         if state.request_in_flight {
             // An earlier `append` future was dropped between sending its request and receiving
             // the response: the stream would answer the next request with that response.
-            // Replace the stream and, as Go's deferred check does for a batch whose outcome
-            // stayed unknown, distrust the offset.
+            // Replace the stream and, as for a batch whose outcome stayed unknown, distrust the
+            // offset.
             Self::reset_stream(&mut state);
             if self.config.exactly_once_delivery {
                 state.offset_desynced = true;
@@ -359,9 +351,9 @@ impl StreamWriter {
             {
                 return Err(rotation_cooldown_error(at));
             }
-            // Not reachable today (Go's comment): every place that sets offset_desynced also
-            // fails the chunk, and the processor stops at the first failed chunk; the check
-            // keeps a batch to one rotation should that change.
+            // Not reachable today: every place that sets offset_desynced also fails the chunk,
+            // and the processor stops at the first failed chunk; the check keeps a batch to one
+            // rotation should that change.
             if *rotated_in_batch {
                 return Err(Error::msg(
                     "committed write stream already rotated in batch",
@@ -388,7 +380,7 @@ impl StreamWriter {
             )
             .await;
 
-        // Go's deferred check: a batch whose outcome stayed unknown leaves the offset untrusted.
+        // A batch whose outcome stayed unknown leaves the offset untrusted.
         if self.config.exactly_once_delivery && had_ambiguous_send {
             let failed = match &res {
                 Err(_) => true,
@@ -404,7 +396,7 @@ impl StreamWriter {
         res
     }
 
-    /// The retry loop of Go's `append` (after the exactly-once prologue).
+    /// The retry loop of `append` (after the exactly-once prologue).
     #[allow(clippy::too_many_lines)]
     async fn append_attempts(
         &self,
@@ -423,8 +415,8 @@ impl StreamWriter {
         let num_rows = i64::try_from(record.num_rows()).unwrap_or(i64::MAX);
         let mut last_err: Option<Error> = None;
         let mut fresh_stream_retried = false;
-        // A stream already open was opened for an earlier request (see Go's comment on
-        // reusedStream): its stream-closing statuses never fail the batch fast.
+        // A stream already open was opened for an earlier request: its stream-closing statuses
+        // never fail the batch fast.
         let mut reused_stream = state.stream.is_some();
 
         let mut attempt: i64 = -1;
@@ -439,8 +431,8 @@ impl StreamWriter {
                     biased;
                     () = ctx.done() => return Err(context_error(ctx)),
                     () = tokio::time::sleep(pause) => {
-                        // Go `time.Duration(float64(delay) * Multiplier)` (saturating, as
-                        // arm64 converts), capped at MaxDelay.
+                        // Multiply the delay (saturating float-to-int conversion), capped at
+                        // the maximum delay.
                         delay = (delay as f64 * retry.multiplier) as i64;
                         if delay > max_delay {
                             delay = max_delay;
@@ -482,8 +474,7 @@ impl StreamWriter {
                 let stop_open = cancel_stream_after(ctx, &stream_ctx);
                 let opened = match &self.write_client {
                     Some(client) => client.append_rows(&stream_ctx).await,
-                    // Divergence (ledger 7b-2): Go calls AppendRows on its nil client and
-                    // panics; without a client the open fails with `writeClient is nil`.
+                    // Without a client the open fails with `writeClient is nil`.
                     None => Err(Error::msg("writeClient is nil")),
                 };
                 if !stop_open.stop() {
@@ -541,7 +532,7 @@ impl StreamWriter {
             if let Err(mut send_err) = stream.send(req).await {
                 // An error not generated by the client is reported as EOF here, with the real
                 // status left for recv; drain until it surfaces, releasing the stream. Wrapped
-                // errors match too (Go `errors.Is`).
+                // errors match too.
                 let send_eof = is_eof(&send_err);
                 if send_eof {
                     loop {
@@ -635,7 +626,7 @@ impl StreamWriter {
 
             if exactly_once && let Some(in_band) = in_band_error(&res) {
                 // An in-band error is the server's rejection of this attempt: it does not
-                // itself make the outcome ambiguous. A number grpc-go has no name for matches
+                // itself make the outcome ambiguous. A number with no known status code matches
                 // none of the classes (Unknown with send_succeeded false does the same).
                 let code = code_from_rpc(in_band.code).unwrap_or(Code::Unknown);
                 let message = in_band.message.clone();
@@ -696,8 +687,8 @@ impl StreamWriter {
         })
     }
 
-    /// Go `newAppendRowsRequestLocked(batchBytes, numRows)` ([`append_rows_request`] with this
-    /// writer's stream, trace id, schema and, with exactly-once, `stream_offset`).
+    /// The request `append` sends ([`append_rows_request`] with this writer's stream, trace id,
+    /// schema and, with exactly-once, `stream_offset`).
     pub(crate) fn new_append_rows_request_locked(
         &self,
         state: &StreamState,
@@ -718,8 +709,7 @@ impl StreamWriter {
         )
     }
 
-    /// Go `serializedRequestSize(batchBytes, numRows)`: the encoded length of the request
-    /// `append` would send.
+    /// The encoded length of the request `append` would send.
     pub(crate) async fn serialized_request_size(&self, batch_bytes: &[u8], num_rows: i64) -> usize {
         let req = {
             let state = self.state.lock().await;
@@ -728,8 +718,8 @@ impl StreamWriter {
         req.encoded_len()
     }
 
-    /// Go `isPermanentWriteError(code)`: PermissionDenied, InvalidArgument, Unauthenticated,
-    /// FailedPrecondition, Unimplemented; NotFound unless exactly-once.
+    /// Whether `code` is a permanent write error: PermissionDenied, InvalidArgument,
+    /// Unauthenticated, FailedPrecondition, Unimplemented; NotFound unless exactly-once.
     pub(crate) fn is_permanent_write_error(&self, code: Code) -> bool {
         match code {
             Code::PermissionDenied
@@ -742,7 +732,8 @@ impl StreamWriter {
         }
     }
 
-    /// Go `isRotationInCooldown()`.
+    /// Whether exactly-once delivery has an untrusted offset and a rotation cooldown still
+    /// running.
     pub(crate) async fn is_rotation_in_cooldown(&self) -> bool {
         let state = self.state.lock().await;
         let now = Self::now_or_default(&state);
@@ -751,24 +742,24 @@ impl StreamWriter {
             && state.rotate_retry_at.is_some_and(|at| now < at)
     }
 
-    /// Go `closeActiveStream()`.
+    /// Closes the open stream (if any) and cancels its context.
     pub(crate) async fn close_active_stream(&self) {
         let mut state = self.state.lock().await;
         Self::reset_stream(&mut state);
     }
 
-    /// Go `cancelFinalizations()`.
+    /// Abandons the running finalizations of retired streams.
     pub(crate) fn cancel_finalizations(&self) {
         self.finalize_ctx.cancel();
     }
 
-    /// Go `waitFinalizations()`.
+    /// Waits until the running finalizations of retired streams have finished.
     pub(crate) async fn wait_finalizations(&self) {
         self.finalizations.close();
         self.finalizations.wait().await;
     }
 
-    /// Go `streamsToFinalize()`: the current stream's name (taken), or none.
+    /// The current stream's name (taken), or none.
     pub(crate) async fn streams_to_finalize(&self) -> Vec<String> {
         let mut state = self.state.lock().await;
         if state.stream_name.is_empty() {
@@ -777,7 +768,7 @@ impl StreamWriter {
         vec![std::mem::take(&mut state.stream_name)]
     }
 
-    /// Go `nowOrDefault()`.
+    /// The current time: the pinned clock if set, else [`Instant::now`].
     pub(crate) fn now_or_default(state: &StreamState) -> Instant {
         match &state.now {
             Some(now) => now(),
@@ -785,7 +776,7 @@ impl StreamWriter {
         }
     }
 
-    /// Go `rotateTimeoutOrDefault()`.
+    /// The rotation timeout, or [`DEFAULT_ROTATE_TIMEOUT`] when unset.
     pub(crate) fn rotate_timeout_or_default(state: &StreamState) -> Duration {
         if state.rotate_timeout > Duration::ZERO {
             state.rotate_timeout
@@ -794,7 +785,7 @@ impl StreamWriter {
         }
     }
 
-    /// Go `resetStream()`.
+    /// Closes and cancels the open stream and clears the in-flight flag.
     pub(crate) fn reset_stream(state: &mut StreamState) {
         state.request_in_flight = false;
         if let Some(mut stream) = state.stream.take() {
@@ -805,7 +796,7 @@ impl StreamWriter {
         }
     }
 
-    /// Go `rotateCommittedStream(ctx)` (caller holds `state`).
+    /// Rotates to a fresh committed stream (caller holds `state`).
     ///
     /// # Errors
     ///
@@ -824,8 +815,8 @@ impl StreamWriter {
             return Err(rotation_cooldown_error(at));
         }
         let timeout = Self::rotate_timeout_or_default(state);
-        // Go `time.Until(deadline) < min(timeout, ShutdownTimeout/2)` (a passed deadline is
-        // negative, so always starved).
+        // The remaining time is under `min(timeout, shutdown_timeout / 2)` (a passed deadline
+        // counts as starved).
         let starved = ctx.deadline().is_some_and(|deadline| {
             deadline
                 .checked_duration_since(Instant::now())
@@ -879,14 +870,14 @@ impl StreamWriter {
         Ok(())
     }
 
-    /// Go `handleExactlyOnceError(ctx, code, numRows, &hadAmbiguousSend, &rotatedInBatch,
-    /// sendSucceeded)` (caller holds `state`): `Ok(Some(response))` is Go's `done` (the batch
-    /// is confirmed), `Ok(None)` retries, `Err` is Go's `rotateErr`.
+    /// Handles an exactly-once error `code` of a batch of `num_rows` rows (caller holds `state`):
+    /// `Ok(Some(response))` means the batch is confirmed, `Ok(None)` retries, `Err` is a
+    /// rotation error.
     ///
     /// # Errors
     ///
-    /// Go's `batch outcome unknown on stream (…)…`, `committed write stream already rotated
-    /// (…)`, `failed to rotate committed write stream after …: …`.
+    /// `batch outcome unknown on stream (…)…`, `committed write stream already rotated (…)`,
+    /// `failed to rotate committed write stream after …: …`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_exactly_once_error(
         &self,
@@ -947,7 +938,7 @@ impl StreamWriter {
         }
     }
 
-    /// Go `s.rotateRetryAt = s.nowOrDefault().Add(s.rotateTimeoutOrDefault())`.
+    /// Starts the rotation cooldown: the next rotation is allowed one rotation timeout from now.
     fn arm_rotation_cooldown(&self, state: &mut StreamState) {
         let now = Self::now_or_default(state);
         state.rotate_retry_at = Some(instant_after(now, Self::rotate_timeout_or_default(state)));

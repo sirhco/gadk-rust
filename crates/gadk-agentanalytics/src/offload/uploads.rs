@@ -13,14 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of the upload orchestration of ADK-Go `plugin/agentanalytics/gcs_offloader.go`
-//! (`impl BatchProcessor`): `resolveUploadsForBatch` with its concurrency limit, batch timeout
-//! (told apart from the caller's deadline by the context's cause), cooldown and deferred
-//! uploads (`clearDeferredUploads`, `dropDeferredUploadsQuietly`, `requeueDeferredUploads`,
-//! `logDeferredUploadFailures`), `objectPath`, `upload` (offloader panics caught),
-//! `applyUpload`, `logUploadFailure`, and the pure helpers (`gcsMetadataDetails`,
-//! `textPreview`, `extensionForMIME`, `isSafeExtension`, `pathSegment`, `gcsObjectPath`,
-//! `safeUploadErrorSummary`, `stripURIQueries`).
+//! The upload orchestration of a batch (`impl BatchProcessor`): `resolve_uploads_for_batch` with
+//! its concurrency limit, batch timeout (told apart from the caller's deadline by the context's
+//! cause), cooldown and deferred uploads (`clear_deferred_uploads`,
+//! `drop_deferred_uploads_quietly`, `requeue_deferred_uploads`, `log_deferred_upload_failures`),
+//! `object_path`, `upload_payload` (offloader panics caught), `apply_upload`,
+//! `log_upload_failure`, and the pure helpers (`gcs_metadata_details`, `text_preview`,
+//! `extension_for_mime`, `is_safe_extension`, `path_segment`, `gcs_object_path`,
+//! `safe_upload_error_summary`, `strip_uri_queries`).
 
 use std::any::Any;
 use std::future::Future;
@@ -64,85 +64,85 @@ use crate::row::{
 };
 use crate::views::ascii_equal_fold;
 
-/// Go `eventIDField`.
+/// The `event_id` field name.
 const EVENT_ID_FIELD: &str = "event_id";
 
-/// Go `timestampField`.
+/// The `timestamp` field name.
 const TIMESTAMP_FIELD: &str = "timestamp";
 
-/// Go `uploadResolveOptions`.
+/// How `resolve_uploads_for_batch` resolves the uploads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct UploadResolveOptions {
-    /// Go `pauseOnCallerDeadline`.
+    /// Pause the uploads when the caller's deadline ends them.
     pub(crate) pause_on_caller_deadline: bool,
-    /// Go `canDefer`.
+    /// Whether failed uploads may be deferred for a later requeue.
     pub(crate) can_defer: bool,
 }
 
-/// Go `uploadTask`: one payload to upload and the `content_parts` entry it rewrites, located
-/// by index (the batch row and the entry's slot) rather than by Go's map pointers.
+/// One payload to upload and the `content_parts` entry it rewrites, located by index (the batch
+/// row and the entry's slot).
 #[derive(Debug)]
 pub(crate) struct UploadTask {
-    /// The index of the row in the batch (Go `row`).
+    /// The index of the row in the batch.
     pub(crate) row: usize,
-    /// The index of the entry in the row's `content_parts` (Go `part`, `pending.slot`).
+    /// The index of the entry in the row's `content_parts` (also the pending upload's slot).
     pub(crate) slot: usize,
-    /// Go `builder`.
+    /// The summary builder of the row, if any.
     pub(crate) builder: Option<SharedSummaryBuilder>,
-    /// Go `pending`.
+    /// The pending upload.
     pub(crate) pending: PendingUpload,
-    /// Go `path`: the object name.
+    /// The object name.
     pub(crate) path: String,
-    /// Go `uri`.
+    /// The resulting URI.
     pub(crate) uri: String,
-    /// Go `err`.
+    /// The upload's error, if it failed.
     pub(crate) err: Option<Error>,
 }
 
-/// What Go's `upload` returns: `(uri, started, err)`.
+/// What an upload returns: `(uri, started, err)`.
 #[derive(Debug)]
 pub(crate) struct UploadResult {
-    /// Go `uri`.
+    /// The resulting URI.
     pub(crate) uri: String,
-    /// Go `started`: the offloader was called.
+    /// The offloader was called.
     pub(crate) started: bool,
-    /// Go `err`.
+    /// The upload's error, if it failed.
     pub(crate) err: Option<Error>,
 }
 
-/// How the uploads of a batch ended (the state Go's `resolveUploadsForBatch` keeps across its
-/// `wg.Wait()`).
+/// How the uploads of a batch ended (the state `resolve_uploads_for_batch` keeps across waiting
+/// for its tasks).
 #[derive(Debug, Clone, Copy)]
 struct UploadsOutcome {
-    /// Go `ownTimeoutExpired`.
+    /// The batch's own timeout expired.
     own_timeout_expired: bool,
-    /// Go `paused`.
+    /// The uploads were paused.
     paused: bool,
 }
 
-/// Which way `resolveUploadsForBatch` went.
+/// Which way `resolve_uploads_for_batch` went.
 enum Stage {
-    /// No task or no offloader (Go's first early return).
+    /// No task or no offloader (the first early return).
     NoUploads { offloader_missing: bool },
-    /// The uploads are paused (Go's cooldown early return).
+    /// The uploads are paused (the cooldown early return).
     Cooldown,
     /// The uploads ran.
     Uploaded(UploadsOutcome),
 }
 
 impl BatchProcessor {
-    /// Go `resolveUploadsForBatch(ctx, opts, batch)`: uploads the payloads queued with the rows
-    /// of `batch` (at most `gcs_max_concurrent_uploads` at a time, under one batch timeout that
-    /// `ctx` can end sooner) and rewrites the matching `content_parts` entries; a failed upload
-    /// keeps the part inline. A batch whose uploads show Cloud Storage stalled pauses the
-    /// uploads for the length of the timeout. With `opts.can_defer`, when `ctx` (not the batch
-    /// timeout) ended the uploads without pausing them, the failed uploads stay reserved on
-    /// their rows' [`DeferredRowUploads`] for [`requeue_deferred_uploads`] or
-    /// [`clear_deferred_uploads`]; otherwise no row keeps any.
+    /// Uploads the payloads queued with the rows of `batch` (at most
+    /// `gcs_max_concurrent_uploads` at a time, under one batch timeout that `ctx` can end
+    /// sooner) and rewrites the matching `content_parts` entries; a failed upload keeps the part
+    /// inline. A batch whose uploads show Cloud Storage stalled pauses the uploads for the
+    /// length of the timeout. With `opts.can_defer`, when `ctx` (not the batch timeout) ended
+    /// the uploads without pausing them, the failed uploads stay reserved on their rows'
+    /// [`DeferredRowUploads`] for [`requeue_deferred_uploads`] or [`clear_deferred_uploads`];
+    /// otherwise no row keeps any.
     ///
     /// A [`Logger`](crate::config::Logger) that panics while the results are applied unwinds
     /// through this function after every reservation it took over is released and every
-    /// row's deferred uploads are dropped (Go's deferred `completedNormally` check).
+    /// row's deferred uploads are dropped.
     ///
     /// [`requeue_deferred_uploads`]: BatchProcessor::requeue_deferred_uploads
     /// [`clear_deferred_uploads`]: BatchProcessor::clear_deferred_uploads
@@ -229,7 +229,7 @@ impl BatchProcessor {
         }
     }
 
-    /// Go `cmp.Or(b.uploadTimeout, b.config.GCSUploadTimeout, gcsUploadTimeout)`.
+    /// The batch upload timeout: the processor's, else the config's, else the default.
     fn batch_upload_timeout(&self) -> Duration {
         [
             self.upload_timeout_override(),
@@ -240,7 +240,7 @@ impl BatchProcessor {
         .unwrap_or(GCS_UPLOAD_TIMEOUT)
     }
 
-    /// The uploads of `resolveUploadsForBatch`, from `context.WithTimeoutCause` to the pause
+    /// The uploads of `resolve_uploads_for_batch`, from the batch timeout's start to the pause
     /// decision: writes each task's `uri` and `err`.
     async fn run_uploads(
         &self,
@@ -361,8 +361,8 @@ impl BatchProcessor {
         }
     }
 
-    /// The part of `resolveUploadsForBatch` that applies the results (and may log, so a
-    /// Logger may panic in it). Returns Go's `deferredReserved`.
+    /// The part of `resolve_uploads_for_batch` that applies the results (and may log, so a
+    /// Logger may panic in it). Returns whether deferred uploads stayed reserved.
     fn settle_uploads(
         &self,
         ctx: &Context,
@@ -457,16 +457,15 @@ impl BatchProcessor {
         deferred_reserved
     }
 
-    /// Go `clearDeferredUploads(batch)`: drops the deferred uploads of the rows (releasing the
-    /// reservations of all of them first, so that a panicking Logger leaks none) and logs
-    /// their failures as final.
+    /// Drops the deferred uploads of the rows (releasing the reservations of all of them first,
+    /// so that a panicking Logger leaks none) and logs their failures as final.
     pub(crate) fn clear_deferred_uploads(&self, batch: &mut [QueuedRow]) {
         let dropped = self.drop_deferred_uploads_quietly(batch);
         self.log_deferred_upload_failures(&dropped, false);
     }
 
-    /// Go `dropDeferredUploadsQuietly(batch)`: drops the deferred uploads and releases their
-    /// reservations without logging; returns them. On a settled batch it does nothing.
+    /// Drops the deferred uploads and releases their reservations without logging; returns
+    /// them. On a settled batch it does nothing.
     pub(crate) fn drop_deferred_uploads_quietly(
         &self,
         batch: &mut [QueuedRow],
@@ -484,9 +483,9 @@ impl BatchProcessor {
         dropped
     }
 
-    /// Go `requeueDeferredUploads(batch)`: queues the deferred uploads of the rows again, with
-    /// their parts back in the form they were queued in (keeping their reservations), and logs
-    /// their failures as pending a retry once every row has been requeued.
+    /// Queues the deferred uploads of the rows again, with their parts back in the form they
+    /// were queued in (keeping their reservations), and logs their failures as pending a retry
+    /// once every row has been requeued.
     pub(crate) fn requeue_deferred_uploads(&self, batch: &mut [QueuedRow]) {
         let mut requeued = Vec::new();
         for q in batch.iter_mut() {
@@ -533,17 +532,16 @@ impl BatchProcessor {
         self.log_deferred_upload_failures(&requeued, true);
     }
 
-    /// Go `logDeferredUploadFailures(uploads, retry)`.
+    /// Logs the failures of `uploads`; `retry` says they are pending a retry.
     pub(crate) fn log_deferred_upload_failures(&self, uploads: &[DeferredUpload], retry: bool) {
         for du in uploads {
             self.log_upload_failure(&du.event_id, &du.upload, &du.err_summary, retry);
         }
     }
 
-    /// Go `objectPath(row, u)`: [`gcs_object_path_from_clean_prefix`] with the effective
-    /// prefix resolved at construction (cleaned per call when unresolved, as Go's struct
-    /// literals are), the row's timestamp (now when it has none), ids and the payload's
-    /// extension.
+    /// [`gcs_object_path_from_clean_prefix`] with the effective prefix resolved at construction
+    /// (cleaned per call when unresolved, as in struct literals), the row's timestamp (now when
+    /// it has none), ids and the payload's extension.
     pub(crate) fn object_path(&self, row: &Row, u: &PendingUpload) -> String {
         let ts = row
             .timestamp(TIMESTAMP_FIELD)
@@ -565,12 +563,11 @@ impl BatchProcessor {
         )
     }
 
-    /// Go `applyUpload(t, deferred)` on the task's row (`row` is `batch[t.row].row`): a
-    /// successful upload (no error and a `gs://` URI) turns the entry into a
-    /// `GCS_REFERENCE` with its `object_ref` (a text keeps a [`text_preview`] and leaves the
-    /// summary); otherwise a binary entry gets `[UPLOAD FAILED]`, a text keeps its inline
-    /// fallback (and marks the row truncated when that was cut), and the failure is logged
-    /// unless the upload is deferred.
+    /// Applies the upload `t` to its row (`row` is `batch[t.row].row`): a successful upload (no
+    /// error and a `gs://` URI) turns the entry into a `GCS_REFERENCE` with its `object_ref` (a
+    /// text keeps a [`text_preview`] and leaves the summary); otherwise a binary entry gets
+    /// `[UPLOAD FAILED]`, a text keeps its inline fallback (and marks the row truncated when
+    /// that was cut), and the failure is logged unless the upload is deferred.
     pub(crate) fn apply_upload(&self, row: &mut Row, t: &UploadTask, deferred: bool) {
         let u = &t.pending;
         let invalid_uri = UploadSentinel::InvalidGcsUri.error();
@@ -624,8 +621,8 @@ impl BatchProcessor {
         }
     }
 
-    /// Go `logUploadFailure(eventID, u, errSummary, retry)`: the event id, part index, byte
-    /// size and `err_summary`, nothing from the payload.
+    /// Logs a failed upload: the event id, part index, byte size and `err_summary`, nothing from
+    /// the payload.
     pub(crate) fn log_upload_failure(
         &self,
         event_id: &str,
@@ -649,9 +646,9 @@ impl BatchProcessor {
     }
 }
 
-/// Go `upload(ctx, offloader, t)`: calls the offloader unless `ctx` has ended; a panic is
-/// caught as Go's `offloaderPanicError`. A free function, as the spawned upload tasks cannot
-/// borrow the processor.
+/// Calls the offloader unless `ctx` has ended; a panic is caught as an
+/// [`OffloaderPanicError`]. A free function, as the spawned upload tasks cannot borrow the
+/// processor.
 async fn upload_payload(
     ctx: &Context,
     offloader: &Arc<dyn GcsContentOffloader>,
@@ -682,10 +679,10 @@ async fn upload_payload(
             err: Some(err),
         },
         // The offloader may be supplied by the user, so a panic in it is turned into an error
-        // that names only its type. Divergence (ledger 7b-2): Rust has no runtime name of a
-        // panic value's type: `string` for `&str` / `String` payloads, else `unknown` (Go
-        // `%T`), as 7b-1's content-formatter panics; Rust's panic hook still reports the panic
-        // (stderr by default) before it is caught, where Go's `recover` is silent.
+        // that names only its type. Rust has no runtime name of a panic value's type: it is
+        // `string` for `&str` / `String` payloads, else `unknown`, as for content-formatter
+        // panics; Rust's panic hook still reports the panic (stderr by default) before it is
+        // caught.
         Err(panic) => UploadResult {
             uri: String::new(),
             started: true,
@@ -696,9 +693,9 @@ async fn upload_payload(
     }
 }
 
-/// A future that catches a panic of the future it wraps (Go's deferred `recover` around a
-/// call): resolves to `Err(payload)` when polling it panicked. Used for offloaders (which may
-/// be the user's) and by the tests that recover Go's panics.
+/// A future that catches a panic of the future it wraps: resolves to `Err(payload)` when
+/// polling it panicked. Used for offloaders (which may be the user's) and by the tests that
+/// recover panics.
 pub(crate) struct CatchUnwind<F>(Pin<Box<F>>);
 
 impl<F: Future> Future for CatchUnwind<F> {
@@ -720,25 +717,25 @@ pub(crate) fn catch_unwind_future<F: Future>(fut: F) -> CatchUnwind<F> {
 }
 
 /// A `std::sync::Mutex` lock that ignores poisoning (a panicking Logger may poison a summary
-/// builder's lock; Go has no poisoning).
+/// builder's lock).
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Go's zero `time.Time` (`0001-01-01 00:00:00 UTC`), which `objectPath` replaces with now.
+/// The zero timestamp (`0001-01-01 00:00:00 UTC`), which `object_path` replaces with now.
 fn go_zero_time() -> Option<DateTime<Utc>> {
     NaiveDate::from_ymd_opt(1, 1, 1)
         .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|d| d.and_utc())
 }
 
-/// The `content_parts` entry at `slot` (Go `t.part`).
+/// The `content_parts` entry at `slot`.
 fn part_mut(row: &mut Row, slot: usize) -> Option<&mut Row> {
     row.parts_mut(COLUMN_CONTENT_PARTS)
         .and_then(|parts| parts.get_mut(slot))
 }
 
-/// Go `fallbackText, _ := t.part["text"].(string)`.
+/// The `text` of the `content_parts` entry at `slot`, or "".
 fn part_text(row: &Row, slot: usize) -> String {
     row.parts(COLUMN_CONTENT_PARTS)
         .and_then(|parts| parts.get(slot))
@@ -747,7 +744,7 @@ fn part_text(row: &Row, slot: usize) -> String {
         .to_owned()
 }
 
-/// Go `s.builder.applyToRow(s.row)` for each row summary.
+/// Applies each row summary builder to its row.
 fn apply_summaries(batch: &mut [QueuedRow], summaries: &[(usize, SharedSummaryBuilder)]) {
     for (i, builder) in summaries {
         if let Some(q) = batch.get_mut(*i) {
@@ -756,8 +753,7 @@ fn apply_summaries(batch: &mut [QueuedRow], summaries: &[(usize, SharedSummaryBu
     }
 }
 
-/// Go `gcsMetadataDetails(contentType, sizeBytes)`: Go `json.Marshal` of
-/// `{"gcs_metadata":{"content_type":…,"size":…}}`.
+/// The JSON text `{"gcs_metadata":{"content_type":…,"size":…}}`.
 pub(crate) fn gcs_metadata_details(content_type: &str, size_bytes: usize) -> String {
     let value = json!({"gcs_metadata": {"content_type": content_type, "size": size_bytes}});
     gadk_model::to_go_json(&value)
@@ -766,8 +762,8 @@ pub(crate) fn gcs_metadata_details(content_type: &str, size_bytes: usize) -> Str
         .unwrap_or_else(|| "{}".to_owned())
 }
 
-/// Go `textPreview(text)`: the first 200 chars and `... [OFFLOADED]` (a `&str` is valid
-/// UTF-8, so Go's `strings.ToValidUTF8` has nothing to do).
+/// The first 200 chars and `... [OFFLOADED]` (a `&str` is valid UTF-8, so no invalid sequence
+/// needs replacing).
 pub(crate) fn text_preview(text: &str) -> String {
     let cut = text
         .char_indices()
@@ -776,9 +772,9 @@ pub(crate) fn text_preview(text: &str) -> String {
     format!("{cut}{TEXT_PREVIEW_SUFFIX}")
 }
 
-/// Go's built-in MIME table (`mime.builtinTypesLower`, Go 1.26) by type, for the types
-/// [`MIME_EXTENSIONS`] does not fix: the first of each type's sorted extensions (all safe),
-/// which is what Go's `mime.ExtensionsByType` answers first on a host without MIME tables.
+/// The standard MIME table by type, for the types [`MIME_EXTENSIONS`] does not fix: the first of
+/// each type's sorted extensions (all safe), which is what a host without MIME tables answers
+/// first.
 const GO_BUILTIN_MIME_EXTENSIONS: [(&str, &str); 35] = [
     ("application/gzip", ".gz"),
     ("application/msword", ".doc"),
@@ -826,8 +822,8 @@ const GO_BUILTIN_MIME_EXTENSIONS: [(&str, &str); 35] = [
     ("video/ogg", ".ogv"),
 ];
 
-/// Go `extensionForMIME(mimeType)`: the extension, with its dot, of objects of the type;
-/// parameters, case and blanks are ignored; [`FALLBACK_EXTENSION`] for a type without one.
+/// The extension, with its dot, of objects of the type; parameters, case and blanks are
+/// ignored; [`FALLBACK_EXTENSION`] for a type without one.
 pub(crate) fn extension_for_mime(mime_type: &str) -> String {
     let base = mime_type
         .split_once(';')
@@ -837,10 +833,8 @@ pub(crate) fn extension_for_mime(mime_type: &str) -> String {
     if let Ok(i) = MIME_EXTENSIONS.binary_search_by(|(t, _)| (*t).cmp(base.as_str())) {
         return MIME_EXTENSIONS[i].1.to_owned();
     }
-    // Divergence (ledger 7b-2): Go asks `mime.ExtensionsByType`, whose answer also comes from
-    // the host's MIME tables (`/etc/mime.types` and the like) and `mime.AddExtensionType`;
-    // gadk answers from Go's built-in table alone, so a type that only the host knows gets
-    // `.bin`.
+    // The answer comes from the standard table alone, not from the host's MIME tables
+    // (`/etc/mime.types` and the like), so a type that only the host knows gets `.bin`.
     GO_BUILTIN_MIME_EXTENSIONS
         .binary_search_by(|(t, _)| (*t).cmp(base.as_str()))
         .ok()
@@ -850,7 +844,7 @@ pub(crate) fn extension_for_mime(mime_type: &str) -> String {
         .to_owned()
 }
 
-/// Go `isSafeExtension(ext)`: a dot and 1 to 16 ASCII letters or digits.
+/// Whether `ext` is a dot and 1 to 16 ASCII letters or digits.
 pub(crate) fn is_safe_extension(ext: &str) -> bool {
     if ext.len() < 2 || ext.len() > 17 || !ext.starts_with('.') {
         return false;
@@ -858,9 +852,9 @@ pub(crate) fn is_safe_extension(ext: &str) -> bool {
     ext[1..].chars().all(|c| c.is_ascii_alphanumeric())
 }
 
-/// Go `pathSegmentHashSuffix(s)`: `~` and the 64 lowercase hex digits of the SHA-256 digest
-/// of `s`. `~` lies outside the unchanged identifier alphabet (`[A-Za-z0-9._-]`), so hashed
-/// outputs occupy a namespace of their own.
+/// `~` and the 64 lowercase hex digits of the SHA-256 digest of `s`. `~` lies outside the
+/// unchanged identifier alphabet (`[A-Za-z0-9._-]`), so hashed outputs occupy a namespace of
+/// their own.
 pub(crate) fn path_segment_hash_suffix(s: &str) -> String {
     use std::fmt::Write as _;
     let sum = Sha256::digest(s.as_bytes());
@@ -872,9 +866,9 @@ pub(crate) fn path_segment_hash_suffix(s: &str) -> String {
     out
 }
 
-/// Go `truncateWithHash(base, raw, maxBytes)`: `base` cut to at most
-/// `max_bytes - PATH_SEGMENT_HASH_SUFFIX_LEN` bytes on a char boundary, followed by
-/// [`path_segment_hash_suffix`] of `raw`. Callers pass `max_bytes ≥ PATH_SEGMENT_HASH_SUFFIX_LEN`.
+/// `base` cut to at most `max_bytes - PATH_SEGMENT_HASH_SUFFIX_LEN` bytes on a char boundary,
+/// followed by [`path_segment_hash_suffix`] of `raw`. Callers pass
+/// `max_bytes ≥ PATH_SEGMENT_HASH_SUFFIX_LEN`.
 fn truncate_with_hash(base: &str, raw: &str, max_bytes: usize) -> String {
     let suffix = path_segment_hash_suffix(raw);
     let mut limit = max_bytes.saturating_sub(suffix.len());
@@ -888,11 +882,11 @@ fn truncate_with_hash(base: &str, raw: &str, max_bytes: usize) -> String {
     format!("{base}{suffix}")
 }
 
-/// Go `pathSegment(id, fallback)`: an id of at most [`MAX_PATH_SEGMENT_BYTES`] ASCII letters,
-/// digits, `-`, `_` and `.` that is not only dots is returned unchanged; an empty id returns
-/// `fallback`; an id of only dots returns `fallback` with the `~<sha256>` suffix of `id`; any
-/// other id has every char outside that set (including `~`) replaced by `_` and is cut to fit
-/// [`MAX_PATH_SEGMENT_BYTES`] with the `~<sha256>` suffix of the raw id appended.
+/// An id of at most [`MAX_PATH_SEGMENT_BYTES`] ASCII letters, digits, `-`, `_` and `.` that is
+/// not only dots is returned unchanged; an empty id returns `fallback`; an id of only dots
+/// returns `fallback` with the `~<sha256>` suffix of `id`; any other id has every char outside
+/// that set (including `~`) replaced by `_` and is cut to fit [`MAX_PATH_SEGMENT_BYTES`] with
+/// the `~<sha256>` suffix of the raw id appended.
 pub(crate) fn path_segment(id: &str, fallback: &str) -> String {
     if id.is_empty() {
         return fallback.to_owned();
@@ -918,14 +912,14 @@ pub(crate) fn path_segment(id: &str, fallback: &str) -> String {
     truncate_with_hash(&sanitized, id, MAX_PATH_SEGMENT_BYTES)
 }
 
-/// Go `isUnsafeGCSPrefixRune(r)`: a control character (U+0000–U+001F, U+007F–U+009F) or the
-/// Unicode line / paragraph separator (U+2028, U+2029).
+/// Whether `r` is a control character (U+0000–U+001F, U+007F–U+009F) or the Unicode line /
+/// paragraph separator (U+2028, U+2029).
 pub(crate) fn is_unsafe_gcs_prefix_rune(r: char) -> bool {
     r < '\u{20}' || ('\u{7f}'..='\u{9f}').contains(&r) || r == '\u{2028}' || r == '\u{2029}'
 }
 
-/// Go `hasReservedACMEPrefix(s)`: the first two `/`-separated segments of `s` are,
-/// case-insensitively, `.well-known` and `acme-challenge`.
+/// Whether the first two `/`-separated segments of `s` are, case-insensitively, `.well-known`
+/// and `acme-challenge`.
 fn has_reserved_acme_prefix(s: &str) -> bool {
     let Some((seg0, rest)) = s.split_once('/') else {
         return false;
@@ -937,15 +931,14 @@ fn has_reserved_acme_prefix(s: &str) -> bool {
     ascii_equal_fold("acme-challenge", seg1)
 }
 
-/// Go `cleanGCSPrefix(prefix)`: the object name prefix for a configured `GCSPathPrefix` (see
+/// The object name prefix for a configured `gcs_path_prefix` (see
 /// [`Config::gcs_path_prefix`](crate::config::Config::gcs_path_prefix)).
 pub(crate) fn clean_gcs_prefix(prefix: &str) -> String {
     clean_gcs_prefix_with_reason(prefix).0
 }
 
-/// Go `cleanGCSPrefixWithReason(prefix)`: the effective prefix and, when it was rewritten, the
-/// `; `-joined reasons. A Rust `&str` is valid UTF-8, so Go's "contains invalid UTF-8" reason
-/// cannot occur.
+/// The effective prefix and, when it was rewritten, the `; `-joined reasons. A Rust `&str` is
+/// valid UTF-8, so an "invalid UTF-8" reason cannot occur.
 pub(crate) fn clean_gcs_prefix_with_reason(prefix: &str) -> (String, String) {
     let trimmed = prefix.trim_matches('/');
     if trimmed.is_empty() {
@@ -997,9 +990,8 @@ pub(crate) fn clean_gcs_prefix_with_reason(prefix: &str) -> (String, String) {
     )
 }
 
-/// Go `resolveGCSPathPrefix(c)`: [`clean_gcs_prefix`] of `c.gcs_path_prefix`, logging a
-/// constant-format warning with the rewrite reason and byte counts (never the prefix text)
-/// when it had to be rewritten.
+/// [`clean_gcs_prefix`] of `c.gcs_path_prefix`, logging a constant-format warning with the
+/// rewrite reason and byte counts (never the prefix text) when it had to be rewritten.
 pub(crate) fn resolve_gcs_path_prefix(c: &Config) -> String {
     let trimmed = c.gcs_path_prefix.trim_matches('/');
     let (cleaned, reason) = clean_gcs_prefix_with_reason(&c.gcs_path_prefix);
@@ -1014,8 +1006,8 @@ pub(crate) fn resolve_gcs_path_prefix(c: &Config) -> String {
     cleaned
 }
 
-/// Go `sanitizeExtension(ext)`: `ext` with every [`is_unsafe_gcs_prefix_rune`] char, `/`, `\\`
-/// and `~` replaced by `_` (a Rust `&str` has no invalid bytes for Go's `ToValidUTF8`).
+/// `ext` with every [`is_unsafe_gcs_prefix_rune`] char, `/`, `\\` and `~` replaced by `_` (a
+/// Rust `&str` has no invalid bytes to replace).
 fn sanitize_extension(ext: &str) -> String {
     ext.chars()
         .map(|r| {
@@ -1028,11 +1020,10 @@ fn sanitize_extension(ext: &str) -> String {
         .collect()
 }
 
-/// Go `gcsObjectPath(prefix, ts, traceID, spanID, eventID, contentOrd, partIdx, ext)`:
-/// `[prefix/]<UTC date>/<trace id>/<span id>_<event id>_c<content>_p<part><ext>` with the
-/// prefix cleaned by [`clean_gcs_prefix`] (see [`gcs_object_path_from_clean_prefix`]).
+/// `[prefix/]<UTC date>/<trace id>/<span id>_<event id>_c<content>_p<part><ext>` with the prefix
+/// cleaned by [`clean_gcs_prefix`] (see [`gcs_object_path_from_clean_prefix`]).
 #[allow(clippy::too_many_arguments)]
-#[cfg_attr(not(test), allow(dead_code))] // Go keeps it; the plugin calls the clean-prefix form
+#[cfg_attr(not(test), allow(dead_code))] // the plugin calls the clean-prefix form
 pub(crate) fn gcs_object_path(
     prefix: &str,
     ts: DateTime<Utc>,
@@ -1055,11 +1046,11 @@ pub(crate) fn gcs_object_path(
     )
 }
 
-/// Go `gcsObjectPathFromCleanPrefix(...)`: the object name for an already-cleaned prefix. A
-/// name is returned as is only when it fits [`MAX_GCS_OBJECT_NAME_BYTES`] and its extension is
-/// empty or [`is_safe_extension`]; a longer name with a safe extension is cut before the
-/// extension and gets the `~<sha256>` suffix of the whole name; a name with any other extension
-/// always ends in that hash (its readable part with the extension sanitized).
+/// The object name for an already-cleaned prefix. A name is returned as is only when it fits
+/// [`MAX_GCS_OBJECT_NAME_BYTES`] and its extension is empty or [`is_safe_extension`]; a longer
+/// name with a safe extension is cut before the extension and gets the `~<sha256>` suffix of
+/// the whole name; a name with any other extension always ends in that hash (its readable part
+/// with the extension sanitized).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn gcs_object_path_from_clean_prefix(
     clean_prefix: &str,
@@ -1095,10 +1086,10 @@ pub(crate) fn gcs_object_path_from_clean_prefix(
     truncate_with_hash(&readable, &out, MAX_GCS_OBJECT_NAME_BYTES)
 }
 
-/// Go `safeUploadErrorSummary(err)`: diagnostic metadata of `err` that never shows a custom
-/// offloader's error text: the context errors and upload sentinels by name, an offloader
-/// panic's type, the built-in offloader's own error scrubbed ([`redact_error_message`], then
-/// [`strip_uri_queries`]), a Google API error's HTTP status, else the error's Go type.
+/// Diagnostic metadata of `err` that never shows a custom offloader's error text: the context
+/// errors and upload sentinels by name, an offloader panic's type, the built-in offloader's own
+/// error scrubbed ([`redact_error_message`], then [`strip_uri_queries`]), a Google API error's
+/// HTTP status (`HTTP <code>`), else `error type <name>` (see `go_error_type`).
 pub(crate) fn safe_upload_error_summary(err: &Error) -> String {
     if err.is_context(ContextError::DeadlineExceeded) {
         return ContextError::DeadlineExceeded.to_string();
@@ -1129,10 +1120,11 @@ pub(crate) fn safe_upload_error_summary(err: &Error) -> String {
     format!("error type {}", go_error_type(err))
 }
 
-/// Go `%T` of an error, by the [`Error`] variant that carries what Go's error type was.
-/// Divergence (ledger 7b-2): an `Error::Other` (a custom offloader's own error type) or an
-/// Arrow error is `error` — Rust has no runtime type name for a `Box<dyn Error>` (Go names
-/// the dynamic type, such as `agentanalytics.zzCustomErr`).
+/// The error type name reported in the summary (`error type <name>`), by the [`Error`] variant,
+/// in the spelling an ADK server logs, so summaries match its logs (for example
+/// `*errors.errorString` for a message, `*googleapi.Error` for an API error). An `Error::Other`
+/// (a custom offloader's own error type) or an Arrow error is `error`, as Rust has no runtime
+/// type name for a `Box<dyn Error>`.
 fn go_error_type(err: &Error) -> &'static str {
     match err {
         Error::Message(_) => "*errors.errorString",
@@ -1149,7 +1141,7 @@ fn go_error_type(err: &Error) -> &'static str {
     }
 }
 
-/// Go `stripURIQueries(msg)`: the URIs in `msg` without their query strings and fragments.
+/// The URIs in `msg` without their query strings and fragments.
 pub(crate) fn strip_uri_queries(msg: &str) -> String {
     if !msg.contains("://") {
         return msg.to_owned();

@@ -13,10 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of the Arrow side of ADK-Go `plugin/agentanalytics/batch_processor.go`:
-//! `buildRecordBatch` ([`build_record_batch`]), `serializeRecord` ([`serialize_record`]),
-//! `estimateRowBytes` ([`estimate_row_bytes`]), `splitBatchByEstimatedBytes`
-//! ([`split_batch_by_estimated_bytes`]) and their limits.
+//! The Arrow side of the batch processor: [`build_record_batch`], [`serialize_record`],
+//! [`estimate_row_bytes`], [`split_batch_by_estimated_bytes`] and their size limits.
 
 use std::sync::Arc;
 
@@ -36,21 +34,19 @@ use crate::error::Error;
 use crate::row::{AsRow, Row, RowExt};
 use crate::schema::{EVENT_ID_FIELD, TIMESTAMP_FIELD};
 
-/// Go `maxAppendRequestBytes`: the estimated payload above which a batch is split into several
-/// AppendRows requests (8 MiB).
+/// The estimated payload above which a batch is split into several AppendRows requests (8 MiB).
 pub const MAX_APPEND_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 
-/// Go `maxSerializedAppendRequestBytes`: the serialized size above which a multi-row request is
-/// halved (9 MiB).
+/// The serialized size above which a multi-row request is halved (9 MiB).
 pub const MAX_SERIALIZED_APPEND_REQUEST_BYTES: usize = 9 * 1024 * 1024;
 
-/// Go `perRowOverheadBytes`.
+/// Estimated bytes added per row by [`estimate_row_bytes`], on top of its string lengths.
 pub const PER_ROW_OVERHEAD_BYTES: usize = 256;
 
-/// Go `perContentPartOverheadBytes`.
+/// Estimated bytes added per `content_parts` entry by [`estimate_row_bytes`].
 pub const PER_CONTENT_PART_OVERHEAD_BYTES: usize = 64;
 
-/// Go `projectedRowStringColumns`: the string columns [`estimate_row_bytes`] counts.
+/// The string columns [`estimate_row_bytes`] counts.
 pub const PROJECTED_ROW_STRING_COLUMNS: [&str; 14] = [
     "event_id",
     "event_type",
@@ -68,7 +64,7 @@ pub const PROJECTED_ROW_STRING_COLUMNS: [&str; 14] = [
     "latency_ms",
 ];
 
-/// Go `projectedContentPartStringFields`.
+/// The string fields of a `content_parts` entry that [`estimate_row_bytes`] counts.
 pub const PROJECTED_CONTENT_PART_STRING_FIELDS: [&str; 5] = [
     "mime_type",
     "uri",
@@ -77,27 +73,27 @@ pub const PROJECTED_CONTENT_PART_STRING_FIELDS: [&str; 5] = [
     "storage_mode",
 ];
 
-/// Go `projectedObjectRefStringFields`.
+/// The string fields of a part's `object_ref` that [`estimate_row_bytes`] counts.
 pub const PROJECTED_OBJECT_REF_STRING_FIELDS: [&str; 4] =
     ["uri", "version", "authorizer", "details"];
 
-/// Go `(*BatchProcessor).buildRecordBatch(batch)` over `schema` (the processor's
-/// `project_arrow_schema(denied)`): one column per schema field, each value read as Go's type
-/// assertions read it ([`crate::row::RowValue`] accessors) — a missing, nil or wrong-typed scalar
-/// is NULL; a missing, nil or wrong-typed `content_parts` an empty (non-null) list; `part_index`
-/// from `Int` / `Float` (truncated); a column the encoder does not know is NULL.
+/// Builds the Arrow record batch of `rows` over `schema` (the processor's
+/// `project_arrow_schema(denied)`): one column per schema field, each value read through the
+/// [`crate::row::RowValue`] accessors — a missing, null or wrong-typed scalar is NULL; a
+/// missing, null or wrong-typed `content_parts` an empty (non-null) list; `part_index` from
+/// `Int` / `Float` (truncated); a column the encoder does not know is NULL.
 ///
-/// Go writes NULL into the non-nullable `timestamp` field of a row without a timestamp
-/// (arrow-go allows it, and the IPC validity bitmap carries it); the record batch therefore
-/// may hold nulls that `schema` declares impossible. arrow-rs refuses such a batch, so a
-/// non-nullable field whose column holds a NULL is declared nullable in the returned batch's
-/// schema (the serialized record batch message carries no schema, so BigQuery receives the same
-/// columns and validity bitmap as from Go; the writer schema stays `schema`).
+/// A row without a timestamp puts NULL into the non-nullable `timestamp` field (the IPC validity
+/// bitmap carries it); the record batch therefore may hold nulls that `schema` declares
+/// impossible. arrow-rs refuses such a batch, so a non-nullable field whose column holds a NULL
+/// is declared nullable in the returned batch's schema (the serialized record batch message
+/// carries no schema, so BigQuery receives the same columns and validity bitmap; the writer
+/// schema stays `schema`).
 ///
 /// # Errors
 ///
-/// An Arrow error building the record batch (a known column whose type is not the one Go's
-/// builder cast expects; Go panics there).
+/// An Arrow error building the record batch (a known column whose type is not the one its
+/// builder expects).
 pub fn build_record_batch<R: AsRow>(rows: &[R], schema: &Schema) -> Result<RecordBatch, Error> {
     let rows: Vec<&Row> = rows.iter().map(AsRow::as_row).collect();
     let columns = schema
@@ -115,11 +111,11 @@ pub fn build_record_batch<R: AsRow>(rows: &[R], schema: &Schema) -> Result<Recor
 
 /// `schema`, with each non-nullable field whose column holds a NULL declared nullable.
 ///
-/// Divergence (ledger 7b-2): arrow-go's record batch keeps the non-nullable `timestamp` field
-/// with Go's NULL in it (a row without a `time.Time`), which arrow-rs's safe constructors
-/// reject (only `unsafe` `RecordBatch::new_unchecked` would allow it, and the crate forbids
-/// `unsafe`). The in-memory batch's schema says nullable instead; the IPC record batch message
-/// (what BigQuery receives, without a schema) carries the same NULL in its validity bitmap.
+/// A row without a timestamp leaves a NULL in the non-nullable `timestamp` column, which
+/// arrow-rs's safe constructors reject (only `unsafe` `RecordBatch::new_unchecked` would allow
+/// it, and the crate forbids `unsafe`). The in-memory batch's schema says nullable instead; the
+/// IPC record batch message (what BigQuery receives, without a schema) carries the same NULL in
+/// its validity bitmap.
 fn nullable_where_null(schema: &Schema, columns: &[ArrayRef]) -> Arc<Schema> {
     if !schema
         .fields()
@@ -144,7 +140,7 @@ fn nullable_where_null(schema: &Schema, columns: &[ArrayRef]) -> Arc<Schema> {
     Arc::new(Schema::new_with_metadata(fields, schema.metadata().clone()))
 }
 
-/// One column of Go's per-field switch in `buildRecordBatch`.
+/// One column of the per-field dispatch in [`build_record_batch`].
 fn build_column(field: &Field, rows: &[&Row]) -> Result<ArrayRef, Error> {
     let name = field.name().as_str();
     Ok(match name {
@@ -153,7 +149,7 @@ fn build_column(field: &Field, rows: &[&Row]) -> Result<ArrayRef, Error> {
                 DataType::Timestamp(_, tz) => tz.clone(),
                 _ => None,
             };
-            // Go `arrow.Timestamp(v.UnixMicro())`: microseconds, floored.
+            // Microseconds since the epoch, floored.
             Arc::new(
                 rows.iter()
                     .map(|row| row.timestamp(name).map(|t| t.timestamp_micros()))
@@ -174,16 +170,15 @@ fn build_column(field: &Field, rows: &[&Row]) -> Result<ArrayRef, Error> {
     })
 }
 
-/// A UTF-8 column: Go `v.(string)` of `key` in each map, else NULL.
+/// A UTF-8 column: the string under `key` in each map, else NULL.
 fn string_array<'a>(maps: impl Iterator<Item = &'a Row>, key: &str) -> StringArray {
     maps.map(|m| m.str(key)).collect()
 }
 
-/// The `content_parts` column: one valid list per row (Go: "Null lists are not allowed for
-/// repeated fields in BigQuery"), its elements the row's `[]map[string]any` parts (a missing,
-/// nil or wrong-typed value: empty), each part a valid struct read in Go's builder order
-/// (`FieldBuilder(0..6)`: `mime_type`, `uri`, `object_ref`, `text`, `part_index`,
-/// `part_attributes`, `storage_mode`).
+/// The `content_parts` column: one valid list per row (BigQuery does not allow null lists for
+/// repeated fields), its elements the row's parts (a missing, null or wrong-typed value:
+/// empty), each part a valid struct whose fields are built in schema order (`mime_type`, `uri`,
+/// `object_ref`, `text`, `part_index`, `part_attributes`, `storage_mode`).
 fn content_parts_array(field: &Field, rows: &[&Row]) -> Result<ListArray, Error> {
     let DataType::List(element) = field.data_type() else {
         return Err(unexpected_type(field));
@@ -228,7 +223,7 @@ fn content_parts_array(field: &Field, rows: &[&Row]) -> Result<ListArray, Error>
 
     let part_string =
         |key: &str| -> ArrayRef { Arc::new(string_array(parts.iter().copied(), key)) };
-    // Go: `int64`, then `float64` truncated toward zero, then `int`; else NULL.
+    // An `int64`, else a `float64` truncated toward zero, else an `int`; else NULL.
     let part_index: Int64Array = parts.iter().map(|p| p.int64_like("part_index")).collect();
     let values = StructArray::try_new(
         part_fields.clone(),
@@ -259,7 +254,7 @@ fn struct_fields(field: &Field) -> Result<&Fields, Error> {
     }
 }
 
-/// The error for a known column whose Arrow type is not the one Go's builder cast expects.
+/// The error for a known column whose Arrow type is not the one its builder expects.
 fn unexpected_type(field: &Field) -> Error {
     Error::Arrow(ArrowError::SchemaError(format!(
         "unexpected Arrow type for field {}: {}",
@@ -268,22 +263,22 @@ fn unexpected_type(field: &Field) -> Error {
     )))
 }
 
-/// Go `serializeRecord(record, logger)`: the record batch IPC message alone (continuation
-/// marker, metadata length, flatbuffer `Message`, body; no schema, no end-of-stream marker), or
-/// `None` after logging `ERROR: Failed to get record batch payload: …` / `ERROR: Failed to
-/// write payload: …` through `logger`.
+/// Serializes `record` as the record batch IPC message alone (continuation marker, metadata
+/// length, flatbuffer `Message`, body; no schema, no end-of-stream marker), or `None` after
+/// logging `ERROR: Failed to get record batch payload: …` / `ERROR: Failed to write payload: …`
+/// through `logger`.
 ///
-/// Divergence (ledger 7b-2): the bytes are arrow-rs's encoding of the message, compared with
-/// arrow-go's by decoding (spec R3, as 7b-1's schema bytes). Both write 8-byte-aligned buffers
-/// with the same field nodes, buffer order and body bytes, but the flatbuffer header is laid
-/// out differently (same length except for an empty batch: 8 bytes shorter), and a validity
-/// bitmap is `ceil(rows / 8)` bytes where arrow-go writes its builder's allocation (4 or 64
-/// bytes for small batches), so a message is at most 63 bytes per NULL-bearing column shorter
-/// than Go's — the serialized request size the stream writer compares with the 9 MiB limit
-/// follows.
+/// The bytes are arrow-rs's encoding of the message, which differs from other Arrow
+/// implementations' (such as arrow-go's) in layout but not in content. Both write 8-byte-aligned
+/// buffers with the same field nodes, buffer order and body bytes, but the flatbuffer header is
+/// laid out differently (same length except for an empty batch: 8 bytes shorter), and a
+/// validity bitmap is `ceil(rows / 8)` bytes where arrow-go writes its builder's allocation (4
+/// or 64 bytes for small batches), so a message is at most 63 bytes per NULL-bearing column
+/// shorter than arrow-go's — the serialized request size the stream writer compares with the
+/// 9 MiB limit follows.
 pub fn serialize_record(record: &RecordBatch, logger: Option<&dyn Logger>) -> Option<Vec<u8>> {
-    // arrow-go `ipc.GetRecordBatchPayload` pads each body buffer to 8 bytes (arrow-rs's
-    // default is 64); metadata version V5 as arrow-go.
+    // Pad each body buffer to 8 bytes (arrow-rs's default is 64), as other Arrow
+    // implementations do; metadata version V5.
     let encoded = IpcWriteOptions::try_new(8, false, MetadataVersion::V5).and_then(|options| {
         let (_, encoded) = IpcDataGenerator::default().encode(
             record,
@@ -314,8 +309,8 @@ pub fn serialize_record(record: &RecordBatch, logger: Option<&dyn Logger>) -> Op
     Some(buf)
 }
 
-/// Go `estimateRowBytes(row)`: [`PER_ROW_OVERHEAD_BYTES`] plus the byte length of every string
-/// of [`PROJECTED_ROW_STRING_COLUMNS`], plus for every `content_parts` entry
+/// Estimates the payload of `row`: [`PER_ROW_OVERHEAD_BYTES`] plus the byte length of every
+/// string of [`PROJECTED_ROW_STRING_COLUMNS`], plus for every `content_parts` entry
 /// [`PER_CONTENT_PART_OVERHEAD_BYTES`] and the lengths of its
 /// [`PROJECTED_CONTENT_PART_STRING_FIELDS`] and `object_ref`'s
 /// [`PROJECTED_OBJECT_REF_STRING_FIELDS`] strings.
@@ -325,7 +320,7 @@ pub fn estimate_row_bytes(row: &Row) -> usize {
     };
     let mut n = PER_ROW_OVERHEAD_BYTES + strings(row, &PROJECTED_ROW_STRING_COLUMNS);
     for part in row.parts("content_parts").unwrap_or_default() {
-        // A Go nil part map (an empty `Row` here) adds only the overhead.
+        // A null part (an empty `Row` here) adds only the overhead.
         n += PER_CONTENT_PART_OVERHEAD_BYTES + strings(part, &PROJECTED_CONTENT_PART_STRING_FIELDS);
         if let Some(object_ref) = part.map("object_ref") {
             n += strings(object_ref, &PROJECTED_OBJECT_REF_STRING_FIELDS);
@@ -334,9 +329,9 @@ pub fn estimate_row_bytes(row: &Row) -> usize {
     n
 }
 
-/// Go `splitBatchByEstimatedBytes(batch, limit)`: consecutive chunks whose estimated payload is
-/// at most `limit` (a row over `limit` alone is a singleton chunk); a batch of at most one row,
-/// a `limit` of 0, or a batch that fits is the only chunk (an empty batch: one empty chunk).
+/// Splits `batch` into consecutive chunks whose estimated payload is at most `limit` (a row over
+/// `limit` alone is a singleton chunk); a batch of at most one row, a `limit` of 0, or a batch
+/// that fits is the only chunk (an empty batch: one empty chunk).
 pub fn split_batch_by_estimated_bytes<R: AsRow>(batch: &[R], limit: usize) -> Vec<&[R]> {
     if batch.len() <= 1 || limit == 0 {
         return vec![batch];

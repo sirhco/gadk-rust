@@ -13,13 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of the call layer of Go's generated `cloud.google.com/go/bigquery/storage/apiv1`
-//! `BigQueryWriteClient` (`big_query_write_client.go`, bigquery v1.79.0) for the three RPCs
-//! ADK-Go's `plugin/agentanalytics` calls — `CreateWriteStream`, `AppendRows`,
-//! `FinalizeWriteStream` — over the generated tonic client of [`crate::storagepb`]: per-RPC
-//! `x-goog-request-params` (gax `InsertMetadataIntoOutgoingContext`), `x-goog-api-client`,
-//! bearer `authorization`, the caller's outgoing metadata from the [`Context`], and Go's
-//! `defaultBigQueryWriteCallOptions` timeouts, retry codes and backoffs (gax `Invoke`).
+//! The call layer of the BigQuery Storage Write client for the three RPCs the analytics plugin
+//! uses — `CreateWriteStream`, `AppendRows`, `FinalizeWriteStream` — over the generated tonic
+//! client of [`crate::storagepb`]: per-RPC `x-goog-request-params`, `x-goog-api-client`, bearer
+//! `authorization`, the caller's outgoing metadata from the [`Context`], and the standard
+//! BigQuery Write call options (timeouts, retry codes and backoffs, applied by `invoke`).
 
 use std::fmt;
 use std::future::Future;
@@ -55,31 +53,31 @@ use crate::storagepb::{
 };
 use crate::write::{AppendRowsClient, eof, status_error};
 
-/// Go `defaultBigQueryWriteGRPCClientOptions`' `WithDefaultEndpoint`: the gRPC endpoint (TLS).
+/// The default gRPC endpoint (TLS).
 pub(crate) const DEFAULT_ENDPOINT: &str = "https://bigquerystorage.googleapis.com:443";
 
-/// Go `DefaultAuthScopes()` (`helpers.go`).
+/// The OAuth scopes requested for Application Default Credentials.
 pub(crate) const DEFAULT_AUTH_SCOPES: [&str; 3] = [
     "https://www.googleapis.com/auth/bigquery",
     "https://www.googleapis.com/auth/bigquery.insertdata",
     "https://www.googleapis.com/auth/cloud-platform",
 ];
 
-/// gax's `x-goog-api-client` key (merged into one value, the client's replacing a caller's).
+/// The `x-goog-api-client` key (merged into one value, the client's replacing a caller's).
 const API_CLIENT_KEY: &str = "x-goog-api-client";
 
 /// The routing header key of the generated client (also the AppendRows routing header the
 /// stream writer adds).
 pub(crate) const REQUEST_PARAMS_KEY: &str = "x-goog-request-params";
 
-/// Go `math.MaxInt32`: grpc-go's default send limit and the gapic client's
-/// `MaxCallRecvMsgSize`.
+/// The largest message size sent or received on the channel (`i32::MAX`, the BigQuery Write
+/// client's default).
 const MAX_MESSAGE_SIZE: usize = i32::MAX as usize;
 
-/// grpc-go `ErrClientConnClosing`'s message (code `Canceled`).
+/// The message of the `Canceled` status of a closed client.
 const CONN_CLOSING: &str = "grpc: the client connection is closing";
 
-/// gax `OnCodes(codes, backoff)`: the retryer of one RPC.
+/// The retry policy of one RPC: which status codes are retried, and the pauses between them.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RetrySettings {
     /// The status codes that are retried.
@@ -88,17 +86,17 @@ pub(crate) struct RetrySettings {
     pub(crate) backoff: Backoff,
 }
 
-/// gax `CallSettings` of one RPC: `WithTimeout` (applied only when the call's context has no
-/// deadline) and `WithRetry`.
+/// The settings of one RPC: a timeout (applied only when the call's context has no deadline) and
+/// a retry policy.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct CallSettings {
-    /// gax `WithTimeout`; `None` = none.
+    /// The timeout; `None` = none.
     pub(crate) timeout: Option<Duration>,
-    /// gax `WithRetry`; `None` = no retries.
+    /// The retry policy; `None` = no retries.
     pub(crate) retry: Option<RetrySettings>,
 }
 
-/// Go `BigQueryWriteCallOptions` for the RPCs ADK-Go calls.
+/// The call options (timeout, retry) of the RPCs the plugin calls.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WriteCallOptions {
     /// `CreateWriteStream`: 1200s; DeadlineExceeded / Unavailable / ResourceExhausted; 10s → 120s ×1.3.
@@ -110,7 +108,7 @@ pub(crate) struct WriteCallOptions {
 }
 
 impl Default for WriteCallOptions {
-    /// Go `defaultBigQueryWriteCallOptions()` (`gapic/call_options.json`).
+    /// The standard BigQuery Write call options.
     fn default() -> Self {
         let unary_codes = vec![
             Code::DeadlineExceeded,
@@ -155,8 +153,8 @@ impl Default for WriteCallOptions {
     }
 }
 
-/// grpc-go's status of a context error (`status.FromContextError`): `Canceled` / `DeadlineExceeded`
-/// with the context error's text.
+/// The status of a context error: `Canceled` / `DeadlineExceeded` with the context error's
+/// text.
 fn context_status(err: ContextError) -> Error {
     Error::Status {
         code: match err {
@@ -172,9 +170,9 @@ fn ended_status(ctx: &Context) -> Error {
     context_status(ctx.err().unwrap_or(ContextError::Canceled))
 }
 
-/// gax `invoke`: `settings.timeout` bounds `ctx` when it has no deadline; a failed attempt whose
-/// status code is one of the retry codes is retried after a jittered backoff pause, which an
-/// ending context interrupts with the context's error (Go `gax.Sleep` returns `ctx.Err()`).
+/// `settings.timeout` bounds `ctx` when it has no deadline; a failed attempt whose status code
+/// is one of the retry codes is retried after a jittered backoff pause, which an ending context
+/// interrupts with the context's error.
 async fn invoke<T, F, Fut>(
     ctx: &Context,
     settings: &CallSettings,
@@ -193,10 +191,9 @@ where
         .as_ref()
         .map(|r| (r.codes.as_slice(), Pauses::new(r.backoff)));
     loop {
-        // Divergence (ledger 7b-2): gax `Invoke` wraps each failed attempt's error with
-        // `apierror.FromError`, whose `Error()` text appends the status details (ErrorInfo,
-        // DebugInfo, …) after `rpc error: code = … desc = …`. gadk's status text carries the code
-        // and message only: the google.rpc error-details protos are not generated.
+        // A failed attempt's error text carries the code and message only: the google.rpc
+        // error-details protos (ErrorInfo, DebugInfo, …) are not generated, so no details are
+        // appended after `rpc error: code = … desc = …`.
         let err = match attempt(ctx.clone()).await {
             Ok(v) => return Ok(v),
             Err(err) => err,
@@ -204,7 +201,7 @@ where
         let Some((codes, pauses)) = retry.as_mut() else {
             return Err(err);
         };
-        // gax retries only gRPC statuses (`status.FromError`); `status_code` is `Unknown` for
+        // Only gRPC statuses are retried; `status_code` is `Unknown` for
         // anything else, which no retryer lists.
         if !matches!(err, Error::Status { .. }) || !codes.contains(&status_code(&err)) {
             return Err(err);
@@ -224,7 +221,7 @@ where
 /// inside the open retry loop).
 pub(crate) type OpenAppendRows = BoxFuture<'static, Result<Box<dyn AppendRowsClient>, Error>>;
 
-/// A test hook in the place of grpc-go's `grpc.WithStreamInterceptor` dial option: called for
+/// A test hook on opening AppendRows streams: called for
 /// every AppendRows stream the client opens (each attempt), with the call's context and the
 /// opening; it may await the opening and wrap the stream, or refuse without opening.
 pub(crate) type StreamInterceptor = Arc<
@@ -233,14 +230,12 @@ pub(crate) type StreamInterceptor = Arc<
         + Sync,
 >;
 
-/// A BigQuery Storage Write API client (Go `*bqstorage.BigQueryWriteClient`): a cheap `Clone`
-/// handle on one tonic channel.
+/// A BigQuery Storage Write API client: a cheap `Clone` handle on one tonic channel.
 #[derive(Clone)]
 pub struct WriteClient {
     /// The generated tonic client.
     pub(crate) inner: BigQueryWriteClient<Channel>,
-    /// The bearer-token source; `None` sends no `authorization` (Go
-    /// `option.WithoutAuthentication`).
+    /// The bearer-token source; `None` sends no `authorization` (unauthenticated).
     pub(crate) credentials: Option<Credentials>,
     /// Per-RPC timeouts and retries.
     pub(crate) call_options: Arc<WriteCallOptions>,
@@ -248,10 +243,10 @@ pub struct WriteClient {
     pub(crate) api_client_header: String,
     /// Test hook on opening AppendRows streams.
     pub(crate) stream_interceptor: Option<StreamInterceptor>,
-    /// [`ClientOptions::headers`] as metadata on every call (Go's header options, e.g.
-    /// `x-goog-user-project`, travel as gRPC metadata).
+    /// [`ClientOptions::headers`] as metadata on every call (header options such as
+    /// `x-goog-user-project` travel as gRPC metadata).
     pub(crate) headers: Arc<Metadata>,
-    /// Set by [`close`](Self::close) (shared by every clone, as Go's client pointer).
+    /// Set by [`close`](Self::close) (shared by every clone).
     pub(crate) closed: Arc<AtomicBool>,
 }
 
@@ -266,12 +261,11 @@ impl fmt::Debug for WriteClient {
 }
 
 impl WriteClient {
-    /// Go `bqstorage.NewBigQueryWriteClient(ctx, opts...)`: a lazily connecting channel to
-    /// [`ClientOptions::endpoint`] (`http://` = plaintext, `https://` or a bare `host:port` =
-    /// TLS) or `bigquerystorage.googleapis.com:443` (TLS, native roots), with
-    /// [`ClientOptions::credentials`], none when [`ClientOptions::without_authentication`],
-    /// else Application Default Credentials with Go's `DefaultAuthScopes()`. Must run inside a
-    /// Tokio runtime.
+    /// Creates a client: a lazily connecting channel to [`ClientOptions::endpoint`] (`http://` =
+    /// plaintext, `https://` or a bare `host:port` = TLS) or `bigquerystorage.googleapis.com:443`
+    /// (TLS, native roots), with [`ClientOptions::credentials`], none when
+    /// [`ClientOptions::without_authentication`], else Application Default Credentials with the
+    /// BigQuery scopes. Must run inside a Tokio runtime.
     ///
     /// # Errors
     ///
@@ -329,15 +323,15 @@ impl WriteClient {
         self
     }
 
-    /// Installs a hook on opening AppendRows streams (Go tests' `grpc.WithStreamInterceptor`).
+    /// Installs a hook on opening AppendRows streams (used by tests to wrap the stream).
     #[cfg_attr(not(test), allow(dead_code))] // test hooks
     pub(crate) fn with_stream_interceptor(mut self, interceptor: StreamInterceptor) -> WriteClient {
         self.stream_interceptor = Some(interceptor);
         self
     }
 
-    /// Go `CreateWriteStream(ctx, req)`: `x-goog-request-params: parent=<QueryEscape(parent)>`,
-    /// retried and bounded per Go's `create_write_stream` call options and `ctx`.
+    /// Creates a write stream: sends `x-goog-request-params: parent=<url-escaped parent>`,
+    /// retried and bounded per the `create_write_stream` call options and `ctx`.
     ///
     /// # Errors
     ///
@@ -356,12 +350,11 @@ impl WriteClient {
         .await
     }
 
-    /// Go `AppendRows(ctx)`: opens a bidirectional AppendRows stream that ends when `ctx` ends
-    /// (its `send` then returns [`eof`] and its `recv` the context's
-    /// status), carrying `ctx`'s outgoing metadata and `x-goog-api-client`; opening is retried
-    /// on `Unavailable` per Go's `append_rows` call options. As grpc-go's `NewStream`, opening
-    /// does not wait for the server: a status the server ends the stream with surfaces at
-    /// `recv` (and `send` returns `EOF`).
+    /// Opens a bidirectional AppendRows stream that ends when `ctx` ends (its `send` then
+    /// returns [`eof`] and its `recv` the context's status), carrying `ctx`'s outgoing metadata
+    /// and `x-goog-api-client`; opening is retried on `Unavailable` per the `append_rows` call
+    /// options. Opening does not wait for the server: a status the server ends the stream with
+    /// surfaces at `recv` (and `send` returns `EOF`).
     ///
     /// # Errors
     ///
@@ -378,8 +371,8 @@ impl WriteClient {
         .await
     }
 
-    /// Go `FinalizeWriteStream(ctx, req)`: `x-goog-request-params: name=<QueryEscape(name)>`,
-    /// retried and bounded per Go's `finalize_write_stream` call options and `ctx`.
+    /// Finalizes a write stream: sends `x-goog-request-params: name=<url-escaped name>`,
+    /// retried and bounded per the `finalize_write_stream` call options and `ctx`.
     ///
     /// # Errors
     ///
@@ -398,20 +391,19 @@ impl WriteClient {
         .await
     }
 
-    /// Go `Close()`: later calls on this client (and its clones) fail with grpc-go's
-    /// `ErrClientConnClosing` (`Canceled`: `grpc: the client connection is closing`); the
-    /// channel closes once every clone is dropped. Streams already open are left to their
-    /// contexts.
+    /// Closes the client: later calls on it (and its clones) fail with `Canceled`
+    /// (`grpc: the client connection is closing`); the channel closes once every clone is
+    /// dropped. Streams already open are left to their contexts.
     ///
     /// # Errors
     ///
-    /// None today (Go's `Close` reports the connection pool's error).
+    /// None today.
     pub async fn close(&self) -> Result<(), Error> {
         self.closed.store(true, Ordering::SeqCst);
         Ok(())
     }
 
-    /// One unary attempt under `ctx` (gax's `APICall`): the request with this call's metadata
+    /// One unary attempt under `ctx` : the request with this call's metadata
     /// and `grpc-timeout`, ended by `ctx` with its status.
     async fn unary<Req, Resp, F, Fut>(
         &self,
@@ -438,7 +430,7 @@ impl WriteClient {
     }
 
     /// Runs one attempt unless the client is closed or `ctx` has ended, ending it with the
-    /// context's status when `ctx` ends first (grpc-go's call cancellation).
+    /// context's status when `ctx` ends first.
     async fn under<T>(
         &self,
         ctx: &Context,
@@ -461,12 +453,11 @@ impl WriteClient {
     }
 
     /// One AppendRows open attempt: the stream starts on a spawned driver task and is returned
-    /// at once (grpc-go `NewStream` does not wait for the server; tonic's call would wait for
-    /// the response headers, so it runs on the driver instead).
-    // Divergence (ledger 7b-2): a channel that cannot connect fails the stream at its first
-    // `recv` (`Unavailable`) instead of failing the open, so gax's open retry on `Unavailable`
-    // does not cover connection failures (grpc-go fails `NewStream` fast while the connection
-    // is in TRANSIENT_FAILURE and gax retries it); the stream writer's own retries apply.
+    /// at once (tonic's call would wait for the response headers, so it runs on the driver
+    /// instead).
+    // A channel that cannot connect fails the stream at its first `recv` (`Unavailable`)
+    // instead of failing the open, so the open retry on `Unavailable` does not cover connection
+    // failures; the stream writer's own retries apply.
     async fn open_append_rows(self, ctx: Context) -> Result<Box<dyn AppendRowsClient>, Error> {
         let metadata = self.under(&ctx, self.call_metadata(&ctx, None)).await?;
         let (req_tx, req_rx) = mpsc::channel::<AppendRowsRequest>(1);
@@ -495,10 +486,10 @@ impl WriteClient {
         }))
     }
 
-    /// gax `InsertMetadataIntoOutgoingContext` + grpc-go's per-RPC credentials: the caller's
+    /// The request metadata: the caller's
     /// outgoing metadata (a caller `x-goog-api-client` replaced by the client's), the client's
     /// header options, `x-goog-api-client`, the routing header appended after any the caller
-    /// set, then the credentials' headers. Validated as grpc-go validates outgoing metadata.
+    /// set, then the credentials' headers. Validated as gRPC validates outgoing metadata.
     async fn call_metadata(
         &self,
         ctx: &Context,
@@ -510,8 +501,7 @@ impl WriteClient {
                 .or_default()
                 .extend(vals.iter().cloned());
         }
-        // Divergence (ledger 7b-2): `x-goog-api-client` is gadk's tracking header
-        // (`gadk_platform::tracking_header()`), not Go's `gl-go/… gapic/… gax/… grpc/…`.
+        // `x-goog-api-client` is gadk's tracking header (`gadk_platform::tracking_header()`).
         md.insert(
             API_CLIENT_KEY.to_owned(),
             vec![self.api_client_header.clone()],
@@ -542,7 +532,7 @@ impl WriteClient {
     }
 }
 
-/// grpc-go's `codes.Internal` status for an RPC it refuses to start.
+/// An `Internal` status for an RPC the client refuses to start.
 fn internal(message: String) -> Error {
     Error::Status {
         code: Code::Internal,
@@ -550,7 +540,7 @@ fn internal(message: String) -> Error {
     }
 }
 
-/// grpc-go `imetadata.Validate` (`stream.go` `newClientStream`): keys in `[0-9a-z-_.]`,
+/// Validates outgoing metadata as gRPC does when a stream starts: keys in `[0-9a-z-_.]`,
 /// values of non-`-bin` keys printable ASCII; pseudo-headers (`:…`) are skipped.
 fn validate_metadata(md: &Metadata) -> Result<(), Error> {
     for (k, vals) in md {
@@ -584,7 +574,7 @@ fn validate_metadata(md: &Metadata) -> Result<(), Error> {
     Ok(())
 }
 
-/// The validated metadata as tonic's map (`-bin` values are sent base64-encoded, as grpc-go
+/// The validated metadata as tonic's map (`-bin` values are sent base64-encoded, as gRPC
 /// does; pseudo-headers are dropped).
 fn metadata_map(md: &Metadata) -> Result<MetadataMap, Error> {
     let mut map = MetadataMap::new();
@@ -611,16 +601,15 @@ fn metadata_map(md: &Metadata) -> Result<MetadataMap, Error> {
     Ok(map)
 }
 
-/// grpc-go sends the remaining time of the call's deadline as `grpc-timeout`.
+/// The client sends the remaining time of the call's deadline as `grpc-timeout`.
 fn set_deadline<T>(request: &mut tonic::Request<T>, ctx: &Context) {
     if let Some(at) = ctx.deadline() {
         request.set_timeout(at.saturating_duration_since(Instant::now()));
     }
 }
 
-/// Go's credentials resolution of `NewBigQueryWriteClient`: explicit credentials, none, or
-/// Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS` first) with
-/// `DefaultAuthScopes()`.
+/// Resolves the credentials of `options`: explicit credentials, none, or Application Default
+/// Credentials (`GOOGLE_APPLICATION_CREDENTIALS` first) with [`DEFAULT_AUTH_SCOPES`].
 fn resolve_credentials(options: &ClientOptions) -> Result<Option<Credentials>, Error> {
     if options.without_authentication && options.credentials.is_some() {
         return Err(Error::msg(
@@ -640,9 +629,9 @@ fn resolve_credentials(options: &ClientOptions) -> Result<Option<Credentials>, E
         .map_err(Error::other)
 }
 
-/// The lazily connecting channel to `endpoint` (Go `option.WithEndpoint`): a URL as given
-/// (`http://` = plaintext), a bare `host[:port]` over TLS, none = [`DEFAULT_ENDPOINT`]. TLS uses
-/// the platform's native roots (rustls with aws-lc).
+/// The lazily connecting channel to `endpoint`: a URL as given (`http://` = plaintext), a bare
+/// `host[:port]` over TLS, none = [`DEFAULT_ENDPOINT`]. TLS uses the platform's native roots
+/// (rustls with aws-lc).
 fn channel_for(endpoint: Option<&str>) -> Result<Channel, Error> {
     let url = match endpoint.filter(|e| !e.is_empty()) {
         None => DEFAULT_ENDPOINT.to_owned(),
@@ -661,7 +650,7 @@ fn channel_for(endpoint: Option<&str>) -> Result<Channel, Error> {
 /// The request side of an AppendRows call: the client's sends, ended once the stream has
 /// ended or been abandoned. Ending it lets hyper drop its half of the HTTP/2 stream, so with
 /// the response side dropped too, h2 resets the stream (`RST_STREAM(CANCEL)`) and the server
-/// sees the call canceled (after the end of the requests), as grpc-go's context cancellation
+/// sees the call canceled (after the end of the requests), as a canceled context does
 /// resets the stream.
 struct RequestStream {
     requests: mpsc::Receiver<AppendRowsRequest>,
@@ -685,7 +674,7 @@ impl Stream for RequestStream {
 /// How an AppendRows stream ended.
 #[derive(Debug, Clone)]
 enum StreamEnd {
-    /// The server ended it with OK (Go `io.EOF` from `Recv`).
+    /// The server ended it with OK.
     Eof,
     /// A status: the server's, the transport's, or the context's.
     Status { code: Code, message: String },
@@ -757,7 +746,7 @@ async fn pump_append_rows(
     }
 }
 
-/// The client half of a tonic AppendRows stream with grpc-go's `ClientStream` semantics.
+/// The client half of a tonic AppendRows stream with gRPC client-stream semantics.
 struct TonicAppendRows {
     ctx: Context,
     /// `None` after `close_send`.

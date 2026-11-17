@@ -13,13 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The event filters and the log / write entry points of ADK-Go
-//! `plugin/agentanalytics/bigquery_agent_analytics_plugin.go`: `shouldLogEvent`,
-//! `shouldLogSessionEvent`, `denied`, `recoverCallback`, `logEvent`, `logSessionEvent`,
-//! `logSessionSpanEvent`, `writeEvent`.
+//! The event filters and the log / write entry points of the plugin: `should_log_event`,
+//! `should_log_session_event`, `denied`, `recover_callback`, `log_event`, `log_session_event`,
+//! `log_session_span_event`, `write_event`.
 //!
-//! Go's `defer p.recoverCallback(eventType)` is `std::panic::catch_unwind(AssertUnwindSafe(…))`
-//! around the span and row-building body (R7): a panic drops the row, counts one append-failure
+//! A callback body that panics is guarded by `std::panic::catch_unwind(AssertUnwindSafe(…))`
+//! around the span and row-building body: a panic drops the row, counts one append-failure
 //! drop and logs `agentanalytics: dropped <type> event: recovered panic of type <T>`.
 
 use std::any::Any;
@@ -30,7 +29,7 @@ use crate::redaction::panic_type_name;
 use crate::trace::{CallbackCtx, Identity, RowSpan};
 
 impl AnalyticsPlugin {
-    /// Go `shouldLogEvent(eventType)`: the denylist, then the allowlist if set.
+    /// Whether an event of `event_type` is logged: the denylist, then the allowlist if set.
     pub(crate) fn should_log_event(&self, event_type: &str) -> bool {
         if self.denylist.contains(event_type) {
             return false;
@@ -41,9 +40,9 @@ impl AnalyticsPlugin {
         true
     }
 
-    /// Go `shouldLogSessionEvent(eventType)`: as `should_log_event`, with the legacy `EVENT`
-    /// alias for every session-event row (a denied `EVENT` drops them all; an allowed `EVENT`
-    /// admits them all; a per-type deny still wins).
+    /// Like `should_log_event`, with the legacy `EVENT` alias for every session-event row (a
+    /// denied `EVENT` drops them all; an allowed `EVENT` admits them all; a per-type deny still
+    /// wins).
     pub(crate) fn should_log_session_event(&self, event_type: &str) -> bool {
         if self.denylist.contains(LEGACY_EVENT_TYPE) || self.denylist.contains(event_type) {
             return false;
@@ -55,20 +54,18 @@ impl AnalyticsPlugin {
         true
     }
 
-    /// Go `denied(column)`.
+    /// Whether `column` is denied.
     pub(crate) fn denied(&self, column: &str) -> bool {
         self.denied_columns.contains(column)
     }
 
-    /// Go `recoverCallback(eventType)` after a recovered panic with payload `panic`: counts one
-    /// append-failure drop (enabled plugin with a processor) and logs the panic's type, never
-    /// its value. As in Go, the log call itself is not guarded: a panicking `Logger`
-    /// propagates.
+    /// Handles a recovered panic with payload `panic`: counts one append-failure drop (enabled
+    /// plugin with a processor) and logs the panic's type, never its value. The log call itself
+    /// is not guarded: a panicking `Logger` propagates.
     ///
-    /// Divergence (ledger 7b-3a): Go logs the panic value's dynamic type (`%T`); Rust knows
-    /// only whether the payload is a string (`string`), else writes `unknown` (7b-1's
-    /// `panic_type_name`). Rust's panic hook also reports the panic (stderr by default) before
-    /// `catch_unwind` returns, where Go's `recover` is silent.
+    /// Rust knows only whether the payload is a string (`string`), else the logged type is
+    /// `unknown` (see `panic_type_name`). Rust's panic hook also reports the panic (stderr by
+    /// default) before `catch_unwind` returns.
     pub(crate) fn recover_callback(&self, event_type: &str, panic: &(dyn Any + Send)) {
         if self.config.enabled
             && let Some(p) = &self.processor
@@ -81,10 +78,9 @@ impl AnalyticsPlugin {
         ));
     }
 
-    /// Go `logEvent(ctx, id, eventType, spanFn, build)`: runs `span_fn` (always, before the
-    /// filters, so the spans and latencies of the rows that are written stay right when the
-    /// filters drop other rows), then, if `event_type` passes `should_log_event`,
-    /// `write_event`; a panic drops the row (`recover_callback`).
+    /// Runs `span_fn` (always, before the filters, so the spans and latencies of the rows that
+    /// are written stay right when the filters drop other rows), then, if `event_type` passes
+    /// `should_log_event`, `write_event`; a panic drops the row (`recover_callback`).
     pub(crate) fn log_event(
         &self,
         ctx: &CallbackCtx,
@@ -105,8 +101,7 @@ impl AnalyticsPlugin {
         }
     }
 
-    /// Go `logSessionEvent(ctx, id, eventType, span, build)`: `write_event` if
-    /// `should_log_session_event` (no recovery of its own, as Go).
+    /// Calls `write_event` if `should_log_session_event` (no recovery of its own).
     pub(crate) fn log_session_event(
         &self,
         ctx: &CallbackCtx,
@@ -121,9 +116,9 @@ impl AnalyticsPlugin {
         self.write_event(ctx, id, event_type, span, build);
     }
 
-    /// Go `logSessionSpanEvent(ctx, id, eventType, spanFn, build)`: as `log_event` with
-    /// `should_log_session_event`, so session-event rows emitted outside the event callback
-    /// honor the legacy `EVENT` alias while keeping the trace manager's span side effects.
+    /// As `log_event` with `should_log_session_event`, so session-event rows emitted outside the
+    /// event callback honor the legacy `EVENT` alias while keeping the trace manager's span side
+    /// effects.
     pub(crate) fn log_session_span_event(
         &self,
         ctx: &CallbackCtx,
@@ -144,10 +139,8 @@ impl AnalyticsPlugin {
         }
     }
 
-    /// Go `writeEvent(ctx, id, eventType, span, build)`: builds the row (`build_row`) and
-    /// appends it to the processor; a panic drops the row. A plugin without a processor (Go's
-    /// test literals, where `Append` on the nil processor panics and the row is dropped)
-    /// drops the row without a log line.
+    /// Builds the row (`build_row`) and appends it to the processor; a panic drops the row. A
+    /// plugin without a processor drops the row without a log line.
     pub(crate) fn write_event(
         &self,
         ctx: &CallbackCtx,

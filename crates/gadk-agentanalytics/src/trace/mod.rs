@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/trace_manager.go`: the trace manager places every row
-//! of an invocation in a trace — trace and span IDs, parent spans, latencies — and infers from
-//! the callbacks it sees which agent activations failed.
+//! The trace manager places every row of an invocation in a trace — trace and span IDs, parent
+//! spans, latencies — and infers from the callbacks it sees which agent activations failed.
 //!
 //! Split by concern: [`span`] (span records and the places of rows), [`invocation`] (one
 //! invocation's spans, its agent tree and the tree queries), [`manager`] (the manager: lookup,
@@ -23,11 +22,10 @@
 //! model and tool calls and agent starts), [`settle`] (agent ends, responses, errors, retirement,
 //! failures and settling, the end of a run) and [`causes`] (cancellation and failure causes).
 //!
-//! Go's `context.Context` arguments are [`CallbackCtx`]: the callback's ADK context (`None` for
-//! Go's plain contexts in direct trace-manager tests), its cancellation and the ADK span it runs
-//! in. Go's goroutine attribution (`currentGoroutine`) reads the callback's fiber
-//! (`gadk_agent::fiber`; [`settle`]'s `current_goroutine`). Locks are `parking_lot` and never
-//! held across an `.await` (no method here is async).
+//! Callback contexts are [`CallbackCtx`]: the callback's ADK context (`None` for a plain context
+//! in direct trace-manager tests), its cancellation and the ADK span it runs in. The callback's
+//! activation attribution reads its fiber (`gadk_agent::fiber`; see [`settle`]). Locks are
+//! `parking_lot` and never held across an `.await` (no method here is async).
 
 pub(crate) mod causes;
 pub(crate) mod invocation;
@@ -62,40 +60,40 @@ pub(crate) use {
     span::{RetiredCause, SpanKind, SpanRecord},
 };
 
-/// Go `maxTrackedInvocations`: the number of invocations whose spans are tracked at once.
+/// The number of invocations whose spans are tracked at once.
 pub(crate) const MAX_TRACKED_INVOCATIONS: usize = 4096;
-/// Go `invocationTTL`: how long an invocation stays tracked after its last callback.
+/// How long an invocation stays tracked after its last callback.
 pub(crate) const INVOCATION_TTL: Duration = Duration::from_secs(3600);
-/// Go `sweepInterval`: the number of new invocations between two sweeps for expired ones.
+/// The number of new invocations between two sweeps for expired ones.
 pub(crate) const SWEEP_INTERVAL: usize = 128;
 
-/// Go `workflowBasePathPrefix`: custom metadata key prefix of the base path of each enclosing
-/// workflow on a node's events (redefined like Go; gadk-engine's keys are crate-private).
+/// Custom metadata key prefix of the base path of each enclosing workflow on a node's events
+/// (redefined here; gadk-engine's keys are crate-private).
 pub(crate) const WORKFLOW_BASE_PATH_PREFIX: &str = "adk.workflow.base_path.";
-/// Go `workflowNodeOutcomeKey`.
+/// Custom metadata key of a workflow node's outcome.
 pub(crate) const WORKFLOW_NODE_OUTCOME_KEY: &str = "adk.workflow.node_outcome";
-/// Go `workflowNodeCompletedKey`.
+/// Custom metadata key marking a workflow node as completed.
 pub(crate) const WORKFLOW_NODE_COMPLETED_KEY: &str = "adk.workflow.node_completed";
-/// Go `workflowNodeFailedOutcome`.
+/// The node outcome of a failed workflow node.
 pub(crate) const WORKFLOW_NODE_FAILED_OUTCOME: &str = "failed";
-/// Go `workflowNodeCancelOutcome`.
+/// The node outcome of a cancelled workflow node.
 pub(crate) const WORKFLOW_NODE_CANCEL_OUTCOME: &str = "cancelled";
 
-/// Go `noFrame` (`^uint64(0)`): no activation ran on the current goroutine since a frame.
+/// No activation ran on the current fiber since a frame (`u64::MAX`).
 pub(crate) const NO_FRAME: u64 = u64::MAX;
 
-/// Go `error` as the trace manager keeps it (recorded errors, failure causes): shared, compared
-/// by kind (`Error::is_context`) or text. Go's `context.Canceled` is
+/// An error as the trace manager keeps it (recorded errors, failure causes): shared, compared
+/// by kind (`Error::is_context`) or text. A canceled context is
 /// `Error::Context(ContextError::Canceled)`.
 pub(crate) type TraceError = Arc<Error>;
 
-/// Go `traceManager.now`: the manager's clock (a field, so tests can replace it).
+/// The manager's clock (a field, so tests can replace it).
 pub(crate) type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 
-/// Go `traceManager.logf` (`Config.logf`): receives the formatted line.
+/// The manager's log sink (`Config.logf`): receives the formatted line.
 pub(crate) type LogFn = Arc<dyn Fn(&str) + Send + Sync>;
 
-/// Go `identity`: the invocation fields of a row (read from a callback's context by
+/// The invocation fields of a row (read from a callback's context by
 /// `plugin::rows::identity_of*`).
 #[derive(Clone, Default)]
 pub(crate) struct Identity {
@@ -106,7 +104,7 @@ pub(crate) struct Identity {
     pub(crate) app_name: String,
     pub(crate) branch: String,
     pub(crate) path: String,
-    /// Go `state session.ReadonlyState` (nil when the context has none).
+    /// The session state (`None` when the context has none).
     pub(crate) state: Option<Arc<dyn ReadonlyState>>,
 }
 
@@ -125,9 +123,8 @@ impl std::fmt::Debug for Identity {
     }
 }
 
-/// Go's agent interface identity (`map[agent.Agent]…` keys, `a == b`): the address of the
-/// agent behind an `Arc<dyn Agent>`. A map keyed by it also holds the `Arc`, so the address
-/// stays the agent's for as long as the entry lives.
+/// Identity of an agent: the address of the agent behind an `Arc<dyn Agent>`. A map keyed by it
+/// also holds the `Arc`, so the address stays the agent's for as long as the entry lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct AgentKey(usize);
 
@@ -138,23 +135,23 @@ impl AgentKey {
     }
 }
 
-/// Go's `context.Context` as the trace manager reads it. Go reads the ADK context's
-/// `InvocationContext` (activation, `Ended`, agent, parent map), `ctx.Err` / `context.Cause`,
-/// and the OpenTelemetry span the callback runs in.
+/// A callback's context as the trace manager reads it: the ADK context's `InvocationContext`
+/// (activation, `Ended`, agent, parent map), its cancellation and cause, and the OpenTelemetry
+/// span the callback runs in.
 #[derive(Clone, Default)]
 pub(crate) struct CallbackCtx {
-    /// The callback's ADK context; `None` for Go's plain `context.Background()` (direct
-    /// trace-manager tests), which shows no activation, no `Ended` and no agent.
+    /// The callback's ADK context; `None` for a plain background context (direct trace-manager
+    /// tests), which shows no activation, no `Ended` and no agent.
     pub(crate) adk: Option<gadk_agent::Context>,
-    /// The context's cancellation (Go `ctx.Err` / `context.Cause(ctx)`): the ADK context's
-    /// token and cause (read when asked), or a test's token and cause.
+    /// The context's cancellation: the ADK context's token and cause (read when asked), or a
+    /// test's token and cause.
     pub(crate) cancel: Option<CancelSource>,
-    /// Go `trace.SpanContextFromContext(ctx)`: the ADK span the callback runs in.
+    /// The ADK span the callback runs in.
     pub(crate) span: Option<SpanIds>,
 }
 
 impl CallbackCtx {
-    /// Go `context.Background()`: no ADK context, never cancelled, no span.
+    /// A context with no ADK context, never cancelled, no span.
     #[cfg(test)]
     pub(crate) fn background() -> CallbackCtx {
         CallbackCtx::default()
@@ -162,13 +159,12 @@ impl CallbackCtx {
 
     /// The context of an agent, model or tool callback: `adk` = a clone of `ctx`, `cancel` =
     /// its cancellation token, `span` = `gadk_engine::telemetry::current_span_ids()` (the
-    /// nearest enclosing ADK span; R1(d)).
+    /// nearest enclosing ADK span).
     ///
-    /// Divergence (ledger 7b-3a): Go reads whatever OpenTelemetry span the caller's
-    /// `context.Context` carries, so rows of a run started under a caller's own span join that
-    /// trace (`attributes.otel`, the adopted trace ID); gadk reads only spans gadk-telemetry's
-    /// bridge marks as ADK spans, and the bridge starts a new trace under a non-ADK span, so a
-    /// caller's span is never inherited.
+    /// Only spans gadk-telemetry's bridge marks as ADK spans are read, and the bridge starts a
+    /// new trace under a non-ADK span, so a caller's own span is never inherited: rows of a run
+    /// started under a caller's span do not join that trace (`attributes.otel`, the adopted
+    /// trace ID).
     pub(crate) fn from_context(ctx: &gadk_agent::Context) -> CallbackCtx {
         CallbackCtx {
             adk: Some(ctx.clone()),
@@ -183,15 +179,14 @@ impl CallbackCtx {
         CallbackCtx::from_context(&ctx.clone().into_context())
     }
 
-    /// Go `context.WithCancel(ctx)` in tests: `cancel` = `token` (cause Go `context.Canceled`).
+    /// For tests: `cancel` = `token` (cause `Canceled`).
     #[cfg(test)]
     pub(crate) fn with_cancel(mut self, token: CancellationToken) -> CallbackCtx {
         self.cancel = Some(CancelSource::of_token(token, None));
         self
     }
 
-    /// Go `context.WithCancelCause(ctx)` in tests: the cause the token set by
-    /// [`with_cancel`](Self::with_cancel) ends with.
+    /// For tests: the cause the token set by [`with_cancel`](Self::with_cancel) ends with.
     #[cfg(test)]
     pub(crate) fn with_cancel_cause(mut self, cause: TraceError) -> CallbackCtx {
         if let Some(c) = self.cancel.as_mut() {
@@ -201,64 +196,62 @@ impl CallbackCtx {
         self
     }
 
-    /// Go `trace.ContextWithSpanContext(ctx, sc)` in tests.
+    /// For tests: the span the callback runs in.
     #[cfg(test)]
     pub(crate) fn with_span(mut self, span: SpanIds) -> CallbackCtx {
         self.span = Some(span);
         self
     }
 
-    /// Go `ambientSpanContext(ctx)`: the span, if valid.
+    /// The span, if valid.
     pub(crate) fn ambient_span_context(&self) -> Option<SpanIds> {
         self.span.filter(SpanIds::is_valid)
     }
 
-    /// Go `ambientTraceID(ctx)`: the span's trace ID as 32 lowercase hex digits, or "".
+    /// The span's trace ID as 32 lowercase hex digits, or "".
     pub(crate) fn ambient_trace_id(&self) -> String {
         self.ambient_span_context()
             .map(|sc| hex(&sc.trace_id))
             .unwrap_or_default()
     }
 
-    /// Go `activationKey(ctx)`: the activation of the ADK context (R1(a)), or `None`.
+    /// The activation of the ADK context, or `None`.
     pub(crate) fn activation_key(&self) -> Option<ActivationId> {
         self.adk.as_ref().map(|c| c.activation_id())
     }
 
-    /// Go `endedFunc(ctx)`: the ADK context whose `ended()` a span record reads later, or
-    /// `None` for a plain context.
+    /// The ADK context whose `ended()` a span record reads later, or `None` for a plain
+    /// context.
     pub(crate) fn ended_func(&self) -> Option<gadk_agent::Context> {
         self.adk.clone()
     }
 
-    /// Go `canceledFunc(ctx)`: what a span record reads later to tell how its context ended,
-    /// or `None` when the context cannot be cancelled (Go's closure over a context that never
-    /// ends reports `(false, nil)` forever, as `None` does).
+    /// What a span record reads later to tell how its context ended, or `None` when the context
+    /// cannot be cancelled (a context that never ends reports "not cancelled" forever, as
+    /// `None` does).
     pub(crate) fn canceled_func(&self) -> Option<CancelSource> {
         self.cancel.clone()
     }
 
-    /// Go `invocationEnded(ctx)`: the ADK context's `ended()`; false for a plain context.
+    /// The ADK context's `ended()`; false for a plain context.
     pub(crate) fn invocation_ended(&self) -> bool {
         self.adk.as_ref().is_some_and(|c| c.ended())
     }
 
-    /// Go `ctx.Err() != nil` / `context.Cause(ctx)` for the run's own end (e.g. `afterRun`):
-    /// `None` while live, else the cause read now (the ADK context's `cause()` or the test
-    /// cause; Go's `context.Canceled` without one).
+    /// The run's own end (e.g. in the after-run callback): `None` while live, else the cause
+    /// read now (the ADK context's `cause()` or the test cause; `Canceled` without one).
     pub(crate) fn err(&self) -> Option<TraceError> {
         self.cancel.as_ref()?.cause()
     }
 
-    /// Go `contextParentMap(ctx)`: the parent map the runner attached to the context.
+    /// The parent map the runner attached to the context.
     pub(crate) fn parent_map(&self) -> Option<Arc<ParentMap>> {
         self.adk.as_ref().and_then(|c| c.parent_map())
     }
 
-    /// Go `runningAgentChildren(ctx, name)`: the sub-agents of the context's agent if it is
-    /// named `name`, else the zero value. `name()` and `sub_agents()` are agent code, so no
-    /// lock may be held by the caller. A panicking agent yields the zero value (Go's `orZero`),
-    /// and a panicking agent type reads as "" (Go's inner `orZero`).
+    /// The sub-agents of the context's agent if it is named `name`, else the default value.
+    /// `name()` and `sub_agents()` are agent code, so no lock may be held by the caller. A
+    /// panicking agent yields the default value, and a panicking agent type reads as "".
     pub(crate) fn running_agent_children(&self, name: &str) -> AgentChildren {
         let Some(adk) = self.adk.as_ref() else {
             return AgentChildren::default();
@@ -292,8 +285,8 @@ impl CallbackCtx {
         .unwrap_or_default()
     }
 
-    /// Go `callKey(ctx, key)`: `key` prefixed with the activation (`"<id>\x00<key>"`), or
-    /// `key` itself when the context shows none.
+    /// `key` prefixed with the activation (`"<id>\x00<key>"`), or `key` itself when the context
+    /// shows none.
     pub(crate) fn call_key(&self, key: &str) -> String {
         match self.activation_key() {
             Some(act) => format!("{}\x00{key}", act.get()),
@@ -302,13 +295,13 @@ impl CallbackCtx {
     }
 }
 
-/// Go `llmKey(id)`: `path \x00 agentName \x00 branch`.
+/// The key of an agent's model call: `path \x00 agent_name \x00 branch`.
 pub(crate) fn llm_key(id: &Identity) -> String {
     format!("{}\x00{}\x00{}", id.path, id.agent_name, id.branch)
 }
 
-/// Go `toolKey(id, functionCallID, toolName)`: the function call ID scoped to the activation
-/// (`path \x00 agentName \x00 branch \x00 call`), or the tool name without an ID.
+/// The key of a tool call: the function call ID scoped to the activation
+/// (`path \x00 agent_name \x00 branch \x00 call`), or the tool name without an ID.
 pub(crate) fn tool_key(id: &Identity, function_call_id: &str, tool_name: &str) -> String {
     let call = if function_call_id.is_empty() {
         tool_name
@@ -321,7 +314,7 @@ pub(crate) fn tool_key(id: &Identity, function_call_id: &str, tool_name: &str) -
     )
 }
 
-/// Go `toolKeyCall(key)`: what follows the last NUL of `key`.
+/// What follows the last NUL of a tool-call `key`.
 pub(crate) fn tool_key_call(key: &str) -> &str {
     match key.rfind('\0') {
         Some(i) => &key[i + 1..],
@@ -329,17 +322,17 @@ pub(crate) fn tool_key_call(key: &str) -> &str {
     }
 }
 
-/// Go `newTraceID()`: 32 random lowercase hex digits (a v4 UUID's bytes).
+/// 32 random lowercase hex digits (a v4 UUID's bytes).
 pub(crate) fn new_trace_id() -> String {
     hex(uuid::Uuid::new_v4().as_bytes())
 }
 
-/// Go `newSpanID()`: 16 random lowercase hex digits (the first 8 bytes of a v4 UUID).
+/// 16 random lowercase hex digits (the first 8 bytes of a v4 UUID).
 pub(crate) fn new_span_id() -> String {
     hex(&uuid::Uuid::new_v4().as_bytes()[..8])
 }
 
-/// Go `hex.EncodeToString`: lowercase hex digits of `bytes`.
+/// Lowercase hex digits of `bytes`.
 pub(crate) fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let mut out = String::with_capacity(bytes.len() * 2);

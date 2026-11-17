@@ -13,17 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Span records and the places of rows, from ADK-Go `plugin/agentanalytics/trace_manager.go`:
-//! `spanKind`, `spanRecord` (with the goroutine attribution fields, read from the callback's
-//! fiber, `gadk_agent::fiber`), `retiredCause`, `rowSpan`, `unclosedAgentSpan`, `latencyOf`,
-//! `goroutineOrigin` (`gadk_agent::fiber::Origin`), `attemptSite`, `nodeRunKey`, and the
-//! record-local helpers that are not about failures (those are [`super::causes`]) or settling
-//! (those are [`super::settle`]).
+//! Span records and the places of rows: [`SpanKind`], [`SpanRecord`] (with the fiber attribution
+//! fields, read from the callback's fiber, `gadk_agent::fiber`), [`RetiredCause`], [`RowSpan`],
+//! [`UnclosedAgentSpan`], [`Latency`] / `latency_of`, `GoroutineOrigin`
+//! (`gadk_agent::fiber::Origin`), [`AttemptSite`], [`NodeRunKey`], and the record-local helpers
+//! that are not about failures (those are [`super::causes`]) or settling (those are
+//! [`super::settle`]).
 //!
-//! Go's `*spanRecord` pointers are [`SpanRef`]s (`Arc<parking_lot::Mutex<SpanRecord>>`, equal
-//! by address). Every record is read and written only while the `mu` of the invocation that
-//! holds it is held, so its own mutex is never contended and guards of several distinct records
-//! may be alive at once; never lock a record whose guard is already alive (compare with
+//! Records are shared as [`SpanRef`]s (`Arc<parking_lot::Mutex<SpanRecord>>`, equal by
+//! address). Every record is read and written only while the `mu` of the invocation that holds
+//! it is held, so its own mutex is never contended and guards of several distinct records may
+//! be alive at once; never lock a record whose guard is already alive (compare with
 //! [`SpanRef::ptr_eq`] first — `parking_lot` mutexes are not reentrant).
 
 use std::collections::HashMap;
@@ -40,38 +40,38 @@ use super::TraceError;
 use crate::context::ContextError;
 use crate::error::Error;
 
-/// Go `spanKind`: the kind of operation a span covers. `None` is Go's zero value, which no
-/// record that the manager makes has.
+/// The kind of operation a span covers. `None` is the default value, which no record that the
+/// manager makes has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) enum SpanKind {
-    /// Go's zero `spanKind`.
+    /// The default kind.
     #[default]
     None,
-    /// Go `spanKindInvocation`.
+    /// An invocation span.
     Invocation,
-    /// Go `spanKindAgent`.
+    /// An agent span.
     Agent,
-    /// Go `spanKindLLM`.
+    /// A model-call span.
     Llm,
-    /// Go `spanKindTool`.
+    /// A tool-call span.
     Tool,
 }
 
-/// Go `goroutineOrigin`: the spawn site that started the fiber (a `gadk_agent::fiber` creator
-/// constant, Go's creator function) and the fiber it ran on. Go `startedBy(creator, p)` is
-/// `origin.started_by(creator, p.goroutine_id)` (false when `p` has no goroutine).
+/// The spawn site that started the fiber (a `gadk_agent::fiber` creator constant) and the fiber
+/// it ran on. `origin.started_by(creator, id)` tells whether the fiber was started by `creator`
+/// from the fiber `id` (false when `id` is 0, i.e. the parent has no fiber).
 pub(crate) type GoroutineOrigin = gadk_agent::fiber::Origin;
 
-/// Go `attemptSite`: `None` is Go's `attemptNone`, the others are the engine's claimed
+/// Where an activation attempt was claimed: `None`, or the engine's claimed
 /// `gadk_agent::fiber::AttemptSite`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) enum AttemptSite {
-    /// Go `attemptNone`.
+    /// No claimed attempt.
     #[default]
     None,
-    /// Go `attemptNode`.
+    /// A workflow node attempt.
     Node,
-    /// Go `attemptWorker`.
+    /// A workflow worker attempt.
     Worker,
 }
 
@@ -85,24 +85,23 @@ impl From<Option<gadk_agent::fiber::AttemptSite>> for AttemptSite {
     }
 }
 
-/// Go `nodeRunKey`: the node path and branch of a workflow node run.
+/// The node path and branch of a workflow node run.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct NodeRunKey {
     pub(crate) path: String,
     pub(crate) branch: String,
 }
 
-/// Go `spanRecord.canceled` (`canceledFunc(ctx)`): the cancellation of the context of the
-/// callback that started the span, read later to tell how it ended (R3).
+/// The cancellation of the context of the callback that started the span, read later to tell
+/// how it ended.
 #[derive(Clone, Default)]
 pub(crate) struct CancelSource {
     /// The context's token (an ADK context's `cancellation_token()`, or a test's own).
     pub(crate) token: CancellationToken,
-    /// A test's cause (Go `context.WithCancelCause`) once `token` is cancelled; `None` = Go
-    /// `context.Canceled`. Unused when `adk` is set.
+    /// A test's cause once `token` is cancelled; `None` = `Canceled`. Unused when `adk` is set.
     pub(crate) cause: Option<TraceError>,
-    /// The ADK context whose `cause()` (Go `context.Cause`) is read at each
-    /// [`check`](Self::check), so a cause recorded after the span started is seen.
+    /// The ADK context whose `cause()` is read at each [`check`](Self::check), so a cause
+    /// recorded after the span started is seen.
     pub(crate) adk: Option<gadk_agent::Context>,
 }
 
@@ -126,8 +125,7 @@ impl CancelSource {
         }
     }
 
-    /// A test's token with an optional cause (Go `context.WithCancel` /
-    /// `context.WithCancelCause`).
+    /// A test's token with an optional cause.
     #[cfg(test)]
     pub(crate) fn of_token(token: CancellationToken, cause: Option<TraceError>) -> CancelSource {
         CancelSource {
@@ -137,10 +135,10 @@ impl CancelSource {
         }
     }
 
-    /// Go `context.Cause(ctx)` once the token is cancelled (`None` while live): the ADK
-    /// context's cause (`Canceled` → Go `context.Canceled`, `DeadlineExceeded` → Go
-    /// `context.DeadlineExceeded`, `Error(e)` → `e`'s text with any cancellation or deadline in
-    /// its chain as Go's sentinel), else the test cause, else Go `context.Canceled`.
+    /// The cause once the token is cancelled (`None` while live): the ADK context's cause
+    /// (`Canceled` → `Canceled`, `DeadlineExceeded` → `DeadlineExceeded`, `Error(e)` → `e`'s
+    /// text with any cancellation or deadline in its chain as the matching context error), else
+    /// the test cause, else `Canceled`.
     pub(crate) fn cause(&self) -> Option<TraceError> {
         if !self.token.is_cancelled() {
             return None;
@@ -152,8 +150,8 @@ impl CancelSource {
         Some(cause.unwrap_or_else(|| Arc::new(Error::Context(ContextError::Canceled))))
     }
 
-    /// The Go closure `canceledFunc` returns: `(false, None)` while live; `(true, None)` when
-    /// cancelled with Go's `context.Canceled` cause; `(false, Some(cause))` otherwise.
+    /// How the context ended: `(false, None)` while live; `(true, None)` when cancelled with
+    /// the plain `Canceled` cause; `(false, Some(cause))` otherwise.
     pub(crate) fn check(&self) -> (bool, Option<TraceError>) {
         match self.cause() {
             None => (false, None),
@@ -163,19 +161,19 @@ impl CancelSource {
     }
 }
 
-/// A gadk cancel cause as the trace manager keeps errors (Go `context.Cause`'s value).
+/// A gadk cancel cause as the trace manager keeps errors.
 pub(crate) fn trace_error_of_cause(cause: &gadk_agent::CancelCause) -> TraceError {
     match cause {
         gadk_agent::CancelCause::DeadlineExceeded => {
             Arc::new(Error::Context(ContextError::DeadlineExceeded))
         }
         gadk_agent::CancelCause::Error(e) => crate::plugin::callbacks::trace_error_of(e.as_ref()),
-        // `Canceled` and any later variant read as Go's plain `context.Canceled`.
+        // `Canceled` and any later variant read as a plain `Canceled`.
         _ => Arc::new(Error::Context(ContextError::Canceled)),
     }
 }
 
-/// Go `retiredCause`: the failure cause of an activation that retired under an open span.
+/// The failure cause of an activation that retired under an open span.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RetiredCause {
     pub(crate) err: Option<TraceError>,
@@ -185,7 +183,7 @@ pub(crate) struct RetiredCause {
     pub(crate) swallowable_by_self: bool,
 }
 
-/// Go `latencyOf`'s map: `total_ms` and, for model calls that produced a first token,
+/// The latency of a span: `total_ms` and, for model calls that produced a first token,
 /// `time_to_first_token_ms` (the `latency_ms` column).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct Latency {
@@ -193,21 +191,20 @@ pub(crate) struct Latency {
     pub(crate) time_to_first_token_ms: Option<i64>,
 }
 
-/// Go `rowSpan`: the place of a row in the trace of its invocation.
+/// The place of a row in the trace of its invocation.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct RowSpan {
     pub(crate) trace_id: String,
     pub(crate) span_id: String,
     pub(crate) parent_span_id: String,
-    /// Go `latency map[string]any` (nil = `None`): set on rows that end a span.
+    /// Set on rows that end a span.
     pub(crate) latency: Option<Latency>,
     pub(crate) root_agent_name: String,
-    /// Go `timestamp time.Time` (zero = `None`): the manager clock's reading by the callback.
+    /// The manager clock's reading by the callback.
     pub(crate) timestamp: Option<DateTime<Utc>>,
 }
 
-/// Go `unclosedAgentSpan`: an activation ended without its AfterAgentCallback (an
-/// `AGENT_ERROR` row).
+/// An activation that ended without its AfterAgentCallback (an `AGENT_ERROR` row).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct UnclosedAgentSpan {
     pub(crate) span: RowSpan,
@@ -215,30 +212,30 @@ pub(crate) struct UnclosedAgentSpan {
     pub(crate) branch: String,
     pub(crate) path: String,
     pub(crate) err: Option<TraceError>,
-    /// Go `timestamp` (zero = `None`): the latest callback under the activation.
+    /// The latest callback under the activation.
     pub(crate) timestamp: Option<DateTime<Utc>>,
 }
 
-/// Go `spanRecord`: a span that has started. Field docs are Go's (`trace_manager.go:99-350`);
-/// Go's closures over the callback's context are kept as that context (R3).
+/// A span that has started. The callback's context is kept as the ADK context and the
+/// cancellation source rather than as closures.
 #[derive(Default)]
 pub(crate) struct SpanRecord {
     pub(crate) span_id: String,
     pub(crate) parent_span_id: String,
     pub(crate) kind: SpanKind,
-    /// Go `path`, `name`, `branch`: identify the activation of agent spans.
+    /// `path`, `name`, `branch`: identify the activation of agent spans.
     pub(crate) path: String,
     pub(crate) name: String,
     pub(crate) branch: String,
     pub(crate) start: DateTime<Utc>,
-    /// Go `firstToken` (zero = `None`).
+    /// The arrival time of the first streamed chunk.
     pub(crate) first_token: Option<DateTime<Utc>>,
     pub(crate) streamed: bool,
-    /// Go `canceled func() (bool, error)`; `None` once dropped (`drop_contexts`) or for a
-    /// context that cannot be cancelled.
+    /// How the span's context ended; `None` once dropped (`drop_contexts`) or for a context that
+    /// cannot be cancelled.
     pub(crate) canceled: Option<CancelSource>,
     pub(crate) retired_causes: Vec<RetiredCause>,
-    /// Go `parent *spanRecord`.
+    /// The parent span.
     pub(crate) parent: Option<SpanRef>,
     pub(crate) stop_point: bool,
     pub(crate) has_response: bool,
@@ -247,18 +244,18 @@ pub(crate) struct SpanRecord {
     pub(crate) awaiting_model_event: i64,
     pub(crate) awaiting_tool_event: i64,
     pub(crate) concurrent_peer: bool,
-    /// Go `goroutineID`, `origin`, `attempt`: the fiber of the callback that started the span
-    /// (`settle::current_goroutine`), zero when its context showed no activation.
+    /// The fiber id, origin and attempt site of the callback that started the span (read in
+    /// [`super::settle`]); zero when its context showed no activation.
     pub(crate) goroutine_id: u64,
     pub(crate) origin: GoroutineOrigin,
     pub(crate) attempt: AttemptSite,
     pub(crate) completed: bool,
     pub(crate) node_run_ended: bool,
     pub(crate) started_again: bool,
-    /// Go `nodeRuns map[nodeRunKey]int` (nil = empty).
+    /// The runs of each workflow node (empty when none).
     pub(crate) node_runs: HashMap<NodeRunKey, i64>,
-    /// Go `ended func() bool`: the ADK context of the activation (its `ended()` flag; R3);
-    /// `None` once it reported true, once dropped, or for a plain context.
+    /// The ADK context of the activation (its `ended()` flag); `None` once it reported true,
+    /// once dropped, or for a plain context.
     pub(crate) ended: Option<gadk_agent::Context>,
     pub(crate) context_ended: bool,
     pub(crate) run_done: bool,
@@ -275,17 +272,17 @@ pub(crate) struct SpanRecord {
     pub(crate) handed_over: bool,
     pub(crate) own_activation: bool,
     pub(crate) children: Vec<String>,
-    /// Go `activation any` (the run's InvocationContext pointer): the context's
-    /// [`ActivationId`]; `None` when the context shows none, or once dropped.
+    /// The context's [`ActivationId`] (the run's InvocationContext identity); `None` when the
+    /// context shows none, or once dropped.
     pub(crate) activation: Option<ActivationId>,
 }
 
-/// Go `*spanRecord`: a shared span record, equal (and hashed) by address.
+/// A shared span record, equal (and hashed) by address.
 #[derive(Clone, Default)]
 pub(crate) struct SpanRef(Arc<Mutex<SpanRecord>>);
 
 impl SpanRef {
-    /// Go `&spanRecord{…}`.
+    /// Wraps a new record.
     pub(crate) fn new(rec: SpanRecord) -> SpanRef {
         SpanRef(Arc::new(Mutex::new(rec)))
     }
@@ -295,18 +292,18 @@ impl SpanRef {
         self.0.lock()
     }
 
-    /// Go `a == b` on `*spanRecord`.
+    /// Whether both refer to the same record.
     pub(crate) fn ptr_eq(&self, other: &SpanRef) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 
-    /// Go `a == b` where `b` may be nil.
+    /// Whether `other` is `Some` of this record.
     pub(crate) fn is(&self, other: Option<&SpanRef>) -> bool {
         other.is_some_and(|o| self.ptr_eq(o))
     }
 
-    /// Whether `rec` is this record (Go `p == rec` where only the locked record is at hand):
-    /// compares addresses without locking, so it is safe while `rec`'s guard is alive.
+    /// Whether `rec` is this record, when only the locked record is at hand: compares
+    /// addresses without locking, so it is safe while `rec`'s guard is alive.
     pub(crate) fn is_record(&self, rec: &SpanRecord) -> bool {
         std::ptr::eq(self.0.data_ptr().cast_const(), rec)
     }
@@ -333,14 +330,13 @@ impl std::fmt::Debug for SpanRef {
 }
 
 impl SpanRecord {
-    /// Go `firstRetiredCause`: the first non-nil retired cause.
+    /// The first retired cause that is set.
     pub(crate) fn first_retired_cause(&self) -> Option<TraceError> {
         self.retired_causes.iter().find_map(|c| c.err.clone())
     }
 
-    /// Go `clearRetiredCauseFor(name, branch, path)`: drops the swallowable causes that
-    /// activations of `name` on `branch` (and on `path`; an empty path on either side matches
-    /// any) retired with.
+    /// Drops the swallowable causes that activations of `name` on `branch` (and on `path`; an
+    /// empty path on either side matches any) retired with.
     pub(crate) fn clear_retired_cause_for(&mut self, name: &str, branch: &str, path: &str) {
         self.retired_causes.retain(|c| {
             !(c.swallowable_by_self
@@ -350,8 +346,7 @@ impl SpanRecord {
         });
     }
 
-    /// Go `dropContexts`: drops `canceled`, `ended`, `activation`, `parent` and
-    /// `retired_causes`.
+    /// Drops `canceled`, `ended`, `activation`, `parent` and `retired_causes`.
     pub(crate) fn drop_contexts(&mut self) {
         self.canceled = None;
         self.ended = None;
@@ -360,14 +355,15 @@ impl SpanRecord {
         self.retired_causes = Vec::new();
     }
 
-    /// Go `isActivationOf(ctx)`: an agent span whose activation is `activation` (non-nil).
+    /// Whether this is an agent span whose activation is `activation` (which must be `Some`).
     pub(crate) fn is_activation_of(&self, activation: Option<ActivationId>) -> bool {
         self.kind == SpanKind::Agent && self.activation.is_some() && self.activation == activation
     }
 
-    /// Go `endedWithRun(runner)`: false whenever the parent's `goroutine_id` is 0. Locks the records above `self` one at a
-    /// time (never `self`, whose guard the caller holds): each step reads `a` into a
-    /// [`JoinView`] before it locks `a`'s parent (R10).
+    /// Whether the activation ended with the run of `runner`: false whenever the parent has
+    /// no fiber id (0). Locks the records above `self` one at a time (never `self`, whose
+    /// guard the caller holds): each step reads `a` into a [`JoinView`] before it locks `a`'s
+    /// parent.
     pub(crate) fn ended_with_run(&self, runner: &str) -> bool {
         let Some(mut a_ref) = self.parent.clone() else {
             return false;
@@ -409,7 +405,7 @@ impl SpanRecord {
         }
     }
 
-    /// Go `isNodeAgentOf(w)` (attribution).
+    /// Whether this span is the agent of workflow node `w`'s run (attribution).
     pub(crate) fn is_node_agent_of(&self, w: &SpanRecord) -> bool {
         if !w.is_workflow
             || !self.parent.as_ref().is_some_and(|p| p.is_record(w))
@@ -430,10 +426,9 @@ impl SpanRecord {
     }
 }
 
-/// The fields of a child record `c` that Go's `p.joins(c, …)` and `p.joinsOnceReturned(c)`
-/// read, taken while only `c` is locked: the walks up a parent chain never hold a parent's
-/// guard while locking its child (R10), so a record met again on the walk is never locked
-/// twice.
+/// The fields of a child record `c` that [`joins`] and [`joins_once_returned`] read, taken
+/// while only `c` is locked: the walks up a parent chain never hold a parent's guard while
+/// locking its child, so a record met again on the walk is never locked twice.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct JoinView {
     pub(crate) goroutine_id: u64,
@@ -456,15 +451,15 @@ impl JoinView {
     }
 }
 
-/// Go `(p *spanRecord).joinsOnceReturned(c)` (attribution). Locks `c`, then `p`, never both.
-/// The trace manager's walks use [`joins_once_returned_records`]; this form is for tests.
+/// Whether `p` joins `c` once `c`'s run returned (attribution). Locks `c`, then `p`, never
+/// both. The trace manager's walks use [`joins_once_returned_records`]; this form is for tests.
 #[cfg(test)]
 pub(crate) fn joins_once_returned(p: &SpanRef, c: &SpanRef) -> bool {
     let c = JoinView::of(&c.lock());
     joins_once_returned_records(&p.lock(), &c)
 }
 
-/// Go `(p *spanRecord).joinsOnceReturned(c)` over the locked parent and the child's [`JoinView`].
+/// [`joins_once_returned`] over the locked parent and the child's [`JoinView`].
 pub(crate) fn joins_once_returned_records(p: &SpanRecord, c: &JoinView) -> bool {
     joins_records(p, c, false)
         || (p.is_parallel
@@ -475,16 +470,15 @@ pub(crate) fn joins_once_returned_records(p: &SpanRecord, c: &JoinView) -> bool 
         || (p.is_workflow && c.attempt == AttemptSite::Worker)
 }
 
-/// Go `(p *spanRecord).joins(c, reported)` (attribution; false when either has no goroutine).
-/// Locks `c`, then `p`, never both. The trace manager's walks use [`joins_records`]; this form
-/// is for tests.
+/// Whether `p` joins `c` (attribution; false when either has no fiber). Locks `c`, then `p`,
+/// never both. The trace manager's walks use [`joins_records`]; this form is for tests.
 #[cfg(test)]
 pub(crate) fn joins(p: &SpanRef, c: &SpanRef, reported: bool) -> bool {
     let c = JoinView::of(&c.lock());
     joins_records(&p.lock(), &c, reported)
 }
 
-/// Go `(p *spanRecord).joins(c, reported)` over the locked parent and the child's [`JoinView`].
+/// [`joins`] over the locked parent and the child's [`JoinView`].
 pub(crate) fn joins_records(p: &SpanRecord, c: &JoinView, reported: bool) -> bool {
     if !p.propagates_child_error || p.goroutine_id == 0 || c.goroutine_id == 0 {
         return false;
@@ -504,8 +498,7 @@ pub(crate) fn joins_records(p: &SpanRecord, c: &JoinView, reported: bool) -> boo
     false
 }
 
-/// Go `parallelBranch(a, childName)`: the branch of a ParallelAgent `a`'s branch running
-/// `child_name`.
+/// The branch of the ParallelAgent `a`'s branch running `child_name`.
 pub(crate) fn parallel_branch(a: &SpanRecord, child_name: &str) -> String {
     if a.branch.is_empty() {
         format!("{}.{child_name}", a.name)
@@ -514,7 +507,7 @@ pub(crate) fn parallel_branch(a: &SpanRecord, child_name: &str) -> String {
     }
 }
 
-/// Go `latencyOf(rec, end)`.
+/// The latency of `rec` ending at `end`.
 pub(crate) fn latency_of(rec: &SpanRecord, end: DateTime<Utc>) -> Latency {
     Latency {
         total_ms: (end - rec.start).num_milliseconds(),

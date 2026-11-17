@@ -13,24 +13,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Agent ends, responses, errors, retirement and settling, from ADK-Go
-//! `plugin/agentanalytics/trace_manager.go`: `popDelegatingAgentSpan`, `popAgentSpan`,
-//! `endRestartedNodeRuns` and `recordNodeCompletion` (attribution: node attempts started by a
-//! workflow agent's scheduler), `inWorkflowNodeSubtreeLocked`, `reconcileConcurrentResponseOnPopLocked`,
-//! `popTaskAgentSpan`, `finishedTaskLocked`, `noteTaskFinished`, `retireAgentLocked`,
-//! `failuresLocked`, `reportedOverLocked`, `purgeActivationLocked`, `endToolRunsLocked`,
-//! `markToolRunsDoneLocked` (attribution), `completeResponse`,
-//! `retireDrainedDescendantsLocked`, `selectResponseOwnerLocked`, `recordError`, `clearError`,
-//! `popUnclosedAgentSpans`, `responded`, `settleEndedLocked`, `settleEndedInSubtreeLocked`,
-//! `canSettleInSubtreeLocked` (attribution: activations count as over),
-//! `settleFinishedLocked`, `retireLateSettledLocked`, `launcherOpenLocked`,
-//! `hasCanceledByStopUnderLocked`, and `popToolSpan`.
+//! Agent ends, responses, errors, retirement and settling: `pop_delegating_agent_span`,
+//! `pop_agent_span`, `end_restarted_node_runs` and `record_node_completion` (attribution: node
+//! attempts started by a workflow agent's scheduler), `in_workflow_node_subtree_locked`,
+//! `reconcile_concurrent_response_on_pop_locked`, `pop_task_agent_span`, `finished_task_locked`,
+//! `note_task_finished`, `retire_agent_locked`, `failures_locked`, `reported_over_locked`,
+//! `purge_activation_locked`, `end_tool_runs_locked`, `mark_tool_runs_done_locked`
+//! (attribution), `complete_response`, `retire_drained_descendants_locked`,
+//! `select_response_owner_locked`, `record_error`, `clear_error`, `pop_unclosed_agent_spans`,
+//! `responded`, `settle_ended_locked`, `settle_ended_in_subtree_locked`,
+//! `can_settle_in_subtree_locked` (attribution: activations count as over),
+//! `settle_finished_locked`, `retire_late_settled_locked`, `launcher_open_locked`,
+//! `has_canceled_by_stop_under_locked`, and `pop_tool_span`.
 //!
-//! Goroutine attribution: Go's `currentGoroutineID()` / `currentGoroutine()` read the
-//! callback's fiber ([`current_goroutine_id`], [`current_goroutine`]); a record made from a
-//! context that shows no activation keeps zero attribution, and the bodies take Go's
-//! zero-information branches for it (an activation without goroutine information counts as
-//! over, Go `:3913`).
+//! Fiber attribution: the callback's fiber is read by the fiber-id and fiber-origin readers
+//! below; a record made from a context that shows no activation keeps zero
+//! attribution, and the bodies take their no-information branches for it (an activation without
+//! fiber information counts as over).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -54,17 +53,17 @@ use crate::context::ContextError;
 use crate::error::Error;
 use crate::plugin::USER_AUTHOR;
 
-/// Go `currentGoroutineID()`: the id of the fiber the caller runs on
-/// (`gadk_agent::fiber::current().id`; 0 outside any task and fiber).
+/// The id of the fiber the caller runs on (`gadk_agent::fiber::current().id`; 0 outside any
+/// task and fiber).
 pub(crate) fn current_goroutine_id() -> u64 {
     fiber::current().id
 }
 
-/// Go `currentGoroutine()` as its callers read it: only when the callback's context shows an
-/// activation (Go `endedFunc(ctx) != nil`), the current fiber's id, its origin and the attempt
-/// site the engine claimed for this agent run (`gadk_agent::fiber::current_attempt`); zero
-/// otherwise.
-// Divergence (ledger 7b-3a): Go parses the goroutine's id, creator function and frame shape out of runtime.Stack; gadk reads fiber ids set by the engine where Go starts goroutines, its creators are gadk_agent::fiber constants, and the attempt site is the engine's per-fiber slot rather than a stack-frame match.
+/// Only when the callback's context shows an activation: the current fiber's id, its origin
+/// and the attempt site the engine claimed for this agent run
+/// (`gadk_agent::fiber::current_attempt`); zero otherwise.
+// Fiber ids are set by the engine where it spawns work; the creators are `gadk_agent::fiber`
+// constants, and the attempt site is the engine's per-fiber slot.
 pub(crate) fn current_goroutine(ctx: &CallbackCtx) -> (u64, GoroutineOrigin, AttemptSite) {
     if ctx.adk.is_none() {
         return (0, GoroutineOrigin::default(), AttemptSite::None);
@@ -73,8 +72,7 @@ pub(crate) fn current_goroutine(ctx: &CallbackCtx) -> (u64, GoroutineOrigin, Att
     (f.id, f.origin, AttemptSite::from(fiber::current_attempt()))
 }
 
-/// Go `ctx.Err()`: `context.Canceled` once the callback's token is cancelled (Go's `Err`
-/// never returns the cancel cause).
+/// `Canceled` once the callback's token is cancelled (the cancel cause is never returned).
 fn ctx_err(ctx: &CallbackCtx) -> Option<TraceError> {
     ctx.cancel
         .as_ref()
@@ -82,7 +80,7 @@ fn ctx_err(ctx: &CallbackCtx) -> Option<TraceError> {
         .map(|_| Arc::new(Error::Context(ContextError::Canceled)))
 }
 
-/// Go `fmt.Errorf("agent %q execution failed before completion", name)`.
+/// The error `agent "<name>" execution failed before completion`.
 fn failed_before_completion(name: &str) -> TraceError {
     Arc::new(Error::msg(format!(
         "agent {} execution failed before completion",
@@ -96,8 +94,8 @@ fn kind_of(r: Option<&SpanRef>) -> Option<SpanKind> {
 }
 
 impl TraceManager {
-    /// Go `popDelegatingAgentSpan(ctx, id)`: `Some(place of AGENT_COMPLETED)` when the new
-    /// activation retires an earlier one that delegated to a completed task.
+    /// `Some(place of AGENT_COMPLETED)` when the new activation retires an earlier one that
+    /// delegated to a completed task.
     pub(crate) fn pop_delegating_agent_span(
         &self,
         ctx: &CallbackCtx,
@@ -131,7 +129,7 @@ impl TraceManager {
                 st.touch_agent_activity_locked(p, now);
             }
             // As in push_agent_span, which runs in the same callback, the runs that started on
-            // this goroutine before are over only if it shows a node attempt.
+            // this fiber before are over only if it shows a node attempt.
             let since = if ended.is_some() && current_goroutine(ctx).2 != AttemptSite::None {
                 0
             } else {
@@ -149,7 +147,7 @@ impl TraceManager {
         None
     }
 
-    /// Go `popAgentSpan(ctx, id)`: the place of `AGENT_COMPLETED`.
+    /// The place of `AGENT_COMPLETED`.
     pub(crate) fn pop_agent_span(&self, ctx: &CallbackCtx, id: &Identity) -> RowSpan {
         let inv = self.invocation(ctx, id);
         let now = (self.now)();
@@ -190,8 +188,8 @@ impl TraceManager {
         span
     }
 
-    /// Go `endRestartedNodeRuns(ctx, id)` (attribution: only node attempts that the workflow's
-    /// scheduler started again are purged).
+    /// Purges node runs (attribution: only node attempts that the workflow's scheduler started
+    /// again are purged).
     pub(crate) fn end_restarted_node_runs(
         &self,
         ctx: &CallbackCtx,
@@ -243,8 +241,8 @@ impl TraceManager {
         purged
     }
 
-    /// Go `recordNodeCompletion(ctx, id, workflowName, path, branch, failed)` (attribution: only
-    /// a node agent the workflow's scheduler started is attributed).
+    /// Records a workflow node's completion (attribution: only a node agent the workflow's
+    /// scheduler started is attributed).
     pub(crate) fn record_node_completion(
         &self,
         ctx: &CallbackCtx,
@@ -316,8 +314,8 @@ impl TraceManager {
         }
     }
 
-    /// Go `popTaskAgentSpan(ctx, id, calls)`: `Some(place of AGENT_COMPLETED)` for a task-mode
-    /// activation that a `finish_task` response ends.
+    /// `Some(place of AGENT_COMPLETED)` for a task-mode activation that a `finish_task`
+    /// response ends.
     pub(crate) fn pop_task_agent_span(
         &self,
         ctx: &CallbackCtx,
@@ -377,7 +375,7 @@ impl TraceManager {
         Some(span)
     }
 
-    /// Go `noteTaskFinished(ctx, id, callID)`.
+    /// Notes that the task call `call_id` finished, on the agent's activation.
     pub(crate) fn note_task_finished(&self, ctx: &CallbackCtx, id: &Identity, call_id: &str) {
         if call_id.is_empty() {
             return;
@@ -402,7 +400,8 @@ impl TraceManager {
         }
     }
 
-    /// Go `completeResponse(ctx, id, author, branch, calls)`.
+    /// Completes the response of `author` on `branch`: clears the partial-event state, retires
+    /// the activations the response drained, and marks the response owner as responded.
     pub(crate) fn complete_response(
         &self,
         ctx: &CallbackCtx,
@@ -518,7 +517,7 @@ impl TraceManager {
         inv.retire_late_settled_locked(st);
     }
 
-    /// Go `recordError(ctx, id, key, err)`.
+    /// Records the unrecovered error `err` of the call `key` under the activation that made it.
     pub(crate) fn record_error(
         &self,
         ctx: &CallbackCtx,
@@ -591,7 +590,7 @@ impl TraceManager {
         );
     }
 
-    /// Go `clearError(ctx, id, key)`.
+    /// Clears the unrecovered error of the call `key` once its model call completed.
     pub(crate) fn clear_error(&self, ctx: &CallbackCtx, id: &Identity, key: &str) {
         let key = ctx.call_key(key);
         let inv = self.invocation(ctx, id);
@@ -601,8 +600,7 @@ impl TraceManager {
         }
     }
 
-    /// Go `popUnclosedAgentSpans(ctx, id)`: the `AGENT_ERROR` activations of the run's end and
-    /// the invocation's terminal error.
+    /// The `AGENT_ERROR` activations of the run's end and the invocation's terminal error.
     pub(crate) fn pop_unclosed_agent_spans(
         &self,
         ctx: &CallbackCtx,
@@ -667,8 +665,8 @@ impl TraceManager {
 
         let mut primary_err = primary_err;
         if primary_err.is_none() && !ctx.invocation_ended() {
-            // Go settles the runner root's subtree when AfterRun runs on the goroutine that
-            // started it (`currentGoroutineID()`).
+            // The runner root's subtree is settled when AfterRun runs on the fiber that started
+            // it.
             let goid = current_goroutine_id();
             if goid != 0 && st.agent_stack[1].lock().goroutine_id == goid {
                 inv.settle_ended_in_subtree_locked(st, 1, true, 0);
@@ -751,7 +749,7 @@ impl TraceManager {
         (popped, Some(primary_err))
     }
 
-    /// Go `popToolSpan(ctx, id, key, fromError)`: `(place, purged, closed_by_error)`.
+    /// The place of a tool call's end: `(place, purged, closed_by_error)`.
     pub(crate) fn pop_tool_span(
         &self,
         ctx: &CallbackCtx,
@@ -827,7 +825,8 @@ impl TraceManager {
 }
 
 impl InvocationTrace {
-    /// Go `reconcileConcurrentResponseOnPopLocked(i, since)`.
+    /// Settles the popped activation `i`'s subtree and counts it as a retired peer when a
+    /// concurrent peer of the same agent, path and branch exists.
     pub(crate) fn reconcile_concurrent_response_on_pop_locked(
         &self,
         st: &mut InvocationState,
@@ -903,7 +902,7 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `finishedTaskLocked(id, calls)`: the index of the activation the response ends.
+    /// The index of the activation the response ends.
     pub(crate) fn finished_task_locked(
         &self,
         st: &mut InvocationState,
@@ -929,7 +928,9 @@ impl InvocationTrace {
         found
     }
 
-    /// Go `retireAgentLocked(i, done, since)`.
+    /// Retires activation `i`: settles its ended subtree, attributes the failed activations and
+    /// the open spans they run under, and retires the unclosed descendant spans of its subtree
+    /// (not the failed ones, nor what runs under them).
     pub(crate) fn retire_agent_locked(
         &self,
         st: &mut InvocationState,
@@ -1063,7 +1064,8 @@ impl InvocationTrace {
         self.sync_open_agents_locked(st);
     }
 
-    /// Go `purgeActivationLocked(i, failures, now, ambient)`.
+    /// Purges the failed activations of the subtree of activation `i`, returning their
+    /// `AGENT_ERROR` places.
     pub(crate) fn purge_activation_locked(
         &self,
         st: &mut InvocationState,
@@ -1079,7 +1081,7 @@ impl InvocationTrace {
             let Some(err) = failures.get(&r.span_id) else {
                 continue;
             };
-            // Go's zero `lastActivity` (never touched) is the record's default here.
+            // A `last_activity` that was never touched is the record's default.
             let end = if r.last_activity == DateTime::<Utc>::default() {
                 now
             } else {
@@ -1131,7 +1133,8 @@ impl InvocationTrace {
         purged_spans
     }
 
-    /// Go `endToolRunsLocked(ctx, id, stopped, now, ambient, since)`.
+    /// Ends the tool-call runs of the activation of `ctx`, returning the `AGENT_ERROR` places
+    /// of the activations it purged.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn end_tool_runs_locked(
         &self,
@@ -1168,7 +1171,7 @@ impl InvocationTrace {
                 if r.parent_span_id != owner_span_id || !is_sub_node_path(&r.path, &owner_path) {
                     continue;
                 }
-                // Only a run on the tool call's own goroutine is known to be over with it.
+                // Only a run on the tool call's own fiber is known to be over with it.
                 r.run_done || r.activation.is_none() || r.goroutine_id == 0
             };
             self.settle_ended_in_subtree_locked(st, j, done, since);
@@ -1184,7 +1187,8 @@ impl InvocationTrace {
         purged
     }
 
-    /// Go `markToolRunsDoneLocked(call)` (attribution: no activation has a goroutine).
+    /// Marks the runs started after tool call `call` as done (attribution: no activation has a
+    /// fiber).
     pub(crate) fn mark_tool_runs_done_locked(&self, st: &mut InvocationState, call: &SpanRef) {
         let call_seq = call.lock().seq;
         let mut goid = 0;
@@ -1208,7 +1212,8 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `retireDrainedDescendantsLocked(matchAnc)`.
+    /// Retires the agent spans that drained, as selected by `match_anc`, with the open spans
+    /// they run under.
     pub(crate) fn retire_drained_descendants_locked(
         &self,
         st: &mut InvocationState,
@@ -1273,7 +1278,10 @@ impl InvocationTrace {
         self.sync_open_agents_locked(st);
     }
 
-    /// Go `selectResponseOwnerLocked(i, calls, wasPartial, partialSpanID, now)`.
+    /// Selects the activation that owns the response of activation `i`, given the response's
+    /// `calls` and the last partial event's state: `(index, matched_pending, absorbed)`, where
+    /// `absorbed` means the response was absorbed onto the parent and needs no further
+    /// handling.
     pub(crate) fn select_response_owner_locked(
         &self,
         st: &mut InvocationState,
@@ -1407,7 +1415,7 @@ impl InvocationTrace {
         (i, false, false)
     }
 
-    /// Go `settleEndedInSubtreeLocked(i, done, since)`.
+    /// Settles the activations of the subtree of `i` whose runs are known to be over.
     pub(crate) fn settle_ended_in_subtree_locked(
         &self,
         st: &mut InvocationState,
@@ -1440,7 +1448,7 @@ impl InvocationTrace {
         self.settle_finished_locked(st);
     }
 
-    /// Go `settleFinishedLocked`.
+    /// Settles the runs that finished and have no tool call or agent still launching them.
     pub(crate) fn settle_finished_locked(&self, st: &mut InvocationState) {
         for rec in &st.agent_stack[1..] {
             let run_done = rec.lock().run_done;
@@ -1450,7 +1458,7 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `retireLateSettledLocked` (a live trace returns at once, Go's first statement).
+    /// Retires the settled agent spans of a late trace (a live trace returns at once).
     pub(crate) fn retire_late_settled_locked(&self, st: &mut InvocationState) {
         if !st.is_late || st.agent_stack.len() <= 1 {
             return;
@@ -1537,8 +1545,8 @@ impl InvocationTrace {
 }
 
 impl InvocationState {
-    /// Go's loop adding the lineage of each non-collateral unrecovered error's activation to
-    /// `failed` (`retireAgentLocked`, `retireDrainedDescendantsLocked`).
+    /// Adds the lineage of each non-collateral unrecovered error's activation to `failed`
+    /// (`retire_agent_locked`, `retire_drained_descendants_locked`).
     fn extend_with_error_lineages(&self, failed: &mut HashSet<String>) {
         for e in self.unrecovered_errors.values() {
             if e.collateral {
@@ -1550,7 +1558,7 @@ impl InvocationState {
         }
     }
 
-    /// Go `inWorkflowNodeSubtreeLocked(rec)` (attribution).
+    /// Whether `rec` is a finished node agent of a workflow, or runs under one (attribution).
     pub(crate) fn in_workflow_node_subtree_locked(&self, rec: &SpanRef) -> bool {
         if !rec.lock().run_done {
             return false;
@@ -1576,7 +1584,7 @@ impl InvocationState {
         false
     }
 
-    /// Go `failuresLocked(i, stopped, over, openCalls)`: span ID → failure.
+    /// The failures of the subtree of `i`: span ID → failure.
     pub(crate) fn failures_locked(
         &self,
         i: usize,
@@ -1662,8 +1670,8 @@ impl InvocationState {
         failures
     }
 
-    /// Go `reportedOverLocked(i)`. Locks one record at a time: the child's [`JoinView`] is
-    /// read before its parent is locked (R10).
+    /// The span IDs of activations reported over. Locks one record at a time: the child's
+    /// [`JoinView`] is read before its parent is locked.
     pub(crate) fn reported_over_locked(&self, i: usize) -> HashSet<String> {
         let subtree = self.subtree_locked(i);
         let mut over = HashSet::from([self.agent_stack[i].lock().span_id.clone()]);
@@ -1705,9 +1713,9 @@ impl InvocationState {
         over
     }
 
-    /// Go `canSettleInSubtreeLocked(rootIdx, d, curGoid, since)` (attribution: with no
-    /// goroutine information every activation counts as over, Go `:3913`). Locks one record at
-    /// a time, as [`InvocationState::reported_over_locked`] (R10).
+    /// Whether the activation can be settled in the subtree of `root_idx` (attribution: with no
+    /// fiber information every activation counts as over). Locks one record at a time, as
+    /// [`InvocationState::reported_over_locked`].
     pub(crate) fn can_settle_in_subtree_locked(
         &self,
         root_idx: usize,
@@ -1750,7 +1758,7 @@ impl InvocationState {
         false
     }
 
-    /// Go `launcherOpenLocked(rec)`.
+    /// Whether an open tool call or launcher still runs `rec`'s activation.
     pub(crate) fn launcher_open_locked(&self, rec: &SpanRef) -> bool {
         let (rec_seq, rec_branch, rec_path) = {
             let r = rec.lock();
@@ -1816,7 +1824,8 @@ impl InvocationState {
         false
     }
 
-    /// Go `hasCanceledByStopUnderLocked(i, canceledByStop)`.
+    /// Whether any span in the subtree of `i` (or call under it) was canceled by a stop point,
+    /// per `canceled_by_stop`.
     pub(crate) fn has_canceled_by_stop_under_locked(
         &self,
         i: usize,
@@ -1842,12 +1851,12 @@ impl InvocationState {
 }
 
 impl SpanRecord {
-    /// Go `responded`.
+    /// Whether the activation responded or its context ended.
     pub(crate) fn responded(&self) -> bool {
         self.has_response || self.context_ended
     }
 
-    /// Go `settleEndedLocked`: reads `ended` once the run is known to be over.
+    /// Reads `ended` once the run is known to be over.
     pub(crate) fn settle_ended_locked(&mut self) {
         if self.ended.as_ref().is_some_and(|c| c.ended()) {
             self.context_ended = true;

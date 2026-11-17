@@ -13,24 +13,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! One invocation's spans, from ADK-Go `plugin/agentanalytics/trace_manager.go`:
-//! `invocationTrace` (its atomics and, behind `mu`, [`InvocationState`]), `recordedError`,
-//! `newInvocationTraceWithSpan`, the open-call / open-agent syncs, `rowSpan` / `rowTraceID` /
-//! `currentTraceID`, the agent tree (`agentEdge`, `rootAgentInput`, `walkAgentEdges`,
-//! `prepareRootAgentInput`, `applyEdgesLocked`, `noteRootAgentLocked`, `isLLMAgent`,
-//! `isBuiltInWorkflowAgent`, `agentTypeOf`, `agentChildren`, `topAgentFromMap`) and the tree
-//! queries (`isAncestorAgent`, `findAgent`, `findAgentForContext`, `parentFor`,
-//! `parentOutsideLocked`, `parentForRunLocked`, `ownerOf`, `withinBranch`, `withinPath`,
-//! `isSubNodePath`, `subtreeLocked`, `lineageLocked`, `activationOfLocked`,
-//! `openCallOwnersLocked`, `agentWithOpenCallLocked`, `newChild`, `lockLive`,
-//! `touchAgentActivityLocked`, `nextSeqLocked`, `sortedErrorKeysLocked`,
-//! `clearLastPartialLocked`, `clearLastPartialUnderLocked`, `markRespondedLocked`,
-//! `dropRetiredLateContextsLocked`, `savedIdentity`, `restoreEvicted`).
+//! One invocation's spans: [`InvocationTrace`] (its atomics and, behind `mu`,
+//! [`InvocationState`]), [`RecordedError`], the open-call / open-agent syncs, the row span and
+//! trace ID helpers (`row_span`, `row_trace_id`, `current_trace_id`), the agent tree
+//! ([`AgentEdge`], [`RootAgentInput`], `walk_agent_edges`, `prepare_root_agent_input`,
+//! `apply_edges_locked`, `note_root_agent_locked`, `is_llm_agent`, `is_built_in_workflow_agent`,
+//! `agent_type_of`, [`AgentChildren`], `top_agent_from_map`) and the tree queries
+//! (`is_ancestor_agent`, `find_agent`, `find_agent_for_context`, `parent_for`,
+//! `parent_outside_locked`, `parent_for_run_locked`, `owner_of`, `within_branch`,
+//! `within_path`, `is_sub_node_path`, `subtree_locked`, `lineage_locked`,
+//! `activation_of_locked`, `open_call_owners_locked`, `agent_with_open_call_locked`,
+//! `new_child`, `lock_live`, `touch_agent_activity_locked`, `next_seq_locked`,
+//! `sorted_error_keys_locked`, `clear_last_partial_locked`, `clear_last_partial_under_locked`,
+//! `mark_responded_locked`, `drop_retired_late_contexts_locked`, `saved_identity`,
+//! `restore_evicted`).
 //!
-//! Go's `invocationTrace` methods named `…Locked` take the locked [`InvocationState`]: those that
-//! change it or the atomics are `InvocationTrace` methods taking `st: &mut InvocationState`;
-//! read-only queries (which may still update span records) are `InvocationState` methods. Go's
-//! `int` indexes into `agentStack` are `usize`; Go's `-1` is `None`.
+//! Methods named `…_locked` take the locked [`InvocationState`]: those that change it or the
+//! atomics are `InvocationTrace` methods taking `st: &mut InvocationState`; read-only queries
+//! (which may still update span records) are `InvocationState` methods. Indexes into
+//! `agent_stack` are `usize`; "no such index" is `None`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -47,8 +48,8 @@ use super::manager::EvictedTrace;
 use super::span::{GoroutineOrigin, Latency, RowSpan, SpanKind, SpanRecord, SpanRef};
 use super::{AgentKey, CallbackCtx, Identity, TraceError, hex, new_span_id, new_trace_id};
 
-/// Go `recordedError`: an unrecovered error of an invocation and the span ID of the agent
-/// activation that was active when it was recorded.
+/// An unrecovered error of an invocation and the span ID of the agent activation that was
+/// active when it was recorded.
 #[derive(Debug, Clone)]
 pub(crate) struct RecordedError {
     pub(crate) err: TraceError,
@@ -60,7 +61,7 @@ pub(crate) struct RecordedError {
     pub(crate) collateral: bool,
 }
 
-/// Go `agentEdge`: a child-to-parent link in an agent sub-agent tree.
+/// A child-to-parent link in an agent sub-agent tree.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct AgentEdge {
     pub(crate) child: String,
@@ -68,8 +69,7 @@ pub(crate) struct AgentEdge {
     pub(crate) non_llm: bool,
 }
 
-/// Go `rootAgentInput`: the agent-tree metadata read before `mu` is taken (agent code never
-/// runs under a lock).
+/// The agent-tree metadata read before `mu` is taken (agent code never runs under a lock).
 #[derive(Clone, Default)]
 pub(crate) struct RootAgentInput {
     pub(crate) has_context_parents: bool,
@@ -84,7 +84,7 @@ pub(crate) struct RootAgentInput {
     pub(crate) remembered_edges: Vec<AgentEdge>,
 }
 
-/// Go `agentChildren`: the sub-agents configured on a running agent and its kind.
+/// The sub-agents configured on a running agent and its kind.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct AgentChildren {
     pub(crate) parent: String,
@@ -96,35 +96,35 @@ pub(crate) struct AgentChildren {
     pub(crate) names: Vec<String>,
 }
 
-/// Go `invocationTrace`: the spans of one invocation. The atomics are read without `mu`
-/// (eviction, pruning); everything else is [`InvocationState`] behind `mu`.
+/// The spans of one invocation. The atomics are read without `mu` (eviction, pruning);
+/// everything else is [`InvocationState`] behind `mu`.
 pub(crate) struct InvocationTrace {
-    /// Go `lastActive` (Unix nanoseconds).
+    /// When the invocation was last active (Unix nanoseconds).
     pub(crate) last_active: AtomicI64,
-    /// Go `openCalls`.
+    /// The number of open model and tool calls.
     pub(crate) open_calls: AtomicI64,
-    /// Go `openHandedOver`.
+    /// The number of open calls that AfterRun handed over.
     pub(crate) open_handed_over: AtomicI64,
-    /// Go `openAgents`.
+    /// Whether any agent span is open besides the invocation span.
     pub(crate) open_agents: AtomicBool,
-    /// Go `pendingSpans` (its own allocation, shared with `CompletedTrace::live_pending`).
+    /// The number of pending spans (its own allocation, shared with
+    /// `CompletedTrace::live_pending`).
     pub(crate) pending_spans: Arc<AtomicI64>,
-    /// Go `rootAgentAtomic` (`atomic.Value` of a string).
+    /// The root agent's name (readable without `mu`).
     pub(crate) root_agent_atomic: RwLock<String>,
-    /// Go `ancestryFromContextAtomic`.
+    /// Whether agent ancestry comes from the context's parent map.
     pub(crate) ancestry_from_context_atomic: AtomicBool,
-    /// Go `adoptedTraceID` (`CompareAndSwap(nil, ambient)` = set once).
+    /// The trace ID adopted from an ambient trace (set once).
     pub(crate) adopted_trace_id: OnceLock<String>,
-    /// Go `traceID`, `rootSpanID`, `rootParentSpanID`: read-only once published.
+    /// The trace ID, root span ID and root parent span ID: read-only once published.
     pub(crate) trace_id: String,
     pub(crate) root_span_id: String,
     pub(crate) root_parent_span_id: String,
-    /// Go `mu` and the fields it guards.
+    /// The mutable state, behind a mutex.
     pub(crate) mu: Mutex<InvocationState>,
 }
 
-/// The fields of Go's `invocationTrace` that `mu` guards (field docs are Go's,
-/// `trace_manager.go:443-548`).
+/// The fields of an [`InvocationTrace`] that its `mu` mutex guards.
 #[derive(Default)]
 pub(crate) struct InvocationState {
     pub(crate) root_agent_name: String,
@@ -138,7 +138,7 @@ pub(crate) struct InvocationState {
     pub(crate) parent_agent: HashMap<String, String>,
     pub(crate) sequential_parent: HashMap<String, String>,
     pub(crate) ancestry_from_context: bool,
-    /// Go `agentStack`: the invocation span, then the running agents in start order.
+    /// The invocation span, then the running agents in start order.
     pub(crate) agent_stack: Vec<SpanRef>,
     pub(crate) llm_spans: HashMap<String, SpanRef>,
     pub(crate) completed_models: HashMap<String, SpanRef>,
@@ -151,14 +151,13 @@ pub(crate) struct InvocationState {
     pub(crate) last_session_event_partial: bool,
     pub(crate) last_event_partial: bool,
     pub(crate) last_partial_span_id: String,
-    /// Go `partialLineage map[string]bool` (only `true` entries).
+    /// The span IDs of the partial-event lineage.
     pub(crate) partial_lineage: HashSet<String>,
 }
 
 impl InvocationTrace {
-    /// Go `newInvocationTraceWithSpan(sc, traceID, now)`: a trace whose `agent_stack` holds its
-    /// invocation span; `trace_id` falls back to a new ID; a valid `sc` gives the trace ID and
-    /// the invocation span's parent.
+    /// Creates a trace whose `agent_stack` holds its invocation span; `trace_id` falls back to a
+    /// new ID; a valid `sc` gives the trace ID and the invocation span's parent.
     pub(crate) fn new_with_span(
         sc: Option<SpanIds>,
         trace_id: &str,
@@ -177,7 +176,7 @@ impl InvocationTrace {
         };
         let mut root_parent_span_id = String::new();
         // Continue the caller's OpenTelemetry trace with an invocation span that is a child of
-        // the caller's span (Go's comment: only the trace ID and this parent follow OTel).
+        // the caller's span (only the trace ID and this parent follow OpenTelemetry).
         if let Some(sc) = sc.filter(SpanIds::is_valid) {
             trace_id = hex(&sc.trace_id);
             root.parent_span_id = hex(&sc.span_id);
@@ -203,27 +202,27 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `hasOpenCalls`: an in-flight model or tool call waits for its completion callback.
+    /// Whether an in-flight model or tool call waits for its completion callback.
     pub(crate) fn has_open_calls(&self) -> bool {
         self.open_calls.load(Ordering::SeqCst) > 0
     }
 
-    /// Go `hasOpenLateSpans`: a callback is starting a span, or a call or an activation is
-    /// open (atomics only; never takes `mu`).
+    /// Whether a callback is starting a span, or a call or an activation is open (atomics only;
+    /// never takes `mu`).
     pub(crate) fn has_open_late_spans(&self) -> bool {
         self.pending_spans.load(Ordering::SeqCst) > 0
             || self.has_open_calls()
             || self.open_agents.load(Ordering::SeqCst)
     }
 
-    /// Go `lockLive`: the locked state, or `None` (unlocked) once the run finished.
+    /// The locked state, or `None` (unlocked) once the run finished.
     pub(crate) fn lock_live(&self) -> Option<MutexGuard<'_, InvocationState>> {
         let st = self.mu.lock();
         if st.finished { None } else { Some(st) }
     }
 
-    /// Go `currentTraceID`: the trace ID of rows of callbacks that run in no span (the
-    /// adopted one, else the invocation's own). Needs no lock.
+    /// The trace ID of rows of callbacks that run in no span (the adopted one, else the
+    /// invocation's own). Needs no lock.
     pub(crate) fn current_trace_id(&self) -> String {
         match self.adopted_trace_id.get() {
             Some(adopted) => adopted.clone(),
@@ -231,8 +230,8 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `rowTraceID(ambient)`: the ambient trace wins; the first one is adopted unless the
-    /// caller's span already gave the invocation its trace.
+    /// The trace ID for a row under `ambient`: the ambient trace wins; the first one is adopted
+    /// unless the caller's span already gave the invocation its trace.
     pub(crate) fn row_trace_id(&self, ambient: &str) -> String {
         if ambient.is_empty() {
             return self.current_trace_id();
@@ -243,7 +242,8 @@ impl InvocationTrace {
         ambient.to_string()
     }
 
-    /// Go `rowSpan(rec, latency, ambient)` (`timestamp` left `None`).
+    /// The row for span record `rec` with `latency` and `ambient` trace (`timestamp` left
+    /// `None`).
     pub(crate) fn row_span(
         &self,
         st: &InvocationState,
@@ -261,7 +261,7 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `savedIdentity`.
+    /// The identity saved when the invocation is evicted or completed.
     pub(crate) fn saved_identity(&self) -> EvictedTrace {
         EvictedTrace {
             trace_id: self.current_trace_id(),
@@ -272,10 +272,10 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `restoreEvicted(ev)`: restores the root span identity and trace metadata saved when
-    /// the invocation was evicted or completed. Go calls it only on a trace that is not
-    /// published yet, and it rewrites the read-only-once-published `trace_id` /
-    /// `root_span_id` / `root_parent_span_id`, so it takes the unshared trace (`&mut self`).
+    /// Restores the root span identity and trace metadata saved when the invocation was evicted
+    /// or completed. It is called only on a trace that is not published yet, and it rewrites
+    /// the read-only-once-published `trace_id` / `root_span_id` / `root_parent_span_id`, so it
+    /// takes the unshared trace (`&mut self`).
     pub(crate) fn restore_evicted(&mut self, ev: &EvictedTrace) {
         if !ev.trace_id.is_empty() {
             self.trace_id = ev.trace_id.clone();
@@ -299,8 +299,8 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `syncOpenCallsLocked`: publishes the number of open model and tool calls, and of
-    /// those AfterRun handed over, for the readers that do not hold `mu`.
+    /// Publishes the number of open model and tool calls, and of those AfterRun handed over,
+    /// for the readers that do not hold `mu`.
     pub(crate) fn sync_open_calls_locked(&self, st: &InvocationState) {
         let open = st.llm_spans.len() + st.tool_spans.len();
         self.open_calls.store(open as i64, Ordering::SeqCst);
@@ -314,13 +314,13 @@ impl InvocationTrace {
             .store(handed_over as i64, Ordering::SeqCst);
     }
 
-    /// Go `syncOpenAgentsLocked`.
+    /// Publishes whether any agent span is open besides the invocation span.
     pub(crate) fn sync_open_agents_locked(&self, st: &InvocationState) {
         self.open_agents
             .store(st.agent_stack.len() > 1, Ordering::SeqCst);
     }
 
-    /// Go `setRootAgentLocked(name)`.
+    /// Sets the root agent's name (the atomic copy only when `name` is non-empty).
     pub(crate) fn set_root_agent_locked(&self, st: &mut InvocationState, name: &str) {
         st.root_agent_name = name.to_string();
         if !name.is_empty() {
@@ -328,7 +328,7 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `applyEdgesLocked(edges)`.
+    /// Records each edge's child-to-parent link (and, for non-LLM parents, the sequential link).
     pub(crate) fn apply_edges_locked(&self, st: &mut InvocationState, edges: &[AgentEdge]) {
         for e in edges {
             st.parent_agent.insert(e.child.clone(), e.parent.clone());
@@ -339,9 +339,9 @@ impl InvocationTrace {
         }
     }
 
-    /// Go `noteRootAgentLocked(id, in, useBranchFallback)`: records the invocation's root
-    /// agent and agent hierarchy from `input`, collected before `mu` was taken. The context's
-    /// parent map is authoritative even when empty; remembered trees count only without one.
+    /// Records the invocation's root agent and agent hierarchy from `input`, collected before
+    /// `mu` was taken. The context's parent map is authoritative even when empty; remembered
+    /// trees count only without one.
     pub(crate) fn note_root_agent_locked(
         &self,
         st: &mut InvocationState,
@@ -413,8 +413,7 @@ impl InvocationTrace {
 }
 
 impl InvocationState {
-    /// Go `isAncestorAgent(ancestor, child)`: `ancestor` is a configured ancestor of `child`
-    /// in `parent_agent`.
+    /// Whether `ancestor` is a configured ancestor of `child` in `parent_agent`.
     pub(crate) fn is_ancestor_agent(&self, ancestor: &str, child: &str) -> bool {
         if ancestor.is_empty() || child.is_empty() {
             return false;
@@ -434,9 +433,8 @@ impl InvocationState {
         false
     }
 
-    /// Go `findAgent(path, name, branch)`: the index of the most recent open span of `name`
-    /// on `path` and `branch`, falling back to `branch` and `name`, or `name` alone; never the
-    /// invocation span.
+    /// The index of the most recent open span of `name` on `path` and `branch`, falling back to
+    /// `branch` and `name`, or `name` alone; never the invocation span.
     pub(crate) fn find_agent(&self, path: &str, name: &str, branch: &str) -> Option<usize> {
         let mut branch_match = None;
         let mut name_match = None;
@@ -464,9 +462,8 @@ impl InvocationState {
         branch_match.or(name_match)
     }
 
-    /// Go `findAgentForContext(ctx, path, name, branch)` with `activation` =
-    /// `ctx.activation_key()`: the open span of `name` on `branch` that the activation
-    /// started, else as [`find_agent`](Self::find_agent).
+    /// The open span of `name` on `branch` that the context's `activation` (its
+    /// `activation_key()`) started, else as [`find_agent`](Self::find_agent).
     pub(crate) fn find_agent_for_context(
         &self,
         activation: Option<ActivationId>,
@@ -489,14 +486,13 @@ impl InvocationState {
         self.find_agent(path, name, branch)
     }
 
-    /// Go `parentFor(id)`: the span `id`'s activation runs under (the invocation span at
-    /// worst).
+    /// The span `id`'s activation runs under (the invocation span at worst).
     pub(crate) fn parent_for(&self, id: &Identity) -> SpanRef {
         self.parent_in(&self.agent_stack, id)
     }
 
-    /// Go `parentFor` over `stack` (Go's `parentOutsideLocked` swaps `agentStack` for a copy
-    /// without the excluded spans; this takes the copy instead).
+    /// [`parent_for`](Self::parent_for) over `stack`, which may be a copy of `agent_stack`
+    /// without some excluded spans.
     fn parent_in(&self, stack: &[SpanRef], id: &Identity) -> SpanRef {
         let mut top_candidate: Option<SpanRef> = None;
         for rec_ref in stack.iter().skip(1).rev() {
@@ -535,8 +531,8 @@ impl InvocationState {
         stack.first().cloned().unwrap_or_default()
     }
 
-    /// Go `parentOutsideLocked(id, exclude)`: the span an agent starting with `id` would run
-    /// under if the spans in `exclude` had ended.
+    /// The span an agent starting with `id` would run under if the spans in `exclude` had
+    /// ended.
     pub(crate) fn parent_outside_locked(
         &self,
         id: &Identity,
@@ -551,9 +547,9 @@ impl InvocationState {
         self.parent_in(&stack, id)
     }
 
-    /// Go `parentForRunLocked(id, goid, origin)` (attribution: with `goid == 0` it is
-    /// `parent_for`): leaves out the open activations of `id`'s agent, branch and node path
-    /// that the workflow scheduler started on other goroutines, with their subtrees.
+    /// Like `parent_for` (attribution: with `goid == 0` it is `parent_for`) but leaves out the
+    /// open activations of `id`'s agent, branch and node path that the workflow scheduler
+    /// started on other fibers, with their subtrees.
     pub(crate) fn parent_for_run_locked(
         &self,
         id: &Identity,
@@ -594,8 +590,8 @@ impl InvocationState {
         }
     }
 
-    /// Go `ownerOf(ctx, id)`: the span the model and tool calls of `id` run under — the
-    /// agent's own span (preferring the activation's), else the span it would run under.
+    /// The span the model and tool calls of `id` run under — the agent's own span (preferring
+    /// the activation's), else the span it would run under.
     pub(crate) fn owner_of(&self, activation: Option<ActivationId>, id: &Identity) -> SpanRef {
         match self.find_agent_for_context(activation, &id.path, &id.agent_name, &id.branch) {
             Some(i) => self.agent_stack[i].clone(),
@@ -603,7 +599,7 @@ impl InvocationState {
         }
     }
 
-    /// Go `newChild(parent, kind, now)`: a new, untracked span under `parent`.
+    /// A new, untracked span of `kind` under `parent`.
     pub(crate) fn new_child(
         &self,
         parent: &SpanRef,
@@ -625,9 +621,9 @@ impl InvocationState {
         })
     }
 
-    /// Go `touchAgentActivityLocked(rec, now)`: moves `last_activity` of `rec` and the agent
-    /// activations above it (up to the first non-agent span) forward to `now`. Locks each
-    /// record itself: call it with no guard of the chain alive.
+    /// Moves `last_activity` of `rec` and the agent activations above it (up to the first
+    /// non-agent span) forward to `now`. Locks each record itself: call it with no guard of the
+    /// chain alive.
     pub(crate) fn touch_agent_activity_locked(&self, rec: &SpanRef, now: DateTime<Utc>) {
         let mut cur = Some(rec.clone());
         while let Some(r) = cur {
@@ -642,13 +638,13 @@ impl InvocationState {
         }
     }
 
-    /// Go `nextSeqLocked`.
+    /// The next error sequence number.
     pub(crate) fn next_seq_locked(&mut self) -> u64 {
         self.last_seq += 1;
         self.last_seq
     }
 
-    /// Go `sortedErrorKeysLocked`: the keys of `unrecovered_errors` by (bare key, seq, key).
+    /// The keys of `unrecovered_errors` by (bare key, seq, key).
     pub(crate) fn sorted_error_keys_locked(&self) -> Vec<String> {
         let mut keys: Vec<String> = self.unrecovered_errors.keys().cloned().collect();
         keys.sort_by(|a, b| {
@@ -661,7 +657,7 @@ impl InvocationState {
         keys
     }
 
-    /// Go `clearLastPartialLocked`: the caller read past the last partial event.
+    /// The caller read past the last partial event.
     pub(crate) fn clear_last_partial_locked(&mut self) {
         self.last_session_event_partial = false;
         self.last_event_partial = false;
@@ -669,8 +665,8 @@ impl InvocationState {
         self.partial_lineage.clear();
     }
 
-    /// Go `clearLastPartialUnderLocked(rec)`: clears `last_event_partial` when work starts
-    /// in `rec` under the last partial event's author, or after the author ended.
+    /// Clears `last_event_partial` when work starts in `rec` under the last partial event's
+    /// author, or after the author ended.
     pub(crate) fn clear_last_partial_under_locked(&mut self, rec: &SpanRef) {
         if self.last_partial_span_id.is_empty() {
             return;
@@ -690,7 +686,7 @@ impl InvocationState {
         }
     }
 
-    /// Go `markRespondedLocked(spans)`.
+    /// Marks the open agent spans in `spans` as having responded.
     pub(crate) fn mark_responded_locked(&self, spans: &HashSet<String>) {
         for rec in self.agent_stack.iter().skip(1) {
             let mut rec = rec.lock();
@@ -700,7 +696,7 @@ impl InvocationState {
         }
     }
 
-    /// Go `subtreeLocked(i)`: the span IDs of `agent_stack[i]` and the open spans under it.
+    /// The span IDs of `agent_stack[i]` and the open spans under it.
     pub(crate) fn subtree_locked(&self, i: usize) -> HashSet<String> {
         let mut subtree = HashSet::from([self.agent_stack[i].lock().span_id.clone()]);
         for rec_ref in &self.agent_stack[i + 1..] {
@@ -723,8 +719,8 @@ impl InvocationState {
         subtree
     }
 
-    /// Go `lineageLocked(i)`: the span IDs of `agent_stack[i]` and of the open agent spans it
-    /// runs under; empty if `i` is not an agent span index.
+    /// The span IDs of `agent_stack[i]` and of the open agent spans it runs under; empty if `i`
+    /// is not an agent span index.
     pub(crate) fn lineage_locked(&self, i: usize) -> HashSet<String> {
         let mut lineage = HashSet::new();
         if i == 0 || i >= self.agent_stack.len() {
@@ -748,7 +744,7 @@ impl InvocationState {
         lineage
     }
 
-    /// Go `activationOfLocked(e)`: the index of the open activation `e` is attributed to.
+    /// The index of the open activation `e` is attributed to.
     pub(crate) fn activation_of_locked(&self, e: &RecordedError) -> Option<usize> {
         if e.span_id.is_empty() {
             return None;
@@ -758,8 +754,8 @@ impl InvocationState {
             .find(|&i| self.agent_stack[i].lock().span_id == e.span_id)
     }
 
-    /// Go `openCallOwnersLocked(ignore)` (`ignore` may be nil): the parent span IDs of the
-    /// open calls, without streamed model calls.
+    /// The parent span IDs of the open calls, without streamed model calls (`ignore` may be
+    /// `None`).
     pub(crate) fn open_call_owners_locked(
         &self,
         ignore: Option<&dyn Fn(&SpanRecord) -> bool>,
@@ -780,8 +776,7 @@ impl InvocationState {
         owners
     }
 
-    /// Go `agentWithOpenCallLocked(ignore)`: the most recent open agent span an open call
-    /// runs under.
+    /// The most recent open agent span an open call runs under.
     pub(crate) fn agent_with_open_call_locked(
         &self,
         ignore: Option<&dyn Fn(&SpanRecord) -> bool>,
@@ -794,9 +789,8 @@ impl InvocationState {
 
     // `SpanRef` hashes by address, never by the record behind its lock.
     #[allow(clippy::mutable_key_type)]
-    /// Go `dropRetiredLateContextsLocked(retired...)`: drops the callback contexts of agent
-    /// spans retired from a late trace, and the `parent` of those no open span or call still
-    /// reaches through its parent chain.
+    /// Drops the callback contexts of agent spans retired from a late trace, and the `parent` of
+    /// those no open span or call still reaches through its parent chain.
     pub(crate) fn drop_retired_late_contexts_locked(&self, retired: &[SpanRef]) {
         for r in retired {
             let mut r = r.lock();
@@ -836,8 +830,7 @@ impl InvocationState {
     }
 }
 
-/// Go `walkAgentEdges(root)`: the child-to-parent links of `root`'s sub-agent tree (each
-/// name visited once).
+/// The child-to-parent links of `root`'s sub-agent tree (each name visited once).
 pub(crate) fn walk_agent_edges(root: Option<&Arc<dyn Agent>>) -> Vec<AgentEdge> {
     fn walk(a: &Arc<dyn Agent>, visited: &mut HashSet<String>, edges: &mut Vec<AgentEdge>) {
         let parent_name = a.name();
@@ -864,10 +857,9 @@ pub(crate) fn walk_agent_edges(root: Option<&Arc<dyn Agent>>) -> Vec<AgentEdge> 
     edges
 }
 
-/// The entries (child name, parent) of a [`ParentMap`], Go's `map[string]agent.Agent`: gadk's
-/// map exposes lookups and its root only, and it is built by walking the root's sub-agents
-/// (names unique, one parent each), so the same walk lists its entries (in tree order where
-/// Go's map order is random).
+/// The entries (child name, parent) of a [`ParentMap`]: the map exposes lookups and its root
+/// only, and it is built by walking the root's sub-agents (names unique, one parent each), so
+/// the same walk lists its entries, in tree order.
 pub(crate) fn parent_map_entries(parents: &ParentMap) -> Vec<(String, Arc<dyn Agent>)> {
     fn walk(
         cur: &Arc<dyn Agent>,
@@ -889,9 +881,8 @@ pub(crate) fn parent_map_entries(parents: &ParentMap) -> Vec<(String, Arc<dyn Ag
     out
 }
 
-/// Go `prepareRootAgentInput(ctx, inv, id, runner, rememberedRoot)`: the agent-tree metadata
-/// of the context's parent map, the runner and the remembered root, read before `mu` (agent
-/// code never runs under a lock).
+/// The agent-tree metadata of the context's parent map, the runner and the remembered root,
+/// read before `mu` (agent code never runs under a lock).
 pub(crate) fn prepare_root_agent_input(
     ctx: &CallbackCtx,
     inv: &InvocationTrace,
@@ -935,12 +926,12 @@ pub(crate) fn prepare_root_agent_input(
     input
 }
 
-/// Go `isLLMAgent(a)`: `gadk_engine::llm::llm_agent_config(a).is_some()` (R1(c)).
+/// Whether `a` is an LLM agent (`gadk_engine::llm::llm_agent_config(a).is_some()`).
 pub(crate) fn is_llm_agent(a: &dyn Agent) -> bool {
     llm_agent_config(a).is_some()
 }
 
-/// Go `isBuiltInWorkflowAgent(a)`: Parallel, Sequential, Loop or Workflow agent.
+/// Whether `a` is a Parallel, Sequential, Loop or Workflow agent.
 pub(crate) fn is_built_in_workflow_agent(a: &dyn Agent) -> bool {
     matches!(
         agent_type_of(a).as_str(),
@@ -948,13 +939,13 @@ pub(crate) fn is_built_in_workflow_agent(a: &dyn Agent) -> bool {
     )
 }
 
-/// Go `agentTypeOf(a)`: the agent's `agent_state().agent_type` name (`AgentType::as_str`).
+/// The agent's type name (`agent_state().agent_type`, via `AgentType::as_str`).
 pub(crate) fn agent_type_of(a: &dyn Agent) -> String {
     a.agent_state().agent_type.as_str().to_string()
 }
 
-/// Go `topAgentFromMap(start, agentName, parents)`: walks `parents` upward from `start` (or
-/// the parent of `agent_name`, or any parent) to the configured root of the runner's tree.
+/// Walks `parents` upward from `start` (or the parent of `agent_name`, or any parent) to the
+/// configured root of the runner's tree.
 pub(crate) fn top_agent_from_map(
     start: Option<&Arc<dyn Agent>>,
     agent_name: &str,
@@ -980,8 +971,7 @@ pub(crate) fn top_agent_from_map(
     cur
 }
 
-/// Go `withinBranch(branch, ancestor)`: `branch` is `ancestor` or one of its descendants
-/// (`"parent.parallel.sub"`).
+/// Whether `branch` is `ancestor` or one of its descendants (`"parent.parallel.sub"`).
 pub(crate) fn within_branch(branch: &str, ancestor: &str) -> bool {
     ancestor.is_empty()
         || branch == ancestor
@@ -990,8 +980,8 @@ pub(crate) fn within_branch(branch: &str, ancestor: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('.'))
 }
 
-/// Go `withinPath(path, ancestor, sameAgent)`: `path` runs inside the node activation
-/// `ancestor` (an activation of the same agent on the same path runs beside it).
+/// Whether `path` runs inside the node activation `ancestor` (an activation of the same agent
+/// on the same path runs beside it).
 pub(crate) fn within_path(path: &str, ancestor: &str, same_agent: bool) -> bool {
     if path == ancestor {
         return !same_agent;
@@ -1003,7 +993,7 @@ pub(crate) fn within_path(path: &str, ancestor: &str, same_agent: bool) -> bool 
         .is_some_and(|rest| rest.starts_with('/'))
 }
 
-/// Go `isSubNodePath(path, owner)`.
+/// Whether `path` is below the node path `owner` (any non-empty path when `owner` is empty).
 pub(crate) fn is_sub_node_path(path: &str, owner: &str) -> bool {
     if owner.is_empty() {
         return !path.is_empty();
@@ -1012,17 +1002,17 @@ pub(crate) fn is_sub_node_path(path: &str, owner: &str) -> bool {
         .is_some_and(|rest| rest.starts_with('/'))
 }
 
-/// Go `a == b` on `agent.Agent` interfaces.
+/// Whether `a` and `b` are the same agent (pointer identity).
 pub(crate) fn same_agent(a: &Arc<dyn Agent>, b: &Arc<dyn Agent>) -> bool {
     AgentKey::of(a) == AgentKey::of(b)
 }
 
-/// Go `cmp.Or` over strings: the first non-empty one, or "".
+/// The first non-empty string, or "".
 fn first_non_empty<'a>(values: &[&'a str]) -> &'a str {
     values.iter().copied().find(|v| !v.is_empty()).unwrap_or("")
 }
 
-/// Go `t.UnixNano()` (saturating outside chrono's nanosecond range).
+/// `t` in Unix nanoseconds (saturating outside chrono's nanosecond range).
 pub(crate) fn unix_nanos(t: DateTime<Utc>) -> i64 {
     t.timestamp_nanos_opt().unwrap_or(i64::MAX)
 }

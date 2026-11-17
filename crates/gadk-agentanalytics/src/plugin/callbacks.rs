@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The plugin callbacks of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin.go`
-//! (`onUserMessage`, `beforeRun`, `afterRun`, `logAgentErrors`, `logPurgedAgents`, `onEvent`,
-//! `nodeCompletion`, `hasTaskCompletedResponse`, `functionResponseCalls`, `beforeAgent`,
-//! `afterAgent`, `beforeModel`, `afterModel`, `hasGeneratedContent`, `onModelError`,
-//! `beforeTool`, `isToolConfirmationOutcome`, `afterTool`, `onToolError`, `logToolError`,
-//! `toolName`, `toolContent`) and their wiring into a `gadk_agent::PluginConfig`.
+//! The plugin callbacks (`on_user_message`, `before_run`, `after_run`, `log_agent_errors`,
+//! `log_purged_agents`, `on_event`, `node_completion`, `has_task_completed_response`,
+//! `function_response_calls`, `before_agent`, `after_agent`, `before_model`, `after_model`,
+//! `has_generated_content`, `on_model_error`, `before_tool`, `is_tool_confirmation_outcome`,
+//! `after_tool`, `on_tool_error`, `log_tool_error`, `tool_name`, `tool_content`) and their wiring
+//! into a `gadk_agent::PluginConfig`.
 //!
 //! Each gadk callback (async) clones the `Arc<AnalyticsPlugin>`, builds a [`CallbackCtx`], runs
 //! the synchronous body below — all trace-manager work and row building, under panic recovery
@@ -62,14 +62,14 @@ use crate::trace::{
     WORKFLOW_NODE_FAILED_OUTCOME, WORKFLOW_NODE_OUTCOME_KEY, llm_key, tool_key,
 };
 
-/// Go `finishTaskToolName`.
+/// The name of the tool that finishes a task.
 pub(crate) const FINISH_TASK_TOOL_NAME: &str = "finish_task";
 
-/// Go `legacyEventType`, the event type `onEvent`'s recovery reports.
+/// The event type `on_event`'s recovery reports.
 const LEGACY_EVENT_TYPE: &str = super::LEGACY_EVENT_TYPE;
 
-/// The `PluginConfig` of an enabled plugin (Go's `baseplugin.Config` literal): the 12
-/// callbacks over `plugin`, `close`, and `state` as the typed state slot.
+/// The `PluginConfig` of an enabled plugin: the 12 callbacks over `plugin`, `close`, and `state`
+/// as the typed state slot.
 pub(crate) fn plugin_config(
     plugin: &Arc<AnalyticsPlugin>,
     state: Arc<PluginState>,
@@ -82,8 +82,8 @@ pub(crate) fn plugin_config(
     }
 }
 
-/// The 12 callbacks over `plugin` under `name`, without close or state (Go's test plugins
-/// `newTraceOnlyPlugin` / `newQueuedRowsPlugin` register the same callbacks).
+/// The 12 callbacks over `plugin` under `name`, without close or state (test plugins register
+/// the same callbacks).
 ///
 /// Each callback builds its [`CallbackCtx`] and runs the synchronous body right away, before
 /// the returned future is awaited, so all trace-manager work and row building is done (and
@@ -108,7 +108,7 @@ pub(crate) fn callbacks_config(name: &str, plugin: &Arc<AnalyticsPlugin>) -> Plu
     let after_run: AfterRunCallback = Arc::new(move |ctx: InvocationContext| {
         let cctx = CallbackCtx::from_invocation(&ctx);
         p.after_run(&cctx);
-        // Go's `afterRun` ends with `flushRunEnd`, inside its recovery.
+        // After-run ends with the flush of the run's rows, inside its recovery.
         let processor = p.processor.clone().filter(|_| p.config.flush_on_run_end());
         async move {
             if let Some(processor) = processor {
@@ -192,7 +192,7 @@ pub(crate) fn callbacks_config(name: &str, plugin: &Arc<AnalyticsPlugin>) -> Plu
         after_run_callback: Some(after_run),
         before_agent_callback: Some(before_agent),
         after_agent_callback: Some(after_agent),
-        // Go's agentanalytics plugin registers no OnAgentErrorCallback.
+        // The plugin registers no on-agent-error callback.
         on_agent_error_callback: None,
         before_model_callback: Some(before_model),
         after_model_callback: Some(after_model),
@@ -206,25 +206,25 @@ pub(crate) fn callbacks_config(name: &str, plugin: &Arc<AnalyticsPlugin>) -> Plu
 }
 
 impl AnalyticsPlugin {
-    /// Go `defer p.recoverCallback(eventType)` around `f`.
+    /// Runs `f` under panic recovery for `event_type`.
     ///
-    // Divergence (ledger 7b-3a): Go's `onUserMessage`, `beforeRun` and `beforeModel` have no
-    // recovery of their own (only their `logEvent` rows do), so a panic outside a row there
-    // (e.g. in the user-message signal rows) would end Go's run; gadk recovers it too, as a
-    // dropped row of the callback's event type, so it never reaches the agent run (R7).
+    // The user-message, before-run and before-model callbacks have no recovery of their own
+    // (only their rows do), so a panic outside a row there (e.g. in the user-message signal
+    // rows) is recovered here too, as a dropped row of the callback's event type, so it never
+    // reaches the agent run.
     pub(crate) fn guard(&self, event_type: &str, f: impl FnOnce()) {
         if let Err(panic) = catch_unwind(AssertUnwindSafe(f)) {
             self.recover_callback(event_type, panic.as_ref());
         }
     }
 
-    /// The trace manager; Go's callbacks dereference `p.traces`, so a plugin without one
-    /// (Go's nil `traces`, a panic recovered by the callback) writes nothing.
+    /// The trace manager; a plugin without one (a test plugin, a panic recovered by the
+    /// callback) writes nothing.
     fn tm(&self) -> Option<Arc<TraceManager>> {
         self.traces.clone()
     }
 
-    /// Go `onUserMessage(ctx, msg)`.
+    /// The user-message callback.
     pub(crate) fn on_user_message(&self, ctx: &CallbackCtx, msg: &Content) {
         let Some(tm) = self.tm() else { return };
         let id = identity_of(ctx);
@@ -246,7 +246,7 @@ impl AnalyticsPlugin {
         self.emit_user_message_signal_events(ctx, &id, msg, &span);
     }
 
-    /// Go `beforeRun(ctx)`.
+    /// The before-run callback.
     pub(crate) fn before_run(&self, ctx: &CallbackCtx) {
         let Some(tm) = self.tm() else { return };
         let id = identity_of(ctx);
@@ -260,7 +260,7 @@ impl AnalyticsPlugin {
         );
     }
 
-    /// Go `afterRun(ctx)` without its final `flushRunEnd` (the callback awaits it).
+    /// The after-run callback without its final flush (the callback awaits it).
     pub(crate) fn after_run(&self, ctx: &CallbackCtx) {
         self.guard(EVENT_INVOCATION_COMPLETED, || {
             let Some(tm) = self.tm() else { return };
@@ -268,8 +268,8 @@ impl AnalyticsPlugin {
             let (unclosed, mut unrec_err) = tm.pop_unclosed_agent_spans(ctx, &id);
             if unrec_err.is_none() && ctx.adk.is_some() {
                 // A canceled invocation failed even when no span is left open, for example
-                // when canceled before any agent started. Go reads `ctx.Err()`, which is
-                // `context.Canceled` whatever the cause.
+                // when canceled before any agent started. The context's error is `Canceled`
+                // whatever the cause.
                 unrec_err = ctx
                     .err()
                     .map(|_| Arc::new(Error::Context(ContextError::Canceled)));
@@ -302,7 +302,8 @@ impl AnalyticsPlugin {
         });
     }
 
-    /// Go `logAgentErrors(ctx, id, unclosed, err)`.
+    /// Logs the `AGENT_ERROR` rows of the unclosed agent spans of the run's end, with the
+    /// invocation's terminal error `err`.
     pub(crate) fn log_agent_errors(
         &self,
         ctx: &CallbackCtx,
@@ -335,7 +336,7 @@ impl AnalyticsPlugin {
         }
     }
 
-    /// Go `logPurgedAgents(ctx, id, purged)`.
+    /// Logs the `AGENT_ERROR` rows of the purged agent spans.
     pub(crate) fn log_purged_agents(
         &self,
         ctx: &CallbackCtx,
@@ -345,7 +346,7 @@ impl AnalyticsPlugin {
         self.log_agent_errors(ctx, id, purged, None);
     }
 
-    /// Go `onEvent(ctx, ev)`.
+    /// The event callback.
     pub(crate) fn on_event(&self, ctx: &CallbackCtx, ev: &Event) {
         self.guard(LEGACY_EVENT_TYPE, || {
             let Some(tm) = self.tm() else { return };
@@ -399,7 +400,7 @@ impl AnalyticsPlugin {
         });
     }
 
-    /// Go `beforeAgent(ctx)`.
+    /// The before-agent callback.
     pub(crate) fn before_agent(&self, ctx: &CallbackCtx) {
         self.guard(EVENT_AGENT_STARTING, || {
             let Some(tm) = self.tm() else { return };
@@ -425,7 +426,7 @@ impl AnalyticsPlugin {
                 Some(&mut || span.clone()),
                 Some(&mut |d: &mut EventData| {
                     // The agent is looked up by name in the tree of the agent that the runner
-                    // runs (Go: the callback context's Agent() is nil).
+                    // runs (the callback context has no agent of its own).
                     let (content, attrs) = match tm.agent_named(ctx, &id) {
                         Some(a) => agent_starting_data(a.as_ref()),
                         None => (None, Map::new()),
@@ -437,7 +438,7 @@ impl AnalyticsPlugin {
         });
     }
 
-    /// Go `afterAgent(ctx)`.
+    /// The after-agent callback.
     pub(crate) fn after_agent(&self, ctx: &CallbackCtx) {
         self.guard(EVENT_AGENT_COMPLETED, || {
             let Some(tm) = self.tm() else { return };
@@ -457,7 +458,7 @@ impl AnalyticsPlugin {
         });
     }
 
-    /// Go `beforeModel(ctx, req)`.
+    /// The before-model callback.
     pub(crate) fn before_model(&self, ctx: &CallbackCtx, req: &LlmRequest) {
         let Some(tm) = self.tm() else { return };
         let id = identity_of(ctx);
@@ -473,7 +474,7 @@ impl AnalyticsPlugin {
         );
     }
 
-    /// Go `afterModel(ctx, res, err)`.
+    /// The after-model callback.
     pub(crate) fn after_model(
         &self,
         ctx: &CallbackCtx,
@@ -522,7 +523,7 @@ impl AnalyticsPlugin {
         });
     }
 
-    /// Go `onModelError(ctx, req, err)`.
+    /// The model-error callback.
     pub(crate) fn on_model_error(&self, ctx: &CallbackCtx, req: &LlmRequest, err: &ModelError) {
         self.guard(EVENT_LLM_ERROR, || {
             let Some(tm) = self.tm() else { return };
@@ -545,7 +546,7 @@ impl AnalyticsPlugin {
         });
     }
 
-    /// Go `beforeTool(ctx, t, args)`.
+    /// The before-tool callback.
     pub(crate) fn before_tool(
         &self,
         ctx: &CallbackCtx,
@@ -579,7 +580,7 @@ impl AnalyticsPlugin {
         });
     }
 
-    /// Go `afterTool(ctx, t, args, result, err)`.
+    /// The after-tool callback.
     pub(crate) fn after_tool(
         &self,
         ctx: &CallbackCtx,
@@ -642,9 +643,8 @@ impl AnalyticsPlugin {
                 Some(&mut |d: &mut EventData| {
                     let origin = self.resolve_tool_origin(ctx, &id, t, args);
                     let mut content = tool_content(&name, "result", &result, origin);
-                    // Divergence (ledger 1b): a tool's empty result map is Go's nil result
-                    // (Go 1ced38ba, #2281: transfer_to_agent and exit_loop return nil), which
-                    // Go records as `"result": null`.
+                    // A tool's empty result map (e.g. `transfer_to_agent` and `exit_loop`,
+                    // which return no result) is recorded as `"result": null`, as ADK does.
                     if result.is_empty()
                         && let Value::Object(m) = &mut content
                     {
@@ -677,7 +677,7 @@ impl AnalyticsPlugin {
         });
     }
 
-    /// Go `onToolError(ctx, t, args, err)`.
+    /// The tool-error callback.
     pub(crate) fn on_tool_error(
         &self,
         ctx: &CallbackCtx,
@@ -712,7 +712,7 @@ impl AnalyticsPlugin {
         });
     }
 
-    /// Go `logToolError(ctx, id, t, spanFn, name, callID, args, err)`.
+    /// Logs the `TOOL_ERROR` row of tool `t`'s call `call_id` failing with `err`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn log_tool_error(
         &self,
@@ -741,14 +741,14 @@ impl AnalyticsPlugin {
     }
 }
 
-/// Go `map[string]any{"error_traceback": err.Error()}`.
+/// The content `{"error_traceback": <err text>}`.
 fn error_traceback(err: &TraceError) -> Payload {
     let mut m = Map::new();
     m.insert("error_traceback".to_owned(), Value::from(err.to_string()));
     Payload::Json(Value::Object(m))
 }
 
-/// Go `orZero(ctx.FunctionCallID)`: the tool call of an ADK context, or "".
+/// The tool call ID of an ADK context, or "".
 fn function_call_id_of(ctx: &CallbackCtx) -> String {
     ctx.adk
         .as_ref()
@@ -756,8 +756,7 @@ fn function_call_id_of(ctx: &CallbackCtx) -> String {
         .unwrap_or_default()
 }
 
-/// Go `nodeCompletion(ev)`: `Some((workflow_name, failed))` for a workflow node-completion
-/// event.
+/// `Some((workflow_name, failed))` for a workflow node-completion event.
 pub(crate) fn node_completion(ev: &Event) -> Option<(String, bool)> {
     if ev.response.partial {
         return None;
@@ -797,8 +796,7 @@ pub(crate) fn node_completion(ev: &Event) -> Option<(String, bool)> {
     Some((workflow_name.to_owned(), failed))
 }
 
-/// Go `hasTaskCompletedResponse(c)`: the first `finish_task` function response says
-/// `"result": "Task completed."`.
+/// Whether the first `finish_task` function response says `"result": "Task completed."`.
 pub(crate) fn has_task_completed_response(c: Option<&Content>) -> bool {
     let Some(c) = c else { return false };
     for part in &c.parts {
@@ -812,8 +810,7 @@ pub(crate) fn has_task_completed_response(c: Option<&Content>) -> bool {
     false
 }
 
-/// Go `functionResponseCalls(c)`: the function call ID, or else the name, of each function
-/// response.
+/// The function call ID, or else the name, of each function response.
 pub(crate) fn function_response_calls(c: Option<&Content>) -> Vec<String> {
     let Some(c) = c else { return Vec::new() };
     c.parts
@@ -826,7 +823,7 @@ pub(crate) fn function_response_calls(c: Option<&Content>) -> Vec<String> {
         .collect()
 }
 
-/// Go `hasGeneratedContent(res)`: a part with text, inline or file data, a function call or
+/// Whether the response has a part with text, inline or file data, a function call or
 /// response, or executable code or its result.
 pub(crate) fn has_generated_content(res: &LlmResponse) -> bool {
     let Some(content) = &res.content else {
@@ -843,9 +840,8 @@ pub(crate) fn has_generated_content(res: &LlmResponse) -> bool {
     })
 }
 
-/// Go `isToolConfirmationOutcome(err)`: `ToolError::ConfirmationRequired` /
-/// `ConfirmationRejected` anywhere in the error's chain (Go `errors.Is`; the flow wraps the
-/// sentinels as `error tool "<name>" <sentinel>`).
+/// Whether `err` is `ToolError::ConfirmationRequired` / `ConfirmationRejected` anywhere in its
+/// chain (the flow wraps them as `error tool "<name>" <error>`).
 pub(crate) fn is_tool_confirmation_outcome(err: &ToolError) -> bool {
     let mut link: Option<&(dyn StdError + 'static)> = Some(err);
     while let Some(e) = link {
@@ -865,12 +861,13 @@ pub(crate) fn is_tool_confirmation_outcome(err: &ToolError) -> bool {
     false
 }
 
-/// Go `toolName(t)`: `t.Name()`, or "" if it panics.
+/// `t.name()`, or "" if it panics.
 pub(crate) fn tool_name(t: &Arc<dyn Tool>) -> String {
     catch_unwind(AssertUnwindSafe(|| t.name().to_owned())).unwrap_or_default()
 }
 
-/// Go `toolContent(name, payloadKey, payload, origin)`.
+/// The content of a tool row: `{"tool": name, <payload_key>: payload, "tool_origin": origin}`
+/// (an empty `origin` reads as the unknown origin).
 pub(crate) fn tool_content(
     name: &str,
     payload_key: &str,
@@ -889,22 +886,22 @@ pub(crate) fn tool_content(
     Value::Object(m)
 }
 
-/// Go's `error` of a model / tool callback as the trace manager records it (Go
-/// `context.Canceled` stays recognizable by `trace::causes::is_canceled`).
+/// The error of a model / tool callback as the trace manager records it (a canceled context
+/// stays recognizable by `trace::causes::is_canceled`).
 pub(crate) fn trace_error_of_model(err: &ModelError) -> TraceError {
     trace_error_of(err)
 }
 
 /// As [`trace_error_of_model`] for a tool error (the trace-manager tests record tool errors
-/// directly, as Go's do; the callbacks record none).
+/// directly; the callbacks record none).
 #[cfg(test)]
 pub(crate) fn trace_error_of_tool(err: &ToolError) -> TraceError {
     trace_error_of(err)
 }
 
 /// The error's text as a [`TraceError`]; a cancellation or deadline in its chain (gadk's
-/// `AgentError::Cancelled` / `DeadlineExceeded`, a [`ContextError`]) becomes Go's
-/// `context.Canceled` / `context.DeadlineExceeded` in the error's tree. Also maps a context's
+/// `AgentError::Cancelled` / `DeadlineExceeded`, a [`ContextError`]) becomes
+/// `ContextError::Canceled` / `DeadlineExceeded` in the error's tree. Also maps a context's
 /// `CancelCause::Error` (`crate::trace::span::trace_error_of_cause`).
 pub(crate) fn trace_error_of(err: &(dyn StdError + 'static)) -> TraceError {
     let text = err.to_string();
