@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Authorization for the ADK REST API (for the ADK REST API): whether the authenticated
-//! [`Caller`] may act as the user a request names.
+//! Authorization for the ADK REST API: whether the authenticated [`Caller`] may act as the user
+//! a request names.
 
 use http::StatusCode;
 

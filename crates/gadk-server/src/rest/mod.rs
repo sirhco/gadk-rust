@@ -16,9 +16,9 @@
 //! The ADK REST API server.
 //!
 //! [`Server::new`] validates the compaction config against every application, builds the routes
-//! (sessions, runtime, apps, artifacts, version, the 501 developer
-//! stubs, and, with [`DebugApiConfig::include_debug_api`], debug and agent graph) behind the
-//! origin guard, and [`Server::router`] serves them as an [`axum::Router`].
+//! (sessions, runtime, apps, artifacts, version, the 501
+//! developer stubs, and, with [`DebugApiConfig::include_debug_api`], debug and agent graph)
+//! behind the origin guard, and [`Server::router`] serves them as an [`axum::Router`].
 //! [`Server::debug_layer`] is the `tracing` layer that feeds the debug trace endpoints.
 
 use std::convert::Infallible;
