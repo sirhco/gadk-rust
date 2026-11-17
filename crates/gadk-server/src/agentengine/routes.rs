@@ -12,8 +12,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//! Go `server/agentengine/internal/routers`: the two routes on a gorilla `StrictSlash(true)`
-//! router.
+//! The two Agent Engine routes on a strict-slash router.
 
 use std::sync::Arc;
 
@@ -23,12 +22,12 @@ use super::controller::Controller;
 use crate::mux::Handler;
 use crate::mux::router::WebRouter;
 
-/// Go `NewReasoningEngineAPIRouter(...).Routes()` pattern.
+/// Path of the non-streaming route.
 pub(crate) const REASONING_ENGINE_PATH: &str = "/reasoning_engine";
-/// Go `NewStreamReasoningEngineAPIRouter(...).Routes()` pattern.
+/// Path of the streaming route.
 pub(crate) const STREAM_REASONING_ENGINE_PATH: &str = "/stream_reasoning_engine";
 
-/// Go `setupRouter(mux.NewRouter().StrictSlash(true), …)`: `POST /reasoning_engine` →
+/// Builds the router: `POST /reasoning_engine` →
 /// `non_stream.query`, `POST /stream_reasoning_engine` → `stream.query` (in that order), on a
 /// `WebRouter::new(true)`; an unknown path is 404, another method 405, a non-canonical path the
 /// router's redirect.
@@ -47,7 +46,7 @@ pub(crate) fn router(non_stream: Arc<Controller>, stream: Arc<Controller>) -> We
     router
 }
 
-/// Go `controller.Query` as an `http.HandlerFunc`.
+/// A handler answering with `controller.query`.
 fn query_handler(controller: Arc<Controller>) -> Handler {
     crate::mux::handler(move |req| {
         let controller = Arc::clone(&controller);

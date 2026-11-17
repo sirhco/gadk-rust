@@ -12,13 +12,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//! Go `structpb.NewStruct` + `json.NewEncoder(sb).Encode(*structpb.Struct)`: the method
-//! metadata as `NewHandler` logs it.
+//! The method metadata as `new_handler` logs it.
 
 use serde_json::{Map, Value};
 
-/// Go `json.NewEncoder(sb).Encode(m)` of `structpb.NewStruct(map)`, newline included.
-/// `*structpb.Struct` has a `MarshalJSON` (protojson), so Go writes the map itself as JSON:
+/// The metadata map as one JSON line, newline included:
 /// `{"api_mode":"async","description":"…","name":"…","parameters":{…}}`, keys sorted, compacted
 /// and HTML-escaped by the encoder (`gadk_model::to_go_json`), plus `\n`. An encoding failure
 /// is the encoder's error text.

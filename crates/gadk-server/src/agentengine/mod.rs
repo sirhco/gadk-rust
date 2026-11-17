@@ -12,9 +12,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//! The Agent Engine server (port of ADK-Go `server/agentengine`): the handler Vertex AI Agent
-//! Engine calls, `POST /reasoning_engine` (session methods) and `POST /stream_reasoning_engine`
-//! (streaming methods), byte-compatible with ADK-Go's.
+//! The Agent Engine server: the handler Vertex AI Agent Engine calls, `POST /reasoning_engine`
+//! (session methods) and `POST /stream_reasoning_engine` (streaming methods). Request and
+//! response bytes are wire-compatible with other ADK Agent Engine servers.
 //!
 //! [`new_handler`] validates the config and builds the [`Handler`]; mount it under a prefix
 //! (the launcher's `agentengine` sub-launcher mounts it at `-path_prefix`, default `/api`).
@@ -22,7 +22,7 @@
 
 pub(crate) mod controller;
 pub(crate) mod encode;
-// Generated from ADK-Go by the Go probe; its own fixed layout.
+// Generated shape tables; kept in their own fixed layout.
 #[rustfmt::skip]
 pub(crate) mod encode_shapes;
 pub(crate) mod metadata;
@@ -52,35 +52,35 @@ use self::method::stream_query::{self, StreamQueryHandler};
 use self::method::streaming_agent_run_with_events::{self, StreamingAgentRunWithEventsHandler};
 use crate::mux::Handler;
 
-/// Go `log.Printf`/`log.Println` of the agentengine code: called with the text Go's logger
-/// receives (Go `Sprintf` / `Sprintln` output, without the timestamp prefix; a trailing newline
-/// is part of the text when Go's is). The launcher passes its Go logger.
+/// Log sink of the Agent Engine code: called with each formatted log line, without a timestamp
+/// prefix; a trailing newline is part of the text when the line has one. The launcher passes
+/// its own logger.
 pub type AgentEngineLog = Arc<dyn Fn(&str) + Send + Sync>;
 
-/// What the Agent Engine handler serves (the fields of Go's `launcher.Config` it reads; the
-/// launcher fills it as it fills `rest::ServerConfig`).
+/// What the Agent Engine handler serves (the launcher fills it as it fills
+/// `rest::ServerConfig`).
 #[derive(Clone)]
 pub struct AgentEngineConfig {
-    /// Go `SessionService`. Required.
+    /// The session service. Required.
     pub session_service: Arc<dyn SessionService>,
-    /// Go `MemoryService`.
+    /// The memory service, if any.
     pub memory_service: Option<Arc<dyn MemoryService>>,
-    /// Go `ArtifactService`.
+    /// The artifact service, if any.
     pub artifact_service: Option<Arc<dyn ArtifactService>>,
-    /// Go `AgentLoader`: the streaming methods run its root agent.
+    /// The agent loader: the streaming methods run its root agent.
     pub agent_loader: Arc<dyn Loader>,
-    /// Go `PluginConfig`.
+    /// Plugins of every runner the handler builds.
     pub plugin_config: gadk_engine::runner::PluginConfig,
-    /// Go `Compaction`; `None` disables it.
+    /// Session compaction; `None` disables it.
     pub compaction: Option<gadk_session::compaction::Config>,
     /// Clock and ID source of every runner the handler builds.
     pub platform: Platform,
-    /// Go's `log` output; `None` writes the lines as `tracing` info events.
+    /// Log output; `None` writes the lines as `tracing` info events.
     pub log: Option<AgentEngineLog>,
 }
 
 impl AgentEngineConfig {
-    /// A config with the two required services and every other field at Go's zero value.
+    /// A config with the two required services and every other field at its default.
     pub fn new(session_service: Arc<dyn SessionService>, agent_loader: Arc<dyn Loader>) -> Self {
         AgentEngineConfig {
             session_service,
@@ -95,15 +95,16 @@ impl AgentEngineConfig {
     }
 }
 
-/// A construction error of [`new_handler`], `Display`ing Go's text.
+/// A construction error of [`new_handler`].
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Go `compactionvalidate.AgainstRootAgent`'s error, unwrapped as Go returns it.
+    /// The compaction config failed validation against the root agent; the error is passed
+    /// through unwrapped.
     #[error(transparent)]
     Compaction(AgentError),
-    /// Go `NewAgentEngineAPIController`'s duplicate check, wrapped as `NewHandler` wraps it
-    /// (`kind` is `non-streaming` or `streaming`). Unreachable with the six built-in methods.
+    /// Two handlers of one controller share a method name (`kind` is `non-streaming` or
+    /// `streaming`). Unreachable with the six built-in methods.
     #[error(
         "controllers.NewAgentEngineAPIController failed (for {kind}): duplicate method name: {name}"
     )]
@@ -113,18 +114,18 @@ pub enum Error {
         /// The duplicated method name.
         name: String,
     },
-    /// Go `json.NewEncoder failed: %w` while logging the method metadata.
+    /// Encoding the method metadata for the startup log failed.
     #[error("json.NewEncoder failed: {0}")]
     Encode(String),
 }
 
-/// Go's `log` package as the agentengine code uses it: through [`AgentEngineConfig::log`], or
-/// `tracing::info!` without one.
+/// The logger of the Agent Engine code: [`AgentEngineConfig::log`], or `tracing::info!` without
+/// one.
 #[derive(Clone, Default)]
 pub(crate) struct Log(pub(crate) Option<AgentEngineLog>);
 
 impl Log {
-    /// Go `log.Print(text)` / `log.Printf` with the message already formatted.
+    /// Logs `text`, already formatted.
     pub(crate) fn print(&self, text: &str) {
         match &self.0 {
             Some(log) => log(text),
@@ -132,36 +133,36 @@ impl Log {
         }
     }
 
-    /// Go `log.Println(text)`: [`Log::print`] of `text` plus `\n` (Go `Sprintln`).
+    /// [`Log::print`] of `text` plus `\n`.
     pub(crate) fn println(&self, text: &str) {
         self.print(&format!("{text}\n"));
     }
 }
 
-/// The method names, in Go's `listNonStreamHandlers` + `listStreamHandlers` order, with their
-/// Go api modes.
+/// The non-streaming method names with their api modes, in handler order.
 pub(crate) const NON_STREAM_METHODS: [(&str, &str); 4] = [
     ("async_create_session", "async"),
     ("async_get_session", "async"),
     ("async_list_sessions", "async"),
     ("async_delete_session", "async"),
 ];
-/// See [`NON_STREAM_METHODS`].
+/// The streaming method names with their api modes, in handler order; see
+/// [`NON_STREAM_METHODS`].
 pub(crate) const STREAM_METHODS: [(&str, &str); 2] = [
     ("async_stream_query", "async_stream"),
     ("streaming_agent_run_with_events", "async_stream"),
 ];
 
-/// Go `NewHandler`: validates `cfg.compaction` against the loader's root agent
+/// Builds the Agent Engine handler: validates `cfg.compaction` against the loader's root agent
 /// (`compactionvalidate::against_root_agent`, error returned unwrapped), builds the two
 /// controllers (non-streaming: the four session methods; streaming: `async_stream_query` and
 /// `streaming_agent_run_with_events`) on a strict-slash `WebRouter` (`routes::router`), and
 /// logs `Supported methods:` then one line per [`list_class_methods`] entry, taken from the
-/// handlers' own `MethodHandler::metadata` (Go
-/// `log.Println(<json.Encoder output>)`, see `metadata::structpb_json`).
+/// handlers' own `MethodHandler::metadata` (each
+/// printed as a JSON line, see `metadata::structpb_json`).
 ///
-/// `sse_write_timeout`: zero means 120 s, negative means no write deadline. Go's
-/// `config.Validate()` is the caller's (the launcher runs `Config::validate` first).
+/// `sse_write_timeout`: zero means 120 s, negative means no write deadline. Validating
+/// the launcher config is the caller's job (the launcher runs `Config::validate` first).
 pub fn new_handler(
     cfg: AgentEngineConfig,
     sse_write_timeout: GoDuration,
@@ -231,7 +232,7 @@ pub fn new_handler(
             run_mode,
         )),
     ];
-    // Go logs `ListClassMethods()`, the same handlers' `Metadata()` (the agent engine ID does
+    // The startup log lists the same metadata as `list_class_methods` (the agent engine ID does
     // not enter it).
     let methods: Vec<Map<String, Value>> = non_stream
         .iter()
@@ -261,8 +262,8 @@ pub fn new_handler(
     }))
 }
 
-/// Go `ListClassMethods`: the six methods' metadata (the maps Go passes to
-/// `structpb.NewStruct`), non-streaming then streaming, with an empty agent engine ID.
+/// The six methods' metadata maps, non-streaming then streaming, with an empty agent engine
+/// ID.
 pub fn list_class_methods() -> Vec<Map<String, Value>> {
     let [
         (create, create_mode),

@@ -13,171 +13,171 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go `server/agentengine/internal/models`: the request and response models, with Go's JSON
-//! names. Requests are decoded by [`go_unmarshal`](super::unmarshal::go_unmarshal) (Go key
-//! matching, then serde); the session responses are written by `gadk_model::to_go_json` (field
-//! order as Go's struct order); the streaming responses by [`emit_json`](super::encode::emit_json).
+//! The Agent Engine request and response models, with their wire JSON names. Requests are
+//! decoded by [`go_unmarshal`](super::unmarshal::go_unmarshal) (case-insensitive key matching,
+//! then serde); the session responses are written by `gadk_model::to_go_json` (field order is
+//! the JSON key order); the streaming responses by [`emit_json`](super::encode::emit_json).
 
 use gadk_genai::Content;
 use gadk_session::{Event, Session};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// Go `Query`: the generic payload; `input` is method-specific.
+/// The generic query payload; `input` is method-specific.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct Query {
-    /// Go `ClassMethod` (`json:"class_method"`).
+    /// The method to call (`class_method`).
     #[serde(default)]
     pub(crate) class_method: String,
-    /// Go `Input any` (`json:"input"`); `None` is Go's nil.
+    /// The method-specific input (`input`); `None` when absent or `null`.
     #[serde(default)]
     pub(crate) input: Option<Value>,
 }
 
-/// Go `CreateSessionRequest`.
+/// Request of `async_create_session`.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct CreateSessionRequest {
-    /// Go `ClassMethod` (`json:"class_method"`).
+    /// The method to call (`class_method`).
     #[serde(default)]
     pub(crate) class_method: String,
-    /// Go `Input` (`json:"input"`).
+    /// The method's input (`input`).
     #[serde(default)]
     pub(crate) input: CreateSessionInput,
 }
 
-/// Go `CreateSessionInput`.
+/// Input of [`CreateSessionRequest`].
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct CreateSessionInput {
-    /// Go `UserID` (`json:"user_id"`).
+    /// The user ID (`user_id`).
     #[serde(default)]
     pub(crate) user_id: String,
-    /// Go `State map[string]any` (`json:"state,omitempty"`); `None` is Go's nil map.
+    /// The initial session state (`state`); `None` when absent or `null`.
     #[serde(default)]
     pub(crate) state: Option<Map<String, Value>>,
 }
 
-/// Go `CreateSessionResponse`.
+/// Response of `async_create_session`.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct CreateSessionResponse {
-    /// Go `Output` (`json:"output"`).
+    /// The method's output (`output`).
     pub(crate) output: SessionData,
 }
 
-/// Go `SessionData`. Field order is Go's (it is the JSON key order).
+/// A session as the Agent Engine API reports it. Field order is the JSON key order.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SessionData {
-    /// Go `UserID` (`json:"user_id"`).
+    /// The user ID (`user_id`).
     pub(crate) user_id: String,
-    /// Go `LastUpdateTime float64` (`json:"last_update_time"`): Unix seconds,
-    /// `UnixNano() as f64 / 1e9`.
+    /// Last update time (`last_update_time`): Unix seconds, as nanoseconds since the epoch
+    /// divided by 1e9.
     pub(crate) last_update_time: f64,
-    /// Go `AppName` (`json:"app_name"`).
+    /// The app name (`app_name`).
     pub(crate) app_name: String,
-    /// Go `ID` (`json:"id"`).
+    /// The session ID (`id`).
     pub(crate) id: String,
-    /// Go `State map[string]any` (`json:"state"`): always a map (`{}` when empty).
+    /// The session state (`state`): always a map (`{}` when empty).
     pub(crate) state: Map<String, Value>,
-    /// Go `Events []session.Event` (`json:"events"`): always a list, each in Go's
-    /// `session.Event` JSON (`gadk_session::Event`'s `Serialize`).
+    /// The events (`events`): always a list, each in the session event JSON
+    /// (`gadk_session::Event`'s `Serialize`).
     pub(crate) events: Vec<Event>,
 }
 
-/// Go `ListSessionRequest`.
+/// Request of `async_list_sessions`.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct ListSessionRequest {
-    /// Go `ClassMethod` (`json:"class_method"`).
+    /// The method to call (`class_method`).
     #[serde(default)]
     pub(crate) class_method: String,
-    /// Go `Input` (`json:"input"`).
+    /// The method's input (`input`).
     #[serde(default)]
     pub(crate) input: ListSessionInput,
 }
 
-/// Go `ListSessionInput`.
+/// Input of [`ListSessionRequest`].
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct ListSessionInput {
-    /// Go `UserID` (`json:"user_id"`).
+    /// The user ID (`user_id`).
     #[serde(default)]
     pub(crate) user_id: String,
 }
 
-/// Go `ListSessionResponse`.
+/// Response of `async_list_sessions`.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ListSessionResponse {
-    /// Go `Output` (`json:"output"`).
+    /// The method's output (`output`).
     pub(crate) output: Sessions,
 }
 
-/// Go `Sessions`.
+/// The sessions of a [`ListSessionResponse`].
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct Sessions {
-    /// Go `Sessions` (`json:"sessions"`): always a list.
+    /// The sessions (`sessions`): always a list.
     pub(crate) sessions: Vec<SessionData>,
 }
 
-/// Go `GetSessionRequest`.
+/// Request of `async_get_session`.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct GetSessionRequest {
-    /// Go `ClassMethod` (`json:"class_method"`).
+    /// The method to call (`class_method`).
     #[serde(default)]
     pub(crate) class_method: String,
-    /// Go `Input` (`json:"input"`).
+    /// The method's input (`input`).
     #[serde(default)]
     pub(crate) input: GetSessionInput,
 }
 
-/// Go `GetSessionInput`.
+/// Input of [`GetSessionRequest`].
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct GetSessionInput {
-    /// Go `UserID` (`json:"user_id"`).
+    /// The user ID (`user_id`).
     #[serde(default)]
     pub(crate) user_id: String,
-    /// Go `SessionID` (`json:"session_id"`).
+    /// The session ID (`session_id`).
     #[serde(default)]
     pub(crate) session_id: String,
 }
 
-/// Go `GetSessionResponse`.
+/// Response of `async_get_session`.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct GetSessionResponse {
-    /// Go `Output` (`json:"output"`).
+    /// The method's output (`output`).
     pub(crate) output: SessionData,
 }
 
-/// Go `DeleteSessionRequest`.
+/// Request of `async_delete_session`.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct DeleteSessionRequest {
-    /// Go `ClassMethod` (`json:"class_method"`).
+    /// The method to call (`class_method`).
     #[serde(default)]
     pub(crate) class_method: String,
-    /// Go `Input` (`json:"input"`).
+    /// The method's input (`input`).
     #[serde(default)]
     pub(crate) input: DeleteSessionInput,
 }
 
-/// Go `DeleteSessionInput`.
+/// Input of [`DeleteSessionRequest`].
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct DeleteSessionInput {
-    /// Go `UserID` (`json:"user_id"`).
+    /// The user ID (`user_id`).
     #[serde(default)]
     pub(crate) user_id: String,
-    /// Go `SessionID` (`json:"session_id"`).
+    /// The session ID (`session_id`).
     #[serde(default)]
     pub(crate) session_id: String,
 }
 
-/// Go `DeleteSessionResponse`: `{"output":""}`.
+/// Response of `async_delete_session`: `{"output":""}`.
 #[derive(Debug, Clone, Default, Serialize)]
 pub(crate) struct DeleteSessionResponse {
-    /// Go `Output` (`json:"output"`).
+    /// The method's output (`output`).
     pub(crate) output: String,
 }
 
-/// Go `FromSession`: the session's user, `last_update_time` (`UnixNano() / 1e9`), app name, ID,
-/// state (all keys) and events.
+/// Converts a session to [`SessionData`]: the session's user, `last_update_time` (nanoseconds
+/// since the epoch / 1e9), app name, ID, state (all keys) and events.
 pub(crate) fn from_session(sess: &dyn Session) -> SessionData {
     let t = sess.last_update_time();
-    // Go `UnixNano()`: seconds * 1e9 + nanoseconds, wrapping on overflow.
+    // Nanoseconds since the epoch: seconds * 1e9 + nanoseconds, wrapping on overflow.
     let unix_nano = t
         .timestamp()
         .wrapping_mul(1_000_000_000)
@@ -192,102 +192,101 @@ pub(crate) fn from_session(sess: &dyn Session) -> SessionData {
     }
 }
 
-/// Go `StreamQueryRequest`: `async_stream_query` with a full `genai.Content` message.
+/// Request of `async_stream_query` with a full [`Content`] message.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct StreamQueryRequest {
-    /// Go `ClassMethod` (`json:"class_method"`).
+    /// The method to call (`class_method`).
     #[serde(default)]
     pub(crate) class_method: String,
-    /// Go `Input` (`json:"input"`).
+    /// The method's input (`input`).
     #[serde(default)]
     pub(crate) input: StreamQueryInput,
 }
 
-/// Go `StreamQueryInput`.
+/// Input of [`StreamQueryRequest`].
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct StreamQueryInput {
-    /// Go `UserID` (`json:"user_id"`).
+    /// The user ID (`user_id`).
     #[serde(default)]
     pub(crate) user_id: String,
-    /// Go `SessionID` (`json:"session_id"`).
+    /// The session ID (`session_id`).
     #[serde(default)]
     pub(crate) session_id: String,
-    /// Go `Message genai.Content` (`json:"message"`): a value, zero when absent.
+    /// The message (`message`): a value, empty when absent.
     #[serde(default)]
     pub(crate) message: Content,
 }
 
-/// Go `StreamQueryTextRequest`: `async_stream_query` with a plain-text message.
+/// Request of `async_stream_query` with a plain-text message.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct StreamQueryTextRequest {
-    /// Go `ClassMethod` (`json:"class_method"`).
+    /// The method to call (`class_method`).
     #[serde(default)]
     pub(crate) class_method: String,
-    /// Go `Input` (`json:"input"`).
+    /// The method's input (`input`).
     #[serde(default)]
     pub(crate) input: StreamQueryTextInput,
 }
 
-/// Go `StreamQueryTextInput`.
+/// Input of [`StreamQueryTextRequest`].
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct StreamQueryTextInput {
-    /// Go `UserID` (`json:"user_id"`).
+    /// The user ID (`user_id`).
     #[serde(default)]
     pub(crate) user_id: String,
-    /// Go `SessionID` (`json:"session_id"`).
+    /// The session ID (`session_id`).
     #[serde(default)]
     pub(crate) session_id: String,
-    /// Go `Message string` (`json:"message"`).
+    /// The message text (`message`).
     #[serde(default)]
     pub(crate) message: String,
 }
 
-/// Go `StreamingAgentRunWithEventsRequest`.
+/// Request of `streaming_agent_run_with_events`.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct StreamingAgentRunWithEventsRequest {
-    /// Go `ClassMethod` (`json:"class_method"`).
+    /// The method to call (`class_method`).
     #[serde(default)]
     pub(crate) class_method: String,
-    /// Go `Input` (`json:"input"`).
+    /// The method's input (`input`).
     #[serde(default)]
     pub(crate) input: StreamingAgentRunWithEventsInput,
 }
 
-/// Go `StreamingAgentRunWithEventsInput`: `request_json` is a JSON-encoded
+/// Input of [`StreamingAgentRunWithEventsRequest`]: `request_json` is a JSON-encoded
 /// [`StreamingAgentRunWithEventsRunRequest`].
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct StreamingAgentRunWithEventsInput {
-    /// Go `RequestJSON` (`json:"request_json"`).
+    /// The JSON-encoded run request (`request_json`).
     #[serde(default)]
     pub(crate) request_json: String,
 }
 
-/// Go `StreamingAgentRunWithEventsRunRequest`: decoded from `input.request_json`.
+/// The run request, decoded from `input.request_json`.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub(crate) struct StreamingAgentRunWithEventsRunRequest {
-    /// Go `UserID` (`json:"user_id"`).
+    /// The user ID (`user_id`).
     #[serde(default)]
     pub(crate) user_id: String,
-    /// Go `SessionID` (`json:"session_id"`).
+    /// The session ID (`session_id`).
     #[serde(default)]
     pub(crate) session_id: String,
-    /// Go `Message genai.Content` (`json:"message"`).
+    /// The user message (`message`).
     #[serde(default)]
     pub(crate) message: Content,
 }
 
-/// Go `StreamingAgentRunWithEventsResponse`: one NDJSON line of
-/// `streaming_agent_run_with_events` (written through `GoSnake`; `Serialize` is the
-/// `Failed to convert` fallback, Go's `encoding/json` of the struct).
+/// One NDJSON line of `streaming_agent_run_with_events` (written through `GoSnake`;
+/// `Serialize` is the `Failed to convert` fallback, the plain JSON of the struct).
 #[derive(Debug, Clone, Default, Serialize)]
 pub(crate) struct StreamingAgentRunWithEventsResponse {
-    /// Go `Events []*session.Event` (`json:"events,omitempty"`).
+    /// The events (`events`); omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) events: Vec<Event>,
-    /// Go `Artifacts []any` (`json:"artifacts,omitempty"`): never set by Go.
+    /// The artifacts (`artifacts`); omitted when empty. Never set.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) artifacts: Vec<Value>,
-    /// Go `SessionID` (`json:"session_id,omitempty"`).
+    /// The session ID (`session_id`); omitted when empty.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub(crate) session_id: String,
 }
