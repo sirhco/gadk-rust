@@ -328,11 +328,11 @@ fn format_function_call_args(fc: &FunctionCall) -> String {
         .join(", ")
 }
 
-/// Renders a function response as `&{<will_continue> <scheduling> [<parts>] <id> <name>
-/// <response>}`, the text ADK writes into the examples instruction. An unset `will_continue` is
-/// `<nil>`, an unset `scheduling` is the empty string, empty `parts` are `[]`, and `response` is
-/// in map form (`map[k:v]`) with sorted keys. A set `will_continue` and each element of `parts`
-/// are printed as their values.
+/// Renders a function response as
+/// `&{<will_continue> <scheduling> [<parts>] <id> <name> <response>}`, the text ADK writes into the
+/// examples instruction. An unset `will_continue` is `<nil>`, an unset `scheduling` is the empty
+/// string, empty `parts` are `[]`, and `response` is in map form (`map[k:v]`) with sorted keys. A
+/// set `will_continue` and each element of `parts` are printed as their values.
 fn go_sprint_function_response(fr: &FunctionResponse) -> String {
     let will_continue = fr
         .will_continue

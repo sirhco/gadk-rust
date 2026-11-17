@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A parser for the regular-expression dialect of ADK's tool search (RE2 syntax with Perl flags,
-//! the dialect of Go's `regexp/syntax`), and the few UTF-8 and string helpers `ranksearch` needs,
-//! so that the regex-or-keywords classification, the pattern-size estimate and the "pattern not
-//! run" notes see the same parse trees and error codes as ADK.
+//! A parser for the regular-expression dialect of ADK's tool search (RE2 syntax with Perl flags),
+//! and the few UTF-8 and string helpers `ranksearch` needs, so that the regex-or-keywords
+//! classification, the pattern-size estimate and the "pattern not run" notes see the same parse
+//! trees and error codes as ADK.
 //!
 //! What is implemented:
 //! - [`parse`] with all its error codes and expression texts, on byte strings (a byte string may
@@ -276,8 +276,8 @@ pub(crate) fn decode_rune(s: &[u8]) -> (i32, usize) {
     }
 }
 
-/// Decodes the last rune of `s` and its width; `(RuneError, 1)` for an invalid byte, `(RuneError,
-/// 0)` for an empty `s`.
+/// Decodes the last rune of `s` and its width; `(RuneError, 1)` for an invalid byte,
+/// `(RuneError, 0)` for an empty `s`.
 fn decode_last_rune(s: &[u8]) -> (i32, usize) {
     let end = s.len();
     let Some(&last) = s.last() else {

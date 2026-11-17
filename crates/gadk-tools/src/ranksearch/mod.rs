@@ -85,11 +85,13 @@ impl Config {
 /// Dispatches on the query form and returns ranked matches plus a UX note (empty for none). Items
 /// whose name is in `already_available` are excluded.
 ///
-/// Query forms: an empty query or one over [`MAX_QUERY_LEN`] chars gets a note and no matches;
-/// `select:name1,name2` loads items by exact name; a query with regex metacharacters is matched
-/// against item names (as a pattern, or as a literal substring when it reads as a keyword or
-/// prose) and falls back to BM25 keyword ranking when no new name matches; any other query is
-/// ranked by BM25 over names, descriptions and extra tokens.
+/// The query is trimmed first. Query forms: an empty query or one over [`MAX_QUERY_LEN`] chars
+/// gets a note and no matches; `select:name1,name2` loads items by exact name; a query with regex
+/// metacharacters is matched against item names, as a pattern or, when it reads as a keyword or
+/// prose, as a literal substring. A keyword or prose query falls back to BM25 ranking when no new
+/// name matches; a true pattern with no new name match gets a "patterns match names only" note
+/// and no fallback. Any other query is ranked by BM25 over names, descriptions and extra
+/// tokens.
 pub(crate) fn rank(
     items: &[Item],
     query: &str,

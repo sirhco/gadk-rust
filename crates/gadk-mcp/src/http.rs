@@ -72,8 +72,8 @@ impl AdkHttpClient {
     /// The tracking step: `custom_headers` (rmcp's own) extended with the configured headers, then
     /// `user-agent` and `x-goog-api-client` set to the ADK tracking tokens followed by the tokens
     /// of the request's values (rmcp's and the configured ones; see [`tracked`]), without
-    /// duplicates. A name the configured headers repeat is sent once, its values joined with `",
-    /// "`. No credential is applied.
+    /// duplicates. A name the configured headers repeat is sent once, its values joined with
+    /// `", "`. No credential is applied.
     // `send` applies the credential between the two steps, so only tests call this seam.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn tracked_headers(
@@ -92,8 +92,8 @@ impl AdkHttpClient {
     /// headers as they were before the stale credential; a second rejection is returned as is.
     /// Any refresh error degrades to the original rejection unless it carries interactive
     /// consent (then it is returned), and only an error applying the fresh credential is
-    /// returned as an apply error. Refresh and apply
-    /// run as separate steps, so a provider's refresh error that is itself an
+    /// returned as an apply error. Refresh and
+    /// apply run as separate steps, so a provider's refresh error that is itself an
     /// `Error::ApplyCredential` still degrades. Credential errors are [`credential_error`]s.
     async fn send<T, F, Fut>(
         &self,

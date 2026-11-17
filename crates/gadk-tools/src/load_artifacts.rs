@@ -200,7 +200,8 @@ async fn append_initial_instructions(
 }
 
 /// HTML-safe JSON text: in serde_json's compact output `<`, `>`, `&`, U+2028 and U+2029 become
-/// `\u003c`, `\u003e`, `\u0026`, `\u2028` and `\u2029`.
+/// `\u003c`, `\u003e`, `\u0026`, `\u2028` and `\u2029`. Those characters only occur inside
+/// strings, so escaping them in the whole text is exact.
 fn go_html_safe(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

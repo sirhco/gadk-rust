@@ -118,8 +118,8 @@ fn object_input_schema(schema: Value) -> Result<Map<String, Value>, String> {
 }
 
 /// A Gemini schema as a JSON Schema map (its JSON encoding, normalized by
-/// [`normalize_gemini_schema_map`]). Only the encoding can fail (`mcptoolset: marshal gemini
-/// schema: …`).
+/// [`normalize_gemini_schema_map`]). Only the encoding can fail
+/// (`mcptoolset: marshal gemini schema: …`).
 pub(crate) fn gemini_to_json_schema(schema: &Schema) -> Result<Map<String, Value>, String> {
     let raw = serde_json::to_value(schema)
         .map_err(|e| format!("mcptoolset: marshal gemini schema: {e}"))?;

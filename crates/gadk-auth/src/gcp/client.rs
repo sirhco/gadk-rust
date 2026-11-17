@@ -83,9 +83,9 @@ pub struct Client {
     pub(crate) initial_backoff: Duration,
     /// Names this client for the credential cache. What the services return depends on the endpoint
     /// asked and on the identity the ask authenticates as, and this package can observe neither, so
-    /// every client is its own slot. It is unique per process too (`join_fields([CLIENT_NONCE,
-    /// seq])`), so a store that outlives the process misses rather than serving an entry no live
-    /// client wrote.
+    /// every client is its own slot. It is unique per process too
+    /// (`join_fields([CLIENT_NONCE, seq])`), so a store that outlives the process misses rather
+    /// than serving an entry no live client wrote.
     pub(crate) cache_slot: String,
 }
 
@@ -110,11 +110,11 @@ impl Client {
         Self::with_adc(cfg, &AdcSource::Discover)
     }
 
-    /// NewClient's ADC branch with an injected source (tests pass `AdcSource::Json`). Builds the
-    /// HTTP client as `crate::client(no-redirect reqwest::Client, crate::token_source(ts),
-    /// AuthContext::anonymous())` over `crate::providers::adc_token_source(adc,
-    /// &[CLOUD_PLATFORM_SCOPE.into()])`. `Client::new(cfg)` is `with_adc(cfg,
-    /// &AdcSource::Discover)`.
+    /// The ADC branch of [`Client::new`] with an injected source (tests pass `AdcSource::Json`).
+    /// Builds the HTTP client with `crate::client`, over a no-redirect `reqwest::Client`, with
+    /// `crate::token_source(ts)` and `AuthContext::anonymous()`, where `ts` comes from
+    /// `crate::providers::adc_token_source(adc, &[CLOUD_PLATFORM_SCOPE.into()])`.
+    /// `Client::new(cfg)` is `with_adc(cfg, &AdcSource::Discover)`.
     pub(crate) fn with_adc(cfg: Config, adc: &AdcSource) -> Result<Client, Error> {
         let endpoint = |given: &str, default: &str| {
             if given.is_empty() {
@@ -228,11 +228,11 @@ impl Client {
         }
     }
 
-    /// The store key of a credential: `CredentialKey { app_name: id.app_name, user_id: id.user_id,
-    /// key: cache_slot(self, scheme) }`. Hand it to [`crate::CredentialStore::delete`] to
-    /// invalidate a credential ahead of its expiry. Only `app_name` and `user_id` take part: a
-    /// credential is shared across a user's sessions. Pass the scheme the provider was built with;
-    /// it is meaningful only while this client is alive.
+    /// The store key of a credential: a `CredentialKey` with the identity's `app_name` and
+    /// `user_id`, and `key` set to `cache_slot(self, scheme)`. Hand it to
+    /// [`crate::CredentialStore::delete`] to invalidate a credential ahead of its expiry. Only
+    /// `app_name` and `user_id` take part: a credential is shared across a user's sessions. Pass
+    /// the scheme the provider was built with; it is meaningful only while this client is alive.
     pub fn cache_key(
         &self,
         scheme: &ProviderScheme,
@@ -479,9 +479,9 @@ pub(crate) fn join_fields(fields: &[&str]) -> String {
     out
 }
 
-/// The cache slot of a scheme: hex SHA-256 of `join_fields([client.cache_slot, name, scopes.len(),
-/// sorted scopes…, continue_uri])`. Lives here because `cache_key` calls it. Scopes are sorted
-/// (byte order) but not deduplicated.
+/// The cache slot of a scheme: hex SHA-256 of
+/// `join_fields([client.cache_slot, name, scopes.len(), sorted scopes…, continue_uri])`. Lives here
+/// because `cache_key` calls it. Scopes are sorted (byte order) but not deduplicated.
 pub(crate) fn cache_slot(client: &Client, scheme: &ProviderScheme) -> String {
     let mut scopes: Vec<&str> = scheme.scopes.iter().map(String::as_str).collect();
     scopes.sort_unstable();

@@ -73,8 +73,9 @@ impl ToolServer {
     }
 
     /// Adds a weather tool as `name` (an empty `description` is omitted): the input schema takes a
-    /// `city`, the output schema a `weather_summary`; it answers `{"weather_summary": "Today in
-    /// \"<city>\" is sunny"}` as structured content, with that JSON's text as the content.
+    /// `city`, the output schema a `weather_summary`; it answers
+    /// `{"weather_summary": "Today in \"<city>\" is sunny"}` as structured content, with that
+    /// JSON's text as the content.
     pub fn weather(self, name: &str, description: &str) -> Self {
         let description = (!description.is_empty()).then(|| Cow::Owned(description.to_owned()));
         let tool = Tool::new_with_raw(name.to_owned(), description, object(weather_input_schema()))

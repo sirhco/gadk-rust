@@ -44,10 +44,10 @@ use crate::provider::{AuthContext, CredentialProvider, RefreshingProvider};
 /// [`AuthContext`] is fixed at construction, so a transport for a per-user provider (such as the
 /// gcp one) must be built per invocation identity and not shared across users.
 ///
-/// Errors reach the caller as `reqwest_middleware::Error::Middleware` wrapping a
-/// [`crate::Error`]: `auth: resolve credential: …` when the provider fails, `auth: apply
-/// credential: …` when the credential cannot be applied. A consent error from a refresh is
-/// returned as the provider gave it. Recover a consent error with [`find_consent_in`].
+/// Errors reach the caller as `reqwest_middleware::Error::Middleware` wrapping a [`crate::Error`]:
+/// `auth: resolve credential: …` when the provider fails, `auth: apply credential: …` when the
+/// credential cannot be applied. A consent error from a refresh is returned as the provider gave
+/// it. Recover a consent error with [`find_consent_in`].
 #[derive(Clone)]
 pub struct Transport {
     provider: Arc<dyn CredentialProvider>,
@@ -148,9 +148,9 @@ pub fn is_auth_rejected(status: StatusCode) -> bool {
 /// requests themselves (the MCP HTTP client) rather than through [`Transport`]. Returns the
 /// applied credential, the `rejected` argument of a later [`refresh_credential`].
 ///
-/// Errors carry [`Transport`]'s texts: [`Error::ResolveCredential`] (`auth: resolve credential:
-/// …`) when the provider fails, [`Error::ApplyCredential`] (`auth: apply credential: …`) when the
-/// credential cannot be applied.
+/// Errors carry [`Transport`]'s texts: [`Error::ResolveCredential`]
+/// (`auth: resolve credential: …`) when the provider fails, [`Error::ApplyCredential`]
+/// (`auth: apply credential: …`) when the credential cannot be applied.
 pub async fn apply_credential(
     provider: &dyn CredentialProvider,
     cx: &AuthContext,
