@@ -13,11 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/json_formatter.go`'s `content_parts` builder:
-//! `FormatContentParts`, `formatContentParts`, `partsCollector` (`reserve`, `hasPendingText`,
-//! `addContent`, `addPart`, `queue`, `addText`, `addInlineData`, `addFileData`,
-//! `addStructured`), `normalizeFunctionResponse`, `formatPartAttributes`,
-//! `sanitizeAndTruncateText` and `orUnknown`.
+//! The `content_parts` builder: [`format_content_parts`], the [`PartsCollector`] methods that add
+//! text, inline data, file data and structured parts, function-response normalization, part
+//! attributes, and text sanitizing and truncation.
 
 use std::collections::BTreeMap;
 
@@ -34,14 +32,12 @@ use super::{
 };
 use crate::redaction::{sanitize_raw_text, sanitize_uri};
 
-/// Go `FormatContentParts(content, maxLength)`: the `content_parts` of `content` with redaction
-/// on (`max_length` < 0: no limit).
+/// The `content_parts` of `content` with redaction on (`max_length` < 0: no limit).
 pub fn format_content_parts(content: Option<&Content>, max_length: i64) -> Vec<Map<String, Value>> {
     format_content_parts_with(content, max_length, true).0
 }
 
-/// Go `formatContentParts(content, maxLength, redact)`: also reports whether any part lost
-/// content to truncation or URI redaction.
+/// Also reports whether any part lost content to truncation or URI redaction.
 pub(crate) fn format_content_parts_with(
     content: Option<&Content>,
     max_length: i64,
@@ -56,8 +52,8 @@ pub(crate) fn format_content_parts_with(
     (c.parts, c.truncated)
 }
 
-/// Go `formatPartAttributes(v, maxLength, redact)`: [`super::smart_truncate_with`] as a
-/// string (Go's `"\"[UNSUPPORTED_OBJECT]\""` on a marshal error cannot happen here).
+/// [`super::smart_truncate_with`] as a string (an encoding error, which would give
+/// `"\"[UNSUPPORTED_OBJECT]\""`, cannot happen here).
 pub(crate) fn format_part_attributes<T: Serialize + ?Sized>(
     v: &T,
     max_length: i64,
@@ -70,7 +66,8 @@ pub(crate) fn format_part_attributes<T: Serialize + ?Sized>(
     }
 }
 
-/// Go `sanitizeAndTruncateText(raw, maxLength, redact)`.
+/// `raw` redacted (when `redact`) and truncated to `max_length`; the flag tells whether content was
+/// lost.
 pub(crate) fn sanitize_and_truncate_text(
     raw: &str,
     max_length: i64,
@@ -85,12 +82,12 @@ pub(crate) fn sanitize_and_truncate_text(
     (shown, content_lost || length_truncated)
 }
 
-/// Go `orUnknown(s)`: `"unknown"` for an empty string.
+/// `"unknown"` for an empty string.
 pub(crate) fn or_unknown(s: &str) -> &str {
     if s.is_empty() { "unknown" } else { s }
 }
 
-/// A Go `map[string]any` literal of one or two entries (Go walks a map, not a struct).
+/// A map of one or two entries, serialized as a map.
 struct Entries<'a, A: ?Sized, B: ?Sized> {
     first: (&'static str, &'a A),
     second: Option<(&'static str, &'a B)>,
@@ -107,7 +104,7 @@ impl<A: Serialize + ?Sized, B: Serialize + ?Sized> Serialize for Entries<'_, A, 
     }
 }
 
-/// `map[string]any{key: value}`.
+/// A map of the single entry `key: value`.
 fn one_entry<'a, T: Serialize + ?Sized>(key: &'static str, value: &'a T) -> Entries<'a, T, ()> {
     Entries {
         first: (key, value),
@@ -115,10 +112,10 @@ fn one_entry<'a, T: Serialize + ?Sized>(key: &'static str, value: &'a T) -> Entr
     }
 }
 
-/// Go `normalizeFunctionResponse(r)`: the SDK-owned fields of `r` and its media parts under
-/// adk-python's snake_case names; caller-defined keys inside `response` are untouched, and
-/// inline data stays bytes ([`GoAny::Bytes`]) so the sanitizer redacts and truncates UTF-8 data
-/// as text and replaces binary data with a placeholder.
+/// The SDK-owned fields of `r` and its media parts under adk-python's snake_case names;
+/// caller-defined keys inside `response` are untouched, and inline data stays bytes
+/// ([`GoAny::Bytes`]) so the sanitizer redacts and truncates UTF-8 data as text and replaces binary
+/// data with a placeholder.
 pub(crate) fn normalize_function_response(r: &FunctionResponse) -> BTreeMap<String, GoAny> {
     let mut out = BTreeMap::new();
     let text = |s: &str| GoAny::Json(Value::from(s));
@@ -181,7 +178,7 @@ pub(crate) fn normalize_function_response(r: &FunctionResponse) -> BTreeMap<Stri
     out
 }
 
-/// The wire string of a genai enum field (`""` when unset), as Go's `string(...)` of it.
+/// The wire string of a genai enum field (`""` when unset).
 fn enum_text<T: Serialize>(v: Option<&T>) -> String {
     v.and_then(|v| serde_json::to_value(v).ok())
         .and_then(|v| v.as_str().map(str::to_owned))
@@ -189,7 +186,7 @@ fn enum_text<T: Serialize>(v: Option<&T>) -> String {
 }
 
 impl PartsCollector {
-    /// Go `reserve(n)`: `(reserved, ok)`.
+    /// Reserves `n` bytes of upload budget: `(reserved, ok)`.
     pub(crate) fn reserve(&self, n: i64) -> (i64, bool) {
         match &self.opts.reserve_bytes {
             None => (0, true),
@@ -198,14 +195,14 @@ impl PartsCollector {
         }
     }
 
-    /// Go `hasPendingText()`: whether any queued upload is a text part.
+    /// Whether any queued upload is a text part.
     pub(crate) fn has_pending_text(&self) -> bool {
         self.pending.iter().any(|u| u.is_text)
     }
 
-    /// Go `addContent(content, contentOrd)`: appends the parts of `content`. `part_index` counts
-    /// the parts of one message; `content_ord`, the position of the message in its request,
-    /// tells apart the parts of different messages in object names.
+    /// Appends the parts of `content`. `part_index` counts the parts of one message; `content_ord`,
+    /// the position of the message in its request, tells apart the parts of different messages in
+    /// object names.
     pub(crate) fn add_content(&mut self, content: Option<&Content>, content_ord: usize) {
         let Some(content) = content else {
             return;
@@ -219,7 +216,8 @@ impl PartsCollector {
         }
     }
 
-    /// Go `addPart(entry, part, contentOrd, index)`.
+    /// Fills `entry` for one part: text, inline data, file data, a function call or response, code,
+    /// a code execution result, or an empty part.
     fn add_part(
         &mut self,
         entry: &mut Map<String, Value>,
@@ -280,15 +278,14 @@ impl PartsCollector {
         }
     }
 
-    /// Go `queue(u)`: records a payload for the entry about to be appended to `parts`.
+    /// Records a payload for the entry about to be appended to `parts`.
     fn queue(&mut self, mut u: PendingUpload) {
         u.slot = self.parts.len();
         self.pending.push(u);
     }
 
-    /// Go `addText(entry, text, contentOrd, index)`: a text part; if it is too long to keep
-    /// inline and an upload is possible, the entry holds the truncated text until the upload
-    /// replaces it with a preview and a reference.
+    /// A text part; if it is too long to keep inline and an upload is possible, the entry holds the
+    /// truncated text until the upload replaces it with a preview and a reference.
     fn add_text(
         &mut self,
         entry: &mut Map<String, Value>,
@@ -328,11 +325,9 @@ impl PartsCollector {
         self.non_upload_truncated = self.non_upload_truncated || truncated;
     }
 
-    /// Go `addInlineData(entry, blob, contentOrd, index)`: a binary part. The bytes are kept
-    /// if they are to be uploaded (Divergence (ledger 7b-1): a cheap handle sharing the
-    /// caller's immutable `Bytes` buffer, where Go copies with `bytes.Clone`; nothing can change
-    /// the bytes through the message, so the queued data is the same);
-    /// otherwise a placeholder stands in for them. Offloading records
+    /// A binary part. The bytes are kept if they are to be uploaded (as a cheap handle sharing the
+    /// caller's immutable `Bytes` buffer; nothing can change the bytes through the message, so the
+    /// queued data is the same); otherwise a placeholder stands in for them. Offloading records
     /// [`DEFAULT_BINARY_MIME_TYPE`] for a blob without a MIME type.
     fn add_inline_data(
         &mut self,
@@ -367,9 +362,9 @@ impl PartsCollector {
         }
     }
 
-    /// Go `addFileData(entry, file)`: a part that already refers to external data; with
-    /// offloading, a `gs://` file also gets an `object_ref` (details `"{}"`, the connection as
-    /// authorizer), unless its URI had to be redacted.
+    /// A part that already refers to external data; with offloading, a `gs://` file also gets an
+    /// `object_ref` (details `"{}"`, the connection as authorizer), unless its URI had to be
+    /// redacted.
     fn add_file_data(&mut self, entry: &mut Map<String, Value>, file: &FileData) {
         let mut uri = file.file_uri.clone();
         let mut changed = false;
@@ -392,8 +387,7 @@ impl PartsCollector {
         }
     }
 
-    /// Go `addStructured(entry, mimeType, text, key, value)`: a short text, and the object
-    /// itself under `key` in `part_attributes`.
+    /// A short text, and the object itself under `key` in `part_attributes`.
     fn add_structured<T: Serialize>(
         &mut self,
         entry: &mut Map<String, Value>,
@@ -415,12 +409,12 @@ impl PartsCollector {
     }
 }
 
-/// The language of an executable-code part as Go's `string(Language)`.
+/// The wire string of the language of an executable-code part.
 pub(super) fn language_text(code: &gadk_genai::ExecutableCode) -> String {
     enum_text(code.language.as_ref())
 }
 
-/// The outcome of a code-execution-result part as Go's `string(Outcome)`.
+/// The wire string of the outcome of a code-execution-result part.
 pub(super) fn outcome_text(result: &gadk_genai::CodeExecutionResult) -> String {
     enum_text(result.outcome.as_ref())
 }

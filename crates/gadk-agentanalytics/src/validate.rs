@@ -13,9 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin.go`'s
-//! `validateConfig` (with `columnAttributes`, `redaction.go`): the settings check that
-//! `NewBatchProcessor` (and the plugin constructors) run after `applyDefaults`.
+//! The settings check that the batch processor and the plugin constructors run after the
+//! defaults are applied.
 
 use std::collections::BTreeSet;
 
@@ -26,16 +25,16 @@ use crate::error::Error;
 use crate::redaction::{COLUMN_ATTRIBUTES, parse_payload_column_denylist};
 use crate::views::is_valid_identifier;
 
-/// Go `validateConfig(c)`: rejects settings that cannot take effect and returns the
-/// `PayloadColumnDenylist` as a set. The first failing check wins, in Go's order.
+/// Rejects settings that cannot take effect and returns the `PayloadColumnDenylist` as a set.
+/// The first failing check wins.
 ///
-/// Go also rejects a negative `BatchFlushIntv` / `ShutdownTimeout` / `RetryConfig.InitialDelay`;
-/// a Rust [`Duration`](std::time::Duration) cannot be negative (7b-1's ledgered divergence), so
-/// only the zero cases exist here.
+/// A negative `BatchFlushIntv`, `ShutdownTimeout` or `RetryConfig.InitialDelay` cannot occur: a
+/// Rust [`Duration`](std::time::Duration) is never negative, so only the zero cases are checked.
 ///
 /// # Errors
 ///
-/// Go's texts, all starting `invalid config: `.
+/// An [`Error`] whose text starts `invalid config: ` (the texts, with ADK's config field names,
+/// match those of an ADK plugin).
 pub(crate) fn validate_config(c: &Config) -> Result<BTreeSet<String>, Error> {
     let r = &c.retry_config;
     if c.batch_size < 1 || c.queue_max_size < 1 {
@@ -77,8 +76,7 @@ pub(crate) fn validate_config(c: &Config) -> Result<BTreeSet<String>, Error> {
     Ok(denied)
 }
 
-/// Go `fmt.Sprintf("%+v", retryConfig)`: `{MaxRetries:3 InitialDelay:100ms MaxDelay:10s
-/// Multiplier:2}`.
+/// The retry settings as `{MaxRetries:3 InitialDelay:100ms MaxDelay:10s Multiplier:2}`.
 fn retry_config_plus_v(r: &RetryConfig) -> String {
     format!(
         "{{MaxRetries:{} InitialDelay:{} MaxDelay:{} Multiplier:{}}}",
@@ -89,8 +87,8 @@ fn retry_config_plus_v(r: &RetryConfig) -> String {
     )
 }
 
-// The R8 golden (`config/validate_config.json`) builds configs with the shared projection helper,
-// so it lives under `tests/support/` beside it (as 7b-1's `golden_apply_defaults`).
+// The golden (`config/validate_config.json`) builds configs with the shared projection helper,
+// so it lives under `tests/support/` beside it.
 #[cfg(test)]
 #[path = "../tests/support/golden_validate_config.rs"]
 mod golden_validate_config;

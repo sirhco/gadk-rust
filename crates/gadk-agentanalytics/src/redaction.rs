@@ -13,19 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/redaction.go`: sensitive-key detection, URI / path /
-//! query sanitizing, credential-marker canonicalization, JSON-text redaction (fail-closed),
-//! error-message and raw-text scrubbing, the content-formatter guard, the payload-column
-//! denylist and the custom-metadata filter. Go's `session.KeyPrefixUser/App/Temp` are
+//! Sensitive-key detection, URI / path / query sanitizing, credential-marker canonicalization,
+//! JSON-text redaction (fail-closed), error-message and raw-text scrubbing, the content-formatter
+//! guard, the payload-column denylist and the custom-metadata filter. The key prefixes are
 //! `gadk_session::KEY_PREFIX_USER/APP/TEMP`.
 //!
-//! The regular expressions are Go's RE2 sources, built by the same functions as in Go
-//! ([`go_regex_source`]) and translated for the `regex` crate by [`go_to_rust_regex`], which
-//! keeps Go's ASCII-only `\s`, `\w` and `\b`. Go's `net/url` is `gadk_platform::go_url`; Go's
-//! `encoding/json` decoding (the `Decoder.Token` grammar, `json.Number`, invalid surrogates as
-//! U+FFFD, `SyntaxError.Offset`) is ported here ([`scan_json_string`], [`StrictDecoder`]), and
-//! `json.Marshal` of a decoded value is [`marshal`] (sorted keys, Go string escaping through
-//! `gadk_model::to_go_json`).
+//! The credential patterns are RE2 sources, so the same text is redacted as by an ADK server.
+//! [`go_regex_source`] builds the source of each pattern by name and [`go_to_rust_regex`]
+//! translates it for the `regex` crate, keeping RE2's ASCII-only `\s`, `\w` and `\b`. URIs are
+//! parsed by `gadk_platform::go_url`. JSON text is decoded here ([`scan_json_string`],
+//! [`StrictDecoder`]: strict JSON grammar, numbers kept as their literal text, invalid surrogates
+//! as U+FFFD, syntax-error offsets), and a decoded value is written back by [`marshal`] (compact,
+//! sorted keys, string escaping through `gadk_model::to_go_json`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -44,50 +43,48 @@ use crate::formatter::{
     UNSUPPORTED_OBJ_PLACEHOLDER,
 };
 
-/// Go `redactedValue`.
+/// The placeholder that replaces a redacted value.
 pub(crate) const REDACTED_VALUE: &str = "[REDACTED]";
-/// Go `redactedURIPlaceholder`.
+/// The placeholder that replaces a redacted URI.
 pub(crate) const REDACTED_URI_PLACEHOLDER: &str = "[REDACTED_SENSITIVE_URI]";
-/// Go `redactedSensitiveTextPlaceholder`.
+/// The placeholder that replaces redacted sensitive text.
 pub(crate) const REDACTED_SENSITIVE_TEXT_PLACEHOLDER: &str = "[REDACTED_SENSITIVE_TEXT]";
-/// Go `formattingFailedPlaceholder`.
+/// The placeholder that replaces content when the content formatter fails.
 pub(crate) const FORMATTING_FAILED_PLACEHOLDER: &str = "[FORMATTER_FAILED]";
-/// Go `unparseableJSONPlaceholder`.
+/// The placeholder that replaces a JSON-like blob that cannot be parsed.
 pub(crate) const UNPARSEABLE_JSON_PLACEHOLDER: &str = "[UNPARSEABLE_JSON_BLOB]";
 
-/// Go `maxInspectableJSONTextBytes` (adk-python `_MAX_JSON_INSPECT_CHARS`).
+/// The longest JSON text inspected, in bytes (adk-python `_MAX_JSON_INSPECT_CHARS`).
 pub(crate) const MAX_INSPECTABLE_JSON_TEXT_BYTES: usize = 4_000_000;
-/// Go `maxCanonicalUnescapePasses`.
+/// The most unescape passes made when canonicalizing a credential marker.
 pub(crate) const MAX_CANONICAL_UNESCAPE_PASSES: usize = 4;
-/// Go `maxQuotedFragmentsPerInspect`.
+/// The most quoted fragments inspected in one text.
 pub(crate) const MAX_QUOTED_FRAGMENTS_PER_INSPECT: usize = 64;
-/// Go `maxBasicCredentialBytes` (adk-python `_MAX_BASIC_AUTH_TOKEN_CHARS`).
+/// The longest basic credential token checked, in bytes (adk-python `_MAX_BASIC_AUTH_TOKEN_CHARS`).
 const MAX_BASIC_CREDENTIAL_BYTES: usize = 16 * 1024;
-/// Go `maxNestedKeyLen`: the longest value `nests_sensitive_key` may take for a key.
+/// The longest value `nests_sensitive_key` may take for a key.
 const MAX_NESTED_KEY_LEN: usize = 128;
 
-/// Go `regexpSpace`: the bytes `\s` matches in a Go regular expression.
+/// The bytes `\s` matches in an RE2 regular expression.
 const REGEXP_SPACE: &str = "\t\n\x0c\r ";
-/// Go `delimSpace`: the bytes `[\s[:cntrl:]]` matches around delimiters in
-/// `textKeyValTokenRe`.
+/// The bytes `[\s[:cntrl:]]` matches around delimiters in the text key-value pattern.
 const DELIM_SPACE: &str = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f \x7f";
-/// Go `closingPunctuation`: what may follow the text of a bare value, as in the `%q` output
-/// `"{APIKey:...}"`.
+/// What may follow the text of a bare value, as in a quoted struct dump such as `"{APIKey:...}"`.
 const CLOSING_PUNCTUATION: &str = "}])\"'\\:.";
 
-/// Go `columnContent`: a payload column [`Config::payload_column_denylist`] may suppress.
+/// A payload column [`Config::payload_column_denylist`] may suppress.
 ///
 /// [`Config::payload_column_denylist`]: crate::config::Config::payload_column_denylist
 pub(crate) const COLUMN_CONTENT: &str = "content";
-/// Go `columnContentParts`.
+/// The `content_parts` payload column.
 pub(crate) const COLUMN_CONTENT_PARTS: &str = "content_parts";
-/// Go `columnAttributes`.
+/// The `attributes` payload column.
 pub(crate) const COLUMN_ATTRIBUTES: &str = "attributes";
-/// Go `columnLatencyMS`.
+/// The `latency_ms` payload column.
 pub(crate) const COLUMN_LATENCY_MS: &str = "latency_ms";
 
-/// Go `sensitiveKeys` (sorted): normalized (lowercase, `-` replaced by `_`) map keys whose
-/// values are always redacted — the adk-python list plus the names ADK-Go adds.
+/// Normalized (lowercase, `-` replaced by `_`) map keys whose values are always redacted — the
+/// adk-python list plus the names this plugin adds.
 const SENSITIVE_KEYS: [&str; 34] = [
     "access_token",
     "api_key",
@@ -125,8 +122,7 @@ const SENSITIVE_KEYS: [&str; 34] = [
     "x_goog_signature",
 ];
 
-/// Go `sensitiveKeyNames`: [`SENSITIVE_KEYS`] with `_` removed, the form in which
-/// [`is_sensitive_key`] compares keys.
+/// [`SENSITIVE_KEYS`] with `_` removed, the form in which [`is_sensitive_key`] compares keys.
 static SENSITIVE_KEY_NAMES: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
     SENSITIVE_KEYS
         .iter()
@@ -134,10 +130,9 @@ static SENSITIVE_KEY_NAMES: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
         .collect()
 });
 
-/// Go `patternWords`: words of which every match of the credential text patterns contains at
-/// least one once the text is folded by [`fold_pattern_text`] — the sensitive key names
-/// without separators, the `temp:` prefix and the `basic` scheme, minus every word that
-/// contains another one.
+/// Words of which every match of the credential text patterns contains at least one once the text
+/// is folded by [`fold_pattern_text`] — the sensitive key names without separators, the `temp:`
+/// prefix and the `basic` scheme, minus every word that contains another one.
 static PATTERN_WORDS: LazyLock<Vec<String>> = LazyLock::new(|| {
     let mut words = vec!["basic".to_owned(), KEY_PREFIX_TEMP.to_owned()];
     words.extend(SENSITIVE_KEY_NAMES.iter().cloned());
@@ -150,7 +145,7 @@ static PATTERN_WORDS: LazyLock<Vec<String>> = LazyLock::new(|| {
     minimal
 });
 
-/// Go `regexp.QuoteMeta`.
+/// Escapes the regular-expression metacharacters of `s`.
 fn regexp_quote_meta(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -162,8 +157,8 @@ fn regexp_quote_meta(s: &str) -> String {
     out
 }
 
-/// Go `fixedSensitiveKeyRegex()`: an alternation of [`SENSITIVE_KEYS`] in which each `_` may
-/// also be written as `-` or left out.
+/// The source of an alternation of [`SENSITIVE_KEYS`] in which each `_` may also be written as `-`
+/// or left out.
 fn fixed_sensitive_key_regex() -> String {
     SENSITIVE_KEYS
         .iter()
@@ -172,26 +167,23 @@ fn fixed_sensitive_key_regex() -> String {
         .join("|")
 }
 
-/// Go `sensitiveKeyRegex()`: key names read inside quotes, where a `temp:` key name may hold
-/// `=` and `:`.
+/// The source for key names read inside quotes, where a `temp:` key name may hold `=` and `:`.
 fn sensitive_key_regex() -> String {
     format!(r#"temp:[^"'\s\r\n,}}]+|{}"#, fixed_sensitive_key_regex())
 }
 
-/// Go `bareSensitiveKeyRegex()`: key names in unquoted `key=value` / `key: value` text; a
-/// `temp:` key name ends before the first `=` or `:`.
+/// The source for key names in unquoted `key=value` / `key: value` text; a `temp:` key name ends
+/// before the first `=` or `:`.
 fn bare_sensitive_key_regex() -> String {
     format!(r#"temp:[^=:"'\s\r\n,}}]+|{}"#, fixed_sensitive_key_regex())
 }
 
-/// Go `escapedQuotedRegex(q)`: a string delimited by `\q`, as produced by quoting JSON text
-/// again.
+/// The source for a string delimited by `\q`, as produced by quoting JSON text again.
 fn escaped_quoted_regex(q: &str) -> String {
     format!(r"\\{q}(?:\\\\(?:\\\\|\\{q}|[^\\{q}])|\\[^\\{q}]|[^\\{q}])*\\{q}")
 }
 
-/// Go `quotedValueRegex()`: a double- or single-quoted string, or one quoted with escaped
-/// quotes.
+/// The source for a double- or single-quoted string, or one quoted with escaped quotes.
 fn quoted_value_regex() -> String {
     format!(
         r#""(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|{}|{}"#,
@@ -200,13 +192,13 @@ fn quoted_value_regex() -> String {
     )
 }
 
-/// Go `sensitiveValueRegex(bareStop)`: a quoted value, or a run of bytes outside `bare_stop`.
+/// The source for a quoted value, or a run of bytes outside `bare_stop`.
 fn sensitive_value_regex(bare_stop: &str) -> String {
     format!("{}|[^{bare_stop}]+", quoted_value_regex())
 }
 
-/// The Go (RE2) source of each package regular expression, by its Go variable name, built as
-/// `redaction.go` builds it (`regexp.MustCompile(...)`); `""` for an unknown name.
+/// The RE2 source of each credential pattern, by its name (`uriTokenRe`, `authHeaderRe`,
+/// `bearerTokenRe`, …); `""` for an unknown name.
 fn go_regex_source(name: &str) -> String {
     match name {
         "uriTokenRe" => r#"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>]+"#.to_owned(),
@@ -253,11 +245,11 @@ fn go_regex_source(name: &str) -> String {
     }
 }
 
-/// Translates a Go RE2 source into one the `regex` crate reads with Go's meaning: Go's `\s`
-/// (`[\t\n\f\r ]`), `\w` (`[0-9A-Za-z_]`) and `\b` (an ASCII word boundary) are ASCII-only,
-/// while the `regex` crate's are Unicode-aware, and a `[` inside a Go class is a literal, while
-/// the `regex` crate reads it as a nested class. Everything else (`(?i)` simple case folding,
-/// `\p{Z}`, `[:cntrl:]`, leftmost-first matching) means the same in both.
+/// Translates an RE2 source into one the `regex` crate reads with RE2's meaning: RE2's `\s`
+/// (`[\t\n\f\r ]`), `\w` (`[0-9A-Za-z_]`) and `\b` (an ASCII word boundary) are ASCII-only, while
+/// the `regex` crate's are Unicode-aware, and a `[` inside an RE2 class is a literal, while the
+/// `regex` crate reads it as a nested class. Everything else (`(?i)` simple case folding, `\p{Z}`,
+/// `[:cntrl:]`, leftmost-first matching) means the same in both.
 fn go_to_rust_regex(src: &str) -> String {
     let mut out = String::with_capacity(src.len() + 64);
     let mut in_class = false;
@@ -316,8 +308,8 @@ fn go_to_rust_regex(src: &str) -> String {
     out
 }
 
-/// Go `regexp.MustCompile` of the named package regular expression.
-#[allow(clippy::expect_used)] // a constant pattern (Go regexp.MustCompile)
+/// Compiles the named credential pattern.
+#[allow(clippy::expect_used)] // a constant pattern
 fn must_compile(name: &str) -> Regex {
     regex::RegexBuilder::new(&go_to_rust_regex(&go_regex_source(name)))
         .size_limit(64 << 20)
@@ -327,36 +319,34 @@ fn must_compile(name: &str) -> Regex {
 
 pub(crate) static URI_TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("uriTokenRe"));
 static AUTH_HEADER_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("authHeaderRe"));
-/// Go `bearerTokenRe`: a bearer token (RFC 6750) never holds quotes, `)` or `]`, so the bare
-/// value stops there.
+/// A bearer token (RFC 6750) never holds quotes, `)` or `]`, so the bare value stops there.
 static BEARER_TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("bearerTokenRe"));
-/// Go `basicTokenRe`: a candidate basic credential, redacted only when it is valid base64.
+/// A candidate basic credential, redacted only when it is valid base64.
 static BASIC_TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("basicTokenRe"));
 static JSON_KEY_VAL_TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("jsonKeyValTokenRe"));
-/// Go `textKeyValTokenRe`: `key=value` and `key: value` pairs.
+/// `key=value` and `key: value` pairs.
 static TEXT_KEY_VAL_TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("textKeyValTokenRe"));
 static TEXT_KEY_VAL_TOKEN_AT_RE: LazyLock<Regex> =
     LazyLock::new(|| must_compile("textKeyValTokenAtRe"));
-/// Go `nestedKeyNameRe`: a value that is itself a fixed sensitive key name.
+/// A value that is itself a fixed sensitive key name.
 static NESTED_KEY_NAME_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("nestedKeyNameRe"));
-/// Go `compoundKeyNameRe`: a value that is a `temp:` key name or only ends in a sensitive key
-/// name.
+/// A value that is a `temp:` key name or only ends in a sensitive key name.
 static COMPOUND_KEY_NAME_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("compoundKeyNameRe"));
-/// Go `quotedValueRe`: a quoted value at the start of a text.
+/// A quoted value at the start of a text.
 static QUOTED_VALUE_RE: LazyLock<Regex> = LazyLock::new(|| must_compile("quotedValueRe"));
-/// Go `quotedSensitiveKeyRe`: a quoted sensitive key followed by a key-value delimiter.
+/// A quoted sensitive key followed by a key-value delimiter.
 static QUOTED_SENSITIVE_KEY_RE: LazyLock<Regex> =
     LazyLock::new(|| must_compile("quotedSensitiveKeyRe"));
-/// Go `r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)` for the first rune of a text.
+/// Matches when a text starts with `_`, a Unicode letter or a Unicode digit.
 #[allow(clippy::expect_used)] // a constant pattern
 static WORD_RUNE_START_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[_\p{L}\p{Nd}]").expect("valid word-rune regex"));
 
-/// A missing submatch in a [`submatch_index`] result (Go's `-1`).
+/// A missing submatch in a [`submatch_index`] result.
 const NO_MATCH: usize = usize::MAX;
 
-/// Go `re.FindStringSubmatchIndex(s)`: the start and end of the match and of each group,
-/// [`NO_MATCH`] for a group that did not take part.
+/// The start and end of the match and of each group, [`NO_MATCH`] for a group that did not take
+/// part.
 fn submatch_index(re: &Regex, s: &str) -> Option<Vec<usize>> {
     let caps = re.captures(s)?;
     let mut loc = Vec::with_capacity(caps.len() * 2);
@@ -375,12 +365,12 @@ fn submatch_index(re: &Regex, s: &str) -> Option<Vec<usize>> {
     Some(loc)
 }
 
-/// Go `unicode.IsSpace(r)` (the Unicode `White_Space` property, as Rust's).
+/// Whether `r` has the Unicode `White_Space` property.
 fn is_space(r: char) -> bool {
     r.is_whitespace()
 }
 
-/// Go `unicode.In(r, unicode.Z)`: the separator categories Zs, Zl and Zp.
+/// Whether `r` is in the separator categories Zs, Zl and Zp.
 fn is_unicode_z(r: char) -> bool {
     matches!(
         r,
@@ -389,15 +379,14 @@ fn is_unicode_z(r: char) -> bool {
     )
 }
 
-/// Go `trimBOMAndSpace(s)`: `s` without leading and trailing white space and U+FEFF.
+/// `s` without leading and trailing white space and U+FEFF.
 fn trim_bom_and_space(s: &str) -> &str {
     s.trim_matches(|r: char| is_space(r) || r == '\u{feff}')
 }
 
-/// The largest char boundary of `s` at or below `i`. Divergence (ledger 7b-1): Go slices bytes
-/// (`s[:maxInspectableJSONTextBytes]`, `loc[0]+1`), and a cut inside a rune leaves invalid UTF-8
-/// there, which a Rust `&str` cannot hold; the cut is rounded to a char boundary instead (no
-/// probe corpus input reaches it).
+/// The largest char boundary of `s` at or below `i`. A byte cut inside a multi-byte character would
+/// leave invalid UTF-8, which a Rust `&str` cannot hold, so cuts (at the inspection limit, after a
+/// match start) are rounded to a char boundary instead (no corpus input reaches this).
 fn floor_boundary(s: &str, mut i: usize) -> usize {
     if i >= s.len() {
         return s.len();
@@ -419,22 +408,22 @@ fn ceil_boundary(s: &str, mut i: usize) -> usize {
     i
 }
 
-/// Bytes Go would hold in a string, as Rust text. Divergence (ledger 7b-1): a percent escape
-/// that decodes to invalid UTF-8 (`%FF`) is U+FFFD here, so a redacted component that holds
-/// one is re-escaped as `%EF%BF%BD` where Go writes `%FF` back.
+/// Bytes as Rust text. A percent escape that decodes to invalid UTF-8 (`%FF`) becomes U+FFFD, so a
+/// redacted component that holds one is re-escaped as `%EF%BF%BD` rather than written back as
+/// `%FF`.
 fn lossy(b: Vec<u8>) -> String {
     String::from_utf8(b).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
-/// Go `mayMatchTextPatterns(s)`: whether `s` holds one of [`PATTERN_WORDS`], ignoring case.
-/// When it does not, none of the credential text patterns can match.
+/// Whether `s` holds one of [`PATTERN_WORDS`], ignoring case. When it does not, none of the
+/// credential text patterns can match.
 fn may_match_text_patterns(s: &str) -> bool {
     let folded = fold_pattern_text(s);
     PATTERN_WORDS.iter().any(|w| folded.contains(w.as_str()))
 }
 
-/// Go `foldPatternText(s)`: ASCII letters lowercased, `-` and `_` removed, U+017F and U+212A
-/// (which `(?i)` matches against `s` and `k`) replaced by `s` and `k`.
+/// ASCII letters lowercased, `-` and `_` removed, U+017F and U+212A (which `(?i)` matches against
+/// `s` and `k`) replaced by `s` and `k`.
 fn fold_pattern_text(s: &str) -> String {
     let mut b = String::with_capacity(s.len());
     for c in s.chars() {
@@ -449,23 +438,23 @@ fn fold_pattern_text(s: &str) -> String {
     b
 }
 
-/// Go `hasQuotedSensitiveKey(s)`.
+/// Whether `s` holds a quoted sensitive key followed by a key-value delimiter.
 fn has_quoted_sensitive_key(s: &str) -> bool {
     may_match_text_patterns(s) && QUOTED_SENSITIVE_KEY_RE.is_match(s)
 }
 
-/// Go `normalizeKey(k)`: lowercased, trimmed, `-` replaced by `_`.
+/// `k` lowercased, trimmed, `-` replaced by `_`.
 fn normalize_key(k: &str) -> String {
     go_to_lower(k.trim()).replace('-', "_")
 }
 
-/// Go `removeKeySeparators(k)`: `k` without `_` and `-`.
+/// `k` without `_` and `-`.
 fn remove_key_separators(k: &str) -> String {
     k.chars().filter(|&r| r != '_' && r != '-').collect()
 }
 
-/// Go `isSensitiveKey(k)`: whether the values under map key `k` are redacted (case- and
-/// separator-insensitive, `user:` / `app:` prefixes stripped, every `temp:` key).
+/// Whether the values under map key `k` are redacted (case- and separator-insensitive, `user:` /
+/// `app:` prefixes stripped, every `temp:` key).
 pub(crate) fn is_sensitive_key(k: &str) -> bool {
     let n = go_to_lower(k.trim());
     if n.starts_with(KEY_PREFIX_TEMP) {
@@ -478,8 +467,8 @@ pub(crate) fn is_sensitive_key(k: &str) -> bool {
     SENSITIVE_KEY_NAMES.contains(&remove_key_separators(n.trim()))
 }
 
-/// Go `canonicalizeCredentialMarker(s)`: nested ASCII `\u`, `\x` and percent escapes, and
-/// escaped quotes, decoded in one pass. The result is for detection only.
+/// Nested ASCII `\u`, `\x` and percent escapes, and escaped quotes, decoded in one pass. The result
+/// is for detection only.
 pub(crate) fn canonicalize_credential_marker(s: &str) -> String {
     if !s.contains(['\\', '%']) {
         // Every escape starts with "\" or "%".
@@ -537,9 +526,9 @@ fn hex_value(digits: &[char]) -> u32 {
         .fold(0, |acc, d| acc * 16 + d.to_digit(16).unwrap_or(0))
 }
 
-/// Go `sanitizeURI(raw)`: `raw` with credentials removed from its userinfo, path, query and
-/// fragment; `true` when it changed. A URI with user information, or one Go's `url.Parse`
-/// rejects, becomes [`REDACTED_URI_PLACEHOLDER`].
+/// `raw` with credentials removed from its userinfo, path, query and fragment; `true` when it
+/// changed. A URI with user information, or one that `go_url::parse` rejects, becomes
+/// [`REDACTED_URI_PLACEHOLDER`].
 pub(crate) fn sanitize_uri(raw: &str) -> (String, bool) {
     if raw.is_empty() {
         return (raw.to_owned(), false);
@@ -585,8 +574,7 @@ pub(crate) fn sanitize_uri(raw: &str) -> (String, bool) {
     (u.to_go_string(), true)
 }
 
-/// Go `sanitizePathSegments(escapedPath)`: `Some((escaped, unescaped))` when a segment was
-/// redacted.
+/// `Some((escaped, unescaped))` when a segment was redacted.
 fn sanitize_path_segments(escaped_path: &str) -> Option<(String, Vec<u8>)> {
     let mut segments: Vec<String> = escaped_path.split('/').map(str::to_owned).collect();
     let escaped_redacted = go_query_escape(REDACTED_VALUE);
@@ -646,10 +634,9 @@ fn sanitize_path_segments(escaped_path: &str) -> Option<(String, Vec<u8>)> {
     Some((escaped, unescaped))
 }
 
-/// Go `sanitizeQueryPairs(raw, requireEquals)`: the values of sensitive keys in `raw`, a query
-/// or a fragment of `&`-separated pairs, redacted. For a fragment (`require_equals`), pairs
-/// without `=` are skipped; for a query, the key and value of every other pair are scrubbed as
-/// text.
+/// The values of sensitive keys in `raw`, a query or a fragment of `&`-separated pairs, redacted.
+/// For a fragment (`require_equals`), pairs without `=` are skipped; for a query, the key and value
+/// of every other pair are scrubbed as text.
 fn sanitize_query_pairs(raw: &str, require_equals: bool) -> (String, bool) {
     let mut pairs: Vec<String> = raw.split('&').map(str::to_owned).collect();
     let mut changed = false;
@@ -692,8 +679,7 @@ fn sanitize_query_pairs(raw: &str, require_equals: bool) -> (String, bool) {
     (pairs.join("&"), true)
 }
 
-/// Go `redactQueryComponent(raw)`: one escaped query key or value scrubbed as text and escaped
-/// again.
+/// One escaped query key or value scrubbed as text and escaped again.
 fn redact_query_component(raw: &str) -> (String, bool) {
     let decoded = match go_url::query_unescape(raw) {
         Ok(b) => lossy(b),
@@ -706,8 +692,8 @@ fn redact_query_component(raw: &str) -> (String, bool) {
     (go_query_escape(&safe), true)
 }
 
-/// Go `redactURIComponent(s)`: one decoded URI component scrubbed with the text patterns,
-/// failing closed when decoding an escape in it exposes a credential pattern.
+/// One decoded URI component scrubbed with the text patterns, failing closed when decoding an
+/// escape in it exposes a credential pattern.
 fn redact_uri_component(s: &str) -> (String, bool) {
     if s.is_empty() || is_known_sentinel(s) {
         return (s.to_owned(), false);
@@ -720,7 +706,7 @@ fn redact_uri_component(s: &str) -> (String, bool) {
     (scrubbed, changed)
 }
 
-/// Go `isKnownSentinel(s)`: `s` is one of the placeholders the formatter and redaction write.
+/// Whether `s` is one of the placeholders the formatter and redaction write.
 pub(crate) fn is_known_sentinel(s: &str) -> bool {
     matches!(
         s,
@@ -739,9 +725,8 @@ pub(crate) fn is_known_sentinel(s: &str) -> bool {
     )
 }
 
-/// Go `sanitizeRawText(raw)`: free text with embedded JSON keys, URIs and credential patterns
-/// redacted; `true` when content was lost. Positively harmless prose that only failed JSON
-/// parsing is kept.
+/// Free text with embedded JSON keys, URIs and credential patterns redacted; `true` when content
+/// was lost. Positively harmless prose that only failed JSON parsing is kept.
 pub(crate) fn sanitize_raw_text(raw: &str) -> (String, bool) {
     let mut budget = NodeBudget::new();
     let (sanitized, changed, lost) = redact_json_text_with_budget(raw, 0, &mut budget);
@@ -766,9 +751,8 @@ pub(crate) fn sanitize_raw_text(raw: &str) -> (String, bool) {
     (sanitized, lost)
 }
 
-/// Go `hasCandidateQuotedSensitiveKey(s, depth)`: a quoted string in `s` (decoded, or
-/// canonicalized) is a sensitive key followed by a key-value delimiter, at most 4 levels of
-/// quoting deep.
+/// Whether a quoted string in `s` (decoded, or canonicalized) is a sensitive key followed by a
+/// key-value delimiter, at most 4 levels of quoting deep.
 fn has_candidate_quoted_sensitive_key(s: &str, depth: usize) -> bool {
     if depth > 4 || s.is_empty() {
         return false;
@@ -833,7 +817,7 @@ fn has_candidate_quoted_sensitive_key(s: &str, depth: usize) -> bool {
     false
 }
 
-/// Go `followedByKeyDelimiter(rest)`: `rest` starts with `:` or `=` after optional white space.
+/// Whether `rest` starts with `:` or `=` after optional white space.
 fn followed_by_key_delimiter(rest: &str) -> bool {
     for r in rest.chars() {
         if is_space(r) || is_unicode_z(r) {
@@ -844,7 +828,8 @@ fn followed_by_key_delimiter(rest: &str) -> bool {
     false
 }
 
-/// Go `hasCredentialPattern(s)`.
+/// Whether `s` holds a credential pattern: scrubbing it as error text changes it, or it holds a
+/// quoted sensitive key (as is, or after canonicalizing its escapes).
 fn has_credential_pattern(s: &str) -> bool {
     if scrub_error_text(s) != s {
         return true;
@@ -855,8 +840,8 @@ fn has_credential_pattern(s: &str) -> bool {
     has_quoted_sensitive_key(&canonicalize_credential_marker(s))
 }
 
-/// Go `isPositivelyHarmlessProse(raw, trimmed)`: bracket-, brace- or quote-led text that failed
-/// JSON parsing and carries no credential pattern.
+/// Whether `raw` is bracket-, brace- or quote-led text that failed JSON parsing and carries no
+/// credential pattern.
 fn is_positively_harmless_prose(raw: &str, trimmed: &str) -> bool {
     if raw.len() > MAX_INSPECTABLE_JSON_TEXT_BYTES {
         return false;
@@ -878,8 +863,8 @@ fn is_positively_harmless_prose(raw: &str, trimmed: &str) -> bool {
     trimmed.starts_with('"') && !has_json_escaped_credential(raw)
 }
 
-/// Go `hasJSONEscapedCredential(s)`: the text between two consecutive quotes in `s`, read as a
-/// JSON string, holds a credential pattern once decoded.
+/// Whether the text between two consecutive quotes in `s`, read as a JSON string, holds a
+/// credential pattern once decoded.
 fn has_json_escaped_credential(s: &str) -> bool {
     if !s.contains('\\') {
         return false;
@@ -902,9 +887,8 @@ fn has_json_escaped_credential(s: &str) -> bool {
     false
 }
 
-/// Go `redactJSONTextWithBudget(s, depth, budget)`: redacts sensitive keys inside JSON-encoded
-/// text (fail-closed: unparseable or over-budget JSON-like blobs become placeholders). Returns
-/// `(sanitized, changed, content_lost)`.
+/// Redacts sensitive keys inside JSON-encoded text (fail-closed: unparseable or over-budget
+/// JSON-like blobs become placeholders). Returns `(sanitized, changed, content_lost)`.
 pub(crate) fn redact_json_text_with_budget(
     s: &str,
     depth: usize,
@@ -1001,8 +985,8 @@ pub(crate) fn redact_json_text_with_budget(
     }
 }
 
-/// Go `inspectQuotedFragments(s, depth, budget)`: a quoted fragment of `s` decodes to text that
-/// needs redaction, or could not be decoded and starts like an encoded container.
+/// Whether a quoted fragment of `s` decodes to text that needs redaction, or could not be decoded
+/// and starts like an encoded container.
 fn inspect_quoted_fragments(s: &str, depth: usize, budget: &mut NodeBudget) -> bool {
     if depth >= MAX_SANITIZE_DEPTH {
         return true;
@@ -1062,15 +1046,13 @@ fn inspect_quoted_fragments(s: &str, depth: usize, budget: &mut NodeBudget) -> b
     false
 }
 
-/// Go `startsLikeEncodedContainer(s)`: `s`, a quoted fragment that could not be decoded,
-/// starts like an encoded JSON container.
+/// Whether `s`, a quoted fragment that could not be decoded, starts like an encoded JSON container.
 fn starts_like_encoded_container(s: &str) -> bool {
     let after_quote = s[1..].trim_start_matches(|r: char| is_space(r) || r == '\u{feff}');
     after_quote.starts_with(['{', '[', '\\', '"'])
 }
 
-/// Go `redactJSONValue(v, depth, budget)` over a decoded JSON value. Returns
-/// `(out, changed, content_lost)`.
+/// Redacts a decoded JSON value. Returns `(out, changed, content_lost)`.
 pub(crate) fn redact_json_value(
     v: &Value,
     depth: usize,
@@ -1080,8 +1062,8 @@ pub(crate) fn redact_json_value(
     (out.into_value(), changed, lost)
 }
 
-/// Go `redactJSONValue` over the decoder's values. Go walks a map in random order; this walks
-/// it in key order (the outputs differ only when the node budget runs out inside a map).
+/// Redacts the decoder's values. A map is walked in key order (the output depends on the order only
+/// when the node budget runs out inside a map).
 fn redact_jval(v: &JVal, depth: usize, budget: &mut NodeBudget) -> (JVal, bool, bool) {
     let budget_placeholder = || JVal::Str(SANITIZE_BUDGET_PLACEHOLDER.to_owned());
     if depth >= MAX_SANITIZE_DEPTH {
@@ -1151,9 +1133,9 @@ fn redact_jval(v: &JVal, depth: usize, budget: &mut NodeBudget) -> (JVal, bool, 
     }
 }
 
-/// Go `redactErrorMessage(msg)`: an error message with credentials scrubbed — full or embedded
-/// JSON values, URIs with credentials, Authorization / API-key headers, bearer and basic
-/// tokens, and sensitive `key=value` / `key: value` pairs.
+/// An error message with credentials scrubbed — full or embedded JSON values, URIs with
+/// credentials, Authorization / API-key headers, bearer and basic tokens, and sensitive `key=value`
+/// / `key: value` pairs.
 pub(crate) fn redact_error_message(msg: &str) -> String {
     if msg.is_empty() || is_known_sentinel(msg) {
         return msg.to_owned();
@@ -1171,9 +1153,9 @@ pub(crate) fn redact_error_message(msg: &str) -> String {
             {
                 return b;
             }
-            // Unchanged values return the message as is. A failed `marshal` of changed values
-            // would also return it unredacted: Go parity (`json.Marshal` error falls through to
-            // `return msg`), and unreachable — a value decoded from JSON always re-encodes.
+            // Unchanged values return the message as is. A failed `marshal` of changed values would
+            // also return it unredacted, and is unreachable: a value decoded from JSON always
+            // re-encodes.
             return msg.to_owned();
         }
         // A malformed JSON document with a sensitive key pattern or a credential marker fails
@@ -1201,8 +1183,7 @@ pub(crate) fn redact_error_message(msg: &str) -> String {
     scrub_error_text(msg)
 }
 
-/// Go `scrubErrorJSONStrings(v, depth)`: every string of a decoded value scrubbed with
-/// [`scrub_error_text`].
+/// Every string of a decoded value scrubbed with [`scrub_error_text`].
 fn scrub_error_json_strings(v: &JVal, depth: usize) -> (JVal, bool) {
     if depth >= MAX_SANITIZE_DEPTH {
         return (v.clone(), false);
@@ -1240,8 +1221,8 @@ fn scrub_error_json_strings(v: &JVal, depth: usize) -> (JVal, bool) {
     }
 }
 
-/// Go `scrubErrorText(msg)`: URIs and credential text patterns redacted; the whole text
-/// becomes [`REDACTED_SENSITIVE_TEXT_PLACEHOLDER`] when decoding escapes would expose one.
+/// URIs and credential text patterns redacted; the whole text becomes
+/// [`REDACTED_SENSITIVE_TEXT_PLACEHOLDER`] when decoding escapes would expose one.
 pub(crate) fn scrub_error_text(msg: &str) -> String {
     let scrubbed = scrub_error_tokens(msg);
     if has_encoded_credential_marker(&scrubbed) || has_backslash_escaped_credential(msg, &scrubbed)
@@ -1251,8 +1232,7 @@ pub(crate) fn scrub_error_text(msg: &str) -> String {
     scrubbed
 }
 
-/// Go `keptLiterals(scrubbed)`: the non-redacted pieces of `scrubbed` between redaction
-/// placeholders, in order.
+/// The non-redacted pieces of `scrubbed` between redaction placeholders, in order.
 fn kept_literals(scrubbed: &str) -> Vec<String> {
     let mut parts = vec![scrubbed.to_owned()];
     let escaped_redacted = go_query_escape(REDACTED_VALUE);
@@ -1271,7 +1251,7 @@ fn kept_literals(scrubbed: &str) -> Vec<String> {
     parts
 }
 
-/// Go `keptInOrder(parts, s)`: every part appears in `s`, in order.
+/// Whether every part appears in `s`, in order.
 fn kept_in_order(parts: &[String], s: &str) -> bool {
     let mut rest = s;
     for part in parts {
@@ -1283,7 +1263,8 @@ fn kept_in_order(parts: &[String], s: &str) -> bool {
     true
 }
 
-/// Go `unescapeCredentialStep(s)`.
+/// One unescape step: the backslash escapes of `s` decoded, then its percent, `\x` and `\u` escapes
+/// canonicalized.
 fn unescape_credential_step(s: &str) -> String {
     let mut s = s.to_owned();
     if s.contains('\\') {
@@ -1295,10 +1276,9 @@ fn unescape_credential_step(s: &str) -> String {
     s
 }
 
-/// Go `hasBackslashEscapedCredential(raw, scrubbed)`: unescaping backslash escapes, or
-/// canonicalizing percent, `\x` or `\u` escapes, exposes a credential that
-/// [`scrub_error_tokens`] or [`has_encoded_credential_marker`] catches; fails closed past
-/// `2 * MAX_CANONICAL_UNESCAPE_PASSES` passes.
+/// Whether unescaping backslash escapes, or canonicalizing percent, `\x` or `\u` escapes, exposes a
+/// credential that [`scrub_error_tokens`] or [`has_encoded_credential_marker`] catches; fails
+/// closed past `2 * MAX_CANONICAL_UNESCAPE_PASSES` passes.
 fn has_backslash_escaped_credential(raw: &str, scrubbed: &str) -> bool {
     let mut parts: Option<Vec<String>> = None;
     let mut cur_raw = raw.to_owned();
@@ -1340,8 +1320,8 @@ fn has_backslash_escaped_credential(raw: &str, scrubbed: &str) -> bool {
     unescape_credential_step(&cur_raw) != cur_raw
 }
 
-/// Go `unescapeBackslashControls(s)`: the standard backslash escapes decoded; a run of
-/// backslashes is decoded in one step as the escape its last backslash starts.
+/// The standard backslash escapes decoded; a run of backslashes is decoded in one step as the
+/// escape its last backslash starts.
 fn unescape_backslash_controls(s: &str) -> String {
     let b = s.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(b.len());
@@ -1377,7 +1357,7 @@ fn unescape_backslash_controls(s: &str) -> String {
     lossy(out)
 }
 
-/// Go `scrubErrorTokens(msg)`: URIs sanitized with [`sanitize_uri`], then the text patterns.
+/// URIs sanitized with [`sanitize_uri`], then the text patterns.
 fn scrub_error_tokens(msg: &str) -> String {
     let msg = if msg.contains("://") {
         URI_TOKEN_RE
@@ -1398,8 +1378,8 @@ fn scrub_error_tokens(msg: &str) -> String {
     scrub_text_patterns(&msg)
 }
 
-/// Go `trimTrailingPunctuation(s)`: `s` without the punctuation that may follow a URI or a
-/// value in text; a `]` that closes a redaction placeholder is kept.
+/// `s` without the punctuation that may follow a URI or a value in text; a `]` that closes a
+/// redaction placeholder is kept.
 pub(crate) fn trim_trailing_punctuation(s: &str) -> &str {
     let trimmed = s.trim_end_matches(|c: char| ".,;:)]}".contains(c));
     let with_bracket = &s[..(trimmed.len() + 1).min(s.len())];
@@ -1412,8 +1392,8 @@ pub(crate) fn trim_trailing_punctuation(s: &str) -> &str {
     trimmed
 }
 
-/// Go `scrubTextPatterns(s)`: Authorization and API-key headers, bearer and basic credentials,
-/// and the values of sensitive key-value pairs redacted.
+/// Authorization and API-key headers, bearer and basic credentials, and the values of sensitive
+/// key-value pairs redacted.
 fn scrub_text_patterns(s: &str) -> String {
     if !may_match_text_patterns(s) {
         return s.to_owned();
@@ -1430,13 +1410,14 @@ fn scrub_text_patterns(s: &str) -> String {
     })
 }
 
-/// Go `findKeyValToken(s)`.
+/// The first key-value match in `s`: one anchored at the start of `s` if there is one, else the
+/// leftmost.
 fn find_key_val_token(s: &str) -> Option<Vec<usize>> {
     submatch_index(&TEXT_KEY_VAL_TOKEN_AT_RE, s)
         .or_else(|| submatch_index(&TEXT_KEY_VAL_TOKEN_RE, s))
 }
 
-/// Go `replaceMatches(s, re, repl)`.
+/// [`replace_matches_func`] over the matches of `re`.
 fn replace_matches(
     s: &str,
     re: &Regex,
@@ -1445,9 +1426,9 @@ fn replace_matches(
     replace_matches_func(s, |t| submatch_index(re, t), repl)
 }
 
-/// Go `replaceMatchesFunc(s, find, repl)`: each match replaced with what `repl` returns, which
-/// also says where the replaced text ends (possibly past the match); the search resumes there,
-/// on the rest of `s` (so `^` and `\b` see the rest as a new text, as in Go).
+/// Each match replaced with what `repl` returns, which also says where the replaced text ends
+/// (possibly past the match); the search resumes there, on the rest of `s` (so `^` and `\b` see the
+/// rest as a new text).
 fn replace_matches_func(
     s: &str,
     find: impl Fn(&str) -> Option<Vec<usize>>,
@@ -1477,8 +1458,7 @@ fn replace_matches_func(
     b
 }
 
-/// Go `redactBearerToken(s, loc)`: a `bearerTokenRe` match replaced; "bearer of" followed by a
-/// space is prose.
+/// A bearer-token match (`loc`) replaced; "bearer of" followed by a space is prose.
 fn redact_bearer_token(s: &str, loc: &[usize]) -> (String, usize) {
     let end = loc[5];
     let value = &s[loc[4]..end];
@@ -1495,9 +1475,9 @@ fn redact_bearer_token(s: &str, loc: &[usize]) -> (String, usize) {
     (format!("{} {REDACTED_VALUE}", &s[loc[2]..loc[3]]), end)
 }
 
-/// Go `redactBasicCredential(s, loc)`: a `basicTokenRe` match replaced when it holds a basic
-/// credential (adk-python's test: valid base64 not running on into more base64 characters,
-/// padded or decoding to `user:password`; an over-long token is always redacted).
+/// A basic-token match (`loc`) replaced when it holds a basic credential (adk-python's test: valid
+/// base64 not running on into more base64 characters, padded or decoding to `user:password`; an
+/// over-long token is always redacted).
 fn redact_basic_credential(s: &str, loc: &[usize]) -> (String, usize) {
     let end = loc[5];
     let encoded = &s[loc[4]..end];
@@ -1513,16 +1493,15 @@ fn redact_basic_credential(s: &str, loc: &[usize]) -> (String, usize) {
     (format!("{} {REDACTED_VALUE}", &s[loc[2]..loc[3]]), end)
 }
 
-/// Go `isBase64Byte(c)`.
+/// Whether `c` is a standard base64 alphabet byte or `=`.
 fn is_base64_byte(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'+' || c == b'/' || c == b'='
 }
 
-/// Go `base64.StdEncoding.DecodeString(s)` for the text `basicTokenRe` matches (base64
-/// characters, then at most two `=`): `None` when Go reports an error (a length that is not a
-/// multiple of 4, or a character outside the alphabet, such as the U+017F or U+212A that the
-/// pattern's `(?i)` admits). Non-zero trailing bits are accepted, as Go's non-strict decoder
-/// does.
+/// Standard base64 decoding of the text the basic-token pattern matches (base64 characters, then at
+/// most two `=`): `None` for a length that is not a multiple of 4, or a character outside the
+/// alphabet (such as the U+017F or U+212A that the pattern's `(?i)` admits). Non-zero trailing bits
+/// are accepted (a non-strict decoder).
 pub(crate) fn decode_std_base64(s: &str) -> Option<Vec<u8>> {
     let b = s.as_bytes();
     if b.is_empty() || !b.len().is_multiple_of(4) {
@@ -1553,8 +1532,7 @@ pub(crate) fn decode_std_base64(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Go `redactJSONKeyValue(s, loc)`: a `jsonKeyValTokenRe` match replaced with
-/// `"key":"[REDACTED]"`.
+/// A JSON key-value match (`loc`) replaced with `"key":"[REDACTED]"`.
 fn redact_json_key_value(s: &str, loc: &[usize]) -> (String, usize) {
     let end = sensitive_value_end(s, loc[4], loc[5]);
     if is_redacted_value(unquote_value(&s[loc[4]..end]).0) {
@@ -1566,8 +1544,8 @@ fn redact_json_key_value(s: &str, loc: &[usize]) -> (String, usize) {
     )
 }
 
-/// Go `redactTextKeyValue(s, loc, brackets)`: a `textKeyValTokenRe` match replaced, keeping the
-/// key, its quote, the delimiter and the quotes around the value.
+/// A text key-value match (`loc`) replaced, keeping the key, its quote, the delimiter and the
+/// quotes around the value.
 fn redact_text_key_value(s: &str, loc: &[usize], brackets: &mut OpenBrackets) -> (String, usize) {
     let open = brackets.before(s, loc[0]);
     let (start, mut end) = (loc[8], loc[9]);
@@ -1602,7 +1580,7 @@ fn redact_text_key_value(s: &str, loc: &[usize], brackets: &mut OpenBrackets) ->
     (keep(quote), end)
 }
 
-/// Go `textValueEnd(s, start, end, open)`: where the value matched at `s[start..end]` ends.
+/// Where the value matched at `s[start..end]` ends.
 fn text_value_end(s: &str, start: usize, end: usize, open: usize) -> usize {
     if !unquote_value(&s[start..end]).1.is_empty() {
         return end;
@@ -1612,13 +1590,13 @@ fn text_value_end(s: &str, start: usize, end: usize, open: usize) -> usize {
     rest + trim_enclosing_closers(&s[rest..end.max(rest)], open).len()
 }
 
-/// Go `startsLine(s, delim, start)`: the white space between the delimiter (ending at `delim`)
-/// and the value at `start` holds a line break.
+/// Whether the white space between the delimiter (ending at `delim`) and the value at `start` holds
+/// a line break.
 fn starts_line(s: &str, delim: usize, start: usize) -> bool {
     s[delim..start].contains(['\r', '\n'])
 }
 
-/// Go `nestedKeyKind`.
+/// What the value of a key-value match is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NestedKeyKind {
     /// A value, which is redacted.
@@ -1630,9 +1608,8 @@ enum NestedKeyKind {
     ValueEndingInKeyName,
 }
 
-/// Go `nestsSensitiveKey(s, start, end, lineStart)`: whether the value matched at
-/// `s[start..end]` is a sensitive key rather than a value, and where the key name in it
-/// starts.
+/// Whether the value matched at `s[start..end]` is a sensitive key rather than a value, and where
+/// the key name in it starts.
 fn nests_sensitive_key(
     s: &str,
     start: usize,
@@ -1692,7 +1669,8 @@ fn nests_sensitive_key(
     nested_key_name(&v[..i], start, line_start)
 }
 
-/// Go `nestedKeyName(name, at, lineStart)`.
+/// Classifies the value `name` that starts at `at` (`line_start`: it starts a line): the kind and
+/// where the key name in it starts.
 fn nested_key_name(name: &str, at: usize, line_start: bool) -> (NestedKeyKind, usize) {
     if SENSITIVE_KEYS.contains(&name) {
         return (NestedKeyKind::NestedKey, at);
@@ -1707,9 +1685,8 @@ fn nested_key_name(name: &str, at: usize, line_start: bool) -> (NestedKeyKind, u
     }
 }
 
-/// Go `nestedPairEnd(s, pair, open)`: where the text redacted with a value that only ends in a
-/// key name ends — at the end of the value of the pair that the key name starts, following
-/// chains of such pairs.
+/// Where the text redacted with a value that only ends in a key name ends — at the end of the value
+/// of the pair that the key name starts, following chains of such pairs.
 pub(crate) fn nested_pair_end(s: &str, mut pair: usize, open: usize) -> usize {
     loop {
         let Some(loc) = submatch_index(&TEXT_KEY_VAL_TOKEN_AT_RE, &s[pair..]) else {
@@ -1725,20 +1702,19 @@ pub(crate) fn nested_pair_end(s: &str, mut pair: usize, open: usize) -> usize {
     }
 }
 
-/// Go `followedByDelimiter(s, i)`: `:` or `=` follows `s[..i]`, possibly after white space.
+/// Whether `:` or `=` follows `s[..i]`, possibly after white space.
 fn followed_by_delimiter(s: &str, i: usize) -> bool {
     let rest = s[i..].trim_start_matches(|c: char| DELIM_SPACE.contains(c));
     rest.starts_with([':', '='])
 }
 
-/// Go `valueFollowsDelimiter(s, i)`: a delimiter follows `s[..i]` and a value starts after it.
+/// Whether a delimiter follows `s[..i]` and a value starts after it.
 fn value_follows_delimiter(s: &str, i: usize) -> bool {
     let rest = s[i..].trim_start_matches(|c: char| DELIM_SPACE.contains(c));
     rest.starts_with([':', '=']) && value_starts_at(rest, 1)
 }
 
-/// Go `valueStartsAt(s, i)`: a value that can be redacted starts in `s` at `i`, possibly after
-/// white space.
+/// Whether a value that can be redacted starts in `s` at `i`, possibly after white space.
 fn value_starts_at(s: &str, i: usize) -> bool {
     let trim_set = |c: char| DELIM_SPACE.contains(c) || CLOSING_PUNCTUATION.contains(c);
     let mut rest = s[i..].trim_start_matches(|c: char| DELIM_SPACE.contains(c));
@@ -1758,8 +1734,8 @@ fn value_starts_at(s: &str, i: usize) -> bool {
     !rest.trim_matches(trim_set).is_empty()
 }
 
-/// Go `quotedValueEnds(s, n)`: the quoted value `s[..n]` ends there — `s` ends, or goes on with
-/// a rune that is not a letter, a digit, `_` or the value's quote.
+/// Whether the quoted value `s[..n]` ends there — `s` ends, or goes on with a character that is not
+/// a letter, a digit, `_` or the value's quote.
 fn quoted_value_ends(s: &str, n: usize) -> bool {
     let after = &s[n..];
     if after.is_empty() {
@@ -1772,7 +1748,7 @@ fn quoted_value_ends(s: &str, n: usize) -> bool {
     !after.starts_with(quote)
 }
 
-/// Go `openBrackets`: the brackets (`{` or `[`) open in a text read from its start.
+/// The brackets (`{` or `[`) open in a text read from its start.
 #[derive(Debug, Default)]
 struct OpenBrackets {
     /// `s[..pos]` has been read or skipped.
@@ -1781,7 +1757,7 @@ struct OpenBrackets {
 }
 
 impl OpenBrackets {
-    /// Go `before(s, i)`: reads `s` up to `i` and returns the brackets open there.
+    /// Reads `s` up to `i` and returns the brackets open there.
     fn before(&mut self, s: &str, i: usize) -> usize {
         let b = s.as_bytes();
         while self.pos < i {
@@ -1795,14 +1771,14 @@ impl OpenBrackets {
         self.depth
     }
 
-    /// Go `skip(i)`: moves past `s[..i]` without reading it.
+    /// Moves past `s[..i]` without reading it.
     fn skip(&mut self, i: usize) {
         self.pos = self.pos.max(i);
     }
 }
 
-/// Go `trimEnclosingClosers(v, open)`: `v` without the `}` and `]` at its end that close
-/// brackets opened before it (at most `open`), and the punctuation after them.
+/// `v` without the `}` and `]` at its end that close brackets opened before it (at most `open`),
+/// and the punctuation after them.
 fn trim_enclosing_closers(v: &str, open: usize) -> &str {
     let tail = v
         .trim_end_matches(|c: char| CLOSING_PUNCTUATION.contains(c))
@@ -1823,9 +1799,8 @@ fn trim_enclosing_closers(v: &str, open: usize) -> &str {
     }
 }
 
-/// Go `sensitiveValueEnd(s, start, end)`: a value that opens a JSON object or array is
-/// extended to its closing bracket (or the end of `s`); brackets inside strings, including
-/// strings delimited by escaped quotes, do not count.
+/// Where a value that opens a JSON object or array is extended to its closing bracket (or the end
+/// of `s`); brackets inside strings, including strings delimited by escaped quotes, do not count.
 fn sensitive_value_end(s: &str, start: usize, end: usize) -> usize {
     let b = s.as_bytes();
     if b[start] != b'{' && b[start] != b'[' {
@@ -1882,8 +1857,8 @@ fn sensitive_value_end(s: &str, start: usize, end: usize) -> usize {
     b.len()
 }
 
-/// Go `unquoteValue(v)`: one pair of quotes (`\"`, `\'`, `"` or `'`) stripped from a value;
-/// returns the content and the quote (`""` when unquoted).
+/// One pair of quotes (`\"`, `\'`, `"` or `'`) stripped from a value; returns the content and the
+/// quote (`""` when unquoted).
 fn unquote_value(v: &str) -> (&str, &'static str) {
     for q in ["\\\"", "\\'", "\"", "'"] {
         if v.len() >= 2 * q.len() && v.starts_with(q) && v.ends_with(q) {
@@ -1893,7 +1868,7 @@ fn unquote_value(v: &str) -> (&str, &'static str) {
     (v, "")
 }
 
-/// Go `isRedactedMarker(v)`: `v`, possibly percent-encoded, is a placeholder.
+/// Whether `v`, possibly percent-encoded, is a placeholder.
 fn is_redacted_marker(v: &str) -> bool {
     if is_known_sentinel(v) {
         return true;
@@ -1906,18 +1881,18 @@ fn is_redacted_marker(v: &str) -> bool {
     }
 }
 
-/// Go `isRedactedValue(v)`: a placeholder, possibly followed by sentence punctuation.
+/// Whether `v` is a placeholder, possibly followed by sentence punctuation.
 fn is_redacted_value(v: &str) -> bool {
     is_redacted_marker(v) || is_redacted_marker(trim_trailing_punctuation(v))
 }
 
-/// Go `hasEncodedCredentialMarker(msg)`.
+/// Whether decoding the escapes in `msg` exposes a pattern that [`scrub_error_tokens`] would
+/// redact.
 fn has_encoded_credential_marker(msg: &str) -> bool {
     exposes_encoded_pattern(msg, scrub_error_tokens)
 }
 
-/// Go `exposesEncodedPattern(msg, scrub)`: decoding the escapes in `msg` exposes a pattern that
-/// `scrub` would redact.
+/// Whether decoding the escapes in `msg` exposes a pattern that `scrub` would redact.
 fn exposes_encoded_pattern(msg: &str, scrub: fn(&str) -> String) -> bool {
     if msg.is_empty() || is_known_sentinel(msg) {
         return false;
@@ -1932,7 +1907,8 @@ fn exposes_encoded_pattern(msg: &str, scrub: fn(&str) -> String) -> bool {
     scrub(&canon) != canon
 }
 
-/// Go `hasAnyCredentialMarker(s)`.
+/// Whether `s` holds any credential marker: text patterns, a quoted sensitive key, or either after
+/// canonicalizing its escapes.
 fn has_any_credential_marker(s: &str) -> bool {
     if s.is_empty() {
         return false;
@@ -1950,8 +1926,8 @@ fn has_any_credential_marker(s: &str) -> bool {
     canon != s && scrub_error_tokens(&canon) != canon
 }
 
-/// The panic value's Go `%T` as far as Rust can tell: a `&str` or `String` payload (Go
-/// `panic("...")`) is `string`.
+/// The type name logged for a panic payload, as far as Rust can tell: a `&str` or `String` payload
+/// is `string`, anything else `unknown`.
 pub(crate) fn panic_type_name(payload: &(dyn std::any::Any + Send)) -> &'static str {
     if payload.is::<&str>() || payload.is::<String>() {
         "string"
@@ -1960,15 +1936,13 @@ pub(crate) fn panic_type_name(payload: &(dyn std::any::Any + Send)) -> &'static 
     }
 }
 
-/// The `%T` written for a formatter error. Divergence (ledger 7b-1): Rust has no runtime type
-/// name for a `Box<dyn Error>`, so every error is `error` (Go writes its dynamic type, such as
-/// `*errors.errorString`).
+/// The type name logged for a formatter error. Rust has no runtime type name for a
+/// `Box<dyn Error>`, so every error is `error`.
 const FORMATTER_ERROR_TYPE: &str = "error";
 
-/// Go `applyContentFormatter(formatter, logger, payload, eventType, debugErrors)`: runs the
-/// formatter fail-closed. Returns `(result, err_note, failed)`; on an error or a panic the
-/// result is [`FORMATTING_FAILED_PLACEHOLDER`] (as a JSON string) and `failed` is true. Raw
-/// error strings and panic values are never logged.
+/// Runs the formatter fail-closed. Returns `(result, err_note, failed)`; on an error or a panic the
+/// result is [`FORMATTING_FAILED_PLACEHOLDER`] (as a JSON string) and `failed` is true. Raw error
+/// strings and panic values are never logged.
 pub(crate) fn apply_content_formatter(
     formatter: Option<&ContentFormatter>,
     logger: Option<&dyn Logger>,
@@ -1980,12 +1954,11 @@ pub(crate) fn apply_content_formatter(
         return (payload.clone(), String::new(), false);
     };
     let failed = || Value::String(FORMATTING_FAILED_PLACEHOLDER.to_owned());
-    // Divergence (ledger 7b-1): Go's recover is silent; Rust's panic hook still reports the
-    // panic (by default on stderr) before catch_unwind returns, message included — which often
-    // carries payload data (`panic!("bad {v}")`, an `expect` on an `Err` holding the value), so
-    // it can reach stderr or an installed hook (Sentry, tracing-panic) unredacted. Under
-    // `panic = "abort"` catch_unwind catches nothing and the process aborts. Replacing the
-    // global hook around the call would race other threads, so it is left alone.
+    // Rust's panic hook reports a panic (by default on stderr) before catch_unwind returns, message
+    // included — which often carries payload data (`panic!("bad {v}")`, an `expect` on an `Err`
+    // holding the value), so it can reach stderr or an installed hook (Sentry, tracing-panic)
+    // unredacted. Under `panic = "abort"` catch_unwind catches nothing and the process aborts.
+    // Replacing the global hook around the call would race other threads, so it is left alone.
     match catch_unwind(AssertUnwindSafe(|| formatter(payload, event_type))) {
         Err(panic) => {
             if let Some(logger) = logger {
@@ -2019,7 +1992,7 @@ pub(crate) fn apply_content_formatter(
     }
 }
 
-/// Go `parsePayloadColumnDenylist(cols)`: validates `cols` and returns them as a set.
+/// Validates `cols` and returns them as a set.
 pub(crate) fn parse_payload_column_denylist(cols: &[String]) -> Result<BTreeSet<String>, Error> {
     let mut denied = BTreeSet::new();
     for c in cols {
@@ -2042,8 +2015,7 @@ pub(crate) fn parse_payload_column_denylist(cols: &[String]) -> Result<BTreeSet<
     Ok(denied)
 }
 
-/// Go `customMetadataFilter`: selects custom-metadata keys by exact name or by prefix (entries
-/// ending in `*`).
+/// Selects custom-metadata keys by exact name or by prefix (entries ending in `*`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CustomMetadataFilter {
     pub(crate) exact: BTreeSet<String>,
@@ -2051,7 +2023,7 @@ pub(crate) struct CustomMetadataFilter {
 }
 
 impl CustomMetadataFilter {
-    /// Go `newCustomMetadataFilter(allowlist)`.
+    /// The filter of an allowlist: an entry ending in `*` is a prefix, any other an exact name.
     pub(crate) fn new(allowlist: &[String]) -> CustomMetadataFilter {
         let mut f = CustomMetadataFilter::default();
         for entry in allowlist {
@@ -2065,12 +2037,12 @@ impl CustomMetadataFilter {
         f
     }
 
-    /// Go `allows(key)`.
+    /// Whether `key` is allowed.
     pub(crate) fn allows(&self, key: &str) -> bool {
         self.exact.contains(key) || self.prefixes.iter().any(|p| key.starts_with(p.as_str()))
     }
 
-    /// Go `apply(md)`: the allowed entries, or `None` when there are none.
+    /// The allowed entries, or `None` when there are none.
     pub(crate) fn apply(&self, md: &Map<String, Value>) -> Option<Map<String, Value>> {
         let out: Map<String, Value> = md
             .iter()
@@ -2082,11 +2054,11 @@ impl CustomMetadataFilter {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Go encoding/json, as redaction.go uses it.
+// JSON decoding and encoding for the redaction walk.
 // ---------------------------------------------------------------------------------------------
 
-/// A value Go's `decodeJSONValue` builds (`map[string]any`, `[]any`, `string`, `json.Number`,
-/// `bool`, `nil`), or one `redactJSONValue` receives from a caller.
+/// A decoded JSON value (an object, array, string, number, boolean or null), or one
+/// [`redact_json_value`] receives from a caller.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum JVal {
     Null,
@@ -2097,7 +2069,7 @@ pub(crate) enum JVal {
     Obj(BTreeMap<String, JVal>),
 }
 
-/// A JSON number: Go's `json.Number` (the literal text, written back as is) or a caller's
+/// A JSON number: the literal text of a decoded number (written back as is) or a caller's
 /// `serde_json::Number`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum JNum {
@@ -2136,8 +2108,7 @@ impl JVal {
     }
 }
 
-/// Go `json.Marshal(v)` of a [`JVal`]: compact, map keys sorted, strings escaped as Go does;
-/// `None` where Go reports an error.
+/// A [`JVal`] as compact JSON text with sorted map keys; `None` when a string cannot be encoded.
 fn marshal(v: &JVal) -> Option<String> {
     let mut out = String::new();
     write_json(v, &mut out)?;
@@ -2179,23 +2150,22 @@ fn write_json(v: &JVal, out: &mut String) -> Option<()> {
     Some(())
 }
 
-/// Go's encoding of a JSON string (`<`, `>`, `&`, U+2028 and U+2029 escaped).
+/// A JSON string with `<`, `>`, `&`, U+2028 and U+2029 escaped.
 fn write_json_string(s: &str, out: &mut String) -> Option<()> {
     out.push_str(&String::from_utf8(gadk_model::to_go_json(s).ok()?).ok()?);
     Some(())
 }
 
-/// Why a JSON string could not be decoded (Go `io.ErrUnexpectedEOF` or a `*json.SyntaxError`
-/// with its `Offset`: the index of the offending byte plus one).
+/// Why a JSON string could not be decoded: the text ended early, or a syntax error at an offset
+/// (the index of the offending byte plus one).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JsonStrError {
     UnexpectedEof,
     Syntax(usize),
 }
 
-/// Go `json.NewDecoder(strings.NewReader(s)).Decode(&str)` for an `s` that starts with `"`:
-/// the decoded string and `dec.InputOffset()` (the index after the closing quote). Invalid
-/// `\u` surrogates decode to U+FFFD, as Go's `unquote` does.
+/// Decodes the JSON string at the start of `s` (which starts with `"`): the decoded string and the
+/// index after the closing quote. Invalid `\u` surrogates decode to U+FFFD.
 fn scan_json_string(s: &str) -> Result<(String, usize), JsonStrError> {
     let b = s.as_bytes();
     let mut out = String::new();
@@ -2221,7 +2191,7 @@ fn scan_json_string(s: &str) -> Result<(String, usize), JsonStrError> {
                         let r = read_hex4(b, i + 2)?;
                         i += 6;
                         if (0xd800..0xe000).contains(&r) {
-                            // Go: a valid pair is consumed, else U+FFFD (the next escape stays).
+                            // A valid pair is consumed, else U+FFFD (the next escape stays).
                             let pair = (0xd800..0xdc00)
                                 .contains(&r)
                                 .then(|| get_u4(b, i))
@@ -2254,7 +2224,7 @@ fn scan_json_string(s: &str) -> Result<(String, usize), JsonStrError> {
     }
 }
 
-/// The 4 hex digits of a `\u` escape at `b[at..at + 4]`, scanned as Go's scanner does.
+/// The 4 hex digits of a `\u` escape at `b[at..at + 4]`, as read by the string scanner.
 fn read_hex4(b: &[u8], at: usize) -> Result<u32, JsonStrError> {
     let mut r = 0u32;
     for k in 0..4 {
@@ -2269,7 +2239,7 @@ fn read_hex4(b: &[u8], at: usize) -> Result<u32, JsonStrError> {
     Ok(r)
 }
 
-/// Go `getu4(s[i:])`: the value of a `\uXXXX` escape at `b[i..]`, if there is one.
+/// The value of a `\uXXXX` escape at `b[i..]`, if there is one.
 fn get_u4(b: &[u8], i: usize) -> Option<u32> {
     if b.get(i) != Some(&b'\\') || b.get(i + 1) != Some(&b'u') {
         return None;
@@ -2277,8 +2247,7 @@ fn get_u4(b: &[u8], i: usize) -> Option<u32> {
     read_hex4(b, i + 2).ok()
 }
 
-/// Go `json.Unmarshal([]byte(s), &str)`: `s` must be exactly one JSON string (plus JSON white
-/// space).
+/// Decodes `s`, which must be exactly one JSON string (plus JSON white space).
 fn go_json_unmarshal_string(s: &str) -> Option<String> {
     if !s.starts_with('"') {
         return None;
@@ -2290,15 +2259,14 @@ fn go_json_unmarshal_string(s: &str) -> Option<String> {
         .then_some(decoded)
 }
 
-/// How [`unmarshal_json_strict_with_budget`] failed: Go's `budgetExceeded`, or another error.
+/// How [`unmarshal_json_strict_with_budget`] failed: the node budget ran out, or a syntax error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DecodeFail {
     Budget,
     Syntax,
 }
 
-/// Go `unmarshalJSONStrictWithBudget(b, budget)`: the decoded value and whether an object held
-/// a duplicate key (the last value wins).
+/// The decoded value and whether an object held a duplicate key (the last value wins).
 pub(crate) fn unmarshal_json_strict_with_budget(
     s: &str,
     budget: &mut NodeBudget,
@@ -2311,14 +2279,14 @@ pub(crate) fn unmarshal_json_strict_with_budget(
     let v = dec.value(0, Delim::None, budget)?;
     dec.skip_space();
     if dec.pos != dec.b.len() {
-        // Go: "unexpected data after JSON value".
+        // Unexpected data after the JSON value.
         return Err(DecodeFail::Syntax);
     }
     Ok(v)
 }
 
-/// The delimiter Go's `Decoder.Token` consumes before a value: `,` before an array element
-/// after the first, `:` before an object member's value.
+/// The delimiter consumed before a value: `,` before an array element after the first, `:` before
+/// an object member's value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Delim {
     None,
@@ -2326,9 +2294,8 @@ enum Delim {
     Colon,
 }
 
-/// Go's `decodeJSONValue` over a `json.Decoder` with `UseNumber`: the `Decoder.Token` grammar
-/// (strict JSON; white space is space, tab, CR and LF), in Go's order of the depth check, the
-/// budget take and the delimiter.
+/// A strict JSON decoder that keeps numbers as their literal text (white space is space, tab, CR
+/// and LF). A value is checked in this order: the depth, the node budget, then the delimiter.
 struct StrictDecoder<'a> {
     b: &'a [u8],
     s: &'a str,
@@ -2351,13 +2318,12 @@ impl StrictDecoder<'_> {
         self.b.get(self.pos).copied()
     }
 
-    /// Go `dec.More()`.
+    /// Whether another element or member follows.
     fn more(&mut self) -> bool {
         self.peek().is_some_and(|c| c != b']' && c != b'}')
     }
 
-    /// Go `decodeJSONValue(dec, depth, budget)`; `delim` is what the value's `Token` call
-    /// consumes first.
+    /// Decodes one value; `delim` is the delimiter consumed first.
     fn value(
         &mut self,
         depth: usize,

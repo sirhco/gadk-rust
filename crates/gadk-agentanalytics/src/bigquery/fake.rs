@@ -13,11 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Test fakes (feature `testutil`): ports of the ADK-Go test helpers the in-scope tests use —
-//! `mockTableOps` (`schema_upgrade_test.go`), `fakeViewRunner` (`views_test.go`),
-//! `recordingLogger`, `lookup` and `checkJSON` (`arrow_test_helper_test.go`) — and a
-//! [`FakeOffloader`]. Go's `mockTransport` (an `http.RoundTripper`) is
-//! `gadk_model::rest::test_util::ScriptedClient` / `FakeServer`.
+//! Test fakes (feature `testutil`): [`MockTableOps`] (an in-memory [`TableMetadataOps`]),
+//! [`FakeViewRunner`], [`RecordingLogger`], [`lookup`], [`check_json`] and a [`FakeOffloader`]. A
+//! scripted HTTP transport is `gadk_model::rest::test_util::ScriptedClient` / `FakeServer`.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -36,7 +34,7 @@ use crate::views::ViewRunner;
 /// A scripted error a fake returns (a cloneable description of an [`Error`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FakeError {
-    /// A `*googleapi.Error` with this HTTP code and message.
+    /// A Google API HTTP error with this code and message.
     Api {
         /// The HTTP status.
         code: u16,
@@ -52,7 +50,7 @@ pub enum FakeError {
     },
     /// A context error.
     Context(ContextError),
-    /// A plain `errors.New` text.
+    /// A plain error text.
     Message(String),
 }
 
@@ -75,30 +73,30 @@ impl FakeError {
     }
 }
 
-/// The state of a [`MockTableOps`] (Go `mockTableOps`'s fields): scripted responses (the last
-/// one repeats; with none, `metadata` returns `{schema: events_schema()}` and `update`
-/// `{schema: update.schema}`) and the recorded calls.
+/// The state of a [`MockTableOps`]: scripted responses (the last one repeats; with none, `metadata`
+/// returns `{schema: events_schema()}` and `update` `{schema: update.schema}`) and the recorded
+/// calls.
 #[derive(Debug, Clone, Default)]
 pub struct MockTableOpsState {
-    /// Go `metadataSeq`.
+    /// The scripted `metadata` responses.
     pub metadata_seq: Vec<Result<TableMetadata, FakeError>>,
-    /// Go `metadataCalls`.
+    /// How many times `metadata` was called.
     pub metadata_calls: usize,
-    /// Go `createErr`.
+    /// The error `create` returns.
     pub create_err: Option<FakeError>,
-    /// Go `createCalls`.
+    /// How many times `create` was called.
     pub create_calls: usize,
-    /// Go `createdMeta`.
+    /// The metadata `create` was last called with.
     pub created_meta: Option<TableMetadata>,
-    /// Go `updateSeq`.
+    /// The scripted `update` responses.
     pub update_seq: Vec<Result<TableMetadata, FakeError>>,
-    /// Go `updateCalls`.
+    /// How many times `update` was called.
     pub update_calls: usize,
-    /// Go `updates`: each update and its etag.
+    /// Each update and its etag.
     pub updates: Vec<(TableMetadataUpdate, String)>,
 }
 
-/// An in-memory [`TableMetadataOps`] (Go `mockTableOps`).
+/// An in-memory [`TableMetadataOps`].
 #[derive(Debug, Default)]
 pub struct MockTableOps {
     state: Mutex<MockTableOpsState>,
@@ -163,12 +161,12 @@ impl TableMetadataOps for MockTableOps {
     }
 }
 
-/// Go `fakeViewRunner.onRun`: called with the view's context and name after the call is
+/// A hook of [`FakeViewRunner`]: called with the view's context and name after the call is
 /// recorded; an error is returned instead of the scripted one.
 pub type OnRun =
     Arc<dyn Fn(Context, String) -> BoxFuture<'static, Result<(), Error>> + Send + Sync>;
 
-/// A scripted [`ViewRunner`] (Go `fakeViewRunner`).
+/// A scripted [`ViewRunner`].
 #[derive(Default)]
 pub struct FakeViewRunner {
     state: Mutex<FakeViewRunnerState>,
@@ -183,7 +181,7 @@ struct FakeViewRunnerState {
 }
 
 impl FakeViewRunner {
-    /// A runner failing the views in `err_for` (Go `errFor`) and calling `on_run` (Go `onRun`).
+    /// A runner failing the views in `err_for` and calling `on_run`.
     pub fn new(err_for: HashMap<String, FakeError>, on_run: Option<OnRun>) -> FakeViewRunner {
         FakeViewRunner {
             state: Mutex::new(FakeViewRunnerState {
@@ -194,7 +192,7 @@ impl FakeViewRunner {
         }
     }
 
-    /// Go `executedNames()`.
+    /// The names of the views run, in order.
     pub fn executed_names(&self) -> Vec<String> {
         lock(&self.state).names.clone()
     }
@@ -224,15 +222,14 @@ impl ViewRunner for FakeViewRunner {
     }
 }
 
-/// A [`Logger`] keeping what is logged (Go `recordingLogger`). `Display` is Go's `String()`:
-/// the lines joined by `\n`.
+/// A [`Logger`] keeping what is logged. `Display` is the lines joined by `\n`.
 #[derive(Debug, Default)]
 pub struct RecordingLogger {
     lines: Mutex<Vec<String>>,
 }
 
 impl RecordingLogger {
-    /// Go `contains(substr)`: whether any line contains `substr`.
+    /// Whether any line contains `substr`.
     pub fn contains(&self, substr: &str) -> bool {
         lock(&self.lines).iter().any(|line| line.contains(substr))
     }
@@ -248,7 +245,7 @@ impl Logger for RecordingLogger {
         lock(&self.lines).push(args.to_string());
     }
 
-    /// Go `fmt.Sprintln`: the text and a trailing newline.
+    /// The text and a trailing newline.
     fn println(&self, args: fmt::Arguments<'_>) {
         lock(&self.lines).push(format!("{args}\n"));
     }
@@ -313,7 +310,7 @@ impl GcsContentOffloader for FakeOffloader {
     }
 }
 
-/// Go `lookup(v, path...)`: the value at `path` through nested objects.
+/// The value at `path` through nested objects.
 pub fn lookup<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
     let mut cur = v;
     for key in path {
@@ -322,8 +319,8 @@ pub fn lookup<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
     Some(cur)
 }
 
-/// Go `checkJSON(t, name, got, want)`: `Err` with a `-want +got` description when `got` and the
-/// JSON document `want` differ (numbers compared by value).
+/// `Err` with a `-want +got` description when `got` and the JSON document `want` differ (numbers
+/// compared by value).
 pub fn check_json(name: &str, got: &Value, want: &str) -> Result<(), String> {
     let want: Value =
         serde_json::from_str(want).map_err(|e| format!("{name}: invalid want JSON {want}: {e}"))?;
@@ -338,7 +335,7 @@ pub fn check_json(name: &str, got: &Value, want: &str) -> Result<(), String> {
     ))
 }
 
-/// Go `json.Unmarshal` into `any`: every number becomes a `float64`.
+/// Every number becomes an `f64`, so numbers compare by value.
 fn numbers_as_f64(v: &Value) -> Value {
     match v {
         Value::Number(n) => n
@@ -360,8 +357,8 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Go `mockTableOps`'s scripted response for call `idx`: that entry, else the last entry
-/// repeated, else `None` (the caller's default).
+/// The scripted response for call `idx`: that entry, else the last entry repeated, else `None` (the
+/// caller's default).
 fn scripted(
     seq: &[Result<TableMetadata, FakeError>],
     idx: usize,

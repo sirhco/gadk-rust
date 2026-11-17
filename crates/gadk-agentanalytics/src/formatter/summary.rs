@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/json_formatter.go`'s content summaries:
-//! `summaryPiece`, `messageSummary` (`newMessageSummary`, `newResponseMessageSummary`,
-//! `render`), `contentSummaryBuilder` (`omitTextFromSummary`, `retainInlineSummary`,
-//! `hasFailedUploadTruncated`, `buildContent`, `applyToRow`), `contentSummary` and
-//! `formatResponseContent`.
+//! Content summaries: [`SummaryPiece`] and [`MessageSummary`] (built for a request message or a
+//! response, then rendered), the [`ContentSummaryBuilder`] that omits or retains text once its
+//! upload resolves and rebuilds the row's `content`, and the functions that summarize content
+//! text and format a model response ([`format_response_content`]).
 
 use gadk_genai::Content;
 use serde_json::{Map, Value};
@@ -27,18 +26,17 @@ use super::sanitize::truncate_string;
 use super::{ContentSummaryBuilder, MessageSummary, SummaryPiece, UNSUPPORTED_OBJ_PLACEHOLDER};
 use crate::redaction::COLUMN_CONTENT;
 
-/// Go `maxFunctionNameSummaryLength`: the runes of a function call / response name a response
-/// summary shows when `maxLength >= 0` (before the `...[TRUNCATED]` suffix).
+/// The characters of a function call / response name a response summary shows when `maxLength >= 0`
+/// (before the `...[TRUNCATED]` suffix).
 pub(crate) const MAX_FUNCTION_NAME_SUMMARY_LENGTH: i64 = 256;
 
-/// Go `responseSummarySlack`: the fixed rune allowance added to a non-negative `maxLength` when
-/// rendering a response summary, bounding the joined summary at `maxLength + 4096` runes.
+/// The fixed character allowance added to a non-negative `maxLength` when rendering a response
+/// summary, bounding the joined summary at `max_length + 4096` characters.
 pub(crate) const RESPONSE_SUMMARY_SLACK: i64 = 4096;
 
-/// Go `contentSummary(content, maxLength, redact)`: what adk-python writes to
-/// `content.text_summary` — the text parts, each truncated, and descriptions of function
-/// responses and code parts, joined by `" | "` and truncated again. Function calls and inline
-/// or file data are left out.
+/// What adk-python writes to `content.text_summary` — the text parts, each truncated, and
+/// descriptions of function responses and code parts, joined by `" | "` and truncated again.
+/// Function calls and inline or file data are left out.
 #[cfg(test)]
 pub(crate) fn content_summary(
     content: Option<&Content>,
@@ -48,9 +46,8 @@ pub(crate) fn content_summary(
     MessageSummary::new(content, 0, max_length, redact).render(max_length)
 }
 
-/// Go `formatResponseContent(content, maxLength, redact)`: model output the way adk-python
-/// writes `content.response` — one entry per part joined by `" | "`, or `"None"` if there are
-/// no parts.
+/// Model output the way adk-python writes `content.response` — one entry per part joined by
+/// `" | "`, or `"None"` if there are no parts.
 pub(crate) fn format_response_content(
     content: Option<&Content>,
     max_length: i64,
@@ -60,7 +57,8 @@ pub(crate) fn format_response_content(
 }
 
 impl MessageSummary {
-    /// Go `newMessageSummary(content, contentOrd, maxLength, redact)`.
+    /// The summary of a request message: its text, function response and code parts, in order
+    /// (function calls and inline or file data are left out).
     pub(crate) fn new(
         content: Option<&Content>,
         content_ord: usize,
@@ -117,7 +115,8 @@ impl MessageSummary {
         m
     }
 
-    /// Go `newResponseMessageSummary(content, contentOrd, maxLength, redact)`.
+    /// The summary of a model response: one piece per part (it renders as `"None"` when there are
+    /// none).
     pub(crate) fn new_response(
         content: Option<&Content>,
         content_ord: usize,
@@ -181,7 +180,7 @@ impl MessageSummary {
         m
     }
 
-    /// Go `render(maxLength)`.
+    /// The pieces joined by `" | "` and truncated; the flag tells whether anything was truncated.
     pub(crate) fn render(&self, max_length: i64) -> (String, bool) {
         if self.pieces.is_empty() {
             let empty = if self.is_response { "None" } else { "" };
@@ -196,7 +195,7 @@ impl MessageSummary {
         let joined = active.join(" | ");
         let mut max_length = max_length;
         if self.is_response && max_length >= 0 {
-            // Pieces are not strictly bounded by max_length (names at 256 runes, wrappers and
+            // Pieces are not strictly bounded by max_length (names at 256 characters, wrappers and
             // per-piece suffixes), so a response summary gets the fixed slack on top.
             max_length = max_length.saturating_add(RESPONSE_SUMMARY_SLACK);
         }
@@ -206,8 +205,7 @@ impl MessageSummary {
 }
 
 impl ContentSummaryBuilder {
-    /// Go `omitTextFromSummary(contentOrd, partIdx)`: a text part whose upload succeeded leaves
-    /// the summary.
+    /// A text part whose upload succeeded leaves the summary.
     pub(crate) fn omit_text_from_summary(&mut self, content_ord: usize, part_idx: usize) {
         let mut rebuild = false;
         for m in self
@@ -230,8 +228,7 @@ impl ContentSummaryBuilder {
         self.needs_rebuild = self.needs_rebuild || rebuild;
     }
 
-    /// Go `retainInlineSummary(contentOrd, partIdx, fallbackText, fallbackTruncated)`: a text
-    /// part whose upload failed keeps its inline fallback in the summary.
+    /// A text part whose upload failed keeps its inline fallback in the summary.
     pub(crate) fn retain_inline_summary(
         &mut self,
         content_ord: usize,
@@ -264,8 +261,8 @@ impl ContentSummaryBuilder {
         self.needs_rebuild = self.needs_rebuild || rebuild;
     }
 
-    /// Go `hasFailedUploadTruncated()`: a non-omitted text piece was truncated (summary-only
-    /// caps on non-text pieces do not count).
+    /// Whether a non-omitted text piece was truncated (summary-only caps on non-text pieces do not
+    /// count).
     pub(crate) fn has_failed_upload_truncated(&self) -> bool {
         self.messages
             .iter()
@@ -273,7 +270,8 @@ impl ContentSummaryBuilder {
             .any(|p| p.is_text && !p.omitted && p.truncated)
     }
 
-    /// Go `buildContent()`.
+    /// The `content` object: `response` (and `usage`) for an LLM response, `text_summary` for other
+    /// content, else the request's `system_prompt` and `prompt` (role and summary per message).
     pub(crate) fn build_content(&self) -> (Map<String, Value>, bool) {
         let mut content = Map::new();
         if self.is_llm_response {
@@ -316,8 +314,8 @@ impl ContentSummaryBuilder {
         (content, truncated)
     }
 
-    /// Go `applyToRow(row)`: rewrites `content` (Go `json.Marshal` text) and `is_truncated` of
-    /// `row` when the summary needs a rebuild.
+    /// Rewrites `content` (as JSON text) and `is_truncated` of `row` when the summary needs a
+    /// rebuild.
     pub(crate) fn apply_to_row(&self, row: &mut Map<String, Value>) {
         if !self.needs_rebuild {
             return;
