@@ -13,20 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Cancellation and failure causes of span records, from ADK-Go
-//! `plugin/agentanalytics/trace_manager.go`: `wasCanceled`, `failureCause`,
-//! `rawContextFailureCause`, `isParallelBranch`, `contextFailureCause`, `openFailureCause`,
-//! `openFailureCauseLocked`, `canceledByStop`, `collateralFailureCause`, and Go's
-//! `errors.Is(err, context.Canceled)` on recorded errors.
+//! Cancellation and failure causes of span records: `was_canceled`, `failure_cause`,
+//! `raw_context_failure_cause`, `is_parallel_branch`, `context_failure_cause`,
+//! `open_failure_cause`, `open_failure_cause_locked`, `canceled_by_stop`,
+//! `collateral_failure_cause`, and the `is_canceled` test on recorded errors.
 //!
 //! The walks follow `parent` links. The [`SpanRef`] methods lock the record they start from and
 //! then each parent; the [`SpanRecord`] methods of the same names start from a record whose guard
 //! the caller holds (as `open_call_owners_locked`'s `ignore` gets it) and lock only its parents.
 //! Never call either while holding the guard of a parent of the start record.
-//! Cause mapping (R3): `CancelSource::check` reads Go's `context.Cause` of the callback's
-//! context when asked — a plain cancel is Go's `context.Canceled`, an agent or node timeout Go's
-//! `context.DeadlineExceeded`, a ParallelAgent sibling's error (Go's errgroup cause) that
-//! error.
+//!
+//! Cause mapping: `CancelSource::check` reads the cause of the callback's context when asked — a
+//! plain cancel is [`ContextError::Canceled`], an agent or node timeout
+//! [`ContextError::DeadlineExceeded`], a ParallelAgent sibling's error that error.
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -39,47 +38,47 @@ use crate::error::Error;
 use gadk_agent::fiber::ERRGROUP_CREATOR;
 
 impl SpanRef {
-    /// Go `wasCanceled`.
+    /// Whether the callback's context was canceled (see [`SpanRecord::was_canceled`]).
     #[cfg(test)]
     pub(crate) fn was_canceled(&self) -> bool {
         self.lock().was_canceled()
     }
 
-    /// Go `failureCause`.
+    /// The failure cause (see [`SpanRecord::failure_cause`]).
     #[cfg(test)]
     pub(crate) fn failure_cause(&self) -> Option<TraceError> {
         self.lock().failure_cause()
     }
 
-    /// Go `rawContextFailureCause`.
+    /// The raw context failure cause (see [`SpanRecord::raw_context_failure_cause`]).
     #[cfg(test)]
     pub(crate) fn raw_context_failure_cause(&self) -> Option<TraceError> {
         self.lock().raw_context_failure_cause()
     }
 
-    /// Go `isParallelBranch` (with zero goroutine information: the branch differs from the
-    /// parent's, Go `:4982-4984`).
+    /// Whether this is a parallel branch (with no fiber information: the branch differs from the
+    /// parent's).
     #[cfg(test)]
     pub(crate) fn is_parallel_branch(&self) -> bool {
         self.lock().is_parallel_branch()
     }
 
-    /// Go `contextFailureCause`.
+    /// The context failure cause (see [`SpanRecord::context_failure_cause`]).
     pub(crate) fn context_failure_cause(&self) -> Option<TraceError> {
         self.lock().context_failure_cause()
     }
 
-    /// Go `openFailureCause`.
+    /// The open failure cause: the context failure cause, else the first retired cause.
     pub(crate) fn open_failure_cause(&self) -> Option<TraceError> {
         self.lock().open_failure_cause()
     }
 
-    /// Go `canceledByStop`.
+    /// Whether the span was canceled by a stop point (see [`SpanRecord::canceled_by_stop`]).
     pub(crate) fn canceled_by_stop(&self) -> bool {
         self.lock().canceled_by_stop()
     }
 
-    /// Go `collateralFailureCause`: `(cause, collateral)`.
+    /// The collateral failure cause: `(cause, collateral)`.
     #[cfg(test)]
     pub(crate) fn collateral_failure_cause(&self) -> (Option<TraceError>, bool) {
         self.lock().collateral_failure_cause()
@@ -87,25 +86,24 @@ impl SpanRef {
 }
 
 impl SpanRecord {
-    /// Go `wasCanceled`: the callback's context was canceled with cause `context.Canceled`.
+    /// Whether the callback's context was canceled with cause [`ContextError::Canceled`].
     pub(crate) fn was_canceled(&self) -> bool {
         self.canceled.as_ref().is_some_and(|c| c.check().0)
     }
 
-    /// Go `failureCause`: the cause other than `context.Canceled` with which the callback's
-    /// context ended.
+    /// The cause other than [`ContextError::Canceled`] with which the callback's context ended.
     pub(crate) fn failure_cause(&self) -> Option<TraceError> {
         self.canceled.as_ref().and_then(|c| c.check().1)
     }
 
-    /// Go `rawContextFailureCause`: [`SpanRecord::failure_cause`] unless it is bare
-    /// `context.DeadlineExceeded` (a workflow node or agent timeout).
+    /// [`SpanRecord::failure_cause`] unless it is bare [`ContextError::DeadlineExceeded`] (a
+    /// workflow node or agent timeout).
     pub(crate) fn raw_context_failure_cause(&self) -> Option<TraceError> {
         self.failure_cause()
             .filter(|c| !matches!(**c, Error::Context(ContextError::DeadlineExceeded)))
     }
 
-    /// Go `isParallelBranch`. Locks the parent.
+    /// Whether this span is a parallel branch of its parent agent. Locks the parent.
     pub(crate) fn is_parallel_branch(&self) -> bool {
         if self.kind != SpanKind::Agent {
             return false;
@@ -123,8 +121,8 @@ impl SpanRecord {
             && self.branch == parallel_branch(&p, &self.name)
     }
 
-    /// Go `contextFailureCause`: the raw cause, only when the outermost span sharing one is a
-    /// parallel branch. Locks the parents.
+    /// The raw cause, only when the outermost span sharing one is a parallel branch. Locks the
+    /// parents.
     pub(crate) fn context_failure_cause(&self) -> Option<TraceError> {
         let cause = self.raw_context_failure_cause()?;
         let top_is_branch = match self.top_with(|p| p.raw_context_failure_cause().is_some()) {
@@ -134,14 +132,14 @@ impl SpanRecord {
         top_is_branch.then_some(cause)
     }
 
-    /// Go `openFailureCause`.
+    /// The open failure cause: the context failure cause, else the first retired cause.
     pub(crate) fn open_failure_cause(&self) -> Option<TraceError> {
         self.context_failure_cause()
             .or_else(|| self.first_retired_cause())
     }
 
-    /// Go `canceledByStop`: canceled with cause `context.Canceled`, and the outermost span so
-    /// canceled is a stop point. Locks the parents.
+    /// Whether the span was canceled with cause [`ContextError::Canceled`] and the outermost
+    /// span so canceled is a stop point. Locks the parents.
     pub(crate) fn canceled_by_stop(&self) -> bool {
         if !self.was_canceled() {
             return false;
@@ -152,8 +150,8 @@ impl SpanRecord {
         }
     }
 
-    /// Go `collateralFailureCause`: the raw cause, and whether the outermost span sharing one
-    /// is a stop point. Locks the parents.
+    /// The raw cause, and whether the outermost span sharing one is a stop point. Locks the
+    /// parents.
     pub(crate) fn collateral_failure_cause(&self) -> (Option<TraceError>, bool) {
         let Some(cause) = self.raw_context_failure_cause() else {
             return (None, false);
@@ -165,8 +163,8 @@ impl SpanRecord {
         (Some(cause), collateral)
     }
 
-    /// Go's `top := rec; for top.parent != nil && shared(top.parent) { top = top.parent }`:
-    /// `None` when the walk stays at `self`.
+    /// The outermost ancestor reached by walking up while `shared` holds of each parent: `None`
+    /// when the walk stays at `self`.
     fn top_with(&self, shared: impl Fn(&SpanRecord) -> bool) -> Option<SpanRef> {
         let mut top = None;
         let mut next = self.parent.clone();
@@ -186,8 +184,8 @@ impl SpanRecord {
 }
 
 impl InvocationState {
-    /// Go `openFailureCauseLocked`: the first open failure cause on `agent_stack`, most recent
-    /// first (the invocation span's retired causes included).
+    /// The first open failure cause on `agent_stack`, most recent first (the invocation span's
+    /// retired causes included).
     pub(crate) fn open_failure_cause_locked(&self) -> Option<TraceError> {
         self.agent_stack
             .iter()
@@ -196,18 +194,17 @@ impl InvocationState {
     }
 }
 
-/// Go `errors.Is(err, context.Canceled)`.
+/// Whether `err` is a canceled-context error anywhere in its tree.
 pub(crate) fn is_canceled(err: &Error) -> bool {
     err.is_context(ContextError::Canceled)
 }
 
-/// Go `errors.Is(err, target)` for a kept error: `target` (by identity) is in `err`'s tree.
+/// Whether `target` (by identity) is in the error tree of a kept error `err`.
 pub(crate) fn error_is(err: &Error, target: &TraceError) -> bool {
     err.find(&mut |e| std::ptr::eq(e, &**target)).is_some()
 }
 
-/// Go `fmt.Errorf("%w: %w", err, cause)`: the text `"{err}: {cause}"`, with both errors in its
-/// tree (Go's `Unwrap() []error`).
+/// The text `"{err}: {cause}"`, with both errors in its tree.
 pub(crate) fn wrap_with_cause(err: &TraceError, cause: &TraceError) -> TraceError {
     std::sync::Arc::new(Error::wrap_text(
         format!("{err}: {cause}"),

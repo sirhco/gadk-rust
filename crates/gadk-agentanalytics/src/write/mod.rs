@@ -13,14 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The BigQuery Storage Write side of ADK-Go `plugin/agentanalytics`: [`gapic`] (the call
-//! layer of Go's generated `bqstorage.BigQueryWriteClient`), [`arrow_batch`] (Arrow record
-//! batches from rows, `batch_processor.go`) and [`stream_writer`] (`streamWriter`,
-//! `batch_processor.go`).
+//! The BigQuery Storage Write side of the analytics plugin: [`gapic`] (the call layer of the
+//! BigQuery Write client), [`arrow_batch`] (Arrow record batches from rows) and
+//! [`stream_writer`] (the persistent AppendRows stream writer).
 //!
 //! This module holds what they share: [`AppendRowsClient`], the client half of an AppendRows
-//! stream (Go `storagepb.BigQueryWrite_AppendRowsClient`, the `stream` interface of Go's
-//! `streamWriter`), Go's `io.EOF` ([`eof`], [`is_eof`]) and the mapping of tonic statuses onto
+//! stream, an end-of-stream error ([`eof`], [`is_eof`]) and the mapping of tonic statuses onto
 //! [`Error::Status`].
 
 pub mod arrow_batch;
@@ -32,24 +30,23 @@ use std::fmt;
 use crate::error::{Code, Error};
 use crate::storagepb::{AppendRowsRequest, AppendRowsResponse};
 
-/// The client half of an open AppendRows stream (Go `storagepb.BigQueryWrite_AppendRowsClient`
-/// as `streamWriter` uses it: `Send`, `Recv`, `CloseSend`). Tests substitute their own (Go's
-/// `mockStream`, the stream-wrapping interceptors).
+/// The client half of an open AppendRows stream, as the stream writer uses it: `send`, `recv`
+/// and `close_send`. Tests substitute their own (a mock stream, stream-wrapping interceptors).
 #[async_trait::async_trait]
 pub trait AppendRowsClient: Send {
-    /// Go `Send(req)`. A stream that the server (or the stream's context) has already ended
-    /// returns [`eof`], leaving the real status to [`recv`](Self::recv), as grpc-go does.
+    /// Sends one request. A stream that the server (or the stream's context) has already ended
+    /// returns [`eof`], leaving the real status to [`recv`](Self::recv), as gRPC clients do.
     async fn send(&mut self, req: AppendRowsRequest) -> Result<(), Error>;
 
-    /// Go `Recv()`: the next response; [`eof`] once the server ended the stream with OK, the
+    /// Receives the next response; [`eof`] once the server ended the stream with OK, the
     /// stream's status ([`Error::Status`]) once it ended otherwise.
     async fn recv(&mut self) -> Result<AppendRowsResponse, Error>;
 
-    /// Go `CloseSend()`: no more requests (the error grpc-go never returns is not modeled).
+    /// Signals that no more requests follow (the error gRPC never returns here is not modeled).
     fn close_send(&mut self);
 }
 
-/// Go's `io.EOF` as an [`Error`] (`Display`: `EOF`). Match it with [`is_eof`].
+/// The end-of-stream error as an [`Error`] (`Display`: `EOF`). Match it with [`is_eof`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Eof;
 
@@ -61,18 +58,18 @@ impl fmt::Display for Eof {
 
 impl std::error::Error for Eof {}
 
-/// Go `io.EOF`.
+/// The end-of-stream error: the server ended the stream with OK.
 pub fn eof() -> Error {
     Error::Other(Box::new(Eof))
 }
 
-/// Go `errors.Is(err, io.EOF)`: [`eof`] anywhere in `err`'s tree.
+/// Whether [`eof`] occurs anywhere in `err`'s source tree.
 pub fn is_eof(err: &Error) -> bool {
     err.find(&mut |e| matches!(e, Error::Other(b) if b.is::<Eof>()))
         .is_some()
 }
 
-/// grpc-go's `codes.Code` of a tonic code (same numbers).
+/// The gRPC [`Code`] of a tonic code (same numbers).
 pub fn code_from_tonic(code: tonic::Code) -> Code {
     u32::try_from(code as i32)
         .ok()
@@ -80,8 +77,8 @@ pub fn code_from_tonic(code: tonic::Code) -> Code {
         .unwrap_or(Code::Unknown)
 }
 
-/// grpc-go's status error (`rpc error: code = … desc = …`) of a tonic status: its code and
-/// message (details and metadata are dropped, as `status.Code` / `Error()` never show them).
+/// The status error (`rpc error: code = … desc = …`) of a tonic status: its code and message
+/// (details and metadata are dropped, as the code and error text never show them).
 pub fn status_error(status: &tonic::Status) -> Error {
     Error::Status {
         code: code_from_tonic(status.code()),
@@ -89,9 +86,9 @@ pub fn status_error(status: &tonic::Status) -> Error {
     }
 }
 
-/// grpc-go `codes.Code(n)` of an in-band `google.rpc.Status.code` (an
-/// `AppendRowsResponse.error`): `None` for a number grpc-go has no name for, which none of the
-/// error classes of `streamWriter` matches.
+/// The [`Code`] of an in-band `google.rpc.Status.code` (an `AppendRowsResponse.error`): `None`
+/// for a number with no known status code, which none of the stream writer's error classes
+/// matches.
 pub fn code_from_rpc(n: i32) -> Option<Code> {
     u32::try_from(n).ok().and_then(Code::from_u32)
 }

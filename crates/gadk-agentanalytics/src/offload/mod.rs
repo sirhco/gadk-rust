@@ -13,14 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/gcs_offloader.go`: `uploads` (the upload
-//! orchestration of a batch, `impl BatchProcessor`) and [`gcs`] (`gcsOffloader`, the Cloud
-//! Storage [`GcsContentOffloader`](crate::config::GcsContentOffloader)). This module holds what
-//! both use: the constants of `gcs_offloader.go` and its error types (`offloaderPanicError`,
-//! `ownedUploadError`, `errInvalidGCSURI`, `errUploadCooldown`, `errBatchUploadTimeout`).
-//! `pendingUpload`, `objectRef`, `uploadFailedText`, `textUploadContentType`,
-//! `gcsUploadTimeout` and `defaultMaxPendingUploadBytes` are 7b-1's (`crate::formatter`,
-//! `crate::config`).
+//! The upload side of the analytics plugin: `uploads` (the upload orchestration of a batch,
+//! `impl BatchProcessor`) and [`gcs`] (the Cloud Storage
+//! [`GcsContentOffloader`](crate::config::GcsContentOffloader)). This module holds what both
+//! use: the offloading constants and its error types (`OffloaderPanicError`,
+//! `OwnedUploadError`, `UploadSentinel`). The pending-upload, object-reference and
+//! upload-timeout types live in `crate::formatter` and `crate::config`.
 
 pub mod gcs;
 pub(crate) mod uploads;
@@ -30,50 +28,50 @@ use std::fmt;
 use crate::context::ContextError;
 use crate::error::Error;
 
-/// Go `mediaOffloadedText`: the text of an uploaded binary part.
+/// The text of an uploaded binary part.
 pub(crate) const MEDIA_OFFLOADED_TEXT: &str = "[MEDIA OFFLOADED]";
 
-/// Go `textPreviewRunes`.
+/// The number of characters kept in the preview of an uploaded text part.
 pub(crate) const TEXT_PREVIEW_RUNES: usize = 200;
 
-/// Go `textPreviewSuffix`.
+/// The suffix of the preview of an uploaded text part.
 pub(crate) const TEXT_PREVIEW_SUFFIX: &str = "... [OFFLOADED]";
 
-/// Go `missingTraceID`.
+/// The trace ID path segment of a row without one.
 pub(crate) const MISSING_TRACE_ID: &str = "no_trace";
 
-/// Go `missingSpanID`.
+/// The span ID path segment of a row without one.
 pub(crate) const MISSING_SPAN_ID: &str = "no_span";
 
-/// Go `missingEventID`.
+/// The event ID path segment of a row without one.
 pub(crate) const MISSING_EVENT_ID: &str = "no_event";
 
-/// Go `fallbackExtension`.
+/// The object extension when the MIME type has none.
 pub(crate) const FALLBACK_EXTENSION: &str = ".bin";
 
-/// Go `maxGCSObjectNameBytes`: Cloud Storage's 1,024-byte UTF-8 object name limit.
+/// Cloud Storage's 1,024-byte UTF-8 object name limit.
 /// [`MAX_GCS_PREFIX_BYTES`] and [`MAX_PATH_SEGMENT_BYTES`] bound an unchanged prefix and each
 /// identifier segment, which keeps the names of the objects the plugin uploads at 905 bytes or
 /// less; a direct `gcs_object_path` call with a long unchanged prefix and long ids, or an
 /// oversized extension, assembles a longer name, which it cuts to this limit.
 pub(crate) const MAX_GCS_OBJECT_NAME_BYTES: usize = 1024;
 
-/// Go `maxGCSPrefixBytes`: the longest `GCSPathPrefix` (after trimming `/`) used verbatim.
+/// The longest `GCSPathPrefix` (after trimming `/`) used verbatim.
 pub(crate) const MAX_GCS_PREFIX_BYTES: usize = 750;
 
-/// Go `maxGCSRewrittenPrefixBytes`: a rewritten prefix (at most 402 readable UTF-8 bytes plus
-/// the 65-byte `~<sha256>` suffix), so that with the 45 folder bytes
-/// `/<YYYY-MM-DD>/<32-hex-trace-id>/` the folder part of the name fits the 512-byte folder
-/// limit of hierarchical-namespace buckets.
+/// The longest rewritten prefix (at most 402 readable UTF-8 bytes plus the 65-byte `~<sha256>`
+/// suffix), so that with the 45 folder bytes `/<YYYY-MM-DD>/<32-hex-trace-id>/` the folder part
+/// of the name fits the 512-byte folder limit of hierarchical-namespace buckets.
 pub(crate) const MAX_GCS_REWRITTEN_PREFIX_BYTES: usize = 467;
 
-/// Go `maxPathSegmentBytes`.
+/// The longest path segment (an identifier) used verbatim.
 pub(crate) const MAX_PATH_SEGMENT_BYTES: usize = 128;
 
-/// Go `pathSegmentHashSuffixLen`: `~` and the 64 lowercase hex digits of a SHA-256 digest.
+/// The length of the hash suffix of a shortened path segment: `~` and the 64 lowercase hex
+/// digits of a SHA-256 digest.
 pub(crate) const PATH_SEGMENT_HASH_SUFFIX_LEN: usize = 65;
 
-/// Go `mimeExtensions`, sorted by type.
+/// The object extension of each MIME type, sorted by type.
 pub(crate) const MIME_EXTENSIONS: [(&str, &str); 11] = [
     ("application/json", ".json"),
     ("application/pdf", ".pdf"),
@@ -88,18 +86,18 @@ pub(crate) const MIME_EXTENSIONS: [(&str, &str); 11] = [
     ("video/webm", ".webm"),
 ];
 
-/// Go `googleapi.DefaultUploadChunkSize` (16 MiB): payloads below it are uploaded in one
-/// multipart request, others as a resumable upload in chunks of this size.
+/// The upload chunk size (16 MiB): payloads below it are uploaded in one multipart request,
+/// others as a resumable upload in chunks of this size.
 pub(crate) const DEFAULT_UPLOAD_CHUNK_SIZE: usize = 16 * 1024 * 1024;
 
-/// Go's upload sentinel errors (`errors.New` / `fmt.Errorf` values compared with `errors.Is`).
+/// The upload sentinel errors, recognized with [`UploadSentinel::is_in`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UploadSentinel {
-    /// Go `errInvalidGCSURI`.
+    /// An invalid `gs://` URI.
     InvalidGcsUri,
-    /// Go `errUploadCooldown`.
+    /// The upload cooldown is running.
     UploadCooldown,
-    /// Go `errBatchUploadTimeout`: wraps `context.DeadlineExceeded`.
+    /// The batch upload timeout: wraps `DeadlineExceeded`.
     BatchUploadTimeout,
 }
 
@@ -128,7 +126,7 @@ impl UploadSentinel {
         Error::Other(Box::new(self))
     }
 
-    /// Go `errors.Is(err, <sentinel>)`.
+    /// Whether the sentinel occurs anywhere in `err`'s tree.
     pub(crate) fn is_in(self, err: &Error) -> bool {
         err.find(&mut |e| {
             matches!(e, Error::Other(b) if b.downcast_ref::<UploadSentinel>() == Some(&self))
@@ -137,10 +135,10 @@ impl UploadSentinel {
     }
 }
 
-/// Go `offloaderPanicError`: a panic of an offloader, naming only its value's type.
+/// A panic of an offloader, naming only its value's type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OffloaderPanicError {
-    /// Go `valueType` (`%T` of the panic value).
+    /// The type name of the panic value.
     pub(crate) value_type: String,
 }
 
@@ -152,8 +150,8 @@ impl fmt::Display for OffloaderPanicError {
 
 impl std::error::Error for OffloaderPanicError {}
 
-/// Go `ownedUploadError`: an error of the built-in Cloud Storage offloader, whose text is safe
-/// to log once scrubbed. `Display` and `source` are the wrapped error's.
+/// An error of the built-in Cloud Storage offloader, whose text is safe to log once scrubbed.
+/// `Display` and `source` are the wrapped error's.
 #[derive(Debug)]
 pub(crate) struct OwnedUploadError(pub(crate) Error);
 
@@ -170,12 +168,12 @@ impl std::error::Error for OwnedUploadError {
 }
 
 impl OwnedUploadError {
-    /// `err` wrapped as Go's `ownedUploadError{err: err}`.
+    /// `err` wrapped as an `OwnedUploadError`.
     pub(crate) fn wrap(err: Error) -> Error {
         Error::Other(Box::new(OwnedUploadError(err)))
     }
 
-    /// Go `errors.As(err, &owned)`: the first `OwnedUploadError` in `err`'s tree.
+    /// The first `OwnedUploadError` in `err`'s tree.
     pub(crate) fn find(err: &Error) -> Option<&OwnedUploadError> {
         match err.find(&mut |e| matches!(e, Error::Other(b) if b.is::<OwnedUploadError>())) {
             Some(Error::Other(b)) => b.downcast_ref::<OwnedUploadError>(),

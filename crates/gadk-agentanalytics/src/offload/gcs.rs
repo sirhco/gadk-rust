@@ -13,16 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of ADK-Go `plugin/agentanalytics/gcs_offloader.go`'s `gcsOffloader` (`newGCSOffloader`,
-//! `UploadContent`, `Close`, `isPreconditionFailed`) over the Cloud Storage JSON API as Go's
-//! `cloud.google.com/go/storage` writer sends it: one multipart request below 16 MiB, a
-//! resumable upload in 16 MiB chunks from 16 MiB on, `ifGenerationMatch=0` (create only), the
-//! CRC32C in the metadata / `X-Goog-Hash`, and the writer's retries of the idempotent upload.
-//!
-//! The wire is that of the versions ADK-Go's `plugin/agentanalytics` module selects:
-//! `cloud.google.com/go/storage` v1.62.3 (`httpStorageClient.OpenWriter`, `Writer`) over
-//! `google.golang.org/api` v0.288.0 (`storage/v1` `ObjectsInsertCall.Do`, `internal/gensupport`
-//! `MediaBuffer` / `sendAndRetry` / `ResumableUpload` / `shouldRetry`, gax-go v2.23.0 `Backoff`).
+//! The Cloud Storage offloader ([`GcsOffloader`]: `new`, `upload_content`, `close`,
+//! `is_precondition_failed`) over the Cloud Storage JSON API, with the wire behavior of the
+//! Cloud Storage client libraries: one multipart request below 16 MiB, a resumable upload in
+//! 16 MiB chunks from 16 MiB on, `ifGenerationMatch=0` (create only), the CRC32C in the
+//! metadata / `X-Goog-Hash`, and the writer's retries of the idempotent upload (the retry
+//! policy, backoff, request parameters and `X-Goog-Api-Client` tokens follow those libraries).
 
 use std::fmt;
 use std::sync::Arc;
@@ -50,30 +46,29 @@ use crate::error::Error;
 use crate::gax::{Backoff, Pauses, random_id, sleep, wrapped_call_err};
 use crate::offload::{DEFAULT_UPLOAD_CHUNK_SIZE, OwnedUploadError};
 
-/// The OAuth scopes Go's `storage.NewClient` requests (`ScopeFullControl` and
+/// The OAuth scopes requested for Cloud Storage (`devstorage.full_control` and
 /// `cloud-platform`).
 pub(crate) const SCOPES: [&str; 2] = [
     "https://www.googleapis.com/auth/devstorage.full_control",
     "https://www.googleapis.com/auth/cloud-platform",
 ];
 
-/// Go's default endpoint (`https://storage.UNIVERSE_DOMAIN/storage/v1/` in the
-/// `googleapis.com` universe).
+/// The default endpoint (`https://storage.UNIVERSE_DOMAIN/storage/v1/` in the `googleapis.com`
+/// universe).
 pub(crate) const DEFAULT_ENDPOINT: &str = "https://storage.googleapis.com/storage/v1/";
 
-/// Go gensupport `defaultRetryDeadline`: the per-chunk retry deadline of a resumable upload
-/// (the storage `Writer`'s `ChunkRetryDeadline` is unset).
+/// The per-chunk retry deadline of a resumable upload (no chunk retry deadline is configured on
+/// the writer).
 pub(crate) const CHUNK_RETRY_DEADLINE: Duration = Duration::from_secs(32);
 
-/// Go gensupport's default backoff, `gax.Backoff{Initial: 100 * time.Millisecond}` (gax's
-/// defaults: max 30 s, multiplier 2).
+/// The default backoff: initial 100 ms (maximum 30 s, multiplier 2).
 const RETRY_BACKOFF: Backoff = Backoff {
     initial: Duration::from_millis(100),
     max: Duration::ZERO,
     multiplier: 0.0,
 };
 
-/// One attempt per request: the retries are gensupport's loops in this module.
+/// One attempt per request: the retry loops are in this module.
 const SINGLE_ATTEMPT: RetryPolicy = RetryPolicy {
     max_retries: 0,
     max_backoff: Duration::ZERO,
@@ -90,21 +85,21 @@ const X_GOOG_HASH: HeaderName = HeaderName::from_static("x-goog-hash");
 const X_HTTP_STATUS_CODE_OVERRIDE: &str = "x-http-status-code-override";
 const CONTENT_RANGE: HeaderName = HeaderName::from_static("content-range");
 
-/// Go `gcsOffloader`: stores objects in one Cloud Storage bucket.
+/// Stores objects in one Cloud Storage bucket.
 pub struct GcsOffloader {
     /// The transport (one attempt per request; the upload retries itself).
     pub(crate) transport: RestTransport,
-    /// The JSON API base, e.g. `https://storage.googleapis.com/storage/v1/` (Go's `BasePath`).
+    /// The JSON API base, e.g. `https://storage.googleapis.com/storage/v1/`.
     pub(crate) base_url: String,
     /// The upload base without a trailing `/`, e.g.
-    /// `https://storage.googleapis.com/upload/storage/v1` (Go resolves
-    /// `/upload/storage/v1/b/{bucket}/o` against the base path).
+    /// `https://storage.googleapis.com/upload/storage/v1` (`/upload/storage/v1/b/{bucket}/o`
+    /// resolved against the base path).
     pub(crate) upload_url: String,
     /// The credentials sent with every request; `None` turns authentication off.
     pub(crate) credentials: Option<Credentials>,
     /// Extra headers sent with every request.
     pub(crate) headers: HeaderMap,
-    /// Go `name`: the bucket.
+    /// The bucket.
     pub(crate) bucket: String,
 }
 
@@ -120,14 +115,13 @@ impl fmt::Debug for GcsOffloader {
 }
 
 impl GcsOffloader {
-    /// Go `newGCSOffloader(ctx, bucket, opts...)`: a client for `bucket` reaching
-    /// [`ClientOptions::endpoint`] (Go `option.WithEndpoint`, e.g.
+    /// Creates a client for `bucket` reaching [`ClientOptions::endpoint`] (e.g.
     /// `http://127.0.0.1:9000/storage/v1/`; a bare `host[:port]` replaces the host of the
     /// default `https://storage.googleapis.com/storage/v1/`) or Cloud Storage, authenticated as
     /// `BigQueryClient::new` authenticates (scopes `devstorage.full_control` and
-    /// `cloud-platform`; none with [`ClientOptions::http_client`], which Go's
-    /// `WithHTTPClient` uses as is). Reads `STORAGE_EMULATOR_HOST` and `GOOGLE_APPLICATION_CREDENTIALS`
-    /// from the process environment.
+    /// `cloud-platform`; none with [`ClientOptions::http_client`], which is used as is). Reads
+    /// `STORAGE_EMULATOR_HOST` and `GOOGLE_APPLICATION_CREDENTIALS` from the process
+    /// environment.
     ///
     /// # Errors
     ///
@@ -136,9 +130,9 @@ impl GcsOffloader {
         Self::new_with_env(bucket, options, &ProcessEnv)
     }
 
-    /// [`new`](Self::new) with the environment read from `env`. As Go's `storage.NewClient`,
-    /// a non-empty `STORAGE_EMULATOR_HOST` (`host[:port]` or a URL) makes
-    /// `http://<host>/storage/v1/` the default endpoint and turns authentication off.
+    /// [`new`](Self::new) with the environment read from `env`. A non-empty
+    /// `STORAGE_EMULATOR_HOST` (`host[:port]` or a URL) makes `http://<host>/storage/v1/` the
+    /// default endpoint and turns authentication off.
     ///
     /// # Errors
     ///
@@ -166,8 +160,8 @@ impl GcsOffloader {
                 ),
             )));
         }
-        // Go `htransport.NewClient`: a caller-supplied `option.WithHTTPClient` is used as is,
-        // with no credential lookup and no authentication.
+        // A caller-supplied HTTP client is used as is, with no credential lookup and no
+        // authentication.
         let credentials = if without_authentication || options.http_client.is_some() {
             None
         } else if let Some(credentials) = &options.credentials {
@@ -212,18 +206,17 @@ impl GcsOffloader {
         })
     }
 
-    /// Go `ObjectHandle.If(storage.Conditions{DoesNotExist: true}).NewWriter(ctx)`, `Write`,
-    /// `Close`: the error the writer's `Close` returns.
+    /// Writes the object, creating it only if it does not exist (`ifGenerationMatch=0`): the
+    /// error the upload returns.
     async fn write_object(&self, ctx: &Context, req: &GcsUploadRequest) -> Result<(), Error> {
-        // Go `Writer.openWriter`: a context that already ended sends nothing.
+        // A context that already ended sends nothing.
         if let Some(err) = ctx.err() {
             return Err(Error::Context(err));
         }
         let data = &req.data;
         let media_type = media_type(&req.content_type, data);
-        // Go `UploadContent`: `ChunkSize = len(Data) + 1` below googleapi.DefaultUploadChunkSize
-        // (the data fits one chunk: a multipart upload), else the writer's default chunk size
-        // (a resumable upload).
+        // Below `DEFAULT_UPLOAD_CHUNK_SIZE` the data fits one chunk (a multipart upload), else
+        // the default chunk size applies (a resumable upload).
         let single_chunk = data.len() < DEFAULT_UPLOAD_CHUNK_SIZE;
         let crc = crc32c::checksum(data);
         let url = self.insert_url(
@@ -235,8 +228,7 @@ impl GcsOffloader {
             },
         );
         let (parts, body) = if single_chunk {
-            // gensupport `ObjectsInsertCall.doRequest`: the auto checksum goes into the
-            // metadata of a single-chunk upload.
+            // The auto checksum goes into the metadata of a single-chunk upload.
             let metadata = metadata_json(&self.bucket, req, Some(crc))?;
             let boundary = multipart_boundary();
             let body = multipart_body(&boundary, &metadata, media_type, data);
@@ -275,8 +267,8 @@ impl GcsOffloader {
         decode_object(&parts, &body)
     }
 
-    /// `POST <upload base>/b/{bucket}/o?…&uploadType=<upload_type>` with Go's parameters
-    /// (`url.Values.Encode`: sorted by key).
+    /// `POST <upload base>/b/{bucket}/o?…&uploadType=<upload_type>` with the query parameters
+    /// sorted by key.
     fn insert_url(&self, name: &str, upload_type: &str) -> String {
         let params = [
             ("alt", "json"),
@@ -298,11 +290,10 @@ impl GcsOffloader {
         )
     }
 
-    /// Go gensupport `sendAndRetry` with the storage writer's `RetryConfig` (the default
-    /// backoff and [`should_retry`]): the multipart upload or the resumable initiation, sent
-    /// until it succeeds, fails without a retryable status or error, or `ctx` ends. Every
-    /// attempt carries the same invocation ID (`X-Goog-Gcs-Idempotency-Token`) and its attempt
-    /// count.
+    /// Sends the multipart upload or the resumable initiation with the default backoff and
+    /// [`should_retry`], until it succeeds, fails without a retryable status or error, or `ctx`
+    /// ends. Every attempt carries the same invocation ID (`X-Goog-Gcs-Idempotency-Token`) and
+    /// its attempt count.
     async fn send_and_retry(
         &self,
         ctx: &Context,
@@ -352,8 +343,8 @@ impl GcsOffloader {
         }
     }
 
-    /// One request (Go `client.Do(req.WithContext(ctx))`): the response with its body read,
-    /// [`Error::Context`] when `ctx` ended first, else the transport's [`Error::Rest`].
+    /// One request: the response with its body read, [`Error::Context`] when `ctx` ended first,
+    /// else the transport's [`Error::Rest`].
     async fn send_once(
         &self,
         ctx: &Context,
@@ -385,12 +376,12 @@ impl GcsOffloader {
 
 #[async_trait::async_trait]
 impl GcsContentOffloader for GcsOffloader {
-    /// Go `UploadContent(ctx, req)`: creates `req.path` unless it exists and returns
-    /// `gs://<bucket>/<path>`; an existing object (HTTP 412) is a success.
+    /// Creates `req.path` unless it exists and returns `gs://<bucket>/<path>`; an existing
+    /// object (HTTP 412) is a success.
     ///
     /// # Errors
     ///
-    /// Go's owned upload error `failed to write the Cloud Storage object: <err>`
+    /// The owned upload error `failed to write the Cloud Storage object: <err>`
     /// (`crate::offload::OwnedUploadError`).
     async fn upload_content(&self, ctx: &Context, req: GcsUploadRequest) -> Result<String, Error> {
         match self.write_object(ctx, &req).await {
@@ -402,14 +393,13 @@ impl GcsContentOffloader for GcsOffloader {
         }
     }
 
-    /// Go `Close()` (`storage.Client.Close`: the HTTP client closes its idle connections;
-    /// never an error).
+    /// Closes the client (the HTTP client closes its idle connections; never an error).
     async fn close(&self) -> Result<(), Error> {
         Ok(())
     }
 }
 
-/// Go `isPreconditionFailed(err)`: the first `googleapi` error in `err`'s tree has HTTP 412.
+/// Whether the first HTTP API error in `err`'s tree has status 412.
 pub(crate) fn is_precondition_failed(err: &Error) -> bool {
     matches!(
         err.find(&mut |e| matches!(e, Error::Api(_))),
@@ -417,22 +407,22 @@ pub(crate) fn is_precondition_failed(err: &Error) -> bool {
     )
 }
 
-/// Go gensupport `ResumableUpload` over the in-memory payload: `MediaBuffer` chunks of
-/// [`DEFAULT_UPLOAD_CHUNK_SIZE`] `POST`ed to the session URI.
+/// A resumable upload of the in-memory payload: chunks of [`DEFAULT_UPLOAD_CHUNK_SIZE`]
+/// `POST`ed to the session URI.
 struct ResumableUpload<'a> {
     offloader: &'a GcsOffloader,
     /// The session URI (the initiation's `Location`).
     uri: String,
     data: &'a Bytes,
     media_type: &'a str,
-    /// The CRC32C of the whole payload (`MediaBuffer.fullObjectChecksum` at the last chunk).
+    /// The CRC32C of the whole payload (sent with the last chunk).
     crc: u32,
 }
 
-/// What the last turn of [`ResumableUpload::upload_chunk_with_retries`] left (Go's `resp`,
-/// `err` pair).
+/// What the last turn of [`ResumableUpload::upload_chunk_with_retries`] left (a response and
+/// error pair).
 enum Last {
-    /// No request was sent yet (Go `nil, nil`).
+    /// No request was sent yet.
     None,
     /// A response.
     Response(http::response::Parts, Bytes),
@@ -441,16 +431,15 @@ enum Last {
 }
 
 impl ResumableUpload<'_> {
-    /// Go `ResumableUpload.Upload(ctx)`: each chunk until the server stops answering
-    /// "resume incomplete"; the response that ended the upload.
+    /// Uploads each chunk until the server stops answering "resume incomplete"; returns the
+    /// response that ended the upload.
     async fn upload(&self, ctx: &Context) -> Result<(http::response::Parts, Bytes), Error> {
         let total = self.data.len();
         let mut off = 0usize;
         loop {
             let end = (off + DEFAULT_UPLOAD_CHUNK_SIZE).min(total);
-            // Go `MediaBuffer.Chunk()`: the chunk is the last one (`io.EOF`) when the payload
-            // ended before the chunk filled — so a payload of a whole number of chunks ends
-            // with an empty one.
+            // The chunk is the last one when the payload ended before the chunk filled — so a
+            // payload of a whole number of chunks ends with an empty one.
             let done = end - off < DEFAULT_UPLOAD_CHUNK_SIZE;
             let chunk = self.data.slice(off..end);
             let (result, attempts) = self.upload_chunk_with_retries(ctx, chunk, off, done).await;
@@ -480,10 +469,10 @@ impl ResumableUpload<'_> {
         }
     }
 
-    /// Go `uploadChunkWithRetries`: one chunk, retried per [`should_retry`] with the default
-    /// backoff until [`CHUNK_RETRY_DEADLINE`] after the chunk started or `ctx` ends. Each chunk
-    /// gets a new invocation ID; a resend keeps it and counts the attempt. Returns the last
-    /// turn's result and the attempt count.
+    /// Uploads one chunk, retried per [`should_retry`] with the default backoff until
+    /// [`CHUNK_RETRY_DEADLINE`] after the chunk started or `ctx` ends. Each chunk gets a new
+    /// invocation ID; a resend keeps it and counts the attempt. Returns the last turn's result
+    /// and the attempt count.
     async fn upload_chunk_with_retries(
         &self,
         ctx: &Context,
@@ -498,8 +487,8 @@ impl ResumableUpload<'_> {
         let mut pause = Duration::ZERO;
         let mut last = Last::None;
         loop {
-            // Go selects on the context, the pause and the retry deadline, then checks the
-            // context and the deadline once more: an ended context or a passed deadline wins.
+            // Wait on the context, the pause and the retry deadline, then check the context and
+            // the deadline once more: an ended context or a passed deadline wins.
             let pause_end = Instant::now() + pause;
             tokio::select! {
                 biased;
@@ -508,7 +497,8 @@ impl ResumableUpload<'_> {
                 () = tokio::time::sleep_until(pause_end) => {}
             }
             if let Some(err) = ctx.err() {
-                // Go returns `resp, err`, with `err = ctx.Err()` when the last turn had none.
+                // Return the last response and error, with the context's error when the last
+                // turn had none.
                 return match last {
                     Last::Err(e) => (Last::Err(e), attempts),
                     _ => (Last::Err(Error::Context(err)), attempts),
@@ -544,9 +534,8 @@ impl ResumableUpload<'_> {
         }
     }
 
-    /// Go `transferChunk` / `doUploadRequest` (no `ChunkTransferTimeout`): one `POST` of the
-    /// chunk at `off` to the session URI. As Go's `gensupport.send`, an error of a request that
-    /// `ctx` ended is the context's error.
+    /// One `POST` of the chunk at `off` to the session URI (no chunk transfer timeout). An
+    /// error of a request that `ctx` ended is the context's error.
     async fn transfer_chunk(
         &self,
         ctx: &Context,
@@ -597,7 +586,7 @@ impl ResumableUpload<'_> {
     }
 }
 
-/// Go `statusResumeIncomplete`: the server's "resume incomplete" for a client that sent
+/// Whether the server answered "resume incomplete" to a client that sent
 /// `X-GUploader-No-308: yes`.
 fn status_resume_incomplete(parts: &http::response::Parts) -> bool {
     parts
@@ -636,7 +625,7 @@ impl RequestHeaders for UploadHeaders<'_> {
     }
 }
 
-/// Go gensupport `shouldRetry(status, err)`: 5xx, 429 and 408 responses; an unexpected EOF, a
+/// Whether the response or error is retryable: 5xx, 429 and 408 responses; an unexpected EOF, a
 /// closed connection, a refused / reset connection or broken pipe, and temporary errors (a
 /// deadline, a timeout).
 fn should_retry(status: u16, err: Option<&Error>) -> bool {
@@ -646,16 +635,16 @@ fn should_retry(status: u16, err: Option<&Error>) -> bool {
     err.is_some_and(retryable_error)
 }
 
-/// The error half of [`should_retry`], over Go's `Unwrap` chain.
+/// The error half of [`should_retry`], over the error's source chain.
 fn retryable_error(err: &Error) -> bool {
     err.find(&mut |e| match e {
-        // Go's `context.DeadlineExceeded` is `Temporary()`; `context.Canceled` is not.
+        // A deadline is temporary; a cancellation is not.
         Error::Context(c) => *c == ContextError::DeadlineExceeded,
         Error::Rest(rest) => match rest {
             RestError::ResponseHeaderTimeout | RestError::DeadlineExceeded => true,
             RestError::Transport(e) => connection_error(e),
             RestError::Headers(e) => connection_error(e.as_ref()),
-            // Go reads a body after `client.Do`; a failed read is never retried.
+            // A body is read after the request was sent; a failed read is never retried.
             RestError::DroppedBody { .. } => false,
         },
         _ => false,
@@ -663,9 +652,8 @@ fn retryable_error(err: &Error) -> bool {
     .is_some()
 }
 
-/// Go's `io.ErrUnexpectedEOF`, `net.ErrClosed`, the `*net.OpError` / `*url.Error` texts
-/// (`connection refused`, `connection reset`, `broken pipe`) and `Temporary()` timeouts, over
-/// the error's source chain.
+/// Whether the error chain holds an unexpected EOF, a closed connection, a refused or reset
+/// connection, a broken pipe (matched by text) or a temporary timeout.
 fn connection_error(err: &(dyn std::error::Error + 'static)) -> bool {
     let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(e) = cur {
@@ -698,9 +686,9 @@ fn connection_error(err: &(dyn std::error::Error + 'static)) -> bool {
     false
 }
 
-/// Go `*url.Error{Op, URL, Err}` around a failed request: `Post "<url>": <err>`.
+/// A failed request's error, `Post "<url>": <err>`.
 fn url_error(method: &str, url: &str, err: Error) -> Error {
-    // Go's `urlErrorOp`: the method with only its first letter upper-case.
+    // The operation name: the method with only its first letter upper-case.
     let mut op = method.to_ascii_lowercase();
     if let Some(first) = op.get_mut(..1) {
         first.make_ascii_uppercase();
@@ -708,28 +696,27 @@ fn url_error(method: &str, url: &str, err: Error) -> Error {
     Error::wrap(format!("{op} {}", go_quote(url)), err)
 }
 
-/// The client-version tokens of `X-Goog-Api-Client` (Go: `gl-go/<go> gccl/<storage>` on the
-/// insert request, `gl-go/<go> gdcl/<google-api-go-client>` on a resumable chunk).
+/// The client-version tokens of `X-Goog-Api-Client` on the insert request and on a resumable
+/// chunk.
 fn client_version_tokens() -> String {
-    // Divergence (ledger 7b-2): gadk sends its tracking header (`gadk-rust/<v> rust/<v>`) in
-    // place of Go's client-version tokens; the `gccl-invocation-id/…` and
-    // `gccl-attempt-count/…` tokens and their order around it are Go's.
+    // gadk sends its tracking header (`gadk-rust/<v> rust/<v>`) as the client-version tokens;
+    // the `gccl-invocation-id/…` and `gccl-attempt-count/…` tokens and their order around it
+    // follow the Cloud Storage client libraries.
     gadk_platform::tracking_header()
 }
 
-/// Go `multipart.Writer`'s random boundary: 60 lower-case hex digits.
+/// A multipart boundary: 60 lower-case hex digits.
 fn multipart_boundary() -> String {
-    // Divergence (ledger 7b-2): Go draws the boundary's 30 bytes from `crypto/rand`; two v4
-    // UUIDs fix 12 of their bits. The boundary's shape (`^[0-9a-f]{60}$`) is Go's.
+    // Two v4 UUIDs supply the digits, which fixes 12 of their bits. The boundary's shape
+    // (`^[0-9a-f]{60}$`) is the standard one.
     let mut boundary = random_id();
     boundary.push_str(&random_id());
     boundary.truncate(60);
     boundary
 }
 
-/// The content type of the payload (Go gensupport `MediaInfo.mType`): the given one, else
-/// sniffed from the payload's first 512 bytes (`gax.DetermineContentType`,
-/// `http.DetectContentType`). The object metadata carries no `contentType` either way.
+/// The content type of the payload: the given one, else sniffed from the payload's first 512
+/// bytes. The object metadata carries no `contentType` either way.
 fn media_type<'a>(content_type: &'a str, data: &[u8]) -> &'a str {
     if content_type.is_empty() {
         gadk_platform::go_mime::detect_content_type(data)
@@ -738,9 +725,9 @@ fn media_type<'a>(content_type: &'a str, data: &[u8]) -> &'a str {
     }
 }
 
-/// The object resource Go sends (`ObjectAttrs.toRawObject` with the writer's attributes, Go's
-/// `JSONBuffer`: `json.Encoder`, so HTML characters escaped and a trailing newline): `bucket`,
-/// `contentType` (when set), `crc32c` (a single-chunk upload's auto checksum), `name`.
+/// The object resource sent as the multipart metadata part, JSON-encoded with HTML characters
+/// escaped and a trailing newline: `bucket`, `contentType` (when set), `crc32c` (a
+/// single-chunk upload's auto checksum), `name`.
 fn metadata_json(bucket: &str, req: &GcsUploadRequest, crc: Option<u32>) -> Result<Bytes, Error> {
     let mut object = Map::new();
     if !bucket.is_empty() {
@@ -763,8 +750,7 @@ fn metadata_json(bucket: &str, req: &GcsUploadRequest, crc: Option<u32>) -> Resu
     Ok(Bytes::from(out))
 }
 
-/// Go gensupport `combineBodyMedia` (`mime/multipart.Writer`): the JSON metadata part, then
-/// the media part.
+/// The multipart body: the JSON metadata part, then the media part.
 fn multipart_body(boundary: &str, metadata: &[u8], media_type: &str, data: &[u8]) -> Bytes {
     let mut out = Vec::with_capacity(metadata.len() + data.len() + 3 * boundary.len() + 128);
     out.extend_from_slice(
@@ -779,8 +765,8 @@ fn multipart_body(boundary: &str, metadata: &[u8], media_type: &str, data: &[u8]
     Bytes::from(out)
 }
 
-/// Go `gensupport.DecodeResponseBytes` into the object resource: a 204 has no body; any other
-/// 2xx body must be JSON.
+/// Decodes the response as the object resource: a 204 has no body; any other 2xx body must be
+/// JSON.
 fn decode_object(parts: &http::response::Parts, body: &[u8]) -> Result<(), Error> {
     if parts.status == http::StatusCode::NO_CONTENT {
         return Ok(());
@@ -788,22 +774,21 @@ fn decode_object(parts: &http::response::Parts, body: &[u8]) -> Result<(), Error
     if body.is_empty() {
         return Err(Error::msg("unexpected end of JSON input"));
     }
-    // Divergence (ledger 7b-2): Go decodes the body into its `storage/v1` `Object` and fails
-    // on a field of the wrong JSON type; gadk only requires JSON (the URI is the bucket and
-    // the path, not the server's answer).
+    // Only JSON is required of the body, not a particular object shape (the URI is the bucket
+    // and the path, not the server's answer).
     serde_json::from_slice::<Value>(body)
         .map(|_| ())
         .map_err(Error::other)
 }
 
-/// Go `googleapi.Expand`'s escaping of a `{var}` path parameter: everything but ASCII letters,
-/// digits and `-._~` percent-encoded (upper-case hex).
+/// Escapes a `{var}` path parameter: everything but ASCII letters, digits and `-._~`
+/// percent-encoded (upper-case hex).
 fn expand_escape(s: &str) -> String {
     go_query_escape(s).replace('+', "%20")
 }
 
-/// Go `newHTTPStorageClient`'s endpoint for `STORAGE_EMULATOR_HOST`: the host (or the URL's
-/// scheme and host) with the path `storage/v1/`.
+/// The endpoint for `STORAGE_EMULATOR_HOST`: the host (or the URL's scheme and host) with the
+/// path `storage/v1/`.
 fn emulator_endpoint(host: &str) -> Result<String, Error> {
     if host.contains("://") {
         let u = gadk_platform::go_url::parse(host).map_err(Error::other)?;
@@ -813,8 +798,7 @@ fn emulator_endpoint(host: &str) -> Result<String, Error> {
     }
 }
 
-/// Go `internal.mergeEndpoints`: the default endpoint with its host replaced by a bare
-/// `host[:port]`.
+/// The default endpoint with its host replaced by a bare `host[:port]`.
 fn merge_endpoints(default: &str, endpoint: &str) -> String {
     match gadk_platform::go_url::parse(default) {
         Ok(u) if !u.host.is_empty() => default.replacen(&u.host, endpoint, 1),

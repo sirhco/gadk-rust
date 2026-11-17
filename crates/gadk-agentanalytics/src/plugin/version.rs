@@ -13,19 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The ADK version of ADK-Go `plugin/agentanalytics/bigquery_agent_analytics_plugin.go`
-//! (`adkVersion`, `adkVersionFromBuildInfo`, `adkModulePath`). Go reads the linked ADK module's
-//! version from the build info; gadk writes its own crate version. Divergence (ledger 7b-3a).
+//! The ADK version written into each row: gadk reports its own crate version (every gadk crate
+//! shares the workspace version) rather than the version of a linked ADK module.
 
-/// Go `adkModulePath` (kept for the ported build-info test's table).
+/// The module path of the upstream ADK (used by the build-info test).
 #[cfg(test)]
 pub(crate) const ADK_MODULE_PATH: &str = "google.golang.org/adk/v2";
 
-/// Go `adkVersion()`: the `adk_version` written in `attributes` (gadk-agentanalytics'
-/// `CARGO_PKG_VERSION`).
+/// The `adk_version` written in `attributes` (gadk-agentanalytics' `CARGO_PKG_VERSION`).
 pub(crate) fn adk_version() -> &'static str {
-    // Go reads the linked ADK module's version from `debug.ReadBuildInfo` (empty for a
-    // development build); every gadk crate shares the workspace version, so this is gadk's.
+    // Every gadk crate shares the workspace version, so this is gadk's.
     env!("CARGO_PKG_VERSION")
 }
 

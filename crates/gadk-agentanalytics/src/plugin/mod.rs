@@ -13,18 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The BigQuery Agent Analytics plugin, from ADK-Go
-//! `plugin/agentanalytics/bigquery_agent_analytics_plugin.go` (constructors, the disabled
-//! plugin, `pluginState`, `BigQueryAgentAnalyticsPlugin`, `AsBigQueryAgentAnalyticsPlugin`,
-//! `DropStats`, `analyticsPlugin`, `eventData`, `closeWriteClient`, `validateEventFilterLists`,
-//! the `CloseFunc`) and `views.go`'s plugin state (`SyncViews`, the view gate, async view
-//! creation). The callbacks are `callbacks`, rows `rows`, filters and the log / write entry
-//! points `filter`, the ADK version `version`; the session-event signal rows are
-//! `crate::events`.
+//! The BigQuery Agent Analytics plugin (constructors, the disabled plugin, `PluginState`,
+//! [`BigQueryAgentAnalyticsPlugin`], [`as_bigquery_agent_analytics_plugin`], `DropStats`,
+//! `AnalyticsPlugin`, `EventData`, `close_write_client`, `validate_event_filter_lists`, the
+//! `CloseFn`) and the plugin's view state (`sync_views`, the view gate, async view creation).
+//! The callbacks are `callbacks`, rows `rows`, filters and the log / write entry points
+//! `filter`, the ADK version `version`; the session-event signal rows are `crate::events`.
 //!
-//! Constructors return a [`gadk_agent::Plugin`] (Go `*baseplugin.Plugin`); its typed state slot
-//! (`PluginConfig::state`, R1(e)) holds the `PluginState` that
-//! [`as_bigquery_agent_analytics_plugin`] recovers (Go's weak-pointer registry).
+//! Constructors return a [`gadk_agent::Plugin`]; its typed state slot (`PluginConfig::state`)
+//! holds the `PluginState` that [`as_bigquery_agent_analytics_plugin`] recovers.
 
 pub(crate) mod callbacks;
 pub(crate) mod filter;
@@ -59,25 +56,25 @@ use crate::validate::validate_config;
 use crate::views::{BigQueryViewRunner, ViewDefinition, ViewRunner, sync_analytics_views};
 use crate::write::gapic::WriteClient;
 
-/// Go `pluginName`.
+/// The plugin's name.
 pub(crate) const PLUGIN_NAME: &str = "bigquery_agent_analytics";
-/// Go `legacyEventType`: accepted in the event filters as an alias of every session-event row.
+/// Accepted in the event filters as an alias of every session-event row.
 pub(crate) const LEGACY_EVENT_TYPE: &str = "EVENT";
-/// Go `adkEnvelopeSchemaVersion`: the version of the `attributes.adk` object.
+/// The version of the `attributes.adk` object.
 pub(crate) const ADK_ENVELOPE_SCHEMA_VERSION: &str = "1";
-/// Go `userAuthor`.
+/// The author of user events.
 pub(crate) const USER_AUTHOR: &str = "user";
-/// Go `scopeKindNodeRun`.
+/// The scope kind of a workflow node run.
 pub(crate) const SCOPE_KIND_NODE_RUN: &str = "node_run";
-/// Go `scopeKindFunctionCall`.
+/// The scope kind of a function call.
 pub(crate) const SCOPE_KIND_FUNCTION_CALL: &str = "function_call";
-/// Go `errPluginClosed`'s text (`views.go`).
+/// The text of the error returned once the plugin is closed.
 pub(crate) const PLUGIN_CLOSED_TEXT: &str = "agentanalytics: plugin is closed";
-/// Go `bigquery.DetectProjectID`: a project ID that asks the BigQuery client for its project.
+/// A project ID that asks the BigQuery client for its project.
 pub(crate) const DETECT_PROJECT_ID: &str = "*detect-project-id*";
 
-/// Go `knownEventTypes`: the event types the filters accept without a warning (the `Event*`
-/// constants and the legacy `EVENT`).
+/// The event types the filters accept without a warning (the `Event*` constants and the legacy
+/// `EVENT`).
 pub(crate) const KNOWN_EVENT_TYPES: [&str; 29] = [
     EVENT_USER_MESSAGE_RECEIVED,
     EVENT_INVOCATION_STARTING,
@@ -110,50 +107,50 @@ pub(crate) const KNOWN_EVENT_TYPES: [&str; 29] = [
     LEGACY_EVENT_TYPE,
 ];
 
-/// Go `eventData.content any`: the raw payload of the `content` / `content_parts` columns.
-/// `add_content` formats the typed payloads as Go's type switch does; everything else is JSON.
+/// The raw payload of the `content` / `content_parts` columns. `add_content` formats the typed
+/// payloads specially; everything else is JSON.
 pub(crate) enum Payload {
-    /// Go `*genai.Content`.
+    /// A genai content.
     Content(Content),
-    /// Go `*model.LLMRequest`.
+    /// A model request.
     LlmRequest(Box<LlmRequest>),
-    /// Go `*model.LLMResponse`.
+    /// A model response.
     LlmResponse(Box<LlmResponse>),
-    /// Any other Go value (maps, strings), as JSON.
+    /// Any other value (maps, strings), as JSON.
     Json(Value),
 }
 
-/// Go `eventData`: the event-specific parts of a row.
+/// The event-specific parts of a row.
 #[derive(Default)]
 pub(crate) struct EventData {
-    /// Go `span`: the place of the row.
+    /// The place of the row.
     pub(crate) span: RowSpan,
-    /// Go `content` (nil = `None`).
+    /// The raw payload of `content` (`None` = none).
     pub(crate) content: Option<Payload>,
     pub(crate) content_truncated: bool,
-    /// Go `parts []map[string]any`: pre-formatted `content_parts` entries.
+    /// Pre-formatted `content_parts` entries.
     pub(crate) parts: Vec<Map<String, Value>>,
     pub(crate) parts_truncated: bool,
-    /// Go `attributes map[string]any` (nil = empty).
+    /// The `attributes` entries (empty when none).
     pub(crate) attributes: Map<String, Value>,
-    /// Go `adkExtras map[string]any` (nil = empty).
+    /// The extra entries of the `attributes.adk` object (empty when none).
     pub(crate) adk_extras: Map<String, Value>,
     pub(crate) err_msg: String,
     pub(crate) failed: bool,
     pub(crate) function_call_id: String,
-    /// Go `sourceEvent *session.Event`.
+    /// The session event the row came from.
     pub(crate) source_event: Option<Arc<Event>>,
     pub(crate) author: String,
-    /// Go `customMetadata map[string]any` (nil = `None`).
+    /// The event's custom metadata (`None` = none).
     pub(crate) custom_metadata: Option<Map<String, Value>>,
     pub(crate) custom_metadata_scrubbed: bool,
     pub(crate) custom_metadata_truncated: bool,
-    /// Go `timestamp` (zero = `None`): overrides `span.timestamp`.
+    /// Overrides `span.timestamp` (`None` = no override).
     pub(crate) timestamp: Option<DateTime<Utc>>,
 }
 
-/// Go `analyticsPlugin`: the state shared by the plugin callbacks. Go's nil `processor` /
-/// `traces` (test literals) are `None`.
+/// The state shared by the plugin callbacks. A `None` `processor` / `traces` (as in test
+/// literals) means there is none.
 pub(crate) struct AnalyticsPlugin {
     pub(crate) config: Config,
     pub(crate) processor: Option<Arc<BatchProcessor>>,
@@ -166,7 +163,7 @@ pub(crate) struct AnalyticsPlugin {
 }
 
 impl Default for AnalyticsPlugin {
-    /// Go's zero `analyticsPlugin{}` (zero `Config`, as Go's test literals).
+    /// The empty plugin (default `Config`, no processor, no traces), as test literals use.
     fn default() -> AnalyticsPlugin {
         AnalyticsPlugin {
             config: Config::zero(),
@@ -181,36 +178,36 @@ impl Default for AnalyticsPlugin {
     }
 }
 
-/// What Go's `pluginState.viewsMu` guards.
+/// What the plugin state's views mutex guards.
 #[derive(Default)]
 pub(crate) struct ViewsState {
     pub(crate) closed: bool,
     pub(crate) runner: Option<Arc<dyn ViewRunner>>,
-    /// Go `viewsCancel`: the running async pass's context (cancel with `cancel()`).
+    /// The running async pass's context (cancel with `cancel()`).
     pub(crate) views_cancel: Option<Context>,
-    /// Go `asyncViewsDone`: cancelled when the async pass ends (Go closes the channel).
+    /// Cancelled when the async pass ends.
     pub(crate) async_views_done: Option<CancellationToken>,
 }
 
-/// Go `pluginState`: the operational state of a constructed plugin, kept in the plugin's state
-/// slot (Go's registry value).
+/// The operational state of a constructed plugin, kept in the plugin's state slot.
 pub(crate) struct PluginState {
-    /// Go `counters` (nil for the disabled plugin).
+    /// The drop counters (`None` for the disabled plugin).
     pub(crate) counters: Option<Arc<DropCounters>>,
     pub(crate) enabled: bool,
-    /// Go `defs`, `defsErr` (the error's text; `SyncViews` returns it as `Error::msg`).
+    /// The view definitions and the text of their error (`sync_views` returns it as
+    /// `Error::msg`).
     pub(crate) defs: Vec<ViewDefinition>,
     pub(crate) defs_err: Option<String>,
-    /// Go `viewGate chan struct{}` (capacity 1, one token): one permit.
+    /// The view gate: one permit.
     pub(crate) view_gate: Arc<Semaphore>,
-    /// Go `viewsMu` and the fields it guards.
+    /// The view state, behind a mutex.
     pub(crate) views: parking_lot::Mutex<ViewsState>,
-    /// Go `lifeCtx` / `lifeCancel` (`cancel()` on it); `None` for the disabled plugin.
+    /// The plugin's life context (`cancel()` on it); `None` for the disabled plugin.
     pub(crate) life_ctx: Option<Context>,
 }
 
 impl PluginState {
-    /// Go `&pluginState{enabled: false, closed: true}` (the disabled plugin).
+    /// The disabled plugin's state: not enabled, already closed.
     pub(crate) fn disabled() -> PluginState {
         PluginState {
             counters: None,
@@ -226,11 +223,11 @@ impl PluginState {
         }
     }
 
-    /// Go `(*pluginState).SyncViews(ctx)`.
+    /// Creates or updates the analytics views now.
     ///
     /// # Errors
     ///
-    /// Go's texts: `agentanalytics: plugin is disabled`, [`PLUGIN_CLOSED_TEXT`],
+    /// `agentanalytics: plugin is disabled`, [`PLUGIN_CLOSED_TEXT`],
     /// `agentanalytics: BigQuery client is not configured for view creation`, the context's
     /// error, the definitions' error, the joined view errors.
     pub(crate) async fn sync_views(&self, ctx: &Context) -> Result<(), Error> {
@@ -269,8 +266,8 @@ impl PluginState {
         result
     }
 
-    /// The part of Go's `SyncViews` after its checks, under its derived context (Go's deferred
-    /// `cancel` / `stop` run by the caller).
+    /// The part of `sync_views` after its checks, under its derived context (the caller runs
+    /// the deferred cleanup).
     async fn sync_views_pass(&self, ctx: &Context, runner: &dyn ViewRunner) -> Result<(), Error> {
         if let Err(err) = self.preempt_async_view_creation(ctx).await {
             return Err(self.closed_or(err));
@@ -290,7 +287,7 @@ impl PluginState {
         result
     }
 
-    /// Go `if s.isClosed() { return errPluginClosed }; return err`.
+    /// `err`, or the plugin-closed error if the plugin is closed.
     fn closed_or(&self, err: Error) -> Error {
         if self.is_closed() {
             Error::msg(PLUGIN_CLOSED_TEXT)
@@ -299,8 +296,8 @@ impl PluginState {
         }
     }
 
-    /// Go `acquireViewGate(ctx)`: the gate's one permit (dropping it is Go's
-    /// `releaseViewGate`), or the context's error once it ends first.
+    /// The gate's one permit (dropping it releases the gate), or the context's error once it
+    /// ends first.
     async fn acquire_view_gate(
         &self,
         ctx: &Context,
@@ -317,13 +314,12 @@ impl PluginState {
         }
     }
 
-    /// Go `isClosed`.
+    /// Whether the plugin is closed.
     pub(crate) fn is_closed(&self) -> bool {
         self.views.lock().closed
     }
 
-    /// Go `startAsyncViewCreation(parentCtx, defs, logf, client)`: a background view pass on
-    /// a spawned task.
+    /// Starts a background view pass on a spawned task.
     pub(crate) fn start_async_view_creation(
         self: &Arc<Self>,
         parent_ctx: &Context,
@@ -364,7 +360,7 @@ impl PluginState {
         });
     }
 
-    /// Go `preemptAsyncViewCreation(ctx)`.
+    /// Preempts a running async view pass, so `ctx` can run its own.
     pub(crate) async fn preempt_async_view_creation(&self, ctx: &Context) -> Result<(), Error> {
         let (cancel, done) = {
             let views = self.views.lock();
@@ -387,8 +383,7 @@ impl PluginState {
         Ok(())
     }
 
-    /// Go `stopAsyncViewCreation`: marks the state closed, cancels and awaits the async pass,
-    /// then waits for the view gate.
+    /// Marks the state closed, cancels and awaits the async pass, then waits for the view gate.
     pub(crate) async fn stop_async_view_creation(&self) {
         let (cancel, done) = {
             let mut views = self.views.lock();
@@ -411,9 +406,9 @@ impl PluginState {
     }
 }
 
-/// The end of an async view pass (Go's deferred `cancel()`, field resets and
-/// `close(done)`), run on drop so that a panicking pass also ends: otherwise close would wait
-/// on `done` forever and never drain the queued rows (Go crashes on such a panic).
+/// The end of an async view pass (cancelling its context, resetting the fields and signalling
+/// `done`), run on drop so that a panicking pass also ends: otherwise close would wait on `done`
+/// forever and never drain the queued rows.
 struct ViewPassEnd {
     state: Arc<PluginState>,
     views_ctx: Context,
@@ -433,8 +428,8 @@ impl Drop for ViewPassEnd {
     }
 }
 
-/// Go `BigQueryAgentAnalyticsPlugin`: a constructed plugin with its operational helpers. Get
-/// one with [`as_bigquery_agent_analytics_plugin`].
+/// A constructed plugin with its operational helpers. Get one with
+/// [`as_bigquery_agent_analytics_plugin`].
 #[derive(Clone)]
 pub struct BigQueryAgentAnalyticsPlugin {
     pub(crate) plugin: Plugin,
@@ -442,13 +437,13 @@ pub struct BigQueryAgentAnalyticsPlugin {
 }
 
 impl BigQueryAgentAnalyticsPlugin {
-    /// The plugin (Go's embedded `*baseplugin.Plugin`).
+    /// The underlying plugin.
     pub fn plugin(&self) -> &Plugin {
         &self.plugin
     }
 
-    /// Go `DropStats()`: cumulative event-drop and formatter-failure counts (zero for the
-    /// disabled plugin). Available after the plugin closed.
+    /// Cumulative event-drop and formatter-failure counts (zero for the disabled plugin).
+    /// Available after the plugin closed.
     pub fn drop_stats(&self) -> DropStats {
         self.state
             .counters
@@ -457,21 +452,19 @@ impl BigQueryAgentAnalyticsPlugin {
             .unwrap_or_default()
     }
 
-    /// Go `SyncViews(ctx)`: creates or updates the analytics views now (see
-    /// `PluginState::sync_views`).
+    /// Creates or updates the analytics views now (see `PluginState::sync_views`).
     ///
     /// # Errors
     ///
-    /// See Go `SyncViews`: disabled or closed plugin, no BigQuery client, the context's error,
-    /// the view errors.
+    /// A disabled or closed plugin, no BigQuery client, the context's error, the view errors.
     pub async fn sync_views(&self, ctx: &Context) -> Result<(), Error> {
         // `self.plugin` keeps the BigQuery client alive; the runner refers to it weakly.
         self.state.sync_views(ctx).await
     }
 }
 
-/// Go `AsBigQueryAgentAnalyticsPlugin(p)`: the helpers of a plugin this crate constructed
-/// (`plugin.state::<PluginState>()`), also after it closed.
+/// The helpers of a plugin this crate constructed (`plugin.state::<PluginState>()`), also after
+/// it closed.
 pub fn as_bigquery_agent_analytics_plugin(p: &Plugin) -> Option<BigQueryAgentAnalyticsPlugin> {
     let state = p.state::<PluginState>()?;
     Some(BigQueryAgentAnalyticsPlugin {
@@ -480,11 +473,12 @@ pub fn as_bigquery_agent_analytics_plugin(p: &Plugin) -> Option<BigQueryAgentAna
     })
 }
 
-/// Go `NewBigQueryAgentAnalyticsPlugin(ctx, projectID, datasetID, tableID)`: the default config
-/// for the table.
+/// Creates the plugin with the default config for the table.
 ///
 /// Register the plugin before any plugin whose callbacks return replacement events, model
-/// responses, tool results or agent content (see Go's doc comment).
+/// responses, tool results or agent content: plugins run in registration order and the first
+/// callback that returns a replacement ends the chain for that event, so a plugin registered
+/// after it never sees the event.
 ///
 /// # Errors
 ///
@@ -504,13 +498,13 @@ pub async fn new_bigquery_agent_analytics_plugin(
     new_bigquery_agent_analytics_plugin_with_config(ctx, config).await
 }
 
-/// Go `NewBigQueryAgentAnalyticsPluginWithConfig(ctx, config)`: a disabled config gives the
-/// disabled plugin; otherwise the config is defaulted and validated, then the BigQuery and
-/// write clients are created and owned by the plugin.
+/// Creates the plugin from `config`: a disabled config gives the disabled plugin; otherwise the
+/// config is defaulted and validated, then the BigQuery and write clients are created and owned
+/// by the plugin.
 ///
 /// # Errors
 ///
-/// The config's validation error (Go's texts), `failed to create bigquery client: …`,
+/// The config's validation error, `failed to create bigquery client: …`,
 /// `failed to create BigQuery write client: …`, and the errors of
 /// [`new_bigquery_agent_analytics_plugin_with_clients`].
 pub async fn new_bigquery_agent_analytics_plugin_with_config(
@@ -525,7 +519,7 @@ pub async fn new_bigquery_agent_analytics_plugin_with_config(
     validate_config(&config)?;
     let bq_client = BigQueryClient::new(config.project_id.clone(), &config.client_options)
         .map_err(|e| Error::wrap("failed to create bigquery client", e))?;
-    // Go closes the BigQuery client when the write client fails; the REST client holds no
+    // The BigQuery client is not closed when the write client fails: the REST client holds no
     // connection to close.
     let write_client = WriteClient::new(config.client_options.clone())
         .await
@@ -540,10 +534,10 @@ pub async fn new_bigquery_agent_analytics_plugin_with_config(
     .await
 }
 
-/// Go `NewBigQueryAgentAnalyticsPluginWithClients(ctx, config, bqClient, writeClient)`: rows go
-/// through `write_client` (owned and closed by the plugin; closed right away when the config is
-/// disabled or construction fails); `bq_client` (caller-owned, `None` skips table setup and
-/// views) creates or upgrades the table and runs the views.
+/// Creates the plugin from `config` and clients: rows go through `write_client` (owned and
+/// closed by the plugin; closed right away when the config is disabled or construction fails);
+/// `bq_client` (caller-owned, `None` skips table setup and views) creates or upgrades the table
+/// and runs the views.
 ///
 /// # Errors
 ///
@@ -559,7 +553,7 @@ pub async fn new_bigquery_agent_analytics_plugin_with_clients(
     new_plugin(ctx, config, bq_client, write_client, false).await
 }
 
-/// Go `newBigQueryAgentAnalyticsPlugin(ctx, config, bqClient, writeClient, ownBQClient)`.
+/// Builds the plugin; `own_bq_client` says the BigQuery client belongs to the plugin.
 pub(crate) async fn new_plugin(
     ctx: &Context,
     config: Config,
@@ -567,7 +561,7 @@ pub(crate) async fn new_plugin(
     write_client: Option<WriteClient>,
     own_bq_client: bool,
 ) -> Result<Plugin, Error> {
-    // Go `closeClients`: the write client; an owned BigQuery client (REST, nothing to close)
+    // Closing the clients: the write client; an owned BigQuery client (REST, nothing to close)
     // is dropped with the plugin.
     let _ = own_bq_client;
     if !config.enabled {
@@ -644,7 +638,7 @@ pub(crate) async fn new_plugin(
 
     // Ensure the table exists and optionally upgrade its schema (once per instance).
     if let Some(bq) = &bq_client {
-        // Go `client.Dataset(d)` (the client's project) when the project is empty.
+        // The client's own project when the project is empty.
         let project = if config.project_id.is_empty() {
             bq.project_id().to_owned()
         } else {
@@ -755,19 +749,18 @@ pub(crate) async fn new_plugin(
     Ok(adk_plugin)
 }
 
-/// What the plugin's close function closes, in Go's `CloseFunc` order.
+/// What the plugin's close function closes, in close order.
 struct CloseResources {
     state: Arc<PluginState>,
     processor: Arc<BatchProcessor>,
     owned_offloader: Option<Arc<GcsOffloader>>,
     write_client: WriteClient,
-    /// Kept alive until the plugin closes: the view runner refers to it only weakly (Go
-    /// `runtime.KeepAlive(bqClient)`).
+    /// Kept alive until the plugin closes: the view runner refers to it only weakly.
     bq_client: Option<Arc<BigQueryClient>>,
 }
 
 impl CloseResources {
-    /// Go's `CloseFunc` body.
+    /// The close sequence.
     async fn close(self) -> Result<(), Arc<Error>> {
         self.state.stop_async_view_creation().await;
         // The processor uploads while it flushes, so it goes first.
@@ -793,13 +786,12 @@ impl CloseResources {
 /// The result of the close sequence, shared by every `close` call.
 type CloseResult = Result<(), Arc<Error>>;
 
-/// The plugin's close function: the first call spawns Go's close sequence on a task of its
-/// own and every call awaits that task's result, so a caller that stops waiting (a
-/// `PluginManager` close timeout) never stops the drain, and the rows still reach BigQuery.
+/// The plugin's close function: the first call spawns the close sequence on a task of its own
+/// and every call awaits that task's result, so a caller that stops waiting (a `PluginManager`
+/// close timeout) never stops the drain, and the rows still reach BigQuery.
 //
-// Divergence (ledger 7b-3a): Go's `CloseFunc` has no once-guard and closes the clients again on
-// a second call; gadk runs the sequence once and a second `close` returns the first call's
-// result (R5).
+// The sequence runs once and a second `close` returns the first call's result, so the clients
+// are not closed again.
 fn close_fn(resources: CloseResources) -> CloseFn {
     let resources = parking_lot::Mutex::new(Some(resources));
     let shared: parking_lot::Mutex<Option<Shared<BoxFuture<'static, CloseResult>>>> =
@@ -852,7 +844,7 @@ impl std::error::Error for SharedError {
     }
 }
 
-/// Go `newDisabledPlugin()`: only a no-op close, and the disabled state.
+/// The disabled plugin: only a no-op close, and the disabled state.
 pub(crate) fn new_disabled_plugin() -> Plugin {
     let close: CloseFn = Arc::new(|| async { Ok(()) }.boxed());
     Plugin::new(PluginConfig {
@@ -863,8 +855,7 @@ pub(crate) fn new_disabled_plugin() -> Plugin {
     })
 }
 
-/// Go `closeWriteClient(writeClient, config)`: closes an unused write client, logging any
-/// error (`failed to close BigQuery write client: …`).
+/// Closes an unused write client, logging any error (`failed to close BigQuery write client: …`).
 pub(crate) async fn close_write_client(write_client: Option<&WriteClient>, config: &Config) {
     let Some(write_client) = write_client else {
         return;
@@ -874,8 +865,8 @@ pub(crate) async fn close_write_client(write_client: Option<&WriteClient>, confi
     }
 }
 
-/// Go `validateEventFilterLists(c)`: logs each unknown filter entry (`agentanalytics: unknown
-/// event_type %q in filter configuration (possible typo)`).
+/// Logs each unknown filter entry (`agentanalytics: unknown event_type %q in filter
+/// configuration (possible typo)`).
 pub(crate) fn validate_event_filter_lists(config: &Config) {
     for event_type in config.event_allowlist.iter().chain(&config.event_denylist) {
         if !KNOWN_EVENT_TYPES.contains(&event_type.as_str()) {

@@ -13,21 +13,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The trace manager, from ADK-Go `plugin/agentanalytics/trace_manager.go`: `traceManager`,
-//! `evictedTrace`, `completedTrace`, `newTraceManager`, `traceIDFor`, `rememberAgentTree`,
-//! `invocation` / `lookupInvocation`, eviction (`evictLocked`, `markEvictedLocked`), completed
-//! runs and their late state (`rememberCompletedLocked`, `lateLocked`, `withCalls`,
-//! `pruneCompletedLocked`, `pruneWaitingLocked`, `startedCalls`), and the span starts and the
-//! model-call / event places: `invocationSpan`, `endInvocation`, `agentNamed`, `pushAgentSpan`,
-//! `pushLLMSpan`, `recordFirstToken`, `recordStreamed`, `clearLastPartial`, `popLLMSpan`,
-//! `pushToolSpan`, `eventSpan`. The agent ends, responses, errors and the end of a run are
-//! [`super::settle`].
+//! The trace manager: [`TraceManager`], [`EvictedTrace`], [`CompletedTrace`], `trace_id_for`,
+//! `remember_agent_tree`, `invocation` / `lookup_invocation`, eviction (`evict_locked`,
+//! `mark_evicted_locked`), completed runs and their late state (`remember_completed_locked`,
+//! `late_locked`, `with_calls`, `prune_completed_locked`, `prune_waiting_locked`,
+//! `started_calls`), and the span starts and the model-call / event places: `invocation_span`,
+//! `end_invocation`, `agent_named`, `push_agent_span`, `push_llm_span`, `record_first_token`,
+//! `record_streamed`, `clear_last_partial`, `pop_llm_span`, `push_tool_span`, `event_span`. The
+//! agent ends, responses, errors and the end of a run are in [`super::settle`].
 //!
-//! Go's `container/list` completion order is a `VecDeque` of `(invocation ID, generation)`
+//! The completion order of finished runs is a `VecDeque` of `(invocation ID, generation)`
 //! entries: moving an entry to the back pushes a new generation (the entry's
 //! `CompletedTrace::generation`), and entries whose generation is stale, or whose ID is no
-//! longer completed, are skipped and dropped — the same order as Go's list (not observable, so
-//! not ledgered; spec R9).
+//! longer completed, are skipped and dropped.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -50,36 +48,35 @@ use super::{
     NO_FRAME, SWEEP_INTERVAL, hex, llm_key, new_span_id, new_trace_id,
 };
 
-/// Go `evictedTrace`: the identity of an invocation after active tracking ends.
+/// The identity of an invocation after active tracking ends.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct EvictedTrace {
     pub(crate) trace_id: String,
     pub(crate) span_id: String,
     pub(crate) parent_span_id: String,
     pub(crate) root_agent_name: String,
-    /// Go `lastActive` (Unix nanoseconds).
+    /// When the invocation was last active (Unix nanoseconds).
     pub(crate) last_active: i64,
 }
 
-/// Go `completedTrace`: what the callbacks that run after a run ended need of it.
+/// What the callbacks that run after a run ended need of it.
 #[derive(Default)]
 pub(crate) struct CompletedTrace {
     pub(crate) identity: EvictedTrace,
-    /// Go `livePending`: the finished run's `pending_spans` while a reservation is held.
+    /// The finished run's `pending_spans` while a reservation is held.
     pub(crate) live_pending: Option<Arc<AtomicI64>>,
-    /// Go `late`: the late state, made for a run that left open calls behind or for the first
-    /// callback after `AfterRun`.
+    /// The late state, made for a run that left open calls behind or for the first callback
+    /// after `AfterRun`.
     pub(crate) late: Option<Arc<InvocationTrace>>,
-    /// Go `endedModels`, `endedTools` (nil = `None`).
+    /// The ended model and tool calls (`None` when there are none).
     pub(crate) ended_models: Option<HashMap<String, SpanRef>>,
     pub(crate) ended_tools: Option<HashMap<String, SpanRef>>,
-    /// Go `position *list.Element`: the generation of this entry's live completion-order
-    /// entry.
+    /// The generation of this entry's live completion-order entry.
     pub(crate) generation: u64,
 }
 
 impl CompletedTrace {
-    /// Go `hasPendingOrOpenLateSpans`.
+    /// Whether a reservation is held or the late state has open spans.
     pub(crate) fn has_pending_or_open_late_spans(&self) -> bool {
         if self
             .live_pending
@@ -91,7 +88,7 @@ impl CompletedTrace {
         self.late.as_ref().is_some_and(|l| l.has_open_late_spans())
     }
 
-    /// Go `hasPendingSpans`.
+    /// Whether a reservation is held or the late state has pending spans.
     pub(crate) fn has_pending_spans(&self) -> bool {
         if self
             .live_pending
@@ -105,8 +102,8 @@ impl CompletedTrace {
             .is_some_and(|l| l.pending_spans.load(Ordering::SeqCst) > 0)
     }
 
-    /// Go `waitsForLateCalls`: kept only for calls AfterRun handed over to the late state
-    /// while one is open, and no callback is starting a span in it.
+    /// Whether the run is kept for calls AfterRun handed over to the late state while one is
+    /// open, and no callback is starting a span in it.
     pub(crate) fn waits_for_late_calls(&self) -> bool {
         !self.has_pending_spans()
             && self
@@ -116,45 +113,44 @@ impl CompletedTrace {
     }
 }
 
-/// An entry of Go's `knownParent`: the child (keeping its address, the key, alive) and its
-/// parent.
+/// An entry of `known_parent`: the child (keeping its address, the key, alive) and its parent.
 #[derive(Clone)]
 pub(crate) struct KnownParent {
     pub(crate) child: Arc<dyn Agent>,
     pub(crate) parent: Arc<dyn Agent>,
 }
 
-/// The fields of Go's `traceManager` that `tm.mu` guards.
+/// The fields of a [`TraceManager`] that its `mu` mutex guards.
 #[derive(Default)]
 pub(crate) struct ManagerState {
     pub(crate) invocations: HashMap<String, Arc<InvocationTrace>>,
     pub(crate) evicted: HashMap<String, EvictedTrace>,
     pub(crate) completed: HashMap<String, CompletedTrace>,
-    /// Go `completionOrder list.List`, front = least recently active.
+    /// The completion order, front = least recently active.
     pub(crate) completion_order: VecDeque<(String, u64)>,
     /// The next completion-order generation.
     pub(crate) next_generation: u64,
-    /// Go `knownParent map[agent.Agent]agent.Agent`, keyed by the child's address.
+    /// The known parent of each agent, keyed by the child's address.
     pub(crate) known_parent: HashMap<AgentKey, KnownParent>,
     pub(crate) inserts: usize,
 }
 
-/// Go `traceManager`. Go's test-settable fields (`maxTracked`, `ttl`, `now`, `logf`) are
-/// plain fields set before the manager is shared.
+/// Tracks the invocations of one plugin. The limits and clock (`max_tracked`, `ttl`, `now`,
+/// `logf`) are plain fields set before the manager is shared.
 pub(crate) struct TraceManager {
     pub(crate) mu: Mutex<ManagerState>,
-    /// Go `traceSeed`: a random trace ID seeding `trace_id_for`.
+    /// A random trace ID seeding `trace_id_for`.
     pub(crate) trace_seed: String,
     pub(crate) logf: Option<LogFn>,
     pub(crate) max_tracked: usize,
     pub(crate) ttl: Duration,
-    /// Go `now` (`time.Now`): call as `(tm.now)()`.
+    /// The clock: call as `(tm.now)()`.
     pub(crate) now: Clock,
 }
 
 impl TraceManager {
-    /// Go `newTraceManager()`: `MAX_TRACKED_INVOCATIONS`, `INVOCATION_TTL`, `Utc::now`, a new
-    /// trace seed, no `logf`.
+    /// Creates a manager with `MAX_TRACKED_INVOCATIONS`, `INVOCATION_TTL`, `Utc::now`, a new
+    /// trace seed and no `logf`.
     pub(crate) fn new() -> TraceManager {
         TraceManager {
             mu: Mutex::new(ManagerState::default()),
@@ -166,7 +162,7 @@ impl TraceManager {
         }
     }
 
-    /// Go `traceIDFor(invocationID)`: the first 16 bytes of SHA-256(`seed \x00 id`) as hex, or
+    /// The trace ID of `invocation_id`: the first 16 bytes of SHA-256(`seed \x00 id`) as hex, or
     /// a new trace ID for an empty ID.
     pub(crate) fn trace_id_for(&self, invocation_id: &str) -> String {
         if invocation_id.is_empty() {
@@ -176,9 +172,9 @@ impl TraceManager {
         hex(&sum[..16])
     }
 
-    /// Go `rememberAgentTree(runner)`: records `runner`'s sub-agent links and returns the
-    /// highest known ancestor of `runner` (`None` for no runner). The sub-agents are walked
-    /// before `mu` is taken (agent code never runs under a lock).
+    /// Records `runner`'s sub-agent links and returns the highest known ancestor of `runner`
+    /// (`None` for no runner). The sub-agents are walked before `mu` is taken (agent code never
+    /// runs under a lock).
     pub(crate) fn remember_agent_tree(
         &self,
         runner: Option<&Arc<dyn Agent>>,
@@ -218,16 +214,15 @@ impl TraceManager {
         Some(cur)
     }
 
-    /// Go `invocation(ctx, id)` = `lookup_invocation(ctx, id, false, false)`.
+    /// The trace of `id`'s invocation: `lookup_invocation(ctx, id, false, false)`.
     pub(crate) fn invocation(&self, ctx: &CallbackCtx, id: &Identity) -> Arc<InvocationTrace> {
         self.lookup_invocation(ctx, id, false, false)
     }
 
-    /// Go `lookupInvocation(ctx, id, start, reserveSpan)`: the trace of `id`'s invocation,
-    /// made on its first callback. Without an invocation ID the trace is untracked. A finished
-    /// run's later callbacks get its late state, unless `start` begins a new run with the ID
-    /// (a HITL resume), which drops the completed entry. `reserve_span` adds a
-    /// `pending_spans` reservation the caller releases.
+    /// The trace of `id`'s invocation, made on its first callback. Without an invocation ID the
+    /// trace is untracked. A finished run's later callbacks get its late state, unless `start`
+    /// begins a new run with the ID (a HITL resume), which drops the completed entry.
+    /// `reserve_span` adds a `pending_spans` reservation the caller releases.
     pub(crate) fn lookup_invocation(
         &self,
         ctx: &CallbackCtx,
@@ -298,7 +293,7 @@ impl TraceManager {
         inv
     }
 
-    /// Go's `now.Add(-tm.ttl).UnixNano()`.
+    /// The cutoff instant (Unix nanoseconds) of `now` minus the TTL.
     fn cutoff(&self, now: DateTime<Utc>) -> i64 {
         chrono::Duration::from_std(self.ttl)
             .ok()
@@ -306,10 +301,10 @@ impl TraceManager {
             .map_or(i64::MIN, unix_nanos)
     }
 
-    /// Go `evictLocked(now, keep)`: drops invocations idle past the TTL without open calls
-    /// (every `SWEEP_INTERVAL` insertions or when too many are tracked), then the least
-    /// recently active ones while too many remain; never `keep`. Returns the IDs of active
-    /// invocations evicted for capacity (logged after `mu` is released).
+    /// Drops invocations idle past the TTL without open calls (every `SWEEP_INTERVAL` insertions
+    /// or when too many are tracked), then the least recently active ones while too many
+    /// remain; never `keep`. Returns the IDs of active invocations evicted for capacity (logged
+    /// after `mu` is released).
     pub(crate) fn evict_locked(
         &self,
         st: &mut ManagerState,
@@ -357,8 +352,8 @@ impl TraceManager {
         warn_ids
     }
 
-    /// Go `markEvictedLocked(now, invocationID, inv)`: saves the identity of an evicted
-    /// invocation, within a capacity of `max(max_tracked, 64)` (expired, then oldest first).
+    /// Saves the identity of an evicted invocation, within a capacity of
+    /// `max(max_tracked, 64)` (expired, then oldest first).
     pub(crate) fn mark_evicted_locked(
         &self,
         st: &mut ManagerState,
@@ -392,12 +387,11 @@ impl TraceManager {
         st.evicted.insert(invocation_id.to_string(), ev);
     }
 
-    /// Go `rememberCompletedLocked(invocationID, runner, inv)`: moves a finished run to its
-    /// completed entry. The model and tool calls it left open and may still end (not streamed
-    /// model calls, nor calls of an activation that ended with the run, see
-    /// [`SpanRecord::ended_with_run`]) move to the late state with the calls an error callback
-    /// ended; `inv` is marked finished and drops all its calls. Then prunes completed runs
-    /// beyond `max(max_tracked, 64)`.
+    /// Moves a finished run to its completed entry. The model and tool calls it left open and
+    /// may still end (not streamed model calls, nor calls of an activation that ended with the
+    /// run, see [`SpanRecord::ended_with_run`]) move to the late state with the calls an error
+    /// callback ended; `inv` is marked finished and drops all its calls. Then prunes completed
+    /// runs beyond `max(max_tracked, 64)`.
     pub(crate) fn remember_completed_locked(
         &self,
         st: &mut ManagerState,
@@ -485,8 +479,8 @@ impl TraceManager {
         self.prune_completed_locked(st, limit, &|c| !c.has_pending_spans());
     }
 
-    /// Go `lateLocked(completed, sc, traceID, now)`: the late state of `completed`, made (with
-    /// the ended calls `completed` holds) if it does not exist yet.
+    /// The late state of `completed`, made (with the ended calls `completed` holds) if it does
+    /// not exist yet.
     pub(crate) fn late_locked(
         &self,
         completed: &mut CompletedTrace,
@@ -519,8 +513,8 @@ impl TraceManager {
         late
     }
 
-    /// Go `pruneCompletedLocked(limit, drop)`: drops the least recently active completed runs
-    /// for which `drop` reports true until at most `limit` remain.
+    /// Drops the least recently active completed runs for which `drop` reports true until at
+    /// most `limit` remain.
     pub(crate) fn prune_completed_locked(
         &self,
         st: &mut ManagerState,
@@ -547,9 +541,8 @@ impl TraceManager {
         }
     }
 
-    /// Go `pruneWaitingLocked(limit, keep)`: while more than `limit` completed runs remain,
-    /// drops the least recently active runs that wait for late calls, as long as more than
-    /// `keep` of them remain.
+    /// While more than `limit` completed runs remain, drops the least recently active runs that
+    /// wait for late calls, as long as more than `keep` of them remain.
     pub(crate) fn prune_waiting_locked(&self, st: &mut ManagerState, limit: usize, keep: usize) {
         if st.completed.len() <= limit {
             return;
@@ -579,8 +572,8 @@ impl TraceManager {
         }
     }
 
-    /// Go `invocationSpan(ctx, id, runner)`: the place of `USER_MESSAGE_RECEIVED` /
-    /// `INVOCATION_STARTING` (starts tracking; `runner` gives the root agent).
+    /// The place of `USER_MESSAGE_RECEIVED` / `INVOCATION_STARTING` (starts tracking; `runner`
+    /// gives the root agent).
     pub(crate) fn invocation_span(
         &self,
         ctx: &CallbackCtx,
@@ -604,9 +597,8 @@ impl TraceManager {
         span
     }
 
-    /// Go `endInvocation(ctx, id)`: the place of `INVOCATION_COMPLETED` / `_ERROR`, with the
-    /// invocation latency if it was tracked from its start without eviction; moves the run to
-    /// its completed entry.
+    /// The place of `INVOCATION_COMPLETED` / `_ERROR`, with the invocation latency if it was
+    /// tracked from its start without eviction; moves the run to its completed entry.
     pub(crate) fn end_invocation(&self, ctx: &CallbackCtx, id: &Identity) -> RowSpan {
         let now = (self.now)();
         let sc = ctx.ambient_span_context();
@@ -661,8 +653,8 @@ impl TraceManager {
         row
     }
 
-    /// Go `agentNamed(ctx, id)`: the agent named `id.agent_name` in the runner's tree
-    /// (`find_agent` runs agent code, so no lock is held).
+    /// The agent named `id.agent_name` in the runner's tree (`find_agent` runs agent code, so no
+    /// lock is held).
     pub(crate) fn agent_named(&self, ctx: &CallbackCtx, id: &Identity) -> Option<Arc<dyn Agent>> {
         let mut inv = self.invocation(ctx, id);
         let root_in = prepare_root_agent_input(ctx, &inv, id, None, None);
@@ -677,14 +669,12 @@ impl TraceManager {
         runner?.find_agent(&id.agent_name)
     }
 
-    /// Go `pushAgentSpan(ctx, id)`: the place of `AGENT_STARTING` and the activations purged
-    /// as failed earlier attempts (it calls
-    /// `settle_ended_in_subtree_locked`, `failures_locked`, `reported_over_locked` and
+    /// The place of `AGENT_STARTING` and the activations purged as failed earlier attempts (it
+    /// calls `settle_ended_in_subtree_locked`, `failures_locked`, `reported_over_locked` and
     /// `purge_activation_locked` of [`super::settle`]).
     ///
-    /// Go reads the goroutine of the callback (`currentGoroutine`) when the context shows its
-    /// activation: here the callback's fiber, its origin and the engine's attempt site
-    /// (`super::settle::current_goroutine`).
+    /// When the context shows its activation, the callback's fiber, its origin and the engine's
+    /// attempt site are read (see [`super::settle`]).
     pub(crate) fn push_agent_span(
         &self,
         ctx: &CallbackCtx,
@@ -699,7 +689,7 @@ impl TraceManager {
         let root_in = prepare_root_agent_input(ctx, &inv, id, None, None);
         let activation = ctx.activation_key();
         let ended = ctx.ended_func();
-        // Go `if ended != nil { goid, origin, attempt = currentGoroutine() }`.
+        // Read the fiber, origin and attempt site only when the context shows an activation.
         let (goid, origin, attempt) = super::settle::current_goroutine(ctx);
         let same_goroutine_since = if attempt == AttemptSite::None {
             NO_FRAME
@@ -716,9 +706,9 @@ impl TraceManager {
         inv.note_root_agent_locked(st, id, &root_in, true);
         let mut parent = st.parent_for_run_locked(id, goid, &origin);
         let mut concurrent_peer = false;
-        // Go `laterAttempt(other)`: whether `id`'s activation is a later attempt of the
-        // workflow node `other` ran as its agent, and whether `other`'s run is known to have
-        // returned. Locks `other`'s parent (the caller holds `other`).
+        // Whether `id`'s activation is a later attempt of the workflow node `other` ran as its
+        // agent, and whether `other`'s run is known to have returned. Locks `other`'s parent
+        // (the caller holds `other`).
         let later_attempt = |other: &SpanRecord| -> (bool, bool) {
             let Some(op_ref) = other.parent.as_ref() else {
                 return (false, false);
@@ -890,8 +880,8 @@ impl TraceManager {
         (span, purged)
     }
 
-    /// Go `pushLLMSpan(ctx, id)`: the place of `LLM_REQUEST`. A model call of the same agent
-    /// that never ended (a BeforeModelCallback answered it) is replaced.
+    /// The place of `LLM_REQUEST`. A model call of the same agent that never ended (a
+    /// BeforeModelCallback answered it) is replaced.
     pub(crate) fn push_llm_span(&self, ctx: &CallbackCtx, id: &Identity) -> RowSpan {
         let inv = self.lookup_invocation(ctx, id, false, true);
         let _reservation = Reservation(inv.clone());
@@ -931,8 +921,8 @@ impl TraceManager {
         span
     }
 
-    /// Go `recordFirstToken(ctx, id)`: the arrival time of the first streamed chunk of
-    /// generated content of the agent's running model call.
+    /// Records the arrival time of the first streamed chunk of generated content of the agent's
+    /// running model call.
     pub(crate) fn record_first_token(&self, ctx: &CallbackCtx, id: &Identity) {
         let mut inv = self.invocation(ctx, id);
         let now = (self.now)();
@@ -962,9 +952,8 @@ impl TraceManager {
         }
     }
 
-    /// Go `recordStreamed(ctx, id, author, branch, withContent)`: a partial session event of
-    /// `author` marks its running model calls as streaming and its lineage as partial (and as
-    /// responded with content).
+    /// A partial session event of `author` marks its running model calls as streaming and its
+    /// lineage as partial (and as responded with content).
     pub(crate) fn record_streamed(
         &self,
         ctx: &CallbackCtx,
@@ -1008,16 +997,17 @@ impl TraceManager {
         }
     }
 
-    /// Go `clearLastPartial(ctx, id)`: a non-partial session event without content arrived.
+    /// A non-partial session event without content arrived.
     pub(crate) fn clear_last_partial(&self, ctx: &CallbackCtx, id: &Identity) {
         let inv = self.invocation(ctx, id);
         inv.mu.lock().clear_last_partial_locked();
     }
 
-    /// Go `popLLMSpan(ctx, id, responded)`: the place of `LLM_RESPONSE` / `LLM_ERROR` (calls
-    /// `retire_late_settled_locked` of [`super::settle`], which returns at once for a live trace). With `responded`, a call that streamed nothing gets a time to first token equal
-    /// to its latency; a call OnModelErrorCallback ended reuses its span without latency; an
-    /// unknown call gets a span of its own.
+    /// The place of `LLM_RESPONSE` / `LLM_ERROR` (calls `retire_late_settled_locked` of
+    /// [`super::settle`], which returns at once for a live trace). With `responded`, a call
+    /// that streamed nothing gets a time to first token equal to its latency; a call
+    /// OnModelErrorCallback ended reuses its span without latency; an unknown call gets a span
+    /// of its own.
     pub(crate) fn pop_llm_span(
         &self,
         ctx: &CallbackCtx,
@@ -1095,7 +1085,7 @@ impl TraceManager {
         span
     }
 
-    /// Go `pushToolSpan(ctx, id, key)`: the place of `TOOL_STARTING`.
+    /// The place of `TOOL_STARTING`.
     pub(crate) fn push_tool_span(&self, ctx: &CallbackCtx, id: &Identity, key: &str) -> RowSpan {
         let inv = self.lookup_invocation(ctx, id, false, true);
         let _reservation = Reservation(inv.clone());
@@ -1136,8 +1126,8 @@ impl TraceManager {
         span
     }
 
-    /// Go `eventSpan(ctx, id, author, branch)`: the place of a session-event row — the span of
-    /// the event's author if it is running, else the invocation span.
+    /// The place of a session-event row — the span of the event's author if it is running, else
+    /// the invocation span.
     pub(crate) fn event_span(
         &self,
         ctx: &CallbackCtx,
@@ -1163,7 +1153,7 @@ impl TraceManager {
     }
 }
 
-/// Go's `defer inv.pendingSpans.Add(-1)` after a reserving lookup.
+/// Releases the `pending_spans` reservation of a reserving lookup when dropped.
 struct Reservation(Arc<InvocationTrace>);
 
 impl Drop for Reservation {
@@ -1172,9 +1162,9 @@ impl Drop for Reservation {
     }
 }
 
-/// Go `completionOrder.PushBack` / `MoveToBack`: a new back entry for `id`; the returned
-/// generation goes to its `CompletedTrace::generation` (earlier entries of `id` go stale).
-/// The caller stores the generation, then calls [`compact_completion_order`].
+/// Pushes a new back entry for `id`; the returned generation goes to its
+/// `CompletedTrace::generation` (earlier entries of `id` go stale). The caller stores the
+/// generation, then calls [`compact_completion_order`].
 fn push_completion(order: &mut VecDeque<(String, u64)>, next: &mut u64, id: &str) -> u64 {
     let generation = *next;
     *next += 1;
@@ -1183,8 +1173,7 @@ fn push_completion(order: &mut VecDeque<(String, u64)>, next: &mut u64, id: &str
 }
 
 /// Drops the stale completion-order entries once they outnumber the live ones: only the
-/// entries whose ID is still completed with that generation stay (Go's list holds exactly
-/// the completed runs, removing a run's element when the run is deleted, e.g. on a resume).
+/// entries whose ID is still completed with that generation stay.
 fn compact_completion_order(
     order: &mut VecDeque<(String, u64)>,
     completed: &HashMap<String, CompletedTrace>,
@@ -1194,7 +1183,7 @@ fn compact_completion_order(
     }
 }
 
-/// Go `withCalls(calls, more)`: `calls` with `more` added; `None` if both are empty.
+/// `calls` with `more` added; `None` if both are empty.
 pub(crate) fn with_calls(
     calls: Option<HashMap<String, SpanRef>>,
     more: Option<HashMap<String, SpanRef>>,
@@ -1211,7 +1200,7 @@ pub(crate) fn with_calls(
     }
 }
 
-/// Go `startedCalls(calls)`: the calls `push_llm_span` / `push_tool_span` started, or `None`.
+/// The calls `push_llm_span` / `push_tool_span` started, or `None`.
 pub(crate) fn started_calls(calls: &HashMap<String, SpanRef>) -> Option<HashMap<String, SpanRef>> {
     let started: HashMap<String, SpanRef> = calls
         .iter()
