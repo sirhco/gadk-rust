@@ -13,10 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The route table (port of ADK-Go `server/adkrest/internal/routers/routers.go` on a
-//! gorilla/mux v1.8.1 router): each controller's [`Route`]s matched with the [`crate::mux`]
-//! path templates, the per-route body limit and authentication, and Go's fallback for unmatched
-//! requests (plan decision D4).
+//! The route table: each controller's [`Route`]s matched with the [`crate::mux`] path templates,
+//! the per-route body limit and authentication, and the fallback for unmatched requests.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -37,19 +35,18 @@ use crate::mux::{
     options_star, redirect, strip_body,
 };
 
-/// Port of Go `routers.Route`.
+/// One route of the server.
 pub struct Route {
-    /// The route's name (Go `Name`).
+    /// The route's name.
     pub name: &'static str,
     /// The methods it serves; GET routes also serve HEAD (added by [`RouteTable::new`]).
     pub methods: Vec<http::Method>,
-    /// A gorilla/mux path template (`{name}` matches one non-empty segment).
+    /// A path template (`{name}` matches one non-empty segment).
     pub pattern: String,
-    /// Exempt from authentication (Go `Public`).
+    /// Exempt from authentication.
     pub public: bool,
-    /// Registered while the router had gorilla's `StrictSlash(true)` (Go registers `/health`
-    /// before `SetupSubRouters` turns it off): the path with the other trailing-slash form also
-    /// matches, and is answered with a 301 to the route's own form instead of the handler.
+    /// Strict slash: the path with the other trailing-slash form also matches, and is answered
+    /// with a 301 to the route's own form instead of the handler.
     pub strict_slash: bool,
     /// The handler.
     pub handler: Handler,
@@ -84,9 +81,8 @@ macro_rules! controller_handler {
 }
 pub(crate) use controller_handler;
 
-/// Go `req.URL.Query().Get(key)` on the request target's `query`: the first value of `key`,
-/// form-decoded, or `""`. Like Go's `url.ParseQuery`, a `&`-separated pair containing `;` is
-/// dropped.
+/// The first value of `key` in the request target's `query`, form-decoded, or `""`. A
+/// `&`-separated pair containing `;` is dropped.
 pub(crate) fn query_get(query: Option<&str>, key: &str) -> String {
     query
         .unwrap_or_default()
@@ -98,10 +94,10 @@ pub(crate) fn query_get(query: Option<&str>, key: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Go `routers.DevPrefix`: the path prefix of the developer-only endpoints.
+/// The path prefix of the developer-only endpoints.
 pub const DEV_PREFIX: &str = "/dev/apps/{app_name}";
 
-/// Go `probeMethods`: the methods an unserved request is re-matched against, in the order they
+/// The methods an unserved request is re-matched against, in the order they
 /// appear in an `Allow` header.
 const PROBE_METHODS: [Method; 7] = [
     Method::GET,
@@ -129,28 +125,28 @@ struct Entry {
     service: RouteService,
 }
 
-/// A registered route as `RouteTable::walk` reports it (Go `mux.Router.Walk`).
+/// A registered route as `RouteTable::walk` reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteInfo {
     /// The route's name.
     pub name: &'static str,
     /// The methods it serves, HEAD included wherever GET is.
     pub methods: Vec<Method>,
-    /// Its gorilla/mux path template.
+    /// Its path template.
     pub pattern: String,
     /// Exempt from authentication.
     pub public: bool,
 }
 
 /// The routes of a server in registration order, with their matcher, body limit and
-/// authentication (Go `SetupSubRouters` on a `mux.Router` with `MaxBytesMiddleware`).
+/// authentication.
 pub struct RouteTable {
     routes: Vec<Entry>,
     max_payload_size: i64,
 }
 
 impl RouteTable {
-    /// Builds the table: HEAD added to GET routes (Go `withHead`), every non-public route wrapped
+    /// Builds the table: HEAD added to GET routes, every non-public route wrapped
     /// in [`authn::middleware`] when `authenticator` is set, and `max_payload_size` (zero or
     /// negative: [`DEFAULT_MAX_PAYLOAD_SIZE`]) applied to every matched route.
     ///
@@ -195,7 +191,7 @@ impl RouteTable {
         }
     }
 
-    /// Every route in registration order (Go `mux.Router.Walk`).
+    /// Every route in registration order.
     pub fn walk(&self) -> Vec<RouteInfo> {
         self.routes
             .iter()
@@ -209,10 +205,9 @@ impl RouteTable {
     }
 
     /// Serves `req`: the first matching route (path variables as [`PathVars`]) runs the body
-    /// limit, then authentication unless public, then its handler; an unmatched request gets Go's
+    /// limit, then authentication unless public, then its handler; an unmatched request gets the
     /// fallback (trailing slash re-dispatch, OPTIONS 204, 405 with `Allow`, 404). A HEAD response
-    /// keeps its headers (and gains the would-be `Content-Length`) but loses its body, as Go's
-    /// `net/http` answers HEAD.
+    /// keeps its headers (and gains the would-be `Content-Length`) but loses its body.
     pub async fn serve(&self, req: Request) -> Response {
         let head = req.method() == Method::HEAD;
         let resp = self.dispatch(req).await;
@@ -225,7 +220,7 @@ impl RouteTable {
             Err(answer) => return answer.response(),
         };
         let raw = req.uri().path().to_owned();
-        // mux matches the decoded path and first redirects one that is not clean.
+        // Routes match the decoded path; one that is not clean is redirected first.
         let clean = clean_path(&path);
         if clean != path {
             return clean_path_redirect(&go_request_uri(&req), &clean);
@@ -233,9 +228,9 @@ impl RouteTable {
         if let Some((entry, vars)) = self.find(req.method(), &path) {
             return self.call(entry, vars, req).await;
         }
-        // Go newFallbackHandler. A trailing slash is normalised first and the request
-        // re-dispatched with its method and body; the trimmed path has no trailing slash, so
-        // this happens at most once.
+        // The fallback. A trailing slash is normalised first and the request re-dispatched with
+        // its method and body; the trimmed path has no trailing slash, so this happens at most
+        // once.
         let (mut req, mut path) = (req, path);
         if let Some((uri, trimmed)) = without_trailing_slash(req.uri(), &raw, &path) {
             *req.uri_mut() = uri;
@@ -275,9 +270,9 @@ impl RouteTable {
             .find_map(|e| e.path_vars(path).map(|vars| (e, vars)))
     }
 
-    /// Runs a matched route: body limit (mux middleware), then its service stack, or for a
-    /// strict-slash route reached with the other trailing-slash form, gorilla's redirect in place
-    /// of the stack (so without authentication, as gorilla replaces the route's handler).
+    /// Runs a matched route: body limit, then its service stack, or for a strict-slash route
+    /// reached with the other trailing-slash form, the redirect in place of the stack (so without
+    /// authentication: the redirect replaces the route's handler).
     async fn call(&self, entry: &Entry, vars: PathVars, mut req: Request) -> Response {
         if let Some(target) = entry.strict_slash_target(&req) {
             return with_max_bytes(self.max_payload_size, req, |req| async move {
@@ -298,8 +293,8 @@ impl RouteTable {
 }
 
 impl Entry {
-    /// The path variables when the route's path matches `path` (gorilla `…[/]?$` under
-    /// `StrictSlash(true)`: the `[^/]+` variables never take a `/`, so the optional slash is the
+    /// The path variables when the route's path matches `path` (for a strict-slash route, as the
+    /// pattern `…[/]?$`: the `[^/]+` variables never take a `/`, so the optional slash is the
     /// path's last byte).
     fn path_vars(&self, path: &[u8]) -> Option<PathVars> {
         self.template.matches(path).or_else(|| {
@@ -312,9 +307,8 @@ impl Entry {
         })
     }
 
-    /// gorilla `setMatch`'s strict-slash check: when the decoded path's trailing slash differs
-    /// from the pattern's, the redirect target, Go `URL.String` of `url.Parse(req.URL.String())`
-    /// with the slash trimmed or added.
+    /// The strict-slash check: when the decoded path's trailing slash differs from the pattern's,
+    /// the redirect target, the request URL with the slash trimmed or added.
     fn strict_slash_target(&self, req: &Request) -> Option<String> {
         if !self.strict_slash {
             return None;
@@ -343,7 +337,7 @@ impl std::fmt::Debug for RouteTable {
     }
 }
 
-/// Go `withHead`: HEAD added wherever a route serves GET.
+/// HEAD added wherever a route serves GET.
 fn with_head(mut methods: Vec<Method>) -> Vec<Method> {
     if !methods.contains(&Method::HEAD) && methods.contains(&Method::GET) {
         methods.push(Method::HEAD);
@@ -351,9 +345,9 @@ fn with_head(mut methods: Vec<Method>) -> Vec<Method> {
     methods
 }
 
-/// Go `withoutTrailingSlash`: the request target with the trailing slashes of its path removed,
-/// and the trimmed decoded path; `None` when there is no trailing slash or nothing would be left.
-/// Slashes are counted on the escaped path (Go `EscapedPath`), so an encoded `%2F` is left alone.
+/// The request target with the trailing slashes of its path removed, and the trimmed decoded path;
+/// `None` when there is no trailing slash or nothing would be left. Slashes are counted on the
+/// escaped path, so an encoded `%2F` is left alone.
 fn without_trailing_slash(uri: &Uri, raw: &str, path: &[u8]) -> Option<(Uri, Vec<u8>)> {
     let escaped = if go_url::valid_encoded_path(raw) {
         raw.to_owned()
@@ -379,9 +373,9 @@ fn without_trailing_slash(uri: &Uri, raw: &str, path: &[u8]) -> Option<(Uri, Vec
     Some((Uri::from_parts(parts).ok()?, trimmed_path))
 }
 
-/// The answers Go's `net/http` server gives before any handler runs (so before the origin guard
-/// too): `OPTIONS *` (`globalOptionsHandler`) and a request target whose escapes do not decode
-/// (`400 Bad Request`). `Ok` is the decoded path of any other request.
+/// The answers given before any handler runs (so before the origin guard too): `OPTIONS *` and a
+/// request target whose escapes do not decode (`400 Bad Request`). `Ok` is the decoded path of
+/// any other request.
 pub(crate) fn decoded_path(req: &Request) -> Result<Vec<u8>, ServerAnswer> {
     if req.method() == Method::OPTIONS && req.uri().path() == "*" {
         return Err(ServerAnswer::OptionsStar);
@@ -389,7 +383,7 @@ pub(crate) fn decoded_path(req: &Request) -> Result<Vec<u8>, ServerAnswer> {
     go_url::unescape_path(req.uri().path()).map_err(|_| ServerAnswer::BadRequest)
 }
 
-/// An answer of Go's `net/http` server itself (see [`decoded_path`]).
+/// An answer given before any handler runs (see [`decoded_path`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ServerAnswer {
     /// `OPTIONS *`: 200 with `Content-Length: 0`.
@@ -399,7 +393,7 @@ pub(crate) enum ServerAnswer {
 }
 
 impl ServerAnswer {
-    /// The response Go's server writes.
+    /// The response.
     pub(crate) fn response(self) -> Response {
         match self {
             ServerAnswer::OptionsStar => options_star(),

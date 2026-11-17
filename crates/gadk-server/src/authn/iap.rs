@@ -13,15 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `server/authn/iap.go`: the identity headers Google Cloud Identity-Aware Proxy sets.
+//! The identity headers Google Cloud Identity-Aware Proxy sets.
 
 use std::sync::Arc;
 
 use super::{Authenticator, AuthnError, Caller};
 
-/// Go `authn.UserEMailHeader`.
+/// Header carrying the IAP-authenticated user's email.
 pub const USER_EMAIL_HEADER: &str = "X-Goog-Authenticated-User-Email";
-/// Go `authn.UserIDHeader`.
+/// Header carrying the IAP-authenticated user's ID.
 pub const USER_ID_HEADER: &str = "X-Goog-Authenticated-User-Id";
 
 /// The prefix IAP puts on both header values.
@@ -29,14 +29,14 @@ const PREFIX: &str = "accounts.google.com:";
 
 struct IdentityAwareProxy;
 
-/// Port of Go `authn.NewIdentityAwareProxy`: the caller is the IAP-authenticated user (user ID
+/// The caller is the IAP-authenticated user (user ID
 /// from [`USER_ID_HEADER`], claim `email` from [`USER_EMAIL_HEADER`], both without IAP's
 /// `accounts.google.com:` prefix).
 pub fn identity_aware_proxy() -> Arc<dyn Authenticator> {
     Arc::new(IdentityAwareProxy)
 }
 
-/// Go `Header.Get`: the first value of `name`, empty when absent.
+/// The first value of `name`, empty when absent.
 fn first(req: &http::request::Parts, name: &str) -> String {
     req.headers
         .get(name)

@@ -13,8 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Go's response helpers, byte for byte: `net/http` `Error` and `NotFound`, ADK-Go
-//! `controllers.EncodeJSONResponse`, and the `NewErrorHandler` rendering of a `statusError`.
+//! Response helpers: plain-text error and not-found responses, JSON responses, and the rendering
+//! of a [`StatusError`]. The bytes (headers, trailing newline, HTML-escaped JSON) are what ADK
+//! REST clients receive from an ADK server.
 
 use axum::body::Body;
 use http::header::CONTENT_TYPE;
@@ -25,10 +26,9 @@ use super::routing::Response;
 
 pub use crate::mux::http_error;
 
-/// Go `controllers.EncodeJSONResponse`: `value` as Go's `json.Encoder` writes it (HTML-escaped,
-/// newline-terminated; [`gadk_model::to_go_json`]) with `Content-Type: application/json;
-/// charset=UTF-8`. A value that cannot be encoded keeps the status and has the encoder's error
-/// text as its body (Go's `http.Error` after the header was written).
+/// `value` as JSON (HTML-escaped, newline-terminated; [`gadk_model::to_go_json`]) with
+/// `Content-Type: application/json; charset=UTF-8`. A value that cannot be encoded keeps the
+/// status and has the encoder's error text (and a newline) as its body.
 pub fn encode_json_response<T: Serialize + ?Sized>(value: &T, status: StatusCode) -> Response {
     let body = match gadk_model::to_go_json(value) {
         Ok(mut b) => {
@@ -46,18 +46,18 @@ pub fn encode_json_response<T: Serialize + ?Sized>(value: &T, status: StatusCode
     resp
 }
 
-/// Go `controllers.statusError`: an error and the status it answers with.
+/// An error and the status it answers with.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct StatusError {
     /// The response status.
     pub status: StatusCode,
-    /// Go `Err.Error()`.
+    /// The error text, sent as the response body.
     pub message: String,
 }
 
 impl StatusError {
-    /// Go `newStatusError(err, code)`.
+    /// A [`StatusError`] answering `status` with `message`.
     pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
             status,
@@ -66,8 +66,7 @@ impl StatusError {
     }
 }
 
-/// Go `controllers.NewErrorHandler`'s rendering of a returned `statusError`:
-/// `http.Error(w, err.Error(), err.Status())`.
+/// The response for a [`StatusError`]: its message as the body of a [`http_error`] with its status.
 pub fn status_error_response(err: &StatusError) -> Response {
     http_error(err.status, &err.message)
 }

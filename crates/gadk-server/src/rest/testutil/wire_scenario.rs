@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Go wire probe's scenario: the fixed clock and
-//! UUID providers, the scripted models, the sample agents and the three server configurations
-//! whose answers `testdata/wire` records. `tests/wire.rs` replays the fixtures against
-//! [`wire_server`]; the controller tests reuse the agents.
+//! The wire scenario: the fixed clock and UUID providers, the scripted models, the sample agents
+//! and the three server configurations whose answers `testdata/wire` records. `tests/wire.rs`
+//! replays the fixtures against [`wire_server`]; the controller tests reuse the agents.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
@@ -70,7 +69,7 @@ pub struct ScriptedModel {
 
 impl ScriptedModel {
     /// A model named `name` answering with `reply(last content)`.
-    #[allow(clippy::new_ret_no_self)] // the model as Go's `model.LLM`, as `FunctionTool::new`
+    #[allow(clippy::new_ret_no_self)] // returns the model as `Arc<dyn Llm>`, as `FunctionTool::new`
     pub fn new(
         name: &'static str,
         reply: fn(Option<&Content>) -> Result<Content, ModelError>,
@@ -144,13 +143,13 @@ pub fn assistant_reply(last: Option<&Content>) -> Result<Content, ModelError> {
     }
 }
 
-/// Go `saveNoteArgs`.
+/// The arguments of the `save_note` tool.
 #[derive(Deserialize, schemars::JsonSchema)]
 struct SaveNoteArgs {
     text: String,
 }
 
-/// Go `saveNoteResult`.
+/// The result of the `save_note` tool.
 #[derive(Serialize, schemars::JsonSchema)]
 struct SaveNoteResult {
     status: String,
@@ -331,7 +330,7 @@ pub fn wire_server(config: WireConfig) -> Result<Server, ServerError> {
     Server::new(server_config(config, fixed_platform()))
 }
 
-/// Every route `server` registered, in registration order (Go `mux.Router.Walk`).
+/// Every route `server` registered, in registration order.
 pub fn server_routes(server: &Server) -> Vec<RouteInfo> {
     server.routes()
 }

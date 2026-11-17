@@ -13,14 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! gadk-server: the ADK REST API server (port of ADK-Go `server/adkrest`, incl.
-//! `controllers/triggers`), its inbound authentication ([`authn`], Go `server/authn`) and
-//! authorization ([`authz`], Go `server/authz`), wire-compatible with an ADK-Go server.
+//! gadk-server: the ADK REST API server (including its Pub/Sub and Eventarc trigger endpoints),
+//! its inbound authentication ([`authn`]) and authorization ([`authz`]). Wire-compatible with ADK
+//! REST clients such as the ADK web UI.
 //!
-//! [`rest::Server`] serves the routes ADK-Go's `adkrest.NewServer` registers as an
-//! [`axum::Router`]; mount it on any axum or hyper server. [`mux`] is the gorilla/mux v1.8.1
-//! port (handler types, path templates, `cleanPath`) its route table and the launcher's web
-//! router share.
+//! [`rest::Server`] serves the REST routes as an [`axum::Router`]; mount it on any axum or hyper
+//! server. [`mux`] provides the handler types, path templates and path cleaning that its route
+//! table and the launcher's web router share.
 
 #[cfg(feature = "agentengine")]
 pub mod agentengine;

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `models/runtime.go`.
+//! The `/run`, `/run_sse` and `/run_live` request bodies.
 
 use bytes::Bytes;
 use gadk_genai::serde_util::base64_bytes;
@@ -23,41 +23,40 @@ use serde_json::{Map, Value};
 
 use super::null_default;
 
-/// Port of Go `models.RunAgentRequest`; unknown fields are rejected (Go `DisallowUnknownFields`).
+/// The `/run` and `/run_sse` request body; unknown fields are rejected.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunAgentRequest {
-    /// Go `AppName`.
+    /// The application name.
     #[serde(default, deserialize_with = "null_default")]
     pub app_name: String,
-    /// Go `UserId`.
+    /// The user ID.
     #[serde(default, deserialize_with = "null_default")]
     pub user_id: String,
-    /// Go `SessionId`.
+    /// The session ID.
     #[serde(default, deserialize_with = "null_default")]
     pub session_id: String,
-    /// Go `NewMessage`.
+    /// The message that starts the run.
     #[serde(default, deserialize_with = "null_default")]
     pub new_message: Content,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(
         default,
         skip_serializing_if = "std::ops::Not::not",
         deserialize_with = "null_default"
     )]
     pub streaming: bool,
-    /// Go `*map[string]any`, `omitempty`.
+    /// State changes applied with the run; omitted from the JSON when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_delta: Option<Map<String, Value>>,
-    /// Accepted for adk-python parity and ignored, as in Go.
+    /// Accepted for adk-python parity and ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub function_call_event_id: Option<String>,
 }
 
 impl RunAgentRequest {
-    /// Port of Go `AssertRunAgentRequestRequired`: `<name> is required` for the first zero field
-    /// of `appName`, `userId`, `sessionId`, `newMessage` (Go iterates a map, so its order is
-    /// unspecified). ADK-Go's handlers do not call it either; only its test does.
+    /// `<name> is required` for the first zero field of `appName`, `userId`, `sessionId`,
+    /// `newMessage`. The handlers do not call it; only tests do.
     #[cfg(test)]
     pub fn assert_run_agent_request_required(&self) -> Result<(), String> {
         let zero = [
@@ -73,17 +72,17 @@ impl RunAgentRequest {
     }
 }
 
-/// Go `models.blob`: a media chunk from a live client (`mime_type`, base64 `data`).
+/// A media chunk from a live client (`mime_type`, base64 `data`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LiveBlob {
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(
         default,
         skip_serializing_if = "String::is_empty",
         deserialize_with = "null_default"
     )]
     pub mime_type: String,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(
         default,
         skip_serializing_if = "Bytes::is_empty",
@@ -92,23 +91,23 @@ pub struct LiveBlob {
     pub data: Bytes,
 }
 
-/// Port of Go `models.LiveRequest`: one client message on a `/run_live` WebSocket.
+/// One client message on a `/run_live` WebSocket.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LiveRequest {
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<Content>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blob: Option<LiveBlob>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activity_start: Option<ActivityStart>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activity_end: Option<ActivityEnd>,
-    /// `omitempty`.
+    /// Omitted from the JSON when empty.
     #[serde(
         skip_serializing_if = "std::ops::Not::not",
         deserialize_with = "null_default"

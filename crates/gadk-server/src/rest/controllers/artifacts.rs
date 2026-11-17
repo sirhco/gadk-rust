@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `controllers/artifacts.go` and `internal/routers/artifacts.go` (plan 5a Task 6).
+//! The artifacts controller and its routes.
 
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ use crate::rest::routing::{
     PathVars, Request, Response, Route, controller_handler, query_get, route,
 };
 
-/// Port of Go `controllers.ArtifactsAPIController`; without a service every handler answers 503
+/// Serves a session's artifacts; without a service every handler answers 503
 /// `artifact service is not configured`.
 pub struct ArtifactsApiController {
     service: Option<Arc<dyn ArtifactService>>,
@@ -36,7 +36,7 @@ pub struct ArtifactsApiController {
 }
 
 impl ArtifactsApiController {
-    /// Go `NewArtifactsAPIController` (authorizer: [`authz::noop`]).
+    /// A controller over `service` (authorizer: [`authz::noop`]).
     pub fn new(service: Option<Arc<dyn ArtifactService>>) -> Self {
         Self {
             service,
@@ -44,13 +44,13 @@ impl ArtifactsApiController {
         }
     }
 
-    /// Go `WithAuthorizer`.
+    /// This controller with `a` deciding whether the caller may act as the path's user.
     pub fn with_authorizer(mut self, a: Arc<dyn Authorizer>) -> Self {
         self.authorizer = a;
         self
     }
 
-    /// Go `ListArtifactsHandler`: the session's artifact names as a JSON array (`[]` when none).
+    /// The session's artifact names as a JSON array (`[]` when none).
     pub async fn list_artifacts_handler(&self, req: Request) -> Response {
         let service = match self.service() {
             Ok(s) => s,
@@ -60,7 +60,7 @@ impl ArtifactsApiController {
             Ok(sid) => sid,
             Err(e) => return http_error(StatusCode::BAD_REQUEST, &e),
         };
-        // Go checks authorization before the session ID here (the other handlers after).
+        // Authorization is checked before the session ID here (the other handlers check it after).
         if let Some(resp) =
             forbid_unless_can_act_as(&*self.authorizer, req.extensions(), &sid.user_id)
         {
@@ -82,7 +82,7 @@ impl ArtifactsApiController {
         }
     }
 
-    /// Go `LoadArtifactHandler`: the latest version, or `?version=N`, as a JSON `genai.Part`.
+    /// The latest version, or `?version=N`, as a JSON content part.
     pub async fn load_artifact_handler(&self, req: Request) -> Response {
         let (service, _, sid, file_name) = match self.artifact_request(&req) {
             Ok(parts) => parts,
@@ -113,7 +113,7 @@ impl ArtifactsApiController {
         }
     }
 
-    /// Go `LoadArtifactVersionHandler`: the `{version}` of the artifact as a JSON `genai.Part`.
+    /// The `{version}` of the artifact as a JSON content part.
     pub async fn load_artifact_version_handler(&self, req: Request) -> Response {
         let (service, vars, sid, file_name) = match self.artifact_request(&req) {
             Ok(parts) => parts,
@@ -144,7 +144,7 @@ impl ArtifactsApiController {
         }
     }
 
-    /// Go `DeleteArtifactHandler`: every version; 200 with the JSON `Content-Type` and no body.
+    /// Deletes every version; 200 with the JSON `Content-Type` and no body.
     pub async fn delete_artifact_handler(&self, req: Request) -> Response {
         let (service, _, sid, file_name) = match self.artifact_request(&req) {
             Ok(parts) => parts,
@@ -165,7 +165,7 @@ impl ArtifactsApiController {
         }
     }
 
-    /// Go `serviceUnavailable`: 503 when the server has no artifact service.
+    /// The service, or a 503 when the server has no artifact service.
     fn service(&self) -> Result<&Arc<dyn ArtifactService>, Box<Response>> {
         self.service.as_ref().ok_or_else(|| {
             Box::new(http_error(
@@ -175,7 +175,7 @@ impl ArtifactsApiController {
         })
     }
 
-    /// The checks Go's load, load-version and delete handlers share, in Go's order: service, path
+    /// The checks the load, load-version and delete handlers share, in order: service, path
     /// variables, session ID, authorization, artifact name. The error is the response to send.
     #[allow(clippy::type_complexity)]
     fn artifact_request(
@@ -208,7 +208,7 @@ impl ArtifactsApiController {
     }
 }
 
-/// Go `writeArtifactError`: a missing artifact (`fs.ErrNotExist`) is a 404, anything else a 500.
+/// The error response: a missing artifact is a 404, anything else a 500.
 fn write_artifact_error(err: &ArtifactError) -> Response {
     let status = match err {
         ArtifactError::NotFound => StatusCode::NOT_FOUND,
@@ -217,7 +217,7 @@ fn write_artifact_error(err: &ArtifactError) -> Response {
     http_error(status, &err.to_string())
 }
 
-/// Go `strconv.Atoi` on a 64-bit platform: an optional sign and ASCII digits in `i64` range.
+/// Parses a base-10 integer: an optional sign and ASCII digits in `i64` range.
 fn go_atoi(s: &str) -> Option<i64> {
     let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
@@ -226,7 +226,7 @@ fn go_atoi(s: &str) -> Option<i64> {
     s.parse().ok()
 }
 
-/// Go `ArtifactsAPIRouter.Routes`.
+/// The artifact routes.
 pub(crate) fn artifacts_routes(c: Arc<ArtifactsApiController>) -> Vec<Route> {
     const BASE: &str = "/apps/{app_name}/users/{user_id}/sessions/{session_id}/artifacts";
     vec![

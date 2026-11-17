@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The ADK REST API server (port of ADK-Go `server/adkrest`).
+//! The ADK REST API server.
 //!
 //! [`Server::new`] validates the compaction config against every application, builds the routes
-//! ADK-Go's `NewServer` registers (sessions, runtime, apps, artifacts, version, the 501 developer
+//! (sessions, runtime, apps, artifacts, version, the 501 developer
 //! stubs, and, with [`DebugApiConfig::include_debug_api`], debug and agent graph) behind the
 //! origin guard, and [`Server::router`] serves them as an [`axum::Router`].
 //! [`Server::debug_layer`] is the `tracing` layer that feeds the debug trace endpoints.
@@ -72,21 +72,21 @@ pub use middleware::max_bytes_middleware;
 pub use originguard::{LocalAddr, normalize_origin, origin_guard_middleware};
 pub use routing::PathVars;
 
-/// Go `adkrest.DefaultMaxPayloadSize`: the request-body limit (10 MiB) when
+/// The request-body limit (10 MiB) when
 /// [`ServerConfig::max_payload_size`] is zero or negative.
 pub const DEFAULT_MAX_PAYLOAD_SIZE: i64 = 10 << 20;
 
-/// A Go `time.Duration` setting whose zero value selects a default and whose negative values turn
-/// the feature off ([`ServerConfig::sse_write_timeout`], [`ServerConfig::live_keepalive_timeout`]
+/// A duration setting whose zero value selects a default and whose negative values turn the
+/// feature off ([`ServerConfig::sse_write_timeout`], [`ServerConfig::live_keepalive_timeout`]
 /// and their [`RuntimeApiControllerConfig`] twins).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Timeout {
-    /// Go zero: the setting's default (`After(Duration::ZERO)` means the same).
+    /// The setting's default (`After(Duration::ZERO)` means the same).
     #[default]
     Default,
-    /// Go negative: no timeout.
+    /// No timeout.
     Disabled,
-    /// Go positive.
+    /// This duration.
     After(Duration),
 }
 
@@ -103,7 +103,7 @@ impl Timeout {
     }
 }
 
-/// Port of Go `adkrest.ServerConfig`.
+/// Configuration of the REST [`Server`].
 #[derive(Clone)]
 pub struct ServerConfig {
     /// The session service. Required.
@@ -114,8 +114,7 @@ pub struct ServerConfig {
     pub agent_loader: Option<Arc<dyn Loader>>,
     /// Optional artifact service; the artifact routes answer 503 without one.
     pub artifact_service: Option<Arc<dyn ArtifactService>>,
-    /// Write deadline of a `/run_sse` response, from when the request arrives (Go
-    /// `SSEWriteTimeout`): default 120 s.
+    /// Write deadline of a `/run_sse` response, from when the request arrives: default 120 s.
     pub sse_write_timeout: Timeout,
     /// Plugins of every runner the server builds.
     pub plugin_config: gadk_engine::runner::PluginConfig,
@@ -123,7 +122,7 @@ pub struct ServerConfig {
     pub debug_config: DebugTelemetryConfig,
     /// Whether the debug and agent graph routes are served.
     pub debug_api_config: DebugApiConfig,
-    /// Authenticates every non-public route; `None` is Go's nil, i.e. [`authn::noop`].
+    /// Authenticates every non-public route; `None` is [`authn::noop`].
     ///
     /// [`authn::noop`]: crate::authn::noop
     pub authenticator: Option<Arc<dyn Authenticator>>,
@@ -131,9 +130,9 @@ pub struct ServerConfig {
     ///
     /// [`authz::noop`]: crate::authz::noop
     pub authorizer: Option<Arc<dyn Authorizer>>,
-    /// Web origins allowed to call the server from a browser (Go `AllowedOrigins`).
+    /// Web origins allowed to call the server from a browser.
     pub allowed_origins: Vec<String>,
-    /// The address the caller binds the server to (Go `BindHost`).
+    /// The address the caller binds the server to.
     pub bind_host: String,
     /// Context compaction for every runner; `None` disables it.
     pub compaction: Option<gadk_session::compaction::Config>,
@@ -141,7 +140,7 @@ pub struct ServerConfig {
     pub max_payload_size: i64,
     /// Cap on one client message of `/run_live`: zero means 16 MiB, negative no cap.
     pub max_live_message_bytes: i64,
-    /// `/run_live` keepalive (Go `LiveKeepaliveTimeout`): default 40 s.
+    /// `/run_live` keepalive: default 40 s.
     pub live_keepalive_timeout: Timeout,
     /// Cap on concurrent `/run_live` connections; zero or negative means no cap.
     pub max_live_sessions: i32,
@@ -150,7 +149,7 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
-    /// A config with `session_service` and every other field at Go's zero value.
+    /// A config with `session_service` and every other field at its zero value.
     pub fn new(session_service: Arc<dyn SessionService>) -> Self {
         Self {
             session_service,
@@ -175,14 +174,14 @@ impl ServerConfig {
     }
 }
 
-/// Port of Go `adkrest.DebugTelemetryConfig`.
+/// Configuration of the debug trace store.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DebugTelemetryConfig {
     /// Maximum number of traces kept; zero or negative selects 10 000.
     pub trace_capacity: i32,
 }
 
-/// Port of Go `adkrest.DebugAPIConfig`.
+/// Whether the debug routes are served.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DebugApiConfig {
     /// Serve the debug and agent graph routes. Do not enable in production: traces carry
@@ -190,26 +189,26 @@ pub struct DebugApiConfig {
     pub include_debug_api: bool,
 }
 
-/// A server construction failure (Go's error text).
+/// A server construction failure.
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub struct ServerError(pub String);
 
-/// Port of Go `adkrest.Server`: the route table behind the origin guard, and the debug trace
+/// The REST server: the route table behind the origin guard, and the debug trace
 /// store its debug routes read.
 pub struct Server {
-    /// Go `Server.router`: the route table (requests reach it only through `handler`).
+    /// The route table (requests reach it only through `handler`).
     table: Arc<RouteTable>,
-    /// Go `Server.handler`: the platform extension, then the origin guard, then the route table.
+    /// The platform extension, then the origin guard, then the route table.
     handler: Handler,
-    /// Go `Server.telemetryStore`.
+    /// The debug trace store.
     debug: DebugTelemetry,
 }
 
 impl Server {
-    /// Port of Go `adkrest.NewServer`: validates the compaction config against every application
-    /// of the loader (so an unservable config fails here rather than on every request), then
-    /// builds the routes in Go's registration order (`/health`, sessions, runtime, apps,
+    /// Validates the compaction config against every application of the loader (so an unservable
+    /// config fails here rather than on every request), then builds the routes in registration
+    /// order (`/health`, sessions, runtime, apps,
     /// artifacts, version, the agent builder, tests and eval stubs, and with
     /// [`DebugApiConfig::include_debug_api`] the debug and agent graph routes) behind
     /// [`ServerConfig::authenticator`] (default [`authn::noop`]) and the origin guard.
@@ -259,7 +258,7 @@ impl Server {
         ))));
         routes.extend(artifacts_routes(artifacts));
         routes.extend(version_routes(Arc::new(VersionApiController::new())));
-        // Ungated on purpose, as in Go: the builder stub reveals nothing.
+        // Ungated on purpose: the builder stub reveals nothing.
         routes.extend(agent_builder_routes());
         routes.extend(tests_routes());
         routes.extend(eval_routes());
@@ -289,12 +288,12 @@ impl Server {
             let table = Arc::clone(&routed);
             async move { table.serve(req).await }
         }));
-        // Go installs the platform on the request context; gadk carries it as an extension.
+        // The platform travels with the request as an extension.
         let platform = cfg.platform;
         let handler = routing::handler(move |mut req: Request| {
-            // Go's `net/http` server answers `OPTIONS *` and an undecodable target itself,
-            // before `policy.Middleware` sees the request. `RouteTable::dispatch` decodes the
-            // path again on purpose: tests drive the table directly, without this handler.
+            // `OPTIONS *` and an undecodable target are answered here, before
+            // `policy.Middleware` sees the request. `RouteTable::dispatch` decodes the path again
+            // on purpose: tests drive the table directly, without this handler.
             if let Err(answer) = routing::decoded_path(&req) {
                 return Box::pin(std::future::ready(answer.response()))
                     as BoxFuture<'static, Response>;
@@ -309,8 +308,7 @@ impl Server {
         })
     }
 
-    /// Every route of the server behind the origin guard, as an [`axum::Router`] (Go
-    /// `Server.ServeHTTP`). Serve it with
+    /// Every route of the server behind the origin guard, as an [`axum::Router`]. Serve it with
     /// `into_make_service_with_connect_info::<`[`LocalAddr`]`>()` so the guard knows the address
     /// each connection was accepted on.
     pub fn router(&self) -> axum::Router {
@@ -321,14 +319,13 @@ impl Server {
         }))
     }
 
-    /// The `tracing` layer feeding the debug trace endpoints (Go `SpanProcessor` and
-    /// `LogProcessor`): the store the debug routes read. Install it in the application's
-    /// subscriber.
+    /// The `tracing` layer feeding the debug trace endpoints: the store the debug routes read.
+    /// Install it in the application's subscriber.
     pub fn debug_layer(&self) -> DebugTelemetry {
         self.debug.clone()
     }
 
-    /// Every route the server registered, in registration order (Go `mux.Router.Walk`).
+    /// Every route the server registered, in registration order.
     #[cfg(feature = "testutil")]
     pub(crate) fn routes(&self) -> Vec<routing::RouteInfo> {
         self.table.walk()
@@ -343,9 +340,8 @@ impl std::fmt::Debug for Server {
     }
 }
 
-/// The agent of a compaction check's base runner config, which every check replaces. Go leaves
-/// that field nil; the loader's root is not used because a loader may have none (Go returns nil
-/// there, gadk's conformance loader panics).
+/// The agent of a compaction check's base runner config, which every check replaces. The loader's
+/// root agent is not used because a loader may have none (the conformance loader panics).
 pub(crate) fn compaction_check_placeholder_agent()
 -> Result<Arc<dyn gadk_agent::Agent>, gadk_agent::AgentError> {
     gadk_agent::new_agent(gadk_agent::AgentConfig {
@@ -354,7 +350,7 @@ pub(crate) fn compaction_check_placeholder_agent()
     })
 }
 
-/// Go `validateCompactionAgainstAgents`: [`compactionvalidate::against_agents`] with the
+/// [`compactionvalidate::against_agents`] with the
 /// server's services. The base config's agent is a placeholder each check replaces.
 ///
 /// [`compactionvalidate::against_agents`]: gadk_engine::compactionvalidate::against_agents
@@ -382,17 +378,16 @@ fn validate_compaction_against_agents(cfg: &ServerConfig) -> Result<(), ServerEr
     .map_err(|e| ServerError(e.to_string()))
 }
 
-/// Go `healthHandler` on `GET`/`HEAD /health`, outside authentication: `{"status":"ok"}` as
-/// `application/json` (no charset, unlike every other JSON answer). Registered under gorilla's
-/// `StrictSlash(true)`, as in Go.
+/// The `GET`/`HEAD /health` route, outside authentication: `{"status":"ok"}` as
+/// `application/json` (no charset, unlike every other JSON answer). Registered with strict
+/// slash on.
 fn health_route() -> Route {
     Route {
         name: "Health",
         methods: vec![Method::GET, Method::HEAD],
         pattern: "/health".to_owned(),
         public: true,
-        // Go registers /health on the StrictSlash(true) router before `SetupSubRouters` turns it
-        // off: `/health/` is answered 301 → `/health`.
+        // Strict slash: `/health/` is answered 301 → `/health`.
         strict_slash: true,
         handler: routing::handler(|_req: Request| async {
             let mut resp = Response::new(Body::from("{\"status\":\"ok\"}\n"));

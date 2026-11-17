@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `server/authn/noop.go`.
+//! An [`Authenticator`] that accepts every request.
 
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ use super::{Authenticator, AuthnError, Caller};
 
 struct Noop;
 
-/// Port of Go `authn.NewNoop`: authenticates every request as an empty caller.
+/// Authenticates every request as an empty caller.
 pub fn noop() -> Arc<dyn Authenticator> {
     Arc::new(Noop)
 }

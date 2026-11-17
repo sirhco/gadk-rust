@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Request-body limit (port of Go `server/adkrest/middleware.go` `MaxBytesMiddleware` and the
-//! `net/http` behaviour of `http.MaxBytesReader`) and the panic catcher.
+//! The request-body limit and the panic catcher.
 
 use std::any::Any;
 use std::convert::Infallible;
@@ -33,21 +32,20 @@ use super::DEFAULT_MAX_PAYLOAD_SIZE;
 use super::http_error::http_error;
 use crate::mux::{Handler, Request, Response, handler};
 
-/// Go `http.MaxBytesError`: reading the request body went past the limit. Its text is what Go's
-/// handlers send back (`http.Error(w, err.Error(), 400)` answers `http: request body too large`).
+/// Reading the request body went past the limit. Handlers answer 400 with its text, `http:
+/// request body too large`.
 ///
 /// A handler reading the body (`axum::body::to_bytes`) sees it as the error's source; its
 /// `Display` (through `axum::Error`) is this text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("http: request body too large")]
 pub(crate) struct MaxBytesError {
-    /// The limit in bytes (Go `Limit`).
+    /// The limit in bytes.
     pub limit: i64,
 }
 
-/// Go `errors.As(err, &maxBytesErr)`: whether `err` or an error in its source chain is a
-/// [`MaxBytesError`] (the trigger controllers' body reader tells it apart, as Go's
-/// `*http.MaxBytesError` check does).
+/// Whether `err` or an error in its source chain is a [`MaxBytesError`] (the trigger controllers'
+/// body reader tells it apart from other read errors).
 pub(crate) fn is_max_bytes_error(err: &(dyn std::error::Error + 'static)) -> bool {
     let mut cur = Some(err);
     while let Some(e) = cur {
@@ -59,7 +57,7 @@ pub(crate) fn is_max_bytes_error(err: &(dyn std::error::Error + 'static)) -> boo
     false
 }
 
-/// Go `MaxBytesMiddleware`'s limit: `max_bytes`, or [`DEFAULT_MAX_PAYLOAD_SIZE`] when zero or
+/// The effective limit: `max_bytes`, or [`DEFAULT_MAX_PAYLOAD_SIZE`] when zero or
 /// negative.
 pub(crate) fn resolve_max_bytes(max_bytes: i64) -> i64 {
     if max_bytes <= 0 {
@@ -69,10 +67,10 @@ pub(crate) fn resolve_max_bytes(max_bytes: i64) -> i64 {
     }
 }
 
-/// Go `MaxBytesMiddleware(limit)` around `next`: the request body fails with [`MaxBytesError`]
-/// once more than `limit` bytes are read (the middleware itself writes no status; the handler
-/// reading the body answers). As in Go's `net/http`, a response produced after the limit was hit
-/// carries `Connection: close` and the connection is closed after it.
+/// Runs `next` with a request body that fails with [`MaxBytesError`] once more than `limit` bytes
+/// are read (this wrapper writes no status; the handler reading the body answers). A response
+/// produced after the limit was hit carries `Connection: close`, so the connection is closed
+/// after it.
 pub(crate) async fn with_max_bytes<F, Fut>(limit: i64, req: Request, next: F) -> Response
 where
     F: FnOnce(Request) -> Fut,
@@ -83,8 +81,7 @@ where
     let (parts, body) = req.into_parts();
     let body = limited(body, limit, Arc::clone(&hit));
     let mut resp = next(Request::from_parts(parts, body)).await;
-    // Go's requestTooLarge: `Connection: close` unless the header was already written; here the
-    // response head is complete once `next` returns.
+    // Ask for the connection to be closed; the response head is complete once `next` returns.
     if hit.load(Ordering::Acquire) {
         resp.headers_mut()
             .insert(CONNECTION, HeaderValue::from_static("close"));
@@ -92,13 +89,13 @@ where
     resp
 }
 
-/// Go `adkrest.MaxBytesMiddleware(limit)` as a handler wrapper (zero/negative: the 10 MiB default,
+/// The body limit as a handler wrapper (zero/negative: the 10 MiB default,
 /// [`DEFAULT_MAX_PAYLOAD_SIZE`](super::DEFAULT_MAX_PAYLOAD_SIZE)).
 ///
 /// The wrapped handler's request body fails once more than the limit is read: the read error's
-/// text is Go's `http: request body too large`, and a handler answering after hitting the limit
-/// gets `Connection: close` added to its response, as Go's `net/http` does. The wrapper itself
-/// writes no status; the handler reading the body answers.
+/// text is `http: request body too large`, and a handler answering after hitting the limit gets
+/// `Connection: close` added to its response. The wrapper itself writes no status; the handler
+/// reading the body answers.
 pub fn max_bytes_middleware(limit: i64) -> Arc<dyn Fn(Handler) -> Handler + Send + Sync> {
     let limit = resolve_max_bytes(limit);
     Arc::new(move |next: Handler| {
@@ -110,7 +107,7 @@ pub fn max_bytes_middleware(limit: i64) -> Arc<dyn Fn(Handler) -> Handler + Send
 }
 
 /// `body` failing with [`MaxBytesError`] on the chunk that takes it past `limit` bytes, setting
-/// `hit` (Go `http.MaxBytesReader`).
+/// `hit`.
 fn limited(body: Body, limit: i64, hit: Arc<AtomicBool>) -> Body {
     let mut remaining = u64::try_from(limit).unwrap_or(0);
     let stream = body.into_data_stream().map(move |chunk| {
@@ -128,8 +125,8 @@ fn limited(body: Body, limit: i64, hit: Arc<AtomicBool>) -> Body {
 }
 
 /// The panic catcher around a route's handler (`tower_http::catch_panic`): a panicking handler
-/// answers 500 `Internal Server Error` in `http.Error` framing and the panic is logged. (Go's
-/// `net/http` logs the panic and aborts the connection instead; accepted divergence.)
+/// answers 500 `Internal Server Error` in [`http_error`] framing and the panic is logged; the
+/// connection is not aborted.
 pub(crate) fn catch_panic<S>(
     inner: S,
 ) -> impl Service<Request, Response = Response, Error = Infallible, Future: Send>
@@ -146,7 +143,7 @@ where
         .map_response(|resp: http::Response<_>| resp.map(Body::new))
 }
 
-/// The response to a handler panic; logs the panic message like Go's `http: panic serving`.
+/// The response to a handler panic; logs the panic message as `http: panic serving request`.
 fn panic_response(err: Box<dyn Any + Send + 'static>) -> Response {
     let msg = err
         .downcast_ref::<String>()

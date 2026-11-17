@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `models/redact.go` (the requested-auth-configs half, ADK-Go #2114): an event's
-//! `requestedAuthConfigs` reach REST clients without the credential fields that can hold a
-//! secret, at any depth. The sign-in half (credential parts and state, #2231) is 8c.
+//! An event's `requestedAuthConfigs` reach REST clients without the credential fields that can
+//! hold a secret, at any depth. Only `requestedAuthConfigs` is redacted here; credential parts
+//! and state are not.
 
 use std::collections::BTreeMap;
 
@@ -24,7 +24,7 @@ use serde::ser::{Error as _, SerializeMap, SerializeSeq};
 use serde::{Serialize, Serializer};
 use serde_json::value::RawValue;
 
-/// Go `credentialSecretKeys`: the JSON keys of credential fields that can hold a secret. Both
+/// The JSON keys of credential fields that can hold a secret. Both
 /// spellings are listed because `Extra` keeps a key under the name it arrived with.
 const CREDENTIAL_SECRET_KEYS: &[&str] = &[
     "password",
@@ -53,9 +53,9 @@ const CREDENTIAL_SECRET_KEYS: &[&str] = &[
     "api_key",
 ];
 
-/// Go `authConfigs.MarshalJSON`: the configs encoded, decoded back into generic JSON with every
-/// number kept as written (Go `UseNumber`), [`CREDENTIAL_SECRET_KEYS`] dropped from every
-/// object at any depth, and encoded again (object keys sorted, as Go encodes a map).
+/// Serializes the configs by encoding them, decoding back into generic JSON with every number
+/// kept as written, dropping [`CREDENTIAL_SECRET_KEYS`] from every object at any depth, and
+/// encoding again (object keys sorted).
 pub(crate) fn serialize_auth_configs<S: Serializer>(
     configs: &BTreeMap<String, toolauth::Config>,
     s: S,
@@ -102,7 +102,7 @@ impl Json {
         })
     }
 
-    /// Go `dropSecretKeys`: deletes [`CREDENTIAL_SECRET_KEYS`] from every JSON object in `self`.
+    /// Deletes [`CREDENTIAL_SECRET_KEYS`] from every JSON object in `self`.
     fn drop_secret_keys(&mut self) {
         match self {
             Json::Object(members) => {

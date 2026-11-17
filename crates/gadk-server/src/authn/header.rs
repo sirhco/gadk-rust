@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Port of Go `server/authn/header.go`.
+//! An [`Authenticator`] that reads the user ID from a request header.
 
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ struct Header {
     name: String,
 }
 
-/// Port of Go `authn.NewHeader`: the caller's user ID is the single, non-empty value of header
+/// The caller's user ID is the single, non-empty value of header
 /// `name`.
 pub fn header(name: &str) -> Arc<dyn Authenticator> {
     Arc::new(Header {
