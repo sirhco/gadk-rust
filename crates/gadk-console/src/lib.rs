@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A local web console for gadk: stored traces from Cloud Trace and Cloud Logging, and the
-//! prompt registry.
+//! A local web console for gadk: stored traces from Cloud Trace and Cloud Logging, the prompt
+//! registry, and the reports of gadk-eval-monitor monitors.
 
 use std::fmt::Write as _;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
+use gadk_eval_monitor::{MonitorError, ReportStore};
+
+use crate::evals::{CACHE_CAP, ReportCache};
 use crate::traces::CloudTraceSource;
 
 mod cli;
+mod evals;
 mod model;
 mod prompts;
 pub mod traces;
@@ -37,6 +41,9 @@ pub struct ConsoleConfig {
     pub project: String,
     /// Prompt store URL (`file://…` or `firestore://…`); `None` disables the prompt pages.
     pub store: Option<String>,
+    /// Monitor report store URL (`file://…`, a directory or `gs://…`); `None` disables the Evals
+    /// pages.
+    pub reports: Option<String>,
     /// Loopback port; 0 picks a free one.
     pub port: u16,
     /// Cloud Logging log id that gadk-telemetry writes (default `gadk`).
@@ -49,6 +56,8 @@ pub struct ConsoleConfig {
 pub enum ConsoleError {
     #[error("prompt store: {0}")]
     Store(#[from] gadk_prompts::StoreError),
+    #[error("report store: {0}")]
+    Reports(String),
     #[error("bind 127.0.0.1:{port}: {detail}")]
     Bind { port: u16, detail: String },
     #[error("serve: {0}")]
@@ -76,15 +85,28 @@ impl Bound {
     }
 }
 
-/// Opens the store (if any), binds `127.0.0.1:<port>`, builds the router.
+/// Opens the prompt store and the report store (if any), binds `127.0.0.1:<port>`, builds the
+/// router.
 ///
-/// The trace source builds its ADC credentials on the first GCP call, so binding needs none.
+/// A `gs://` report store needs Application Default Credentials here; the trace source builds its
+/// credentials on the first GCP call.
 pub async fn bind(cfg: ConsoleConfig) -> Result<Bound, ConsoleError> {
     let store = cfg
         .store
         .as_deref()
         .map(gadk_prompts_cli::open_store)
         .transpose()?;
+    let reports = cfg
+        .reports
+        .as_deref()
+        .map(|url| ReportStore::open(url).map(|s| Arc::new(ReportCache::new(s, CACHE_CAP))))
+        .transpose()
+        .map_err(|e| {
+            ConsoleError::Reports(match e {
+                MonitorError::Store(text) => text,
+                other => other.to_string(),
+            })
+        })?;
     let bind_err = |e: std::io::Error| ConsoleError::Bind {
         port: cfg.port,
         detail: e.to_string(),
@@ -99,6 +121,7 @@ pub async fn bind(cfg: ConsoleConfig) -> Result<Bound, ConsoleError> {
             cfg.log_id.clone(),
         )),
         store,
+        reports,
         csrf: Arc::from(csrf_token()),
         port: addr.port(),
         now: chrono::Utc::now,
@@ -142,6 +165,7 @@ mod tests {
         ConsoleConfig {
             project: "p".into(),
             store: store.map(str::to_owned),
+            reports: None,
             port: 0,
             log_id: "gadk".into(),
         }
@@ -190,6 +214,27 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let url = format!("file://{}", dir.path().display());
         assert!(bind(cfg(Some(&url))).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn bad_reports_url_is_a_reports_error() {
+        let mut c = cfg(None);
+        c.reports = Some("s3://x".into());
+        let err = bind(c).await.err().unwrap();
+        assert!(matches!(err, ConsoleError::Reports(_)), "{err}");
+        assert!(
+            err.to_string()
+                .starts_with("report store: unsupported store URL scheme \"s3\""),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn file_reports_url_binds() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = cfg(None);
+        c.reports = Some(format!("file://{}", dir.path().display()));
+        assert!(bind(c).await.is_ok());
     }
 
     /// A writer that forwards every write to a channel.

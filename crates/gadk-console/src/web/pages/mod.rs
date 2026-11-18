@@ -15,6 +15,8 @@
 //! HTML pages rendered with maud.
 
 pub(crate) mod error;
+pub(crate) mod eval_report;
+pub(crate) mod evals;
 pub(crate) mod layout;
 pub(crate) mod prompt;
 pub(crate) mod prompts;

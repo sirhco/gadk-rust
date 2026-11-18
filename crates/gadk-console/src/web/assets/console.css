@@ -200,3 +200,28 @@ tr.diff-insert td { background: var(--ins-bg); }
 @media (max-width: 900px) {
   .trace-layout { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Evals */
+
+p.filter { color: var(--muted); }
+.eval-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.eval-card { border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; background: var(--panel); }
+.eval-card h2 { margin: 0 0 4px; font-size: 14px; }
+.eval-card .rate { margin: 0; font-size: 22px; font-variant-numeric: tabular-nums; }
+.eval-card .meta { margin: 2px 0 6px; color: var(--muted); font-size: 12px; }
+.trend { display: block; }
+.trend polyline { stroke: var(--bar); stroke-width: 1.5; }
+.trend circle { fill: var(--bar); }
+.chip-pass { background: var(--ins-bg); }
+.chip-fail { background: var(--del-bg); }
+.chip-error { background: var(--warn-bg); color: var(--warn-fg); }
+.eval-meta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0 0 16px; }
+.eval-meta dt { color: var(--muted); }
+.eval-meta dd { margin: 0; }
+.eval-run { border: 1px solid var(--line); border-radius: 4px; margin-bottom: 6px; }
+.eval-run summary { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 6px 10px; cursor: pointer; }
+.eval-run .chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.eval-run-body { padding: 8px 12px; border-top: 1px solid var(--line); }
+.eval-run-body h3 { font-size: 13px; margin: 12px 0 4px; }
+.eval-run-body pre { white-space: pre-wrap; word-break: break-word; background: var(--panel); padding: 6px 8px; border-radius: 4px; margin: 2px 0 8px; }
+.turn-head, .who, .call { margin: 6px 0 2px; color: var(--muted); font-size: 12px; }

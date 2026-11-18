@@ -175,12 +175,18 @@ impl ReportStore {
         )))
     }
 
-    /// The newest `limit` reports (by the timestamp in their names), reading only those.
+    /// Whether `name` is a stored report's name (`<spec>-<YYYYMMDDTHHMMSSZ>[-<n>].json`).
+    pub fn is_report_name(name: &str) -> bool {
+        name_key(name).is_some()
+    }
+
+    /// The names of the newest `limit` reports (by the timestamp in their names, then the
+    /// suffix), newest first, reading no report. Other files in the store are ignored.
     ///
     /// # Errors
     ///
-    /// [`MonitorError::Store`] when listing or reading fails or a listed report is not valid.
-    pub async fn list(&self, limit: usize) -> Result<Vec<ReportMeta>, MonitorError> {
+    /// [`MonitorError::Store`] when listing fails.
+    pub async fn names(&self, limit: usize) -> Result<Vec<String>, MonitorError> {
         let names = match &self.backend {
             Backend::Local(s) => s.names()?,
             Backend::Gcs(s) => s.names().await?,
@@ -190,12 +196,43 @@ impl ReportStore {
             .filter_map(|n| name_key(&n).map(|k| (k, n)))
             .collect();
         keyed.sort_by(|a, b| b.cmp(a));
+        Ok(keyed.into_iter().take(limit).map(|(_, n)| n).collect())
+    }
+
+    /// The newest `limit` reports (by the timestamp in their names), reading only those.
+    ///
+    /// # Errors
+    ///
+    /// [`MonitorError::Store`] when listing or reading fails or a listed report is not valid.
+    pub async fn list(&self, limit: usize) -> Result<Vec<ReportMeta>, MonitorError> {
         let mut out = Vec::new();
-        for (_, name) in keyed.into_iter().take(limit) {
+        for name in self.names(limit).await? {
             let report = self.get(&name).await?;
             out.push(ReportMeta::of(name, &report));
         }
         Ok(out)
+    }
+
+    /// The report stored as `name`, or `None` when no report has that name.
+    ///
+    /// # Errors
+    ///
+    /// [`MonitorError::Store`] when `name` is not a report name
+    /// (`<spec>-<YYYYMMDDTHHMMSSZ>[-<n>].json`), or the report cannot be read or is not a report.
+    pub async fn find(&self, name: &str) -> Result<Option<MonitorReport>, MonitorError> {
+        if name_key(name).is_none() {
+            return Err(MonitorError::Store(format!("invalid report name {name:?}")));
+        }
+        let text = match &self.backend {
+            Backend::Local(s) => s.read(name)?,
+            Backend::Gcs(s) => s.read(name).await?,
+        };
+        let Some(text) = text else {
+            return Ok(None);
+        };
+        MonitorReport::from_json(&text)
+            .map(Some)
+            .map_err(|e| MonitorError::Store(format!("report {name}: {e}")))
     }
 
     /// The report stored as `name`.
@@ -206,16 +243,9 @@ impl ReportStore {
     /// (`<spec>-<YYYYMMDDTHHMMSSZ>[-<n>].json`), does not exist, cannot be read or is not a
     /// report.
     pub async fn get(&self, name: &str) -> Result<MonitorReport, MonitorError> {
-        if name_key(name).is_none() {
-            return Err(MonitorError::Store(format!("invalid report name {name:?}")));
-        }
-        let text = match &self.backend {
-            Backend::Local(s) => s.read(name)?,
-            Backend::Gcs(s) => s.read(name).await?,
-        };
-        let text = text.ok_or_else(|| MonitorError::Store(format!("report {name} not found")))?;
-        MonitorReport::from_json(&text)
-            .map_err(|e| MonitorError::Store(format!("report {name}: {e}")))
+        self.find(name)
+            .await?
+            .ok_or_else(|| MonitorError::Store(format!("report {name} not found")))
     }
 }
 
@@ -359,6 +389,74 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "report store: report a-20270115T080000Z.json not found"
+        );
+    }
+
+    #[test]
+    fn is_report_name_matches_the_name_check() {
+        assert!(ReportStore::is_report_name("support-20261117T080000Z.json"));
+        assert!(ReportStore::is_report_name(
+            "a-b_1-20261117T080000Z-12.json"
+        ));
+        for bad in [
+            "../support-20261117T080000Z.json",
+            "support-20261317T080000Z.json",
+            "support.json",
+            "",
+        ] {
+            assert!(!ReportStore::is_report_name(bad), "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn local_names_are_newest_first_and_read_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = ReportStore::open(&dir.path().join("missing").display().to_string()).unwrap();
+        assert!(missing.names(10).await.unwrap().is_empty());
+
+        let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+        store.put(&report("a", 1_800_000_000, true)).await.unwrap();
+        store.put(&report("b", 1_800_003_600, false)).await.unwrap();
+        store.put(&report("b", 1_800_003_600, true)).await.unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "not a report").unwrap();
+        // An unreadable report is still named: names() opens no report.
+        std::fs::write(dir.path().join("c-20200101T000000Z.json"), "{").unwrap();
+        assert_eq!(
+            store.names(10).await.unwrap(),
+            [
+                "b-20270115T090000Z-2.json",
+                "b-20270115T090000Z.json",
+                "a-20270115T080000Z.json",
+                "c-20200101T000000Z.json",
+            ]
+        );
+        assert_eq!(
+            store.names(2).await.unwrap(),
+            ["b-20270115T090000Z-2.json", "b-20270115T090000Z.json"]
+        );
+        assert!(store.names(0).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn find_is_none_for_a_missing_report_and_errs_otherwise() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+        assert_eq!(store.find("a-20270115T080000Z.json").await.unwrap(), None);
+
+        let r = report("a", 1_800_000_000, true);
+        let name = store.put(&r).await.unwrap();
+        assert_eq!(store.find(&name).await.unwrap(), Some(r));
+
+        let err = store.find("../x").await.unwrap_err();
+        assert!(
+            matches!(&err, MonitorError::Store(m) if m.starts_with("invalid report name")),
+            "{err}"
+        );
+        std::fs::write(dir.path().join("b-20270115T080000Z.json"), "{").unwrap();
+        let err = store.find("b-20270115T080000Z.json").await.unwrap_err();
+        assert!(
+            matches!(&err, MonitorError::Store(m) if m.starts_with("report b-20270115T080000Z.json: ")),
+            "{err}"
         );
     }
 
