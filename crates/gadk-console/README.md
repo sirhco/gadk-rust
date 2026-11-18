@@ -20,7 +20,7 @@ The console prints its URL and serves until you stop it (Ctrl-C).
 |---|---|---|
 | `--project <p>` | required | GCP project whose traces and logs are read |
 | `--store <url>` | none | Prompt store: `file://<dir>` or `firestore://<project>/<database>[/<root>]`. Without it the prompt pages say "no store configured" and the label routes return 404. |
-| `--reports <url>` | none | Monitor report store: `file://<dir>`, a directory, or `gs://<bucket>[/<prefix>]` (the `--store` of `gadk-eval monitor`). Without it the Evals pages answer 404 "no report store configured". |
+| `--reports <url>` | none | Monitor report store: `file://<dir>`, a directory, or `gs://<bucket>[/<prefix>]` (the `--out` of `gadk-eval monitor`, or the `<url>` of `gadk-eval report`). Without it the Evals pages answer 404 "no report store configured". |
 | `--port <n>` | `8765` | Port on 127.0.0.1; `0` picks a free one (the printed URL shows it) |
 | `--log-id <id>` | `gadk` | Cloud Logging log id the agents write (`with_cloud_log_name` in `gadk-telemetry`) |
 
@@ -59,7 +59,7 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 
 ## Evals
 
-The Evals pages are read-only views of the JSON reports `gadk-eval monitor --store <url>` writes
+The Evals pages are read-only views of the JSON reports `gadk-eval monitor --out <url>` writes
 (see the [`gadk-eval-monitor` README](../gadk-eval-monitor/README.md)); start the console with the
 same URL as `--reports`. Nothing on these pages runs a monitor or changes the store.
 
@@ -87,6 +87,8 @@ The console is for one developer on their own machine:
 - Log entries: at most 1,000 per trace; the page says when the list is truncated.
 - Log bodies and attributes longer than 4,096 characters are collapsed, with an "expand"
   control.
+- The report cache keeps up to 256 full reports (transcripts included) in memory, so memory use
+  grows with transcript size.
 
 ## Live test
 

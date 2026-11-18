@@ -74,7 +74,9 @@ fn run(m: &MonitoredRun) -> Markup {
                 @if !run.content_complete || !run.tools_complete {
                     div class="banner warn" {
                         p { "Incomplete transcript" }
-                        ul { @for n in &run.notes { li { (n) } } }
+                        @if !run.notes.is_empty() {
+                            ul { @for n in &run.notes { li { (n) } } }
+                        }
                     }
                 }
                 @if let Some(err) = &run.transcript.error {
@@ -286,6 +288,16 @@ mod tests {
         assert!(out.contains("Run error: agent timed out"), "{out}");
         assert!(!out.contains("ignored when complete"), "{out}");
         assert_eq!(out.matches("Incomplete transcript").count(), 1, "{out}");
+    }
+
+    #[test]
+    fn incomplete_run_without_notes_renders_no_empty_list() {
+        let mut r = report("support", 1_800_000_000, &[&[Outcome::Pass]]);
+        r.runs[0].run.tools_complete = false;
+        r.runs[0].run.notes = vec![];
+        let out = render(NAME, &r).into_string();
+        assert!(out.contains("Incomplete transcript"), "{out}");
+        assert!(!out.contains("<ul></ul>"), "{out}");
     }
 
     #[test]
