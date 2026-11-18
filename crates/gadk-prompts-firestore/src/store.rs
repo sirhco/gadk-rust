@@ -258,13 +258,20 @@ impl PromptStore for FirestoreStore {
             for (doc, created, _, latest, _) in &listed {
                 let have = cache.entry(doc.clone()).or_default();
                 let max = have.versions.keys().next_back().copied().unwrap_or(0);
-                if have.create_time != *created || max > *latest {
+                // A document without a createTime cannot be told apart from a recreated one, so
+                // its cache is never reused.
+                if created.is_empty() || have.create_time != *created || max > *latest {
                     // Deleted and recreated: start over.
                     have.versions.clear();
                     have.create_time.clone_from(created);
                 }
-                let max = have.versions.keys().next_back().copied().unwrap_or(0);
-                wanted.extend((max + 1..=*latest).map(|n| format!("{doc}/versions/{n}")));
+                // Every version not cached, so a gap left by a missing document or a racing
+                // call heals on the next poll; a complete cache wants nothing.
+                wanted.extend(
+                    (1..=*latest)
+                        .filter(|n| !have.versions.contains_key(n))
+                        .map(|n| format!("{doc}/versions/{n}")),
+                );
             }
             wanted
         };

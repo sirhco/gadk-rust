@@ -406,3 +406,63 @@ async fn load_all_sees_a_recreated_prompt_with_more_versions() {
         .collect();
     assert_eq!(got, [(1, "b1"), (2, "b2"), (3, "b3")]);
 }
+
+#[tokio::test]
+async fn load_all_heals_a_gap_in_the_cache() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    s.create_version(nv("p", "b")).await.unwrap();
+    // v1 is unreadable for one poll: the cache ends up holding only v2.
+    let v1 = {
+        let mut st = fake.state.lock().unwrap();
+        let key = st.docs.keys().find(|k| k.ends_with("/versions/1")).cloned();
+        let key = key.unwrap();
+        (key.clone(), st.docs.remove(&key).unwrap())
+    };
+    let snap = s.load_all().await.unwrap();
+    assert_eq!(
+        snap.prompts["p"]
+            .versions
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![2]
+    );
+    fake.state.lock().unwrap().docs.insert(v1.0, v1.1);
+
+    drain(&fake);
+    let snap = s.load_all().await.unwrap();
+    assert_eq!(
+        snap.prompts["p"]
+            .versions
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    let reqs = drain(&fake);
+    let docs = reqs[1].1["documents"].as_array().unwrap();
+    assert_eq!(docs.len(), 1, "{docs:?}");
+    assert!(docs[0].as_str().unwrap().ends_with("/versions/1"));
+}
+
+#[tokio::test]
+async fn load_all_never_reuses_the_cache_without_a_create_time() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "old")).await.unwrap();
+    fake.state.lock().unwrap().created.clear(); // createTime now empty
+    assert_eq!(
+        s.load_all().await.unwrap().prompts["p"].versions[&1].template,
+        "old"
+    );
+
+    wipe(&fake);
+    s.create_version(nv("p", "new")).await.unwrap();
+    fake.state.lock().unwrap().created.clear();
+    assert_eq!(
+        s.load_all().await.unwrap().prompts["p"].versions[&1].template,
+        "new"
+    );
+}
