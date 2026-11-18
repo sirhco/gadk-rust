@@ -276,4 +276,58 @@ mod tests {
             "report store: HTTP 403: caller lacks storage.objects.get"
         );
     }
+
+    #[tokio::test]
+    async fn names_pages_without_reading_objects() {
+        let dir = tempfile::tempdir().unwrap();
+        // Replay fails any request not listed here, so a report read would fail the test.
+        let http = replay(
+            dir.path(),
+            &[
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=monitors%2F&delimiter=%2F"),
+                    "",
+                    200,
+                    r#"{"items":[{"name":"monitors/support-20270115T080000Z.json"},{"name":"monitors/readme.txt"}],"nextPageToken":"t 2"}"#,
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=monitors%2F&delimiter=%2F&pageToken=t%202"),
+                    "",
+                    200,
+                    r#"{"items":[{"name":"monitors/support-20270115T090000Z.json"}]}"#,
+                ),
+            ],
+        );
+        let store =
+            ReportStore::gcs_with_client("gs://evals/monitors", http, Arc::new(NoAuth)).unwrap();
+        assert_eq!(
+            store.names(10).await.unwrap(),
+            [
+                "support-20270115T090000Z.json",
+                "support-20270115T080000Z.json"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn find_is_none_for_a_missing_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[exchange(
+                "GET",
+                &format!("{OBJECTS}/support-20270115T080000Z.json?alt=media"),
+                "",
+                404,
+                r#"{"error":{"code":404,"message":"No such object"}}"#,
+            )],
+        );
+        let store = ReportStore::gcs_with_client("gs://evals", http, Arc::new(NoAuth)).unwrap();
+        assert_eq!(
+            store.find("support-20270115T080000Z.json").await.unwrap(),
+            None
+        );
+    }
 }
