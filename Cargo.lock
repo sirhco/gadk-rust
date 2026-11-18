@@ -1676,6 +1676,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "gadk-eval-monitor"
+version = "0.2.2"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "clap",
+ "futures",
+ "gadk-eval",
+ "gadk-gemini",
+ "gadk-genai",
+ "gadk-httprr",
+ "gadk-model",
+ "gadk-platform",
+ "google-cloud-auth",
+ "http",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "gadk-gemini"
 version = "0.2.2"
 dependencies = [
