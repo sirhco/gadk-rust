@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 gadk-model = { workspace = true, features = ["gcp-auth"] }
+gadk-cloudtrace = { workspace = true }
 gadk-eval = { workspace = true }
 gadk-eval-monitor = { workspace = true }
 gadk-prompts = { workspace = true }

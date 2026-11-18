@@ -476,19 +476,42 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-session -> gadk-memory creates a cycle" in e for e in errs), errs)
 
-    def test_eval_monitor_edges_are_exactly_eval_gemini_model_platform(self):
+    def test_eval_monitor_edges_are_exactly_cloudtrace_eval_gemini_model_platform(self):
         self.assertEqual(cwd.ALLOWED["gadk-eval-monitor"],
-                         {"gadk-eval", "gadk-gemini", "gadk-model", "gadk-platform"})
+                         {"gadk-cloudtrace", "gadk-eval", "gadk-gemini", "gadk-model",
+                          "gadk-platform"})
         # Only the console (its Evals pages) depends on it; the façade does not.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-eval-monitor" in deps],
                          ["gadk-console"])
         self.assertNotIn("gadk-eval-monitor", cwd.ENGINE_DEPENDENTS)
 
-    def test_console_may_depend_on_eval_and_eval_monitor(self):
+    def test_console_may_depend_on_cloudtrace_eval_and_eval_monitor(self):
         self.assertEqual(cwd.ALLOWED["gadk-console"],
-                         {"gadk-model", "gadk-prompts", "gadk-prompts-cli", "gadk-eval",
-                          "gadk-eval-monitor"})
+                         {"gadk-cloudtrace", "gadk-model", "gadk-prompts", "gadk-prompts-cli",
+                          "gadk-eval", "gadk-eval-monitor"})
         self.assertEqual(cwd.check(self.repo), [])
+
+    def test_cloudtrace_depends_only_on_model(self):
+        self.assertEqual(cwd.ALLOWED["gadk-cloudtrace"], {"gadk-model"})
+        # The console (trace reads) and the eval monitor (Cloud Trace source) depend on it.
+        self.assertEqual(sorted(c for c, deps in cwd.ALLOWED.items() if "gadk-cloudtrace" in deps),
+                         ["gadk-console", "gadk-eval-monitor"])
+        self.assertNotIn("gadk-cloudtrace", cwd.ENGINE_DEPENDENTS)
+
+    def test_cloudtrace_dependency_on_engine_is_rejected(self):
+        self.edit("gadk-cloudtrace", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-cloudtrace -> gadk-engine is not allowed" in e for e in errs), errs)
+
+    def test_cloudtrace_missing_model_edge_is_rejected(self):
+        self.edit("gadk-cloudtrace", 'gadk-model = { workspace = true, features = ["gcp-auth"] }\n', "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-cloudtrace -> gadk-model is missing" in e for e in errs), errs)
+
+    def test_eval_monitor_missing_cloudtrace_edge_is_rejected(self):
+        self.edit("gadk-eval-monitor", "gadk-cloudtrace = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-eval-monitor -> gadk-cloudtrace is missing" in e for e in errs), errs)
 
     def test_eval_monitor_normal_dependency_on_engine_is_rejected(self):
         self.edit("gadk-eval-monitor", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
