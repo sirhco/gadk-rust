@@ -33,5 +33,6 @@ pub use error::EvalError;
 pub use evaluator::Evaluator;
 pub use report::{CaseRun, EvalReport, VariantReport};
 pub use result::{Outcome, RunTranscript, ScoreResult, ToolCall, TurnRecord};
+pub use score::score_transcript;
 pub use spec::{EvalCase, EvalSet, ScorerSpec, ToolExpect};
 pub use variant::Variant;

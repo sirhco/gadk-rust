@@ -1,0 +1,44 @@
+[package]
+name = "gadk-eval-monitor"
+description = "Production eval monitors for gadk: grade logged agent runs with gadk-eval scorers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "gadk-eval"
+path = "src/bin/gadk-eval.rs"
+# Not documented: the bin's doc output path would collide with the gadk-eval library's.
+doc = false
+
+[dependencies]
+gadk-eval = { workspace = true }
+gadk-gemini = { workspace = true }
+gadk-model = { workspace = true, features = ["gcp-auth"] }
+gadk-platform = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+google-cloud-auth = { workspace = true }
+http = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-saphyr = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+gadk-genai = { workspace = true }
+gadk-httprr = { workspace = true }
+gadk-model = { workspace = true, features = ["test-util"] }
+tempfile = { workspace = true }

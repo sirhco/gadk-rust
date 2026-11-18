@@ -87,6 +87,10 @@
 - eval: `gadk-eval` depends on exactly `gadk-agent`, `gadk-engine`, `gadk-genai`, `gadk-model`,
   `gadk-platform`, `gadk-prompts` and `gadk-session` (the eleventh crate that may depend on
   `gadk-engine`); only the façade depends on it, optionally (feature `eval`).
+- eval-monitor: `gadk-eval-monitor` (production eval monitors and the `gadk-eval` binary) depends
+  on exactly `gadk-eval`, `gadk-gemini` (the Vertex AI judge), `gadk-model` (HTTP seam,
+  `gcp-auth`) and `gadk-platform`; it never depends on `gadk-engine` directly, and nothing depends
+  on it.
 """
 import pathlib, sys, tomllib
 
@@ -134,6 +138,7 @@ ALLOWED = {
     "gadk-console": {"gadk-model", "gadk-prompts", "gadk-prompts-cli"},
     "gadk-eval": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
                   "gadk-prompts", "gadk-session"},
+    "gadk-eval-monitor": {"gadk-eval", "gadk-gemini", "gadk-model", "gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
