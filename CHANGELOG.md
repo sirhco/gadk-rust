@@ -7,6 +7,21 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-console`: Evals pages. `--reports <url>` (`file://<dir>`, a directory or
+  `gs://<bucket>[/<prefix>]`) points the console at a `gadk-eval-monitor` report store; `/evals`
+  shows a card per monitor with its latest pass rate and a pass-rate trend, then the newest 100
+  reports (`?spec=<name>` for one monitor), and `/evals/{report}` shows each run's scorer verdicts,
+  judge rationales and transcript, linking to the run's trace. Read-only.
+- `gadk-eval-monitor`: `ReportStore::names` (the newest report names without reading them),
+  `ReportStore::is_report_name` and `ReportStore::find` (`Ok(None)` for a missing report).
+
+### Changed
+
+- `gadk-console`: `ConsoleConfig::reports` is a new field; code that builds `ConsoleConfig` with a
+  struct literal must set it.
+
 ## [0.3.0] - 2026-11-18
 
 ### Added

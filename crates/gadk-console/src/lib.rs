@@ -25,7 +25,6 @@ use crate::evals::{CACHE_CAP, ReportCache};
 use crate::traces::CloudTraceSource;
 
 mod cli;
-#[allow(dead_code)] // used by the Evals routes (Task 5)
 mod evals;
 mod model;
 mod prompts;
