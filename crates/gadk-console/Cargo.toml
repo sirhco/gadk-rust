@@ -17,6 +17,8 @@ path = "src/main.rs"
 
 [dependencies]
 gadk-model = { workspace = true, features = ["gcp-auth"] }
+gadk-eval = { workspace = true }
+gadk-eval-monitor = { workspace = true }
 gadk-prompts = { workspace = true }
 gadk-prompts-cli = { workspace = true, features = ["firestore"] }
 async-trait = { workspace = true }

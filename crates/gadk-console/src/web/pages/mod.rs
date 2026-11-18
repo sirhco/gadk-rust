@@ -15,6 +15,10 @@
 //! HTML pages rendered with maud.
 
 pub(crate) mod error;
+#[allow(dead_code)] // used by the Evals routes (Task 5)
+pub(crate) mod eval_report;
+#[allow(dead_code)] // used by the Evals routes (Task 5)
+pub(crate) mod evals;
 pub(crate) mod layout;
 pub(crate) mod prompt;
 pub(crate) mod prompts;

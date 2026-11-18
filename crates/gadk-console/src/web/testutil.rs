@@ -20,12 +20,15 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use chrono::{DateTime, TimeZone, Utc};
+use gadk_eval::{Outcome, RunTranscript, ScoreResult, TurnRecord};
+use gadk_eval_monitor::{MonitorReport, MonitoredRun, ProductionRun, ReportStore, Window};
 use gadk_prompts::PromptStore;
 use http::header::{CONTENT_TYPE, HOST, ORIGIN};
 use http::{HeaderMap, Request, StatusCode};
 use tower::ServiceExt;
 
 use super::{AppState, router};
+use crate::evals::ReportCache;
 use crate::traces::{SourceError, TraceDetail, TraceId, TracePage, TraceQuery, TraceSource};
 
 /// The port every test state claims to be bound to.
@@ -69,15 +72,96 @@ impl TraceSource for FakeSource {
     }
 }
 
-/// State with csrf `CSRF`, port `PORT` and clock `fixed_now`.
+/// State with csrf `CSRF`, port `PORT`, clock `fixed_now` and no report store.
 pub(crate) fn state(source: Arc<FakeSource>, store: Option<Arc<dyn PromptStore>>) -> AppState {
+    state_with_reports(source, store, None)
+}
+
+/// [`state`] with a report cache.
+pub(crate) fn state_with_reports(
+    source: Arc<FakeSource>,
+    store: Option<Arc<dyn PromptStore>>,
+    reports: Option<Arc<ReportCache>>,
+) -> AppState {
     AppState {
         source,
         store,
+        reports,
         csrf: Arc::from(CSRF),
         port: PORT,
         now: fixed_now,
     }
+}
+
+/// `secs` after the Unix epoch (`1_800_000_000` is 2027-01-15T08:00:00Z).
+pub(crate) fn at(secs: i64) -> DateTime<Utc> {
+    DateTime::from_timestamp(secs, 0).unwrap()
+}
+
+/// A report of `spec` generated at `at(secs)` over the hour before it, from source
+/// `bigquery:p.d.t`, with one run per entry of `runs`: run `i` is invocation `inv-{i}` in
+/// session `session-{i}` of agent `agent`, started at `at(secs - 60)`, with one turn `hi` →
+/// `hello` and no tool calls, and one `contains` score per outcome with rationale `r{j}`.
+pub(crate) fn report(spec: &str, secs: i64, runs: &[&[Outcome]]) -> MonitorReport {
+    MonitorReport {
+        spec: spec.to_owned(),
+        generated_at: at(secs),
+        window: Window {
+            from: at(secs - 3_600),
+            to: at(secs),
+        },
+        source: "bigquery:p.d.t".to_owned(),
+        runs: runs
+            .iter()
+            .enumerate()
+            .map(|(i, outcomes)| MonitoredRun {
+                run: ProductionRun {
+                    invocation_id: format!("inv-{i}"),
+                    session_id: format!("session-{i}"),
+                    trace_id: None,
+                    agent: "agent".to_owned(),
+                    started_at: at(secs - 60),
+                    transcript: RunTranscript {
+                        turns: vec![TurnRecord {
+                            user: "hi".to_owned(),
+                            reply: "hello".to_owned(),
+                            calls: Vec::new(),
+                        }],
+                        error: None,
+                    },
+                    content_complete: true,
+                    tools_complete: true,
+                    notes: Vec::new(),
+                },
+                scores: outcomes
+                    .iter()
+                    .enumerate()
+                    .map(|(j, outcome)| ScoreResult {
+                        kind: "contains".to_owned(),
+                        outcome: *outcome,
+                        score: None,
+                        rationale: format!("r{j}"),
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+/// A temp-dir report store holding `reports` (stored in order with `ReportStore::put`) behind a
+/// cache of `cap` entries; returns the dir guard, the cache and the stored names.
+pub(crate) async fn report_cache(
+    reports: &[MonitorReport],
+    cap: usize,
+) -> (tempfile::TempDir, Arc<ReportCache>, Vec<String>) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+    let mut names = Vec::new();
+    for r in reports {
+        names.push(store.put(r).await.unwrap());
+    }
+    let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+    (dir, Arc::new(ReportCache::new(store, cap)), names)
 }
 
 /// The `Host` value the guard accepts for `PORT`.
