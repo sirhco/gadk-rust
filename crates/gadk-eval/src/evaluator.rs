@@ -23,11 +23,11 @@ use gadk_model::Llm;
 
 use crate::error::EvalError;
 use crate::report::{CaseRun, EvalReport, VariantReport};
-use crate::result::{RunTranscript, ScoreResult};
+use crate::result::RunTranscript;
 use crate::run::run_case;
 use crate::score::judge::Judge;
-use crate::score::{check, tools};
-use crate::spec::{EvalCase, EvalSet, ScorerSpec};
+use crate::score::score_scorers;
+use crate::spec::EvalSet;
 use crate::variant::{Variant, check_variants};
 
 /// Runs eval sets. Defaults: concurrency 4, one run per case, 120 s per run.
@@ -134,7 +134,7 @@ impl Evaluator {
                         error: Some(e.clone()),
                     },
                 };
-                let scores = score_run(judge, case, &transcript).await;
+                let scores = score_scorers(judge, &case.expect, &transcript).await;
                 (
                     (vi, ci, run),
                     CaseRun {
@@ -164,46 +164,6 @@ impl Evaluator {
         }
         Ok(report)
     }
-}
-
-/// Scores one run: every scorer errors when the run failed; otherwise each scorer grades it.
-async fn score_run(judge: &Judge, case: &EvalCase, t: &RunTranscript) -> Vec<ScoreResult> {
-    if let Some(e) = &t.error {
-        return case
-            .expect
-            .iter()
-            .map(|s| ScoreResult::error(s.kind(), e.clone()))
-            .collect();
-    }
-    let mut out = Vec::with_capacity(case.expect.len());
-    for s in &case.expect {
-        out.push(match s {
-            ScorerSpec::Contains {
-                text,
-                ignore_case,
-                turn,
-            } => check::contains(t.reply(*turn), text, *ignore_case, false),
-            ScorerSpec::NotContains {
-                text,
-                ignore_case,
-                turn,
-            } => check::contains(t.reply(*turn), text, *ignore_case, true),
-            ScorerSpec::Regex { pattern, turn } => check::regex(t.reply(*turn), pattern),
-            ScorerSpec::Equals { text, turn } => check::equals(t.reply(*turn), text),
-            ScorerSpec::Tools {
-                calls,
-                ordered,
-                exact,
-            } => tools::tools(&t.all_calls(), calls, *ordered, *exact),
-            ScorerSpec::Reference {
-                answer,
-                min_score,
-                turn,
-            } => judge.reference(t, *turn, answer, *min_score).await,
-            ScorerSpec::LlmJudge { rubric, min_score } => judge.rubric(t, rubric, *min_score).await,
-        });
-    }
-    out
 }
 
 #[cfg(test)]
