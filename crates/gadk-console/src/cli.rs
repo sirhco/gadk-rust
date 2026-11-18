@@ -20,7 +20,7 @@ use crate::ConsoleConfig;
 
 fn cli() -> Command {
     Command::new("gadk-console")
-        .about("A local web console for gadk traces and prompts")
+        .about("A local web console for gadk traces, prompts and eval reports")
         .arg(
             Arg::new("project")
                 .long("project")
@@ -31,6 +31,11 @@ fn cli() -> Command {
             Arg::new("store")
                 .long("store")
                 .help("Prompt store: file://<dir> or firestore://<project>/<database>[/<root>]"),
+        )
+        .arg(
+            Arg::new("reports")
+                .long("reports")
+                .help("Monitor report store: file://<dir>, <dir> or gs://<bucket>[/<prefix>]"),
         )
         .arg(
             Arg::new("port")
@@ -61,6 +66,7 @@ where
     Ok(ConsoleConfig {
         project: string("project").unwrap_or_default(),
         store: string("store"),
+        reports: string("reports"),
         port: m.get_one::<u16>("port").copied().unwrap_or(8765),
         log_id: string("log-id").unwrap_or_else(|| "gadk".into()),
     })
@@ -81,6 +87,7 @@ mod tests {
             ConsoleConfig {
                 project: "p".into(),
                 store: None,
+                reports: None,
                 port: 8765,
                 log_id: "gadk".into(),
             }
@@ -95,6 +102,8 @@ mod tests {
             "proj",
             "--store",
             "file:///tmp/prompts",
+            "--reports",
+            "gs://evals/monitors",
             "--port",
             "0",
             "--log-id",
@@ -106,6 +115,7 @@ mod tests {
             ConsoleConfig {
                 project: "proj".into(),
                 store: Some("file:///tmp/prompts".into()),
+                reports: Some("gs://evals/monitors".into()),
                 port: 0,
                 log_id: "agents".into(),
             }

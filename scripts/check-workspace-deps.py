@@ -86,11 +86,12 @@
   nothing depends on `gadk-console`.
 - eval: `gadk-eval` depends on exactly `gadk-agent`, `gadk-engine`, `gadk-genai`, `gadk-model`,
   `gadk-platform`, `gadk-prompts` and `gadk-session` (the eleventh crate that may depend on
-  `gadk-engine`); only the façade depends on it, optionally (feature `eval`).
+  `gadk-engine`); the façade depends on it optionally (feature `eval`), and `gadk-console` (its
+  Evals pages) depends on it.
 - eval-monitor: `gadk-eval-monitor` (production eval monitors and the `gadk-eval` binary) depends
   on exactly `gadk-eval`, `gadk-gemini` (the Vertex AI judge), `gadk-model` (HTTP seam,
-  `gcp-auth`) and `gadk-platform`; it never depends on `gadk-engine` directly, and nothing depends
-  on it.
+  `gcp-auth`) and `gadk-platform`; it never depends on `gadk-engine` directly, and only
+  `gadk-console` (its Evals pages) depends on it.
 """
 import pathlib, sys, tomllib
 
@@ -135,7 +136,8 @@ ALLOWED = {
     "gadk-prompts": {"gadk-agent", "gadk-engine"},
     "gadk-prompts-firestore": {"gadk-prompts", "gadk-model", "gadk-platform"},
     "gadk-prompts-cli": {"gadk-prompts", "gadk-prompts-firestore"},
-    "gadk-console": {"gadk-model", "gadk-prompts", "gadk-prompts-cli"},
+    "gadk-console": {"gadk-model", "gadk-prompts", "gadk-prompts-cli", "gadk-eval",
+                     "gadk-eval-monitor"},
     "gadk-eval": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
                   "gadk-prompts", "gadk-session"},
     "gadk-eval-monitor": {"gadk-eval", "gadk-gemini", "gadk-model", "gadk-platform"},

@@ -79,6 +79,7 @@ gadk-prompts = { path = "crates/gadk-prompts", version = "0.3.0" }
 gadk-prompts-firestore = { path = "crates/gadk-prompts-firestore", version = "0.3.0" }
 gadk-prompts-cli = { path = "crates/gadk-prompts-cli", version = "0.3.0" }
 gadk-eval = { path = "crates/gadk-eval", version = "0.3.0" }
+gadk-eval-monitor = { path = "crates/gadk-eval-monitor", version = "0.3.0" }
 similar = "2.7.0"
 maud = { version = "0.27.0", default-features = false }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }

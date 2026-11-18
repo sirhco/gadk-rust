@@ -1594,6 +1594,8 @@ dependencies = [
  "chrono",
  "clap",
  "futures",
+ "gadk-eval",
+ "gadk-eval-monitor",
  "gadk-model",
  "gadk-prompts",
  "gadk-prompts-cli",

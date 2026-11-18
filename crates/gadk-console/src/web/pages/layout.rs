@@ -24,11 +24,12 @@ use maud::{DOCTYPE, Markup, html};
 pub(crate) enum Nav {
     Traces,
     Prompts,
+    Evals,
 }
 
 /// Full HTML document: <!DOCTYPE html>, <title>{title} · gadk console</title>, <link rel=stylesheet
 /// href="/assets/console.css">, <script src="/assets/waterfall.js" defer>, a header nav with links
-/// /traces and /prompts (the active one has class "active"), then `body` in <main>.
+/// /traces, /prompts and /evals (the active one has class "active"), then `body` in <main>.
 pub(crate) fn page(title: &str, nav: Nav, body: Markup) -> Markup {
     let link = |href: &str, label: &str, this: Nav| {
         html! {
@@ -55,6 +56,7 @@ pub(crate) fn page(title: &str, nav: Nav, body: Markup) -> Markup {
                     nav {
                         (link("/traces", "Traces", Nav::Traces))
                         (link("/prompts", "Prompts", Nav::Prompts))
+                        (link("/evals", "Evals", Nav::Evals))
                     }
                 }
                 main { (body) }
@@ -96,16 +98,20 @@ mod tests {
             "{out}"
         );
         assert!(
-            out.contains(r#"<a class="active" href="/traces">Traces</a>"#),
+            out.contains(r#"<a class="active" href="/traces">Traces</a><a href="/prompts">Prompts</a><a href="/evals">Evals</a>"#),
             "{out}"
         );
-        assert!(out.contains(r#"<a href="/prompts">Prompts</a>"#), "{out}");
         assert!(out.contains("<main><p>hi &lt;b&gt;</p></main>"), "{out}");
 
         let out = page("P", Nav::Prompts, html! {}).into_string();
-        assert!(out.contains(r#"<a href="/traces">Traces</a>"#), "{out}");
         assert!(
-            out.contains(r#"<a class="active" href="/prompts">Prompts</a>"#),
+            out.contains(r#"<a href="/traces">Traces</a><a class="active" href="/prompts">Prompts</a><a href="/evals">Evals</a>"#),
+            "{out}"
+        );
+
+        let out = page("E", Nav::Evals, html! {}).into_string();
+        assert!(
+            out.contains(r#"<a href="/traces">Traces</a><a href="/prompts">Prompts</a><a class="active" href="/evals">Evals</a>"#),
             "{out}"
         );
     }

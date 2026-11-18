@@ -36,6 +36,8 @@ mod traces;
 pub(crate) struct AppState {
     pub source: Arc<dyn TraceSource>,
     pub store: Option<Arc<dyn gadk_prompts::PromptStore>>,
+    #[allow(dead_code)] // used by the Evals routes (Task 5)
+    pub reports: Option<Arc<crate::evals::ReportCache>>,
     pub csrf: Arc<str>,                             // 64 hex chars
     pub port: u16,                                  // the bound port
     pub now: fn() -> chrono::DateTime<chrono::Utc>, // Utc::now in production; fixed in tests
@@ -285,5 +287,14 @@ mod tests {
             let (status, _, _) = send(fresh(), post_with(&host, origin)).await;
             assert_eq!(status, StatusCode::FORBIDDEN, "{origin}");
         }
+    }
+
+    #[tokio::test]
+    async fn state_with_reports_carries_the_cache() {
+        let (_dir, cache, _) = super::testutil::report_cache(&[], 4).await;
+        let st =
+            super::testutil::state_with_reports(Arc::new(FakeSource::new()), None, Some(cache));
+        assert!(st.reports.is_some());
+        assert!(fresh().reports.is_none());
     }
 }
