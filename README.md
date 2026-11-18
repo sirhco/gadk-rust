@@ -16,7 +16,7 @@ Add gadk from crates.io:
 
 ```toml
 [dependencies]
-gadk = "0.2"   # default features: gemini, gcp, mcp
+gadk = "0.3"   # default features: gemini, gcp, mcp
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 ```
