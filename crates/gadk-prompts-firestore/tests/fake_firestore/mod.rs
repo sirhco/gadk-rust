@@ -34,6 +34,7 @@ pub struct Fake {
     pub server: FakeServer,
     pub abort_next: Arc<AtomicUsize>,
     pub requests: Arc<Mutex<Vec<RecordedRequest>>>,
+    pub state: Arc<Mutex<State>>,
 }
 
 /// Undoes one level of URL percent-encoding (URL paths arrive with '%' escaped twice).
@@ -190,5 +191,6 @@ pub fn start() -> Fake {
         server,
         abort_next,
         requests,
+        state,
     }
 }

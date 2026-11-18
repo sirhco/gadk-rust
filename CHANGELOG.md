@@ -7,6 +7,19 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `PromptStore::create_version_reporting`: like `create_version`, and also reports whether a
+  version was written. It has a default body, so existing implementations keep compiling;
+  `FileStore` and `FirestoreStore` implement it natively.
+
+### Changed
+
+- `gadk-prompts push` no longer reads the whole store to tell whether a version was created.
+- `FirestoreStore::load_all` keeps the version documents it has read and fetches only new ones
+  by name, instead of querying every version of every prompt on each call. An unchanged store
+  now costs one read per prompt per poll.
+
 ## [0.2.1] - 2026-11-17
 
 The first version published to crates.io. No code changes.

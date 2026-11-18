@@ -14,8 +14,8 @@
 
 //! The Firestore PromptStore.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use gadk_model::gcp_auth::adc_credentials;
@@ -31,6 +31,9 @@ use crate::config::{DEFAULT_ENDPOINT, FirestoreConfig, SCOPES};
 use crate::value::{prompt_fields, read_prompt, read_version, version_fields};
 
 const ATTEMPTS: usize = 3;
+
+/// Documents per `batchGet` request.
+const BATCH_GET_LIMIT: usize = 100;
 
 /// The document ID of prompt `name`: `%` → `%25`, `/` → `%2F`.
 pub fn encode_doc_id(name: &str) -> String {
@@ -49,6 +52,10 @@ pub struct FirestoreStore {
     db: String,
     /// `db` or `db/{root}`
     root: String,
+    /// Version documents already read, per prompt document name. Versions are immutable (they
+    /// are written with `currentDocument.exists = false` and never updated), so a cached entry
+    /// never goes stale. Never held across an `.await`.
+    cache: Mutex<HashMap<String, BTreeMap<u32, Arc<PromptVersion>>>>,
 }
 
 impl std::fmt::Debug for FirestoreStore {
@@ -132,6 +139,7 @@ impl FirestoreStore {
             client: Client::new(&endpoint, credentials, config.http_client),
             db,
             root,
+            cache: Mutex::default(),
         })
     }
 
@@ -203,7 +211,6 @@ impl PromptStore for FirestoreStore {
         } else {
             self.root.clone()
         };
-        let q = |coll: &str, all: bool| json!({"structuredQuery": {"from": [{"collectionId": coll, "allDescendants": all}]}});
         let docs = |v: Value| -> Vec<(String, serde_json::Map<String, Value>)> {
             v.as_array()
                 .into_iter()
@@ -218,48 +225,96 @@ impl PromptStore for FirestoreStore {
                 .collect()
         };
         let path = format!("{}:runQuery", url_doc(&parent));
+        let query = json!({"structuredQuery": {"from": [{"collectionId": "prompts", "allDescendants": false}]}});
         let prompts = self
             .client
-            .call_unclassified(Method::POST, &path, Some(q("prompts", false)))
+            .call_unclassified(Method::POST, &path, Some(query))
             .await?;
-        let versions = self
-            .client
-            .call_unclassified(Method::POST, &path, Some(q("versions", true)))
-            .await?;
-        let mut snap = PromptSnapshot::default();
-        let mut by_doc: BTreeMap<String, String> = BTreeMap::new(); // prompt doc name -> prompt name
+        // (prompt doc name, prompt name, latest version, labels)
+        let mut listed = Vec::new();
         for (doc, fields) in docs(prompts) {
             let name = crate::value::get_str(&fields, "name")?;
-            let (_, labels) = read_prompt(&fields)?;
-            snap.prompts.insert(
-                name.clone(),
-                PromptEntry {
-                    versions: BTreeMap::new(),
-                    labels,
-                },
-            );
-            by_doc.insert(doc, name);
+            let (latest, labels) = read_prompt(&fields)?;
+            listed.push((doc, name, latest, labels));
         }
-        let prefix = format!("{}/prompts/", self.root);
-        for (doc, fields) in docs(versions) {
-            if !doc.starts_with(&prefix) {
-                continue;
+        // Which version documents the cache lacks. The lock is released before any request.
+        let wanted: Vec<String> = {
+            let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.retain(|doc, _| listed.iter().any(|(d, ..)| d == doc));
+            let mut wanted = Vec::new();
+            for (doc, _, latest, _) in &listed {
+                let have = cache.entry(doc.clone()).or_default();
+                if have.keys().next_back().is_some_and(|max| max > latest) {
+                    // Deleted and recreated with fewer versions: start over.
+                    have.clear();
+                }
+                let max = have.keys().next_back().copied().unwrap_or(0);
+                wanted.extend((max + 1..=*latest).map(|n| format!("{doc}/versions/{n}")));
             }
-            let Some((pdoc, _)) = doc.rsplit_once("/versions/") else {
-                continue;
-            };
-            let Some(name) = by_doc.get(pdoc) else {
-                continue;
-            };
-            let v = read_version(&fields)?;
-            if let Some(e) = snap.prompts.get_mut(name) {
-                e.versions.insert(v.version, Arc::new(v));
+            wanted
+        };
+        let mut fetched = Vec::new();
+        for chunk in wanted.chunks(BATCH_GET_LIMIT) {
+            let reply = self
+                .client
+                .call_unclassified(
+                    Method::POST,
+                    &format!("{}:batchGet", self.db),
+                    Some(json!({"documents": chunk})),
+                )
+                .await?;
+            let items = reply
+                .as_array()
+                .ok_or_else(|| StoreError::Decode("batchGet: response is not an array".into()))?;
+            for it in items {
+                // A `missing` item is a version document that is not there: skipped.
+                let Some(found) = it.get("found") else {
+                    continue;
+                };
+                let Some(doc) = found.get("name").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some((pdoc, _)) = doc.rsplit_once("/versions/") else {
+                    continue;
+                };
+                let fields = found
+                    .get("fields")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                let v = read_version(&fields)?;
+                fetched.push((pdoc.to_owned(), v));
             }
+        }
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        for (pdoc, v) in fetched {
+            if let Some(have) = cache.get_mut(&pdoc) {
+                have.insert(v.version, Arc::new(v));
+            }
+        }
+        let mut snap = PromptSnapshot::default();
+        for (doc, name, latest, labels) in listed {
+            let versions = cache
+                .get(&doc)
+                .map(|have| {
+                    have.range(..=latest)
+                        .map(|(n, v)| (*n, v.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            snap.prompts.insert(name, PromptEntry { versions, labels });
         }
         Ok(snap)
     }
 
     async fn create_version(&self, new: NewVersion) -> Result<PromptVersion, StoreError> {
+        self.create_version_reporting(new).await.map(|(v, _)| v)
+    }
+
+    async fn create_version_reporting(
+        &self,
+        new: NewVersion,
+    ) -> Result<(PromptVersion, bool), StoreError> {
         validate_name(&new.name)?;
         let id = encode_doc_id(&new.name);
         let pdoc = self.prompt_doc(&id);
@@ -287,7 +342,7 @@ impl PromptStore for FirestoreStore {
                         let last = read_version(&f)?;
                         if last.meta.hash == hash {
                             self.rollback(&tx).await;
-                            return Ok(last);
+                            return Ok((last, false));
                         }
                     }
                     Ok(None) => {}
@@ -317,7 +372,7 @@ impl PromptStore for FirestoreStore {
                        "currentDocument": {"exists": false}}),
             ];
             match self.commit(&tx, writes).await {
-                Ok(()) => return Ok(v),
+                Ok(()) => return Ok((v, true)),
                 Err(CallError::Aborted) if attempt < ATTEMPTS => continue,
                 Err(e) => return Err(self.map(&new.name, e)),
             }

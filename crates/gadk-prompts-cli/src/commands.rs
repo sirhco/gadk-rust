@@ -87,9 +87,8 @@ pub(crate) async fn dispatch(
                 None => None,
             };
             let name = req(m, "name");
-            let latest_before = store.load_all().await?.latest_version(name);
-            let v = store
-                .create_version(NewVersion {
+            let (v, created) = store
+                .create_version_reporting(NewVersion {
                     name: name.into(),
                     template,
                     config,
@@ -97,13 +96,12 @@ pub(crate) async fn dispatch(
                     message: arg(m, "message").cloned().unwrap_or_default(),
                 })
                 .await?;
-            let unchanged = latest_before == Some(v.version);
             writeln!(
                 out,
                 "{} v{}{}",
                 v.name,
                 v.version,
-                if unchanged { " (unchanged)" } else { "" }
+                if created { "" } else { " (unchanged)" }
             )
             .map_err(io)
         }

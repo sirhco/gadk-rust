@@ -1924,6 +1924,7 @@ dependencies = [
 name = "gadk-prompts-cli"
 version = "0.2.1"
 dependencies = [
+ "async-trait",
  "chrono",
  "clap",
  "gadk-prompts",

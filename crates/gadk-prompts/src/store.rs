@@ -71,6 +71,22 @@ pub trait PromptStore: Send + Sync {
     /// Appends version N+1 of `new.name` (creating the prompt at version 1). If the content
     /// hash equals the current latest version's, returns that version unchanged instead.
     async fn create_version(&self, new: NewVersion) -> Result<PromptVersion, StoreError>;
+    /// Like [`create_version`](Self::create_version), and also reports whether a version was
+    /// written: the `bool` is `true` when a new version was appended and `false` when the
+    /// content hash matched the latest version and that version was returned unchanged.
+    ///
+    /// The default implementation reads the whole store with
+    /// [`load_all`](Self::load_all) to learn the latest version before the write. Stores should
+    /// override it with a native check; [`FileStore`](crate::FileStore) and the Firestore store do.
+    async fn create_version_reporting(
+        &self,
+        new: NewVersion,
+    ) -> Result<(PromptVersion, bool), StoreError> {
+        let before = self.load_all().await?.latest_version(&new.name);
+        let v = self.create_version(new).await?;
+        let created = before != Some(v.version);
+        Ok((v, created))
+    }
     /// Points `label` at `version` (compare-and-set): `expected = None` skips the check,
     /// `Some(None)` requires the label to be unset, `Some(Some(v))` requires it to point at `v`;
     /// a mismatch is `Conflict { expected: <inner>, actual }`. Unknown name or version:

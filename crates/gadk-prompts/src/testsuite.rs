@@ -49,6 +49,7 @@ where
     Fut: Future<Output = Arc<dyn PromptStore>>,
 {
     versions_and_noop(factory().await).await;
+    reporting(factory().await).await;
     labels_cas(factory().await).await;
     not_found(factory().await).await;
     remove_label(factory().await).await;
@@ -93,6 +94,37 @@ async fn versions_and_noop(s: Arc<dyn PromptStore>) {
         snap.resolve("p", &Selector::Latest).unwrap().template == "three",
         c,
         "latest"
+    );
+}
+
+async fn reporting(s: Arc<dyn PromptStore>) {
+    let c = "reporting";
+    let (v1, created) = s.create_version_reporting(new("p", "one")).await.unwrap();
+    check!(
+        created && v1.version == 1,
+        c,
+        "first: {created} v{}",
+        v1.version
+    );
+    let (again, created) = s.create_version_reporting(new("p", "one")).await.unwrap();
+    check!(
+        !created && again == v1,
+        c,
+        "same content: {created} {again:?}"
+    );
+    let (v2, created) = s.create_version_reporting(new("p", "two")).await.unwrap();
+    check!(
+        created && v2.version == 2,
+        c,
+        "changed: {created} v{}",
+        v2.version
+    );
+    let (v3, created) = s.create_version_reporting(new("q", "one")).await.unwrap();
+    check!(
+        created && v3.version == 1,
+        c,
+        "other prompt: {created} v{}",
+        v3.version
     );
 }
 

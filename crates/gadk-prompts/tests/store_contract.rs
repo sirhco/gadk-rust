@@ -16,7 +16,47 @@
 
 use std::sync::Arc;
 
-use gadk_prompts::{FileStore, PromptStore};
+use async_trait::async_trait;
+use gadk_prompts::{
+    FileStore, Label, NewVersion, PromptSnapshot, PromptStore, PromptVersion, StoreError,
+};
+
+/// Implements only the required methods, so `create_version_reporting` is the trait default.
+struct DefaultsOnly(FileStore);
+
+#[async_trait]
+impl PromptStore for DefaultsOnly {
+    async fn load_all(&self) -> Result<PromptSnapshot, StoreError> {
+        self.0.load_all().await
+    }
+    async fn create_version(&self, new: NewVersion) -> Result<PromptVersion, StoreError> {
+        self.0.create_version(new).await
+    }
+    async fn set_label(
+        &self,
+        name: &str,
+        label: &Label,
+        version: u32,
+        expected: Option<Option<u32>>,
+    ) -> Result<(), StoreError> {
+        self.0.set_label(name, label, version, expected).await
+    }
+    async fn remove_label(&self, name: &str, label: &Label) -> Result<(), StoreError> {
+        self.0.remove_label(name, label).await
+    }
+}
+
+#[tokio::test]
+async fn store_contract_default_reporting() {
+    let dirs = std::sync::Mutex::new(Vec::new());
+    gadk_prompts::testsuite::run(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let store: Arc<dyn PromptStore> = Arc::new(DefaultsOnly(FileStore::new(dir.path())));
+        dirs.lock().unwrap().push(dir);
+        async move { store }
+    })
+    .await;
+}
 
 #[tokio::test]
 async fn store_contract_file_store() {

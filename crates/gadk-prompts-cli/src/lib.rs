@@ -137,3 +137,76 @@ pub async fn run(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use gadk_prompts::{
+        FileStore, Label, NewVersion, PromptSnapshot, PromptStore, PromptVersion, StoreError,
+    };
+
+    /// A store that counts `load_all` calls.
+    struct Counting {
+        inner: FileStore,
+        loads: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl PromptStore for Counting {
+        async fn load_all(&self) -> Result<PromptSnapshot, StoreError> {
+            self.loads.fetch_add(1, Ordering::SeqCst);
+            self.inner.load_all().await
+        }
+        async fn create_version(&self, new: NewVersion) -> Result<PromptVersion, StoreError> {
+            self.inner.create_version(new).await
+        }
+        async fn create_version_reporting(
+            &self,
+            new: NewVersion,
+        ) -> Result<(PromptVersion, bool), StoreError> {
+            self.inner.create_version_reporting(new).await
+        }
+        async fn set_label(
+            &self,
+            name: &str,
+            label: &Label,
+            version: u32,
+            expected: Option<Option<u32>>,
+        ) -> Result<(), StoreError> {
+            self.inner.set_label(name, label, version, expected).await
+        }
+        async fn remove_label(&self, name: &str, label: &Label) -> Result<(), StoreError> {
+            self.inner.remove_label(name, label).await
+        }
+    }
+
+    async fn push(store: &Counting, template: &str) -> String {
+        let m = super::cli()
+            .try_get_matches_from(["gadk-prompts", "push", "p", "--author", "me"])
+            .unwrap();
+        let mut out = Vec::new();
+        super::commands::dispatch(store, &m, &mut template.as_bytes(), &mut out)
+            .await
+            .unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[tokio::test]
+    async fn push_does_not_read_the_whole_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let loads = Arc::new(AtomicUsize::new(0));
+        let store = Counting {
+            inner: FileStore::new(dir.path()),
+            loads: loads.clone(),
+        };
+        assert_eq!(push(&store, "hello").await, "p v1\n");
+        assert_eq!(push(&store, "hello").await, "p v1 (unchanged)\n");
+        assert_eq!(push(&store, "bye").await, "p v2\n");
+        assert_eq!(loads.load(Ordering::SeqCst), 0);
+    }
+}

@@ -244,6 +244,13 @@ impl PromptStore for FileStore {
     }
 
     async fn create_version(&self, new: NewVersion) -> Result<PromptVersion, StoreError> {
+        self.create_version_reporting(new).await.map(|(v, _)| v)
+    }
+
+    async fn create_version_reporting(
+        &self,
+        new: NewVersion,
+    ) -> Result<(PromptVersion, bool), StoreError> {
         let name = new.name.clone();
         self.locked(&name, move |_, current| {
             let mut doc = current.unwrap_or_else(|| PromptFile {
@@ -254,7 +261,7 @@ impl PromptStore for FileStore {
             if let Some(last) = doc.versions.last()
                 && last.meta.hash == hash
             {
-                return Ok((None, last.clone()));
+                return Ok((None, (last.clone(), false)));
             }
             let version = doc.versions.last().map_or(1, |v| v.version + 1);
             let v = PromptVersion {
@@ -270,7 +277,7 @@ impl PromptStore for FileStore {
                 },
             };
             doc.versions.push(v.clone());
-            Ok((Some(doc), v))
+            Ok((Some(doc), (v, true)))
         })
         .await
     }

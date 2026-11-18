@@ -20,11 +20,12 @@
 //! `/` percent-encoded. Every write is one Firestore transaction.
 //!
 //! Read cost: [`load_all`](gadk_prompts::PromptStore::load_all), which every registry refresh
-//! runs, re-reads the whole prompt set, about one document read per prompt plus one per
-//! version (of every prompt) on each poll. With an empty
-//! [`root`](FirestoreConfig::root) the versions query covers every `versions` collection in
-//! the database and filters by prefix only after the reads are billed. Use a dedicated
-//! non-empty root (e.g. `envs/prod`) and a refresh interval suited to the prompt set's size.
+//! runs, reads the prompt documents (one read per prompt) and then only the version documents
+//! it has not read before, each new version once, by document name. The store keeps the versions
+//! it has read in memory (they are immutable), so a poll of an unchanged store costs one read
+//! per prompt and nothing more. The first call after a restart reads every version once. Use a
+//! dedicated non-empty root (e.g. `envs/prod`) and a refresh interval suited to the number of
+//! prompts.
 //!
 //! ```no_run
 //! # fn demo() -> Result<(), gadk_prompts::StoreError> {

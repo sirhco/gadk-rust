@@ -226,3 +226,161 @@ async fn load_all_failed_precondition_is_http_400_with_body() {
         other => panic!("want Http 400, got {other:?}"),
     }
 }
+
+/// `(method-ish suffix, body)` of every request since the last call, oldest first.
+fn drain(fake: &fake_firestore::Fake) -> Vec<(String, serde_json::Value)> {
+    let mut reqs = fake.requests.lock().unwrap();
+    let out = reqs
+        .iter()
+        .map(|r| {
+            let op = r.path.rsplit(':').next().unwrap_or_default().to_owned();
+            (op, r.json())
+        })
+        .collect();
+    reqs.clear();
+    out
+}
+
+/// Deletes every document of the fake (a store wiped behind the cache's back).
+fn wipe(fake: &fake_firestore::Fake) {
+    fake.state.lock().unwrap().docs.clear();
+}
+
+#[tokio::test]
+async fn create_version_reporting_says_whether_a_version_was_written() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    let (v1, created) = s.create_version_reporting(nv("p", "a")).await.unwrap();
+    assert!(created);
+    assert_eq!(v1.version, 1);
+    let (same, created) = s.create_version_reporting(nv("p", "a")).await.unwrap();
+    assert!(!created);
+    assert_eq!(same, v1);
+    let (v2, created) = s.create_version_reporting(nv("p", "b")).await.unwrap();
+    assert!(created);
+    assert_eq!(v2.version, 2);
+    // No whole-store read on the write path.
+    assert!(drain(&fake).iter().all(|(op, _)| op != "runQuery"));
+}
+
+#[tokio::test]
+async fn load_all_fetches_only_new_versions() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    s.create_version(nv("p", "b")).await.unwrap();
+    s.create_version(nv("q", "x")).await.unwrap();
+    let first = s.load_all().await.unwrap();
+    assert_eq!(first.prompts["p"].versions.len(), 2);
+    assert_eq!(first.prompts["q"].versions.len(), 1);
+
+    s.create_version(nv("p", "c")).await.unwrap();
+    drain(&fake);
+    let second = s.load_all().await.unwrap();
+    assert_eq!(
+        second.prompts["p"]
+            .versions
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    assert_eq!(second.prompts["p"].versions[&3].template, "c");
+    assert_eq!(second.prompts["q"].versions.len(), 1);
+    let reqs = drain(&fake);
+    let ops: Vec<&str> = reqs.iter().map(|(op, _)| op.as_str()).collect();
+    assert_eq!(ops, ["runQuery", "batchGet"], "{reqs:?}");
+    assert_eq!(
+        reqs[0].1["structuredQuery"]["from"][0]["collectionId"],
+        "prompts"
+    );
+    assert_eq!(
+        reqs[0].1["structuredQuery"]["from"][0]["allDescendants"],
+        false
+    );
+    let docs = reqs[1].1["documents"].as_array().unwrap();
+    assert_eq!(docs.len(), 1, "{docs:?}");
+    assert!(docs[0].as_str().unwrap().ends_with("/prompts/p/versions/3"));
+    assert!(reqs[1].1.get("transaction").is_none());
+}
+
+#[tokio::test]
+async fn unchanged_store_costs_one_read_call() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    s.create_version(nv("p", "b")).await.unwrap();
+    let first = s.load_all().await.unwrap();
+    drain(&fake);
+    let second = s.load_all().await.unwrap();
+    assert_eq!(first, second);
+    let reqs = drain(&fake);
+    assert_eq!(reqs.len(), 1, "{reqs:?}");
+    assert_eq!(reqs[0].0, "runQuery");
+}
+
+#[tokio::test]
+async fn load_all_drops_removed_prompts_and_refetches_recreated_ones() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "old")).await.unwrap();
+    s.create_version(nv("keep", "k")).await.unwrap();
+    assert_eq!(s.load_all().await.unwrap().prompts.len(), 2);
+
+    // Removed: gone from the snapshot.
+    fake.state
+        .lock()
+        .unwrap()
+        .docs
+        .retain(|name, _| !name.contains("/prompts/p"));
+    let snap = s.load_all().await.unwrap();
+    assert!(!snap.prompts.contains_key("p"));
+    assert_eq!(snap.prompts["keep"].versions.len(), 1);
+
+    // Recreated with the same latest_version but other content: the dropped cache must not
+    // answer for it.
+    s.create_version(nv("p", "new")).await.unwrap();
+    let snap = s.load_all().await.unwrap();
+    assert_eq!(snap.prompts["p"].versions[&1].template, "new");
+}
+
+#[tokio::test]
+async fn load_all_refetches_when_latest_version_goes_backwards() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    s.create_version(nv("p", "b")).await.unwrap();
+    assert_eq!(s.load_all().await.unwrap().prompts["p"].versions.len(), 2);
+
+    wipe(&fake);
+    s.create_version(nv("p", "fresh")).await.unwrap();
+    drain(&fake);
+    let snap = s.load_all().await.unwrap();
+    let p = &snap.prompts["p"];
+    assert_eq!(p.versions.keys().copied().collect::<Vec<_>>(), vec![1]);
+    assert_eq!(p.versions[&1].template, "fresh");
+    let reqs = drain(&fake);
+    assert_eq!(reqs[1].1["documents"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn load_all_skips_a_missing_version_document() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    s.create_version(nv("p", "b")).await.unwrap();
+    fake.state
+        .lock()
+        .unwrap()
+        .docs
+        .retain(|name, _| !name.ends_with("/versions/1"));
+    let snap = s.load_all().await.unwrap();
+    assert_eq!(
+        snap.prompts["p"]
+            .versions
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![2]
+    );
+}
