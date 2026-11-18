@@ -25,6 +25,7 @@ use http::header::CONTENT_TYPE;
 
 use crate::traces::TraceSource;
 
+mod evals;
 pub(crate) mod guard;
 pub(crate) mod pages;
 mod prompts;
@@ -36,7 +37,6 @@ mod traces;
 pub(crate) struct AppState {
     pub source: Arc<dyn TraceSource>,
     pub store: Option<Arc<dyn gadk_prompts::PromptStore>>,
-    #[allow(dead_code)] // used by the Evals routes (Task 5)
     pub reports: Option<Arc<crate::evals::ReportCache>>,
     pub csrf: Arc<str>,                             // 64 hex chars
     pub port: u16,                                  // the bound port
@@ -47,9 +47,9 @@ const CONSOLE_CSS: &str = include_str!("assets/console.css");
 const WATERFALL_JS: &str = include_str!("assets/waterfall.js");
 
 /// GET / → 303 /traces; GET /assets/console.css and /assets/waterfall.js (include_str!, with
-/// text/css and text/javascript; charset=utf-8 content types); merges traces::routes() and
-/// prompts::routes(); wraps everything in guard::layer (Host 421, POST Origin 403) and adds the
-/// CSP header to every response; unknown paths → error page 404.
+/// text/css and text/javascript; charset=utf-8 content types); merges traces::routes(),
+/// prompts::routes() and evals::routes(); wraps everything in guard::layer (Host 421, POST Origin
+/// 403) and adds the CSP header to every response; unknown paths → error page 404.
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(root))
@@ -57,6 +57,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/assets/waterfall.js", get(waterfall_js))
         .merge(traces::routes())
         .merge(prompts::routes())
+        .merge(evals::routes())
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(state.clone(), guard::check))
         .layer(middleware::map_response(guard::csp))
