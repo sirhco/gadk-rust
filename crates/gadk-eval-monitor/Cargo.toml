@@ -11,6 +11,12 @@ keywords.workspace = true
 [lints]
 workspace = true
 
+[[bin]]
+name = "gadk-eval"
+path = "src/bin/gadk-eval.rs"
+# Not documented: the bin's doc output path would collide with the gadk-eval library's.
+doc = false
+
 [dependencies]
 gadk-eval = { workspace = true }
 gadk-gemini = { workspace = true }
