@@ -33,6 +33,7 @@ members = [
   "crates/gadk-prompts-cli",
   "crates/gadk-console",
   "crates/gadk-eval",
+  "crates/gadk-eval-monitor",
   "crates/gadk",
 ]
 
