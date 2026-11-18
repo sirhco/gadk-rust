@@ -7,6 +7,20 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval`: `score_transcript` grades a `RunTranscript` with a list of `ScorerSpec`s exactly
+  as `Evaluator` does, and `ScorerSpec::from_value` parses one scorer in the eval-set syntax
+  outside an eval set (no turn bound; `llm_judge` needs its own `rubric`). Eval-set parsing is
+  unchanged.
+- New crate `gadk-eval-monitor`: production eval monitors. A YAML monitor spec selects recent
+  runs from the BigQuery agent-analytics table (`BigQueryTranscriptSource`, or any
+  `TranscriptSource`), `Monitor` grades them with gadk-eval scorers (an `llm_judge` judge is
+  Gemini on Vertex AI), and `MonitorReport`s are kept in a directory or `gs://` bucket
+  (`ReportStore`). The `gadk-eval` binary (`cargo install gadk-eval-monitor`) runs a monitor
+  (`gadk-eval monitor`, exit 1 below `min_pass_rate`) and reads stored reports
+  (`gadk-eval report`).
+
 ## [0.2.2] - 2026-11-17
 
 ### Added
