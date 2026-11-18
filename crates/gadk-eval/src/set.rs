@@ -171,15 +171,24 @@ fn opt_bool(o: Option<&Map<String, Value>>, key: &str) -> Result<bool, String> {
     }
 }
 
-fn opt_turn(o: Option<&Map<String, Value>>, nturns: usize) -> Result<Option<usize>, String> {
+/// The optional 1-based `turn`, at most `max_turn` when given.
+fn opt_turn(
+    o: Option<&Map<String, Value>>,
+    max_turn: Option<usize>,
+) -> Result<Option<usize>, String> {
     match o.and_then(|o| o.get("turn")) {
         None | Some(Value::Null) => Ok(None),
-        Some(v) => v
-            .as_u64()
-            .and_then(|n| usize::try_from(n).ok())
-            .filter(|n| (1..=nturns).contains(n))
-            .map(Some)
-            .ok_or_else(|| format!("`turn` must be an integer from 1 to {nturns}")),
+        Some(v) => {
+            let n = v
+                .as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .filter(|n| *n >= 1 && max_turn.is_none_or(|max| *n <= max));
+            match (n, max_turn) {
+                (Some(n), _) => Ok(Some(n)),
+                (None, Some(max)) => Err(format!("`turn` must be an integer from 1 to {max}")),
+                (None, None) => Err("`turn` must be a positive integer".to_owned()),
+            }
+        }
     }
 }
 
@@ -194,9 +203,34 @@ fn min_score(o: Option<&Map<String, Value>>) -> Result<u8, String> {
     }
 }
 
+impl ScorerSpec {
+    /// Parses one scorer written in the eval-set syntax (for example
+    /// `{"contains": {"text": "30 days", "turn": 2}}`), outside an eval set: `turn` has no upper
+    /// bound and `llm_judge` needs its own `rubric`.
+    ///
+    /// # Errors
+    ///
+    /// [`EvalError::Load`] with `case: None` and the same message an eval set reports for that
+    /// scorer.
+    pub fn from_value(v: &Value) -> Result<ScorerSpec, EvalError> {
+        parse_scorer_with(v, None, None).map_err(|m| EvalError::load(None, m))
+    }
+}
+
+/// A scorer of a case with `nturns` turns, falling back to the set's `default_rubric`.
 fn parse_scorer(
     v: &Value,
     nturns: usize,
+    default_rubric: Option<&str>,
+) -> Result<ScorerSpec, String> {
+    parse_scorer_with(v, Some(nturns), default_rubric)
+}
+
+/// A scorer whose `turn` is at most `max_turn` (any positive turn for `None`); `llm_judge`
+/// without a `rubric` uses `default_rubric`.
+fn parse_scorer_with(
+    v: &Value,
+    max_turn: Option<usize>,
     default_rubric: Option<&str>,
 ) -> Result<ScorerSpec, String> {
     let Some((kind, body)) = v
@@ -210,7 +244,7 @@ fn parse_scorer(
         "contains" | "not_contains" => {
             let (text, o) = main_and_options(kind, body, "text", &["text", "ignore_case", "turn"])?;
             let ignore_case = opt_bool(o, "ignore_case")?;
-            let turn = opt_turn(o, nturns)?;
+            let turn = opt_turn(o, max_turn)?;
             Ok(if kind == "contains" {
                 ScorerSpec::Contains {
                     text,
@@ -230,14 +264,14 @@ fn parse_scorer(
             let pattern = Regex::new(&pattern).map_err(|e| format!("invalid regex: {e}"))?;
             Ok(ScorerSpec::Regex {
                 pattern,
-                turn: opt_turn(o, nturns)?,
+                turn: opt_turn(o, max_turn)?,
             })
         }
         "equals" => {
             let (text, o) = main_and_options(kind, body, "text", &["text", "turn"])?;
             Ok(ScorerSpec::Equals {
                 text,
-                turn: opt_turn(o, nturns)?,
+                turn: opt_turn(o, max_turn)?,
             })
         }
         "tools" => parse_tools(body),
@@ -247,7 +281,7 @@ fn parse_scorer(
             Ok(ScorerSpec::Reference {
                 answer,
                 min_score: min_score(o)?,
-                turn: opt_turn(o, nturns)?,
+                turn: opt_turn(o, max_turn)?,
             })
         }
         "llm_judge" => {
@@ -265,10 +299,15 @@ fn parse_scorer(
                 }
                 _ => return Err("`llm_judge` must be a string or a mapping".into()),
             };
+            let missing = if max_turn.is_some() {
+                "`llm_judge` needs a `rubric` (or a set-level `judge_rubric`)"
+            } else {
+                "`llm_judge` needs a `rubric`"
+            };
             let rubric = rubric
                 .filter(|r| !r.trim().is_empty())
                 .or_else(|| default_rubric.map(str::to_owned))
-                .ok_or("`llm_judge` needs a `rubric` (or a set-level `judge_rubric`)")?;
+                .ok_or(missing)?;
             Ok(ScorerSpec::LlmJudge {
                 rubric,
                 min_score: min_score(o)?,
@@ -540,5 +579,74 @@ cases:
             assert!(msg.starts_with("expect[1]: "), "{scorer}: {msg}");
             assert!(msg.contains(needle), "{scorer}: {msg}");
         }
+    }
+
+    fn scorer(json: Value) -> Result<ScorerSpec, EvalError> {
+        ScorerSpec::from_value(&json)
+    }
+
+    #[test]
+    fn from_value_accepts_every_kind_without_a_turn_bound() {
+        let ok = [
+            (json!({"contains": "x"}), "contains"),
+            (
+                json!({"contains": {"text": "x", "ignore_case": true, "turn": 50}}),
+                "contains",
+            ),
+            (json!({"not_contains": "x"}), "not_contains"),
+            (json!({"regex": {"pattern": "a+", "turn": 2}}), "regex"),
+            (json!({"equals": "x"}), "equals"),
+            (
+                json!({"tools": ["a", {"name": "b", "args": {"k": 1}}]}),
+                "tools",
+            ),
+            (json!({"reference": "x"}), "reference"),
+            (json!({"llm_judge": "be nice"}), "llm_judge"),
+            (
+                json!({"llm_judge": {"rubric": "be nice", "min_score": 4}}),
+                "llm_judge",
+            ),
+        ];
+        for (v, kind) in ok {
+            assert_eq!(scorer(v.clone()).unwrap().kind(), kind, "{v}");
+        }
+        assert!(matches!(
+            scorer(json!({"contains": {"text": "x", "turn": 50}})).unwrap(),
+            ScorerSpec::Contains { turn: Some(50), .. }
+        ));
+    }
+
+    #[test]
+    fn from_value_errors_are_set_level_load_errors() {
+        let cases = [
+            (
+                json!({"contains": {"text": "x", "turn": 0}}),
+                "`turn` must be a positive integer",
+            ),
+            (
+                json!({"contains": {"text": "x", "turn": "2"}}),
+                "`turn` must be a positive integer",
+            ),
+            (json!({"llm_judge": {}}), "`llm_judge` needs a `rubric`"),
+            (json!({"llm_judge": null}), "`llm_judge` needs a `rubric`"),
+            (json!({"bogus": "x"}), "unknown scorer `bogus`"),
+            (json!("contains"), "single-key"),
+            (json!({"regex": "(unclosed"}), "invalid regex"),
+        ];
+        for (v, needle) in cases {
+            match scorer(v.clone()) {
+                Err(EvalError::Load {
+                    case: None,
+                    message,
+                }) => {
+                    assert!(message.contains(needle), "{v}: {message}")
+                }
+                other => panic!("{v}: expected a set-level load error, got {other:?}"),
+            }
+        }
+        let Err(EvalError::Load { message, .. }) = scorer(json!({"llm_judge": {}})) else {
+            panic!("expected an error");
+        };
+        assert!(!message.contains("judge_rubric"), "{message}");
     }
 }
