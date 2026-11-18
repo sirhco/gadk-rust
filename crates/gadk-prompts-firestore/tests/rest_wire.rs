@@ -384,3 +384,25 @@ async fn load_all_skips_a_missing_version_document() {
         vec![2]
     );
 }
+
+#[tokio::test]
+async fn load_all_sees_a_recreated_prompt_with_more_versions() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a1")).await.unwrap();
+    s.create_version(nv("p", "a2")).await.unwrap();
+    assert_eq!(s.load_all().await.unwrap().prompts["p"].versions.len(), 2);
+
+    wipe(&fake);
+    for t in ["b1", "b2", "b3"] {
+        s.create_version(nv("p", t)).await.unwrap();
+    }
+    let snap = s.load_all().await.unwrap();
+    let p = &snap.prompts["p"];
+    let got: Vec<(u32, &str)> = p
+        .versions
+        .iter()
+        .map(|(n, v)| (*n, v.template.as_str()))
+        .collect();
+    assert_eq!(got, [(1, "b1"), (2, "b2"), (3, "b3")]);
+}

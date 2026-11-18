@@ -28,6 +28,9 @@ pub struct State {
     pub docs: BTreeMap<String, (Value, u64)>,
     /// transaction id → (document name → counter seen at read; 0 = absent)
     pub txs: HashMap<String, HashMap<String, u64>>,
+    /// document name → create time, set when the document is first written (a deleted and
+    /// rewritten document gets a new one, like Firestore's `createTime`)
+    pub created: HashMap<String, String>,
 }
 
 pub struct Fake {
@@ -110,6 +113,10 @@ pub fn start() -> Fake {
                     return err(400, "FAILED_PRECONDITION");
                 }
                 let n = counter.fetch_add(1, Ordering::SeqCst);
+                if !s.docs.contains_key(&name) {
+                    s.created
+                        .insert(name.clone(), format!("2026-11-15T00:00:00.{n:09}Z"));
+                }
                 s.docs.insert(name, (doc["fields"].clone(), n));
             }
             return FakeResponse::json(json!({"writeResults": []}).to_string());
@@ -159,7 +166,8 @@ pub fn start() -> Fake {
                     segs.len() == 2 && segs[0] == coll
                 };
                 if hit {
-                    out.push(json!({"document": {"name": name, "fields": fields}, "readTime": "2026-11-15T00:00:00Z"}));
+                    let created = s.created.get(name).cloned().unwrap_or_default();
+                    out.push(json!({"document": {"name": name, "fields": fields, "createTime": created, "updateTime": created}, "readTime": "2026-11-15T00:00:00Z"}));
                 }
             }
             if out.is_empty() {

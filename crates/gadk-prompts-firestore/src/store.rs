@@ -54,8 +54,17 @@ pub struct FirestoreStore {
     root: String,
     /// Version documents already read, per prompt document name. Versions are immutable (they
     /// are written with `currentDocument.exists = false` and never updated), so a cached entry
-    /// never goes stale. Never held across an `.await`.
-    cache: Mutex<HashMap<String, BTreeMap<u32, Arc<PromptVersion>>>>,
+    /// never goes stale; a prompt document's `createTime` tells a recreated prompt from the same one.
+    /// Never held across an `.await`.
+    cache: Mutex<HashMap<String, CachedVersions>>,
+}
+
+/// The versions read so far for one prompt document, valid for the incarnation of that
+/// document identified by `create_time` (a deleted and recreated prompt has a new one).
+#[derive(Default)]
+struct CachedVersions {
+    create_time: String,
+    versions: BTreeMap<u32, Arc<PromptVersion>>,
 }
 
 impl std::fmt::Debug for FirestoreStore {
@@ -211,7 +220,7 @@ impl PromptStore for FirestoreStore {
         } else {
             self.root.clone()
         };
-        let docs = |v: Value| -> Vec<(String, serde_json::Map<String, Value>)> {
+        let docs = |v: Value| -> Vec<(String, String, serde_json::Map<String, Value>)> {
             v.as_array()
                 .into_iter()
                 .flatten()
@@ -219,6 +228,10 @@ impl PromptStore for FirestoreStore {
                     let d = it.get("document")?;
                     Some((
                         d.get("name")?.as_str()?.to_owned(),
+                        d.get("createTime")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
                         d.get("fields")?.as_object()?.clone(),
                     ))
                 })
@@ -230,25 +243,27 @@ impl PromptStore for FirestoreStore {
             .client
             .call_unclassified(Method::POST, &path, Some(query))
             .await?;
-        // (prompt doc name, prompt name, latest version, labels)
+        // (prompt doc name, create time, prompt name, latest version, labels)
         let mut listed = Vec::new();
-        for (doc, fields) in docs(prompts) {
+        for (doc, created, fields) in docs(prompts) {
             let name = crate::value::get_str(&fields, "name")?;
             let (latest, labels) = read_prompt(&fields)?;
-            listed.push((doc, name, latest, labels));
+            listed.push((doc, created, name, latest, labels));
         }
         // Which version documents the cache lacks. The lock is released before any request.
         let wanted: Vec<String> = {
             let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
             cache.retain(|doc, _| listed.iter().any(|(d, ..)| d == doc));
             let mut wanted = Vec::new();
-            for (doc, _, latest, _) in &listed {
+            for (doc, created, _, latest, _) in &listed {
                 let have = cache.entry(doc.clone()).or_default();
-                if have.keys().next_back().is_some_and(|max| max > latest) {
-                    // Deleted and recreated with fewer versions: start over.
-                    have.clear();
+                let max = have.versions.keys().next_back().copied().unwrap_or(0);
+                if have.create_time != *created || max > *latest {
+                    // Deleted and recreated: start over.
+                    have.versions.clear();
+                    have.create_time.clone_from(created);
                 }
-                let max = have.keys().next_back().copied().unwrap_or(0);
+                let max = have.versions.keys().next_back().copied().unwrap_or(0);
                 wanted.extend((max + 1..=*latest).map(|n| format!("{doc}/versions/{n}")));
             }
             wanted
@@ -287,17 +302,27 @@ impl PromptStore for FirestoreStore {
             }
         }
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        // Insert under the lock that also builds the snapshot, so a concurrent call that
+        // pruned or reset the cache meanwhile cannot make this one return fewer versions than
+        // it fetched.
         for (pdoc, v) in fetched {
-            if let Some(have) = cache.get_mut(&pdoc) {
-                have.insert(v.version, Arc::new(v));
+            let Some((_, created, ..)) = listed.iter().find(|(d, ..)| *d == pdoc) else {
+                continue;
+            };
+            let have = cache.entry(pdoc).or_default();
+            if have.create_time != *created {
+                have.versions.clear();
+                have.create_time.clone_from(created);
             }
+            have.versions.insert(v.version, Arc::new(v));
         }
         let mut snap = PromptSnapshot::default();
-        for (doc, name, latest, labels) in listed {
+        for (doc, _, name, latest, labels) in listed {
             let versions = cache
                 .get(&doc)
                 .map(|have| {
-                    have.range(..=latest)
+                    have.versions
+                        .range(..=latest)
                         .map(|(n, v)| (*n, v.clone()))
                         .collect()
                 })
