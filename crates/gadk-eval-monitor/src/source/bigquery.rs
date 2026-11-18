@@ -23,7 +23,8 @@
 //! incomplete, and missing `attributes` makes the `agent` column the run's agent (an `agent`
 //! filter then fails). Rows with equal timestamps (parallel
 //! tool calls, for example) are ordered by `event_id`, which is random: the order is
-//! deterministic but not causal.
+//! deterministic but not causal. Older tables without an `event_id` column leave such ties in
+//! no particular order.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -57,16 +58,18 @@ pub struct BigQueryTranscriptSource {
     gcp: GcpHttp,
 }
 
-/// Which payload columns the table has (the analytics plugin can leave each out).
+/// Which optional columns the table has: the payload columns (the analytics plugin can leave
+/// each out) and `event_id` (missing from tables created before it was added).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Columns {
     pub(crate) content: bool,
     pub(crate) content_parts: bool,
     pub(crate) attributes: bool,
+    pub(crate) event_id: bool,
 }
 
 impl Columns {
-    /// The payload columns named in a `tables.get` reply's `schema.fields`.
+    /// The optional columns named in a `tables.get` reply's `schema.fields`.
     pub(crate) fn from_schema(table: &Value) -> Self {
         let names: Vec<&str> = table
             .pointer("/schema/fields")
@@ -79,6 +82,7 @@ impl Columns {
             content: names.contains(&"content"),
             content_parts: names.contains(&"content_parts"),
             attributes: names.contains(&"attributes"),
+            event_id: names.contains(&"event_id"),
         }
     }
 }
@@ -310,7 +314,8 @@ pub(crate) fn invocations_sql(table: &str, with_agent: bool, columns: &Columns) 
 }
 
 /// The second query: the mapped rows of `@invocation_ids` from 10 minutes before `@from` on, in
-/// log order; payload columns the table lacks are NULL.
+/// log order (ties broken by `event_id` when the table has it); payload columns the table lacks
+/// are NULL.
 pub(crate) fn rows_sql(table: &str, columns: &Columns) -> String {
     let types: Vec<String> = MAPPED_EVENT_TYPES
         .iter()
@@ -330,7 +335,7 @@ pub(crate) fn rows_sql(table: &str, columns: &Columns) -> String {
          WHERE invocation_id IN UNNEST(@invocation_ids)\n  \
          AND timestamp >= TIMESTAMP_SUB(@from, INTERVAL 10 MINUTE)\n  \
          AND event_type IN ({})\n\
-         ORDER BY invocation_id, timestamp, event_id",
+         ORDER BY invocation_id, timestamp{}",
         pick(columns.content, "content", "content"),
         pick(
             columns.content_parts,
@@ -338,7 +343,8 @@ pub(crate) fn rows_sql(table: &str, columns: &Columns) -> String {
             "content_parts"
         ),
         pick(columns.attributes, "attributes", "attributes"),
-        types.join(", ")
+        types.join(", "),
+        if columns.event_id { ", event_id" } else { "" }
     )
 }
 
@@ -483,6 +489,7 @@ mod tests {
         content: true,
         content_parts: true,
         attributes: true,
+        event_id: true,
     };
 
     /// A `tables.get` reply whose schema has the analytics columns minus `denied`.
@@ -504,6 +511,7 @@ mod tests {
             "status",
             "error_message",
             "is_truncated",
+            "event_id",
         ]
         .iter()
         .filter(|n| !denied.contains(n))
@@ -883,6 +891,7 @@ mod tests {
             content: false,
             content_parts: false,
             attributes: false,
+            event_id: true,
         };
         assert_eq!(
             rows_sql("`p.d.t`", &none),
@@ -907,7 +916,23 @@ mod tests {
                 content: true,
                 content_parts: false,
                 attributes: true,
+                event_id: false,
             }
+        );
+    }
+
+    #[test]
+    fn tables_without_event_id_order_by_timestamp_only() {
+        let old = Columns {
+            event_id: false,
+            ..ALL
+        };
+        let sql = rows_sql("`p.d.t`", &old);
+        assert!(sql.ends_with("ORDER BY invocation_id, timestamp"), "{sql}");
+        assert!(!sql.contains("event_id"), "{sql}");
+        assert!(rows_sql("`p.d.t`", &ALL).ends_with("ORDER BY invocation_id, timestamp, event_id"));
+        assert!(
+            !Columns::from_schema(&json!({"schema": {"fields": [{"name": "content"}]}})).event_id
         );
     }
 
@@ -934,6 +959,7 @@ mod tests {
             content: false,
             content_parts: false,
             attributes: false,
+            event_id: true,
         };
         let invocations = query_body(&invocations_sql(tbl, false, &denied), invocation_params(&q));
         let rows = query_body(

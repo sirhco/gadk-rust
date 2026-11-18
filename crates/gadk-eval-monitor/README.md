@@ -69,7 +69,8 @@ invocation is listed once), the monitor reads its `USER_MESSAGE_RECEIVED`, `AGEN
   of that run is an error and the run does not pass.
 
 Rows with equal timestamps (parallel tool calls) are ordered by their random `event_id`:
-deterministic, not causal. Rows are read from 10 minutes before the window start (the user
+deterministic, not causal (tables created before the `event_id` column was added leave such ties
+in no particular order). Rows are read from 10 minutes before the window start (the user
 message is logged just before the invocation starts). A resumed invocation is listed by its
 first start in the window; if it started before the window and resumed inside it, it is listed
 at the resume, and its rows from more than 10 minutes before the window start are missing (a
@@ -81,14 +82,20 @@ was offloaded (`content_parts` not `INLINE`, or with a `uri` or `object_ref`); w
 user message; when a turn has no response and the run has no error; or when rows come before the
 first user message (they are ignored). For an incomplete run, `contains`, `not_contains`, `regex`
 and `llm_judge` report an error (`content incomplete: <first note>`) instead of grading a partial
-transcript; `tools` scorers still run.
+transcript. `tools` scorers still run unless a note is about a `TOOL_STARTING` row (its content
+was NULL, another shape, truncated or offloaded, or it came before the first user message): its
+call could not be rebuilt, so `tools` scorers report an error (`tool calls incomplete: <note>`)
+instead of grading a partial call list.
 
 **Denied payload columns.** The analytics plugin's `payload_column_denylist` leaves `content`,
 `content_parts` or `attributes` out of the table altogether. The monitor reads the table schema
-first and selects a missing column as NULL: without `content` every run is incomplete (only
-`tools` scorers grade); without `content_parts` offloading cannot be detected; without
+first and selects a missing column as NULL: without `content` every run is incomplete and every
+scorer reports an error (a run's `tools` scorers grade only when it logged no tool calls);
+without `content_parts` offloading cannot be detected; without
 `attributes` the run's agent is the `agent` column (the emitting agent) and a spec with `agent`
-fails, since the root-agent filter needs `attributes`.
+fails, since the root-agent filter needs `attributes`. Runs are listed from their
+`INVOCATION_STARTING` rows, so if the plugin's event denylist (or allowlist) drops that event
+type, no runs are listed.
 
 **Redaction and truncation.** Text over the plugin's `max_content_len` is cut and sets
 `is_truncated`, so those runs are incomplete. With sensitive-key redaction on, free text (user
@@ -107,13 +114,14 @@ free text or offloading lowers the number of gradable runs.
 | `gadk-eval monitor <spec.yaml> [--out <url>] [--limit N]` | Runs the monitor, prints its summary and, with `--out`, stores the report. `--limit` (1-1000) overrides the spec. |
 | `gadk-eval report <url> [<name>] [--limit N]` | Lists the newest stored reports (name, spec, time, runs, pass rate, runs with errors; default 20), or prints one report's summary. |
 
-`<url>` is a directory, `file://<dir>` or `gs://<bucket>[/<prefix>]`. Reports are named
+`<url>` is a directory, `file://<dir>` or `gs://<bucket>[/<prefix>]`; other schemes (such as
+`s3://`) are rejected. Reports are named
 `<spec>-<YYYYMMDDTHHMMSSZ>.json`, with `-2`, `-3`, … added when the name is taken.
 
 | Exit | `monitor` | `report` |
 |---|---|---|
 | 0 | success | success |
-| 1 | `min_pass_rate` is set and the pass rate is below it, or there are no runs | — |
+| 1 | `min_pass_rate` is set and either the pass rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0) | — |
 | 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, or a usage error | a store error, an unknown or invalid report name, or a usage error |
 
 A judge call that fails or times out is an error result for that scorer, not exit 2.
@@ -141,7 +149,9 @@ a single `RunTranscript` with the same scorers.
 ## Access (IAM)
 
 Google Cloud access uses Application Default Credentials; specs and reports hold no
-credentials.
+credentials. Reports do hold production content (user messages, replies, tool call arguments and
+error tracebacks), so restrict who can read the `gs://` bucket or local directory they are
+written to as you would the analytics table.
 
 - BigQuery Data Viewer on the analytics dataset (it also allows reading the table schema) and
   BigQuery Job User on the project that runs the queries (the source project).

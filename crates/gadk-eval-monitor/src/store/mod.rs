@@ -86,14 +86,22 @@ impl ReportStore {
     ///
     /// # Errors
     ///
-    /// [`MonitorError::Store`] for an empty URL, a `gs://` URL without a valid bucket, or when no
-    /// credentials are found.
+    /// [`MonitorError::Store`] for an empty URL, a URL with another scheme (such as `s3://`), a
+    /// `gs://` URL without a valid bucket, or when no credentials are found.
     pub fn open(url: &str) -> Result<Self, MonitorError> {
         if url.starts_with("gs://") {
             let auth = AdcTokenSource::adc().map_err(|e| {
                 MonitorError::Store(format!("Application Default Credentials: {e}"))
             })?;
             return Self::gcs_with_client(url, GcpHttp::default_http(), Arc::new(auth));
+        }
+        if let Some((scheme, _)) = url.split_once("://")
+            && scheme != "file"
+        {
+            return Err(MonitorError::Store(format!(
+                "unsupported store URL scheme {scheme:?} in {url:?} (expected gs://, file:// or a \
+                 directory path)"
+            )));
         }
         let dir = url.strip_prefix("file://").unwrap_or(url);
         if dir.is_empty() {
@@ -360,6 +368,22 @@ mod tests {
         let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
         let err = store.put(&report("../x", 0, true)).await.unwrap_err();
         assert!(matches!(err, MonitorError::Store(_)), "{err}");
+    }
+
+    #[test]
+    fn open_rejects_other_schemes() {
+        for bad in ["gcs://b", "s3://b/p", "https://example.com/r"] {
+            match ReportStore::open(bad) {
+                Err(MonitorError::Store(e)) => assert!(
+                    e.contains("gs://, file:// or a directory path"),
+                    "{bad}: {e}"
+                ),
+                Err(e) => panic!("{bad}: {e}"),
+                Ok(_) => panic!("{bad} opened"),
+            }
+        }
+        assert!(ReportStore::open("file:///tmp/reports").is_ok());
+        assert!(ReportStore::open("reports/a").is_ok());
     }
 
     #[test]

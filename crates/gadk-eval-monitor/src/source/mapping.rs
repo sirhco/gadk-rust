@@ -36,6 +36,8 @@
 //! unexpected content or `is_truncated` set, when a content part was offloaded (not `INLINE`, or
 //! with a `uri` / `object_ref`), when there is no user message, when a turn has no response and
 //! the run has no error, or when rows come before the first user message (they are ignored).
+//! When any of those notes is about a `TOOL_STARTING` row, the run's tool calls are also marked
+//! incomplete (`tools_complete`).
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use gadk_eval::{RunTranscript, ToolCall, TurnRecord};
@@ -107,11 +109,15 @@ pub fn build_run(header: RunHeader, rows: &[EventRow]) -> ProductionRun {
     let mut error: Option<String> = None;
     let mut notes: Vec<String> = Vec::new();
     let mut saw_user = false;
+    let mut tools_complete = true;
     for row in rows
         .iter()
         .filter(|r| MAPPED_EVENT_TYPES.contains(&r.event_type.as_str()))
     {
         let mut note = |reason: &str| {
+            if row.event_type == "TOOL_STARTING" {
+                tools_complete = false;
+            }
             notes.push(format!(
                 "{} at {}: {reason}",
                 row.event_type,
@@ -219,6 +225,7 @@ pub fn build_run(header: RunHeader, rows: &[EventRow]) -> ProductionRun {
             error,
         },
         content_complete: notes.is_empty(),
+        tools_complete,
         notes,
     }
 }
@@ -646,6 +653,51 @@ mod tests {
                 calls: vec![call("transfer_funds", json!({"amount": 100}))],
             }]
         );
+    }
+
+    #[test]
+    fn unusable_tool_rows_mark_tool_calls_incomplete() {
+        let mut truncated = tool(3, "g", json!({"q": "x...[TRUNCATED]"}));
+        truncated.is_truncated = true;
+        let mut offloaded = tool(4, "h", json!({}));
+        offloaded.content_parts = vec![json!({"storage_mode": "GCS_REFERENCE"})];
+        for bad in [
+            row(2, "TOOL_STARTING", Value::Null),
+            row(2, "TOOL_STARTING", json!({"tool": "f", "args": [1]})),
+            truncated,
+            offloaded,
+        ] {
+            let run = build_run(
+                header(),
+                &[user(1, "hi"), bad.clone(), response(5, "text: 'ok'")],
+            );
+            assert!(!run.tools_complete, "{bad:?}");
+            assert!(!run.content_complete, "{bad:?}");
+        }
+        let run = build_run(
+            header(),
+            &[
+                tool(1, "early", json!({})),
+                user(2, "hi"),
+                response(3, "text: 'ok'"),
+            ],
+        );
+        assert!(!run.tools_complete);
+    }
+
+    #[test]
+    fn other_problems_leave_tool_calls_complete() {
+        let run = build_run(
+            header(),
+            &[
+                user(1, "hi"),
+                tool(2, "f", json!({})),
+                row(3, "AGENT_RESPONSE", Value::Null),
+            ],
+        );
+        assert!(!run.content_complete);
+        assert!(run.tools_complete, "{:?}", run.notes);
+        assert!(build_run(header(), &fixture("tool_call")).tools_complete);
     }
 
     #[test]

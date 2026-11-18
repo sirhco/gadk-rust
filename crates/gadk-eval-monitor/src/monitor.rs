@@ -85,7 +85,8 @@ impl Monitor {
     ///
     /// A run whose transcript has an error gets an error result from every scorer. Otherwise,
     /// when its content is incomplete, every scorer except `tools` is an error naming the first
-    /// note, and a scorer whose `turn` the run does not have is an error. `judge` grades
+    /// note; when a tool row could not be rebuilt, `tools` scorers are an error naming that row's
+    /// note; and a scorer whose `turn` the run does not have is an error. `judge` grades
     /// `llm_judge` scorers; judge failures are error results, not errors of `run`.
     ///
     /// # Errors
@@ -173,10 +174,20 @@ async fn score_run(
     out.into_iter().flatten().collect()
 }
 
-/// Why `s` cannot grade `run`, if it cannot: the run's content is incomplete and `s` reads text,
-/// or the run has no turn `s.turn`.
+/// Why `s` cannot grade `run`, if it cannot: `s` is `tools` and a tool row could not be rebuilt,
+/// the run's content is incomplete and `s` reads text, or the run has no turn `s.turn`.
 fn precheck(s: &ScorerSpec, run: &ProductionRun) -> Option<String> {
-    if !matches!(s, ScorerSpec::Tools { .. }) && !run.content_complete {
+    let is_tools = matches!(s, ScorerSpec::Tools { .. });
+    if is_tools && !run.tools_complete {
+        let note = run
+            .notes
+            .iter()
+            .find(|n| n.starts_with("TOOL_STARTING "))
+            .or(run.notes.first())
+            .map_or("", String::as_str);
+        return Some(format!("tool calls incomplete: {note}"));
+    }
+    if !is_tools && !run.content_complete {
         let note = run.notes.first().map_or("", String::as_str);
         return Some(format!("content incomplete: {note}"));
     }
@@ -294,6 +305,7 @@ scorers:
                                 "error": null
                             },
                             "content_complete": true,
+                            "tools_complete": true,
                             "notes": []
                         },
                         "scores": [
@@ -318,6 +330,7 @@ scorers:
                                 "error": null
                             },
                             "content_complete": false,
+                            "tools_complete": true,
                             "notes": ["turn 1 has no AGENT_RESPONSE"]
                         },
                         "scores": [
@@ -343,6 +356,7 @@ scorers:
                                 "error": null
                             },
                             "content_complete": true,
+                            "tools_complete": true,
                             "notes": []
                         },
                         "scores": [
@@ -359,6 +373,33 @@ scorers:
         );
         assert_eq!(report.pass_rate(), Some(1.0 / 3.0));
         assert_eq!(report.error_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn unusable_tool_rows_error_tools_scorers() {
+        let mut r = run("inv", 50_000, &[("Where is my order?", "order", &[])]);
+        r.content_complete = false;
+        r.tools_complete = false;
+        r.notes = vec![
+            "AGENT_RESPONSE at 1970-01-01T00:00:02.000000Z: content truncated (is_truncated)"
+                .into(),
+            "TOOL_STARTING at 1970-01-01T00:00:03.000000Z: content is NULL".into(),
+        ];
+        let spec = spec(
+            "name: m\nsource: { bigquery: { project: p, dataset: d, table: t } }\nwindow: 1d\n\
+             scorers: [tools: [lookup_order]]\n",
+        );
+        let report = Monitor::new()
+            .now(at(100_000))
+            .run(&spec, &FakeSource::new(vec![r]), None)
+            .await
+            .unwrap();
+        let score = &report.runs[0].scores[0];
+        assert_eq!(score.outcome, Outcome::Error);
+        assert_eq!(
+            score.rationale,
+            "tool calls incomplete: TOOL_STARTING at 1970-01-01T00:00:03.000000Z: content is NULL"
+        );
     }
 
     #[tokio::test]

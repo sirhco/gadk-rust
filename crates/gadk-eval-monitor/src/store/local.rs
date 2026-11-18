@@ -34,17 +34,32 @@ impl LocalStore {
 
     /// Writes `body` as `name` unless that file exists; `false` when it does.
     pub(super) fn create(&self, name: &str, body: &str) -> Result<bool, MonitorError> {
+        self.create_with(name, |f| f.write_all(body.as_bytes()))
+    }
+
+    /// Creates `name` unless it exists (`false` when it does) and fills it with `write`. When
+    /// `write` fails the file is removed, so a partial report never keeps a report name.
+    fn create_with(
+        &self,
+        name: &str,
+        write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+    ) -> Result<bool, MonitorError> {
         std::fs::create_dir_all(&self.dir).map_err(|e| self.store_err(e))?;
+        let path = self.dir.join(name);
         let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(self.dir.join(name));
+            .open(&path);
         match file {
-            Ok(mut f) => {
-                f.write_all(body.as_bytes())
-                    .map_err(|e| self.store_err(e))?;
-                Ok(true)
-            }
+            Ok(mut f) => match write(&mut f) {
+                Ok(()) => Ok(true),
+                Err(e) => {
+                    drop(f);
+                    // Best effort: the write error is the one worth reporting.
+                    let _ = std::fs::remove_file(&path);
+                    Err(self.store_err(e))
+                }
+            },
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
             Err(e) => Err(self.store_err(e)),
         }
@@ -74,5 +89,26 @@ impl LocalStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(self.store_err(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_write_leaves_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::new(&dir.path().display().to_string());
+        let err = store
+            .create_with("r.json", |f| {
+                f.write_all(b"{\"partial")?;
+                Err(std::io::ErrorKind::StorageFull.into())
+            })
+            .unwrap_err();
+        assert!(matches!(err, MonitorError::Store(_)), "{err}");
+        assert_eq!(store.names().unwrap(), Vec::<String>::new());
+        assert!(store.create("r.json", "{}").unwrap());
+        assert_eq!(store.read("r.json").unwrap().as_deref(), Some("{}"));
     }
 }

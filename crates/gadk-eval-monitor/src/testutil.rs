@@ -191,6 +191,7 @@ pub(crate) fn run(id: &str, started: i64, turns: &[(&str, &str, &[&str])]) -> Pr
             error: None,
         },
         content_complete: true,
+        tools_complete: true,
         notes: Vec::new(),
     }
 }

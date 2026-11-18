@@ -55,6 +55,10 @@ pub struct ProductionRun {
     /// `false` when the logged content could not be fully rebuilt (see `notes`); scorers that
     /// read text then report an error instead of grading a partial transcript.
     pub content_complete: bool,
+    /// `false` when a `TOOL_STARTING` row could not be rebuilt into a tool call (NULL, unexpected,
+    /// truncated or offloaded content, or logged before the first user message; see `notes`);
+    /// `tools` scorers then report an error instead of grading a partial call list.
+    pub tools_complete: bool,
     /// Why the content is incomplete, one note per problem.
     pub notes: Vec<String>,
 }
@@ -80,6 +84,7 @@ mod tests {
             started_at: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
             transcript: RunTranscript::default(),
             content_complete: false,
+            tools_complete: true,
             notes: vec!["no USER_MESSAGE_RECEIVED row".into()],
         };
         let back: ProductionRun =

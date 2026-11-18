@@ -19,8 +19,8 @@
 //! gadk-eval report <url> [<name>] [--limit N]
 //! ```
 //!
-//! `monitor` exits 0 on success, 1 when the spec's `min_pass_rate` is set and the pass rate is
-//! below it (or there are no runs), and 2 when the spec cannot be loaded, the runs cannot be
+//! `monitor` exits 0 on success, 1 when the spec's `min_pass_rate` is set and either the pass
+//! rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0), and 2 when the spec cannot be loaded, the runs cannot be
 //! listed, the judge cannot be built or the report cannot be stored. `report` exits 0, or 2 on a
 //! store error or an unknown or invalid report name. Usage errors exit 2.
 
@@ -177,9 +177,13 @@ async fn monitor(
         None => None,
     };
     let report = Monitor::new().run(&spec, source.as_ref(), judge).await?;
+    // Store before printing, so a failing stdout (a closed pipe) does not lose the report.
+    let stored = match store {
+        Some(store) => Some(store.put(&report).await?),
+        None => None,
+    };
     write!(stdout, "{}", report.summary())?;
-    if let Some(store) = store {
-        let name = store.put(&report).await?;
+    if let Some(name) = stored {
         writeln!(stdout, "stored report {name}")?;
     }
     if let Some(min) = spec.min_pass_rate {
@@ -328,6 +332,40 @@ mod tests {
     fn failing(id: &str) -> ProductionRun {
         let now = chrono::Utc::now().timestamp();
         prod_run(id, now - 120, &[("hi", "hello", &[])])
+    }
+
+    /// A writer whose every write fails, like a closed pipe.
+    struct BrokenPipe;
+
+    impl Write for BrokenPipe {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn the_report_is_stored_even_when_stdout_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = spec_file(dir.path(), "");
+        let out = dir.path().join("reports");
+        let fake = Fake::new(vec![passing("a")]);
+        let argv = [
+            "gadk-eval",
+            "monitor",
+            &spec,
+            "--out",
+            &out.display().to_string(),
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        let mut err = Vec::new();
+        let code = run(argv, &fake, &mut BrokenPipe, &mut err).await;
+        assert_eq!(code, 2, "{}", String::from_utf8_lossy(&err));
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 1);
     }
 
     #[tokio::test]
