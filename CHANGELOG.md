@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-17
+
 ### Added
 
 - `PromptStore::create_version_reporting`: like `create_version`, and also reports whether a
@@ -19,6 +21,8 @@ the public API.
 - `FirestoreStore::load_all` keeps the version documents it has read and fetches only new ones
   by name, instead of querying every version of every prompt on each call. An unchanged store
   now costs one read per prompt per poll.
+- `gadk-launcher`'s embedded web UI module describes the bundle as a prebuilt google/adk-web
+  build (see `NOTICE`).
 
 ## [0.2.1] - 2026-11-17
 
@@ -181,7 +185,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/sirhco/gadk-rust/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/sirhco/gadk-rust/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sirhco/gadk-rust/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sirhco/gadk-rust/releases/tag/v0.1.0
