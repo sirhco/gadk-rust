@@ -118,9 +118,11 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 | `gadk-httprr` | HTTP record/replay for deterministic tests |
 | [`gadk-console`](crates/gadk-console/README.md) | Local web console: Cloud Trace traces with their Cloud Logging entries, and the prompt registry |
 | [`gadk-eval`](crates/gadk-eval/README.md) | Offline agent evaluation: YAML eval sets, deterministic, tool-trajectory and LLM-judge scorers, per-variant reports |
+| [`gadk-eval-monitor`](crates/gadk-eval-monitor/README.md) | Production eval monitors: grade logged runs from the BigQuery analytics table with gadk-eval scorers; the `gadk-eval` CLI |
 
 Binaries: `gadk` (the deploy CLI, [README](crates/gadk-cli/README.md)), `gadk-console` (the
-local web console, [README](crates/gadk-console/README.md)) and `adkcli` (the conformance CLI in
+local web console, [README](crates/gadk-console/README.md)), `gadk-eval` (production eval
+monitors, [README](crates/gadk-eval-monitor/README.md)) and `adkcli` (the conformance CLI in
 `gadk-configurable`).
 
 Not included: ADK's experimental (`exp`) packages, the deprecated A2A v1 packages and the symbols

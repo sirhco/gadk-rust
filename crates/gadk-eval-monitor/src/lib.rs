@@ -14,11 +14,29 @@
 
 //! Production eval monitors: grade real agent runs with gadk-eval's scorers.
 //!
-//! A [`TranscriptSource`] lists recent runs as [`ProductionRun`]s (the [`source::bigquery`]
-//! source reads the agent-analytics table). A monitor ([`monitor`]) scores each run against a
-//! YAML monitor spec ([`spec`]) and returns a report ([`report`]), which a report store
-//! ([`store`]) keeps in a local directory or a `gs://` bucket. The `gadk-eval` binary ([`cli`])
-//! runs all of it.
+//! A [`TranscriptSource`] lists recent runs as [`ProductionRun`]s
+//! ([`BigQueryTranscriptSource`] reads the agent-analytics table). A [`Monitor`] scores each run
+//! against a [`MonitorSpec`] (YAML) and returns a [`MonitorReport`], which a [`ReportStore`]
+//! keeps in a local directory or a `gs://` bucket. The `gadk-eval` binary ([`cli`]) runs all of
+//! it.
+//!
+//! ```no_run
+//! # async fn demo() -> Result<(), gadk_eval_monitor::MonitorError> {
+//! use gadk_eval_monitor::{
+//!     BigQueryTranscriptSource, Monitor, MonitorSpec, ReportStore, vertex_judge,
+//! };
+//!
+//! let spec = MonitorSpec::load("monitors/support.yaml")?;
+//! let source = BigQueryTranscriptSource::new("my-proj", "agent_analytics", "agent_events")?;
+//! let judge = match &spec.judge {
+//!     Some(j) => Some(vertex_judge(j).await?),
+//!     None => None,
+//! };
+//! let report = Monitor::new().run(&spec, &source, judge).await?;
+//! print!("{}", report.summary());
+//! ReportStore::open("gs://my-bucket/monitors")?.put(&report).await?;
+//! # Ok(()) }
+//! ```
 
 mod error;
 #[cfg(test)]
@@ -34,4 +52,11 @@ pub mod spec;
 pub mod store;
 
 pub use error::MonitorError;
+pub use gcp::{AdcTokenSource, NoAuth, TokenSource};
+pub use judge::vertex_judge;
+pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
+pub use report::{MonitorReport, MonitoredRun, Window};
+pub use source::bigquery::BigQueryTranscriptSource;
 pub use source::{ProductionRun, TranscriptQuery, TranscriptSource};
+pub use spec::{JudgeSpec, MonitorSpec, SourceSpec};
+pub use store::{ReportMeta, ReportStore};
