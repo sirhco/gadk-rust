@@ -143,15 +143,13 @@ impl CloudTraceSource {
                 session.clone(),
             ));
         }
-        ListRequest {
-            start: end - query.range.duration(),
-            end,
-            view: View::RootSpan,
-            filters,
-            start_descending: true,
-            page_size: LIST_PAGE_SIZE,
-            page_token: query.page_token.clone(),
-        }
+        let mut req = ListRequest::new(end - query.range.duration(), end);
+        req.view = View::RootSpan;
+        req.filters = filters;
+        req.start_descending = true;
+        req.page_size = LIST_PAGE_SIZE;
+        req.page_token = query.page_token.clone();
+        req
     }
 
     /// Sends one Cloud Logging request; the 2xx body, or the mapped error.

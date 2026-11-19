@@ -19,10 +19,12 @@
 //! `+gen_ai.agent.name:"<agent>"` when the query names an agent) and rebuilds each trace's runs
 //! with [`build_runs`]. Runs whose root span started outside the window, or whose root agent is
 //! not the query's agent, are dropped. Paging stops once `limit` runs are found, at the last
-//! page, or after [`MAX_PAGES`] pages; the runs are returned newest first, at most `limit`. The
+//! page, or after [`MAX_PAGES`] pages; a run listed twice (its trace on two pages, when traces
+//! arrive while paging) is kept once. The runs are returned newest first, at most `limit`. The
 //! agent must record message content on its spans
 //! (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` or `SPAN_AND_EVENT`).
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use gadk_cloudtrace::{Adc, CloudTraceClient, Filter, ListRequest, View};
@@ -46,7 +48,6 @@ const AGENT_LABEL: &str = "gen_ai.agent.name";
 /// Reads production runs from the spans in one project's Cloud Trace.
 pub struct CloudTraceTranscriptSource {
     client: CloudTraceClient,
-    project: String,
 }
 
 impl CloudTraceTranscriptSource {
@@ -56,34 +57,29 @@ impl CloudTraceTranscriptSource {
     /// # Errors
     ///
     /// [`MonitorError::Source`] when `project` is not `[A-Za-z0-9_-]+` (checked first) or when
-    /// no credentials are found.
+    /// no credentials can be built; some credential failures only show on the first request
+    /// (as a source error from [`TranscriptSource::list`]).
     pub fn new(project: &str) -> Result<Self, MonitorError> {
         check_project(project)?;
         let auth = Adc::resolve()
             .map_err(|e| MonitorError::Source(format!("Application Default Credentials: {e}")))?;
-        Self::with_client(
-            project,
-            CloudTraceClient::with_auth(project, Arc::new(auth)),
-        )
+        Self::with_client(CloudTraceClient::with_auth(project, Arc::new(auth)))
     }
 
-    /// Like [`CloudTraceTranscriptSource::new`], with an explicit client (whose project should
-    /// be `project`).
+    /// Like [`CloudTraceTranscriptSource::new`], with an explicit client; the traces read are
+    /// those of the client's project.
     ///
     /// # Errors
     ///
-    /// [`MonitorError::Source`] when `project` is not `[A-Za-z0-9_-]+`.
-    pub fn with_client(project: &str, client: CloudTraceClient) -> Result<Self, MonitorError> {
-        check_project(project)?;
-        Ok(Self {
-            client,
-            project: project.to_owned(),
-        })
+    /// [`MonitorError::Source`] when the client's project is not `[A-Za-z0-9_-]+`.
+    pub fn with_client(client: CloudTraceClient) -> Result<Self, MonitorError> {
+        check_project(client.project())?;
+        Ok(Self { client })
     }
 
     /// The project whose traces are read.
     pub fn project(&self) -> &str {
-        &self.project
+        self.client.project()
     }
 }
 
@@ -103,15 +99,13 @@ fn request(q: &TranscriptQuery, page_token: Option<String>) -> ListRequest {
     if let Some(agent) = &q.agent {
         filters.push(Filter::LabelExact(AGENT_LABEL.to_owned(), agent.clone()));
     }
-    ListRequest {
-        start: q.from,
-        end: q.to,
-        view: View::Complete,
-        filters,
-        start_descending: true,
-        page_size: PAGE_SIZE,
-        page_token,
-    }
+    let mut req = ListRequest::new(q.from, q.to);
+    req.view = View::Complete;
+    req.filters = filters;
+    req.start_descending = true;
+    req.page_size = PAGE_SIZE;
+    req.page_token = page_token;
+    req
 }
 
 #[async_trait::async_trait]
@@ -121,6 +115,9 @@ impl TranscriptSource for CloudTraceTranscriptSource {
             return Ok(Vec::new());
         }
         let mut runs: Vec<ProductionRun> = Vec::new();
+        // (trace id, invocation id) of the runs kept: new traces arriving while paging newest
+        // first push older ones onto the next page, so a trace can be listed twice.
+        let mut seen: HashSet<(Option<String>, String)> = HashSet::new();
         let mut token: Option<String> = None;
         for _ in 0..MAX_PAGES {
             let page = self
@@ -133,6 +130,7 @@ impl TranscriptSource for CloudTraceTranscriptSource {
                     r.started_at >= q.from
                         && r.started_at < q.to
                         && q.agent.as_ref().is_none_or(|a| &r.agent == a)
+                        && seen.insert((r.trace_id.clone(), r.invocation_id.clone()))
                 }));
             }
             token = page.next_page_token;
@@ -178,7 +176,7 @@ mod tests {
     }
 
     fn source(http: Arc<dyn HttpClient>) -> CloudTraceTranscriptSource {
-        CloudTraceTranscriptSource::with_client("proj", client("proj", http)).unwrap()
+        CloudTraceTranscriptSource::with_client(client("proj", http)).unwrap()
     }
 
     fn query(agent: Option<&str>, limit: usize) -> TranscriptQuery {
@@ -250,7 +248,7 @@ mod tests {
     fn the_project_is_validated() {
         let http: Arc<dyn HttpClient> = Arc::new(gadk_model::ReqwestClient::default());
         for bad in ["", "p.q", "a b"] {
-            let err = CloudTraceTranscriptSource::with_client(bad, client(bad, http.clone()))
+            let err = CloudTraceTranscriptSource::with_client(client(bad, http.clone()))
                 .err()
                 .unwrap();
             assert!(
@@ -258,8 +256,7 @@ mod tests {
                 "{err}"
             );
         }
-        let ok = CloudTraceTranscriptSource::with_client("my-proj_1", client("my-proj_1", http))
-            .unwrap();
+        let ok = CloudTraceTranscriptSource::with_client(client("my-proj_1", http)).unwrap();
         assert_eq!(ok.project(), "my-proj_1");
     }
 
@@ -297,6 +294,35 @@ mod tests {
             "{:?}",
             run.notes
         );
+    }
+
+    #[tokio::test]
+    async fn a_trace_listed_on_two_pages_gives_one_run() {
+        // A newer trace arriving between the requests pushes trace 2 onto the second page too.
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[
+                page(
+                    LIST,
+                    vec![
+                        trace(1, v1_run(1, "inv-a", "support", FROM + 300)),
+                        trace(2, v1_run(2, "inv-b", "support", FROM + 200)),
+                    ],
+                    Some("p2"),
+                ),
+                page(
+                    &format!("{LIST}&pageToken=p2"),
+                    vec![
+                        trace(2, v1_run(2, "inv-b", "support", FROM + 200)),
+                        trace(3, v1_run(3, "inv-c", "support", FROM + 100)),
+                    ],
+                    None,
+                ),
+            ],
+        );
+        let runs = source(http).list(&query(None, 10)).await.unwrap();
+        assert_eq!(ids(&runs), ["inv-a", "inv-b", "inv-c"]);
     }
 
     #[tokio::test]

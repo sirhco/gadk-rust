@@ -167,6 +167,8 @@ Limits:
 - A message attribute whose JSON is over 60 KiB is left off the span by the telemetry, so long
   conversations show up as incomplete.
 - Parallel tool calls start together, so their order may differ from the order the model chose.
+- A resumed invocation (the same invocation id continuing in a new trace) is one run per trace
+  here, where the BigQuery source gives one run.
 - A listing reads at most 50 pages (5,000 traces) and stops early once `limit` runs are found.
   `COMPLETE` pages carry every span, so they can be large.
 - Access: Cloud Trace User (`roles/cloudtrace.user`) on the project.
@@ -231,6 +233,9 @@ that started in the window, then the rows of at most `limit` of them. Both filte
 `timestamp` (the analytics plugin's default) scans only the window's partitions; keep the window
 short and the event types filtered. Judge cost grows with `limit` times the number of
 `llm_judge` scorers; runs are graded 8 at a time.
+
+With the Cloud Trace source, each monitor run makes up to 50 `COMPLETE` `traces.list` calls of
+100 traces each, counted against the Cloud Trace API read quota.
 
 ## Live test
 

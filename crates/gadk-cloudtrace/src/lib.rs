@@ -30,17 +30,12 @@
 //!
 //! let client = CloudTraceClient::new("my-proj");
 //! let end = Utc::now();
-//! let page = client
-//!     .list(&ListRequest {
-//!         start: end - TimeDelta::hours(1),
-//!         end,
-//!         view: View::RootSpan,
-//!         filters: vec![Filter::LabelExact("gen_ai.agent.name".into(), "support".into())],
-//!         start_descending: true,
-//!         page_size: 50,
-//!         page_token: None,
-//!     })
-//!     .await?;
+//! let mut req = ListRequest::new(end - TimeDelta::hours(1), end);
+//! req.view = View::RootSpan;
+//! req.filters = vec![Filter::LabelExact("gen_ai.agent.name".into(), "support".into())];
+//! req.start_descending = true;
+//! req.page_size = 50;
+//! let page = client.list(&req).await?;
 //! for summary in &page.traces {
 //!     let trace = client.get(&summary.trace_id).await?;
 //!     println!("{}: {} spans", trace.trace_id, trace.spans.len());

@@ -387,14 +387,13 @@ fn text_parts(parts: &[Part]) -> impl Iterator<Item = String> + '_ {
         .map(str::to_owned)
 }
 
-/// A label's JSON value; a JSON string is parsed once more (JSON text inside a JSON string).
+/// A label's JSON value; a JSON string is parsed once more (JSON text inside a JSON string),
+/// and stays a string when its content is not JSON. The error is for a label that is not JSON.
 fn parse_json(text: &str) -> Result<Value, String> {
     let value: Value =
         serde_json::from_str(text).map_err(|e| format!("is not valid JSON ({e})"))?;
     match value {
-        Value::String(inner) => {
-            serde_json::from_str(&inner).map_err(|e| format!("is not valid JSON ({e})"))
-        }
+        Value::String(inner) => Ok(serde_json::from_str(&inner).unwrap_or(Value::String(inner))),
         other => Ok(other),
     }
 }
@@ -441,17 +440,13 @@ mod tests {
         offset: i64,
         labels: &[(&str, &str)],
     ) -> Span {
-        Span {
-            span_id: id.into(),
-            parent_id: parent.map(str::to_owned),
-            name: name.into(),
-            start: at(T0 + offset),
-            end: at(T0 + offset + 1),
-            labels: labels
-                .iter()
-                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-                .collect(),
-        }
+        let mut span = Span::new(id, name, at(T0 + offset), at(T0 + offset + 1));
+        span.parent_id = parent.map(str::to_owned);
+        span.labels = labels
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        span
     }
 
     fn with(mut span: Span, key: &str, value: &str) -> Span {
@@ -527,10 +522,7 @@ mod tests {
     }
 
     fn trace(spans: Vec<Span>) -> Trace {
-        Trace {
-            trace_id: TRACE_ID.into(),
-            spans,
-        }
+        Trace::new(TRACE_ID, spans)
     }
 
     fn only(trace: &Trace) -> ProductionRun {
@@ -942,6 +934,36 @@ mod tests {
             run.content_complete && run.tools_complete,
             "{:?}",
             run.notes
+        );
+    }
+
+    #[test]
+    fn tool_arguments_not_json_differ_from_json_not_an_object() {
+        let t = trace(vec![
+            agent("a1", None, "support", "inv-1", 0),
+            model(
+                "m1",
+                "a1",
+                1,
+                Some(asked(&["hi"])),
+                Some(answered(&["hello"])),
+            ),
+            with(tool("t1", "a1", 2, "plain"), TOOL_ARGUMENTS, r#""abc""#),
+            with(tool("t2", "a1", 3, "broken"), TOOL_ARGUMENTS, "{oops"),
+        ]);
+        let run = only(&t);
+        assert!(!run.tools_complete);
+        assert_eq!(run.notes.len(), 2, "{:?}", run.notes);
+        assert_eq!(
+            run.notes[0],
+            "execute_tool span t1 (plain): the arguments are not a JSON object"
+        );
+        assert!(
+            run.notes[1].starts_with(
+                "execute_tool span t2 (broken): the arguments attribute is not valid JSON ("
+            ),
+            "{}",
+            run.notes[1]
         );
     }
 

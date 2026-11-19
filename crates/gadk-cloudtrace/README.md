@@ -11,17 +11,12 @@ use gadk_cloudtrace::{CloudTraceClient, Filter, ListRequest, View};
 
 let client = CloudTraceClient::new("my-proj"); // Application Default Credentials, built on first use
 let end = Utc::now();
-let page = client
-    .list(&ListRequest {
-        start: end - TimeDelta::hours(1),
-        end,
-        view: View::RootSpan,
-        filters: vec![Filter::Span("invoke_agent".into())],
-        start_descending: true,
-        page_size: 50,
-        page_token: None,
-    })
-    .await?;
+let mut req = ListRequest::new(end - TimeDelta::hours(1), end);
+req.view = View::RootSpan;
+req.filters = vec![Filter::Span("invoke_agent".into())];
+req.start_descending = true;
+req.page_size = 50;
+let page = client.list(&req).await?;
 for summary in &page.traces {
     let trace = client.get(&summary.trace_id).await?;
     println!("{}: {} spans", trace.trace_id, trace.spans.len());
@@ -71,6 +66,7 @@ ids are returned as Cloud Trace sent them; callers validate them.
 Every request carries the headers of an `AuthHeaders` implementation and
 `x-goog-user-project: <project>` (replacing any quota project the credentials carry).
 `Adc::lazy()` builds Application Default Credentials (cloud-platform scope) on first use;
-`Adc::resolve()` builds them at once and fails when there are none (call it inside a Tokio
-runtime); `NoAuth` sends none; `CloudTraceClient::with_auth` and `with_parts` take any
+`Adc::resolve()` builds them at once and fails when no credentials can be built; some failures
+(such as metadata-server credentials with no metadata server) only show on the first request
+(call it inside a Tokio runtime); `NoAuth` sends none; `CloudTraceClient::with_auth` and `with_parts` take any
 implementation. Reading traces needs Cloud Trace User (`roles/cloudtrace.user`) on the project.

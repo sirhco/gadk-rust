@@ -44,8 +44,10 @@ impl Adc {
         }
     }
 
-    /// Credentials built now, so a missing credential is reported up front. Must be called
-    /// inside a Tokio runtime.
+    /// Credentials built now, so most credential problems are reported up front. Without an
+    /// ADC file the credentials may come from the metadata server, and some failures (no
+    /// metadata server, say) only show on the first request. Must be called inside a Tokio
+    /// runtime.
     ///
     /// # Errors
     ///

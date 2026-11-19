@@ -88,6 +88,7 @@ pub enum SourceSpec {
         table: String,
     },
     /// The spans an agent exports to Cloud Trace (with message content on spans).
+    #[non_exhaustive]
     CloudTrace {
         /// The Google Cloud project the traces are in (`[A-Za-z0-9_-]+`).
         project: String,

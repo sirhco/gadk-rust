@@ -76,8 +76,10 @@ fn quote(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// One `traces.list` request.
+/// One `traces.list` request. Build it with [`ListRequest::new`] and set the other fields by
+/// assignment.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ListRequest {
     /// The window start (`startTime`).
     pub start: DateTime<Utc>,
@@ -97,6 +99,7 @@ pub struct ListRequest {
 
 /// One page of traces.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct TracePage {
     /// The traces, in the order Cloud Trace returned them.
     pub traces: Vec<Trace>,
@@ -106,6 +109,7 @@ pub struct TracePage {
 
 /// A trace.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Trace {
     /// The trace id as Cloud Trace returned it (normally 32 hex characters; not validated).
     pub trace_id: String,
@@ -113,8 +117,9 @@ pub struct Trace {
     pub spans: Vec<Span>,
 }
 
-/// A span.
+/// A span. Build it with [`Span::new`] and set the other fields by assignment.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Span {
     /// 16 lowercase hex characters (a [`View::RootSpan`] list keeps an id that is not a decimal
     /// u64 as sent).
@@ -129,6 +134,62 @@ pub struct Span {
     pub end: DateTime<Utc>,
     /// The span's labels (its attributes, as text).
     pub labels: BTreeMap<String, String>,
+}
+
+impl ListRequest {
+    /// A request for the traces in `start..end`: [`View::RootSpan`], no filters, no order
+    /// (`start_descending` false), `page_size` 0 (sent as `pageSize=0`, so Cloud Trace picks the
+    /// page size) and no page token.
+    pub fn new(start: DateTime<Utc>, end: DateTime<Utc>) -> Self {
+        Self {
+            start,
+            end,
+            view: View::RootSpan,
+            filters: Vec::new(),
+            start_descending: false,
+            page_size: 0,
+            page_token: None,
+        }
+    }
+}
+
+impl TracePage {
+    /// A page of `traces`, followed by the page `next_page_token` names (`None` on the last).
+    pub fn new(traces: Vec<Trace>, next_page_token: Option<String>) -> Self {
+        Self {
+            traces,
+            next_page_token,
+        }
+    }
+}
+
+impl Trace {
+    /// The trace `trace_id` with `spans`.
+    pub fn new(trace_id: impl Into<String>, spans: Vec<Span>) -> Self {
+        Self {
+            trace_id: trace_id.into(),
+            spans,
+        }
+    }
+}
+
+impl Span {
+    /// The span `span_id` named `name`, from `start` to `end`, with no parent and no labels.
+    pub fn new(
+        span_id: impl Into<String>,
+        name: impl Into<String>,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            span_id: span_id.into(),
+            parent_id: None,
+            name: name.into(),
+            start,
+            end,
+            labels: BTreeMap::new(),
+        }
+    }
 }
 
 /// Cloud Trace v1 `ListTracesResponse`.
@@ -267,6 +328,36 @@ mod tests {
         assert_eq!(Filter::Root(String::new()).term(), None);
         assert_eq!(Filter::Span(String::new()).term(), None);
         assert_eq!(Filter::LabelExact("k".into(), String::new()).term(), None);
+    }
+
+    #[test]
+    fn constructors_default_the_other_fields() {
+        let start = DateTime::from_timestamp(1_000, 0).unwrap();
+        let end = DateTime::from_timestamp(2_000, 0).unwrap();
+
+        let req = ListRequest::new(start, end);
+        assert_eq!((req.start, req.end), (start, end));
+        assert_eq!(req.view, View::RootSpan);
+        assert!(req.filters.is_empty());
+        assert!(!req.start_descending);
+        assert_eq!(req.page_size, 0);
+        assert_eq!(req.page_token, None);
+
+        let span = Span::new("00000000000000ff", "invoke_agent a", start, end);
+        assert_eq!(span.span_id, "00000000000000ff");
+        assert_eq!(span.name, "invoke_agent a");
+        assert_eq!((span.start, span.end), (start, end));
+        assert_eq!(span.parent_id, None);
+        assert!(span.labels.is_empty());
+
+        let trace = Trace::new("t1", vec![span.clone()]);
+        assert_eq!(trace.trace_id, "t1");
+        assert_eq!(trace.spans, vec![span]);
+
+        let page = TracePage::new(vec![trace.clone()], Some("p2".into()));
+        assert_eq!(page.traces, vec![trace]);
+        assert_eq!(page.next_page_token.as_deref(), Some("p2"));
+        assert_eq!(TracePage::new(Vec::new(), None), TracePage::default());
     }
 
     #[test]
