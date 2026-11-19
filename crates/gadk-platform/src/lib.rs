@@ -23,7 +23,8 @@
 //! [`go_filepath_is_local`], safe resolution of an untrusted relative path ([`safe_subpath`]),
 //! URL parsing ([`go_url`]), error wrapping with a prefix ([`GoWrapped`]), a built-in MIME
 //! table and content sniffing ([`go_mime`]), durations ([`GoDuration`], [`go_parse_duration`],
-//! [`go_format_duration`]) and the flag parser the launcher uses ([`go_flag`]).
+//! [`go_format_duration`]), the flag parser the launcher uses ([`go_flag`]) and the wording of
+//! JSON type-mismatch errors ([`json_kind`], [`json_expected_found`]).
 
 pub mod env;
 mod exec;
@@ -34,6 +35,7 @@ pub mod go_mime;
 mod go_path;
 mod go_time;
 pub mod go_url;
+mod json_kind;
 mod safe_subpath;
 mod time;
 mod tracking;
@@ -52,6 +54,7 @@ pub use go_path::{
 pub use go_time::{
     GoDuration, go_format_duration, go_format_rfc3339_nano, go_parse_duration, go_parse_rfc3339,
 };
+pub use json_kind::{json_expected_found, json_kind, json_kind_article, json_text_kind_article};
 pub use safe_subpath::{
     ERR_NOT_VALID_RELATIVE_PATH, ERR_SYMLINK_IN_RELATIVE_PATH, SafeSubpathError,
     SafeSubpathErrorKind, is_link_like, safe_subpath,
