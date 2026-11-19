@@ -93,7 +93,9 @@ impl BigQueryTranscriptSource {
     ///
     /// # Errors
     ///
-    /// [`MonitorError::Source`] for an invalid identifier or when no credentials are found.
+    /// [`MonitorError::Source`] for an invalid identifier or when no credentials can be built;
+    /// some credential failures (such as metadata-server credentials with no metadata server)
+    /// only show on the first request.
     pub fn new(project: &str, dataset: &str, table: &str) -> Result<Self, MonitorError> {
         let auth = AdcTokenSource::adc()
             .map_err(|e| MonitorError::Source(format!("Application Default Credentials: {e}")))?;

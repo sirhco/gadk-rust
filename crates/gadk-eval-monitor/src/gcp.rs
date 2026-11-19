@@ -54,7 +54,8 @@ impl AdcTokenSource {
     ///
     /// # Errors
     ///
-    /// [`AdcError`] when no credentials can be found or built.
+    /// [`AdcError`] when no credentials can be built; some credential failures (such as
+    /// metadata-server credentials with no metadata server) only show on the first request.
     pub fn adc() -> Result<Self, AdcError> {
         let file = ProcessEnv.var("GOOGLE_APPLICATION_CREDENTIALS");
         Ok(Self::from_credentials(adc_credentials(
