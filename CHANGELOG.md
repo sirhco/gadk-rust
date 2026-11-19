@@ -7,6 +7,42 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-platform`: `json_kind`, `json_kind_article`, `json_text_kind_article` and
+  `json_expected_found`, the shared wording for JSON type-mismatch errors.
+
+### Changed
+
+- JSON decode and type errors are worded for Rust instead of copying Go's `encoding/json` texts
+  (`json: cannot unmarshal … into Go value of type map[string]interface {}`). They name the
+  expected JSON shape and what was found, e.g. `expected a JSON object, found an array`:
+  - `gadk-server`: Agent Engine request errors name the JSON path (``invalid
+    `Query.class_method`: expected a string, found a number``; `invalid Query: expected a JSON
+    object, found an array`; ``number 1.5 is not a valid i32``; ``number 1e400 is out of range
+    for f64``; `invalid base64 data at byte 4`), including inside `videoMetadata` and
+    `audioTranscription`; `json.Unmarshal() failed` wrappers read `failed to decode request: …`;
+    the REST runtime says `failed to decode request: unknown field "x"`; NaN/Inf encode errors
+    read `cannot encode NaN as JSON`; the Eventarc trigger says `event data is not valid JSON`.
+  - `gadk-engine`: tool, transfer, `set_model_response`, finish-task, single-turn, agent-tool and
+    parallel-worker argument errors (`unexpected args type: expected a JSON object, found a
+    string`); schema type mismatches show the value as JSON; `failed to parse output JSON:
+    expected a JSON object, found an array`; `empty agent_name: {…}` shows the args as JSON.
+  - `gadk-openai`: function call args and JSON schemas (`expected a JSON object, found an
+    array`); a non-object `error` in an API error body (``invalid API error response: `error`
+    must be a JSON object, found a string``); `openai` and `gadk-anthropic`: a non-JSON response
+    is `unexpected response content-type '<ct>': expected 'application/json'`.
+  - `gadk-a2a` (non-object metadata), `gadk-mcp` (non-object input schema; schema types shown as
+    JSON), `gadk-agent` (`originalFunctionCall`), `gadk-tools` (`load_artifacts`, `load_memory`),
+    `gadk-telemetry` (GKE `machineType`), `gadk-agentanalytics` (`expirationMs`; `max retries
+    exceeded`), `gadk-configurable` (MCP toolset `args` / `tool_filter` elements; values with no
+    JSON form).
+  - `gadk-session`: `invalid number 1e999: out of range for f64` in requested auth configs;
+    toolauth model errors name Rust types (`cannot use a JSON string as i64`, `Vec<String>`,
+    `HttpAuth`) and say `expected a JSON object, found …`.
+  - `gadk-vertexai`: `expected an RFC 3339 timestamp, found a number (1)` for a memory state
+    value; `operation finished without a response` for a done operation with no result.
+
 ## [0.4.1] - 2026-11-19
 
 ### Added

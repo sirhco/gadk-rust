@@ -130,7 +130,7 @@ impl LiveConnection for ScriptedConn {
         if self.0.fail_history {
             return Err(LiveConnError::new(
                 LiveConnErrorKind::Other,
-                "failed to send history: json: unsupported value: NaN",
+                "failed to send history: cannot encode NaN as JSON",
             ));
         }
         Ok(())
