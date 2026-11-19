@@ -16,6 +16,7 @@
 //! Kubernetes Engine, including the Compute API host type.
 
 use gadk_model::gcp_auth::credential_headers;
+use gadk_platform::json_expected_found;
 use http::HeaderMap;
 use serde_json::Value;
 
@@ -218,8 +219,10 @@ fn path_escape(s: &str) -> String {
 }
 
 /// Reads `machineType` from the first JSON value of a response body:
-/// the key is matched case-insensitively, `null` is skipped; the type-mismatch and EOF texts are
-/// byte-identical to ADK's. Syntax errors carry serde_json's text.
+/// the key is matched case-insensitively, `null` is skipped. A non-string `machineType` is
+/// ``invalid `machineType`: expected a string, found <kind>``, a body that is not an object
+/// `invalid instance metadata: expected a JSON object, found <kind>`; an empty body is `EOF`, a
+/// truncated one `unexpected EOF`. Syntax errors carry serde_json's text.
 ///
 /// serde_json's map keeps one value per key (the document's last) and
 /// iterates keys in sorted order, so of keys differing only in case (`MachineType`,
@@ -246,8 +249,8 @@ fn decode_machine_type(body: &[u8]) -> Result<String, String> {
                     Value::Null => {}
                     other => {
                         return Err(format!(
-                            "json: cannot unmarshal {} into Go struct field .machineType of type string",
-                            json_kind(other)
+                            "invalid `machineType`: {}",
+                            json_expected_found("a string", other)
                         ));
                     }
                 }
@@ -256,21 +259,9 @@ fn decode_machine_type(body: &[u8]) -> Result<String, String> {
         }
         Value::Null => Ok(String::new()),
         other => Err(format!(
-            "json: cannot unmarshal {} into Go value of type struct {{ MachineType string \"json:\\\"machineType\\\"\" }}",
-            json_kind(&other)
+            "invalid instance metadata: {}",
+            json_expected_found("a JSON object", &other)
         )),
-    }
-}
-
-/// The JSON type name used in type-mismatch errors.
-fn json_kind(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "null",
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
     }
 }
 
@@ -304,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_machine_type_matches_gos_decoder() {
+    fn decode_machine_type_error_texts() {
         let cases: &[(&str, Result<&str, &str>)] = &[
             (r#"{"machineType":"a"}"#, Ok("a")),
             (r#"{"MACHINETYPE":"a"}"#, Ok("a")),
@@ -315,27 +306,19 @@ mod tests {
             (r#"{"machineType":"#, Err("unexpected EOF")),
             (
                 r#"{"machineType":5}"#,
-                Err(
-                    "json: cannot unmarshal number into Go struct field .machineType of type string",
-                ),
+                Err("invalid `machineType`: expected a string, found a number"),
             ),
             (
                 r#"{"machineType":{"a":1}}"#,
-                Err(
-                    "json: cannot unmarshal object into Go struct field .machineType of type string",
-                ),
+                Err("invalid `machineType`: expected a string, found an object"),
             ),
             (
                 "[1]",
-                Err(
-                    r#"json: cannot unmarshal array into Go value of type struct { MachineType string "json:\"machineType\"" }"#,
-                ),
+                Err("invalid instance metadata: expected a JSON object, found an array"),
             ),
             (
                 "true",
-                Err(
-                    r#"json: cannot unmarshal bool into Go value of type struct { MachineType string "json:\"machineType\"" }"#,
-                ),
+                Err("invalid instance metadata: expected a JSON object, found a boolean"),
             ),
         ];
         for (body, want) in cases {
