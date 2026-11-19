@@ -21,10 +21,13 @@ the public API.
   README.
 - Error messages name Rust items: a missing model says `ensure LlmAgentConfig::model is set`,
   `run_llm_agent_as_node` errors carry that prefix, and the agent engine stream methods report
-  `streaming JSONL failed: <err>`.
+  `streaming JSONL failed: <err>`; the telemetry missing-project error says to set
+  `with_gcp_quota_project` / `with_gcp_resource_project` or `GOOGLE_CLOUD_PROJECT`; the launcher's
+  kept-subscriber log names `Config::telemetry_options`.
 - Docs: `gadk-eval-monitor`'s Application Default Credentials `# Errors` sections say some
   credential failures only show on the first request; `Filter::LabelExact` notes the label key
-  is sent verbatim (only the value is quoted).
+  is sent verbatim (only the value is quoted); the `gadk-telemetry` README documents credentials,
+  the quota and resource projects and the needed roles.
 
 ### Fixed
 

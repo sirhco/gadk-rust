@@ -11,6 +11,19 @@ With `with_otel_to_cloud(true)`:
 - log records go to Cloud Logging (`logging.googleapis.com/v2/entries:write`), unless you
   supply your own logger provider with `with_logger_provider`.
 
+### Credentials and projects
+
+The export authenticates with the credentials given by `with_google_credentials`, or else with
+Application Default Credentials (scope `cloud-platform`), loaded when telemetry starts; failing to
+find them is a setup error. The quota project (sent as `x-goog-user-project`) and the resource
+project (`gcp.project_id`) come from `with_gcp_quota_project` / `with_gcp_resource_project`, else
+the credentials' project ID, else `GOOGLE_CLOUD_PROJECT`; with neither, setup fails. The identity
+needs permission to write traces and metrics through the Telemetry API on the project (for example
+`roles/telemetry.tracesWriter` and `roles/monitoring.metricWriter`).
+
+The `gadk-launcher` `-otel_to_cloud` flag turns this export on; otherwise a
+`with_otel_to_cloud` option in its `Config::telemetry_options` decides.
+
 Log export through the API needs the Cloud Logging API enabled on the project and
 `logging.logEntries.create` (for example `roles/logging.logWriter`) on the identity. A failed
 export is reported once as a `tracing` warning under the target `gadk_telemetry::cloud_logging`,

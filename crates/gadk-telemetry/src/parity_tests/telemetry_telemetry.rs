@@ -732,7 +732,7 @@ fn run_project_cases(
             Err(e) => assert_eq!(
                 e,
                 format!(
-                    "telemetry.googleapis.com requires setting the {project_type} project. Refer to telemetry.config for the available options to set the {project_type} project"
+                    "telemetry.googleapis.com requires setting the {project_type} project. Set it with `with_gcp_{project_type}_project` or the GOOGLE_CLOUD_PROJECT environment variable"
                 ),
                 "{}",
                 tc.name
