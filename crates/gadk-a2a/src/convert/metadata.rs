@@ -273,20 +273,10 @@ pub(crate) fn to_map_structure<T: Serialize + ?Sized>(
     }
 }
 
-/// The error for a non-object JSON value decoded into a map, byte-identical to an ADK server's
-/// error text; see the literal in this function.
+/// The error for a non-object JSON value decoded into a map:
+/// `expected a JSON object, found <kind>` (e.g. `found an array`).
 pub(crate) fn unmarshal_into_map_error(value: &Value) -> Error {
-    let kind = match value {
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-        Value::Null => "null",
-    };
-    Error::msg(format!(
-        "json: cannot unmarshal {kind} into Go value of type map[string]interface {{}}"
-    ))
+    Error::msg(gadk_platform::json_expected_found("a JSON object", value))
 }
 
 /// Stores `data` under `key` as a JSON object; absent or `null` data is skipped.
