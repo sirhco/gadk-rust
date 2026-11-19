@@ -323,13 +323,13 @@ fn hex4(body: &str, at: usize) -> Option<u32> {
 }
 
 /// The JSON kind of `text`, with the literal cut
-/// off: "object", "array", "string", "bool", "null" or "number".
+/// off: "object", "array", "string", "boolean", "null" or "number".
 fn json_kind(text: &str) -> &'static str {
     match text.trim_start().as_bytes().first() {
         Some(b'{') => "object",
         Some(b'[') => "array",
         Some(b'"') => "string",
-        Some(b't' | b'f') => "bool",
+        Some(b't' | b'f') => "boolean",
         Some(b'n') => "null",
         _ => "number",
     }
@@ -424,9 +424,10 @@ pub(crate) fn decode_object(
             }
         }
         "null" => {}
-        kind => {
+        _ => {
             return Err(format!(
-                "toolauth: {type_name}: want a JSON object, got {kind}"
+                "toolauth: {type_name}: expected a JSON object, found {}",
+                gadk_platform::json_text_kind_article(text)
             ));
         }
     }
@@ -526,7 +527,7 @@ impl Decoded {
             self.known.remove(alias);
             return Ok(Some(n));
         }
-        self.take::<i64>(alias, type_name, "int64")
+        self.take::<i64>(alias, type_name, "i64")
     }
 
     /// [`Decoded::take`] for a `Vec<String>` field: a `null` element is `""`.
@@ -536,7 +537,7 @@ impl Decoded {
         type_name: &str,
     ) -> Result<Option<Vec<String>>, String> {
         Ok(self
-            .take::<Vec<Option<String>>>(alias, type_name, "[]string")?
+            .take::<Vec<Option<String>>>(alias, type_name, "Vec<String>")?
             .map(|items| items.into_iter().map(Option::unwrap_or_default).collect()))
     }
 
@@ -547,7 +548,7 @@ impl Decoded {
         type_name: &str,
     ) -> Result<Option<BTreeMap<String, String>>, String> {
         Ok(self
-            .take::<BTreeMap<String, Option<String>>>(alias, type_name, "map[string]string")?
+            .take::<BTreeMap<String, Option<String>>>(alias, type_name, "BTreeMap<String, String>")?
             .map(|map| {
                 map.into_iter()
                     .map(|(k, v)| (k, v.unwrap_or_default()))
@@ -731,34 +732,34 @@ mod tests {
             "toolauth: T: missing required field a"
         );
         for (text, kind) in [
-            ("\"s\"", "string"),
-            ("[1]", "array"),
-            ("12", "number"),
-            ("true", "bool"),
+            ("\"s\"", "a string"),
+            ("[1]", "an array"),
+            ("12", "a number"),
+            ("true", "a boolean"),
         ] {
             assert_eq!(
                 decode_object(&raw(text), "T", &[], true, &[])
                     .err()
                     .unwrap(),
-                format!("toolauth: T: want a JSON object, got {kind}")
+                format!("toolauth: T: expected a JSON object, found {kind}")
             );
         }
     }
 
     #[test]
-    fn take_reports_go_type_errors_without_the_value() {
+    fn take_reports_type_errors_without_the_value() {
         let r = raw(r#"{"n":98765432109876543210,"s":["secret"],"z":null}"#);
         let mut d = decode_object(&r, "T", &["n", "s", "z"], true, &[]).unwrap();
         assert_eq!(
-            d.take::<i64>("n", "T", "int64").err().unwrap(),
-            "toolauth: T: field n: cannot use a JSON number as int64"
+            d.take::<i64>("n", "T", "i64").err().unwrap(),
+            "toolauth: T: field n: cannot use a JSON number as i64"
         );
         assert_eq!(
-            d.take::<String>("s", "T", "string").err().unwrap(),
-            "toolauth: T: field s: cannot use a JSON array as string"
+            d.take::<String>("s", "T", "String").err().unwrap(),
+            "toolauth: T: field s: cannot use a JSON array as String"
         );
-        assert_eq!(d.take::<String>("z", "T", "string").unwrap(), None);
-        assert_eq!(d.take::<String>("missing", "T", "string").unwrap(), None);
+        assert_eq!(d.take::<String>("z", "T", "String").unwrap(), None);
+        assert_eq!(d.take::<String>("missing", "T", "String").unwrap(), None);
     }
 
     #[test]
@@ -766,7 +767,7 @@ mod tests {
         let r = raw("{\"s\":\"a\\ud800b\"}");
         let mut d = decode_object(&r, "T", &["s"], true, &[]).unwrap();
         assert_eq!(
-            d.take::<String>("s", "T", "string").unwrap().unwrap(),
+            d.take::<String>("s", "T", "String").unwrap().unwrap(),
             "a\u{FFFD}b"
         );
     }
@@ -793,14 +794,14 @@ mod tests {
             ("-9223372036854775809", "number"),
             ("\"5\"", "string"),
             ("[1]", "array"),
-            ("true", "bool"),
+            ("true", "boolean"),
             ("{}", "object"),
         ] {
             assert_eq!(
                 unmarshal::<OAuth2Auth>(&format!(r#"{{"expiresAt":{text}}}"#))
                     .err()
                     .unwrap(),
-                format!("toolauth: OAuth2Auth: field expiresAt: cannot use a JSON {kind} as int64"),
+                format!("toolauth: OAuth2Auth: field expiresAt: cannot use a JSON {kind} as i64"),
                 "{text}"
             );
         }
@@ -841,25 +842,25 @@ mod tests {
             unmarshal::<ServiceAccount>(r#"{"scopes":["a",1]}"#)
                 .err()
                 .unwrap(),
-            "toolauth: ServiceAccount: field scopes: cannot use a JSON array as []string"
+            "toolauth: ServiceAccount: field scopes: cannot use a JSON array as Vec<String>"
         );
         assert_eq!(
             unmarshal::<ServiceAccount>(r#"{"scopes":{"a":"b"}}"#)
                 .err()
                 .unwrap(),
-            "toolauth: ServiceAccount: field scopes: cannot use a JSON object as []string"
+            "toolauth: ServiceAccount: field scopes: cannot use a JSON object as Vec<String>"
         );
         assert_eq!(
             unmarshal::<OAuthFlow>(r#"{"scopes":{"r":1}}"#)
                 .err()
                 .unwrap(),
-            "toolauth: OAuthFlow: field scopes: cannot use a JSON object as map[string]string"
+            "toolauth: OAuthFlow: field scopes: cannot use a JSON object as BTreeMap<String, String>"
         );
         assert_eq!(
             unmarshal::<HttpAuth>(r#"{"scheme":"b","credentials":{},"additionalHeaders":["a"]}"#)
                 .err()
                 .unwrap(),
-            "toolauth: HTTPAuth: field additionalHeaders: cannot use a JSON array as map[string]string"
+            "toolauth: HttpAuth: field additionalHeaders: cannot use a JSON array as BTreeMap<String, String>"
         );
     }
 

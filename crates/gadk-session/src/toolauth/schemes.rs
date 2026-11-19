@@ -80,9 +80,9 @@ impl GoUnmarshal for OAuthFlow {
         const T: &str = "OAuthFlow";
         let mut d = decode_object(raw, T, OAUTH_FLOW_FIELDS, false, &[])?;
         Ok(OAuthFlow {
-            authorization_url: d.take("authorizationUrl", T, "string")?.unwrap_or_default(),
-            token_url: d.take("tokenUrl", T, "string")?.unwrap_or_default(),
-            refresh_url: d.take("refreshUrl", T, "string")?.unwrap_or_default(),
+            authorization_url: d.take("authorizationUrl", T, "String")?.unwrap_or_default(),
+            token_url: d.take("tokenUrl", T, "String")?.unwrap_or_default(),
+            refresh_url: d.take("refreshUrl", T, "String")?.unwrap_or_default(),
             scopes: d.take_string_map("scopes", T)?.unwrap_or_default(),
             extra: d.extra,
         })
@@ -176,7 +176,7 @@ impl GoUnmarshal for OAuthFlows {
     /// counts as missing.
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
         const T: &str = "OAuthFlows";
-        const FLOW: &str = "*toolauth.OAuthFlow";
+        const FLOW: &str = "OAuthFlow";
         let mut d = decode_object(raw, T, OAUTH_FLOWS_FIELDS, false, &[])?;
         let flows = OAuthFlows {
             implicit: d.take("implicit", T, FLOW)?,
@@ -376,26 +376,24 @@ impl GoUnmarshal for Scheme {
         const T: &str = "Scheme";
         let mut d = decode_object(raw, T, SCHEME_FIELDS, false, &[])?;
         let mut s = Scheme {
-            r#type: d
-                .take("type", T, "toolauth.SchemeType")?
-                .unwrap_or_default(),
-            description: d.take("description", T, "string")?.unwrap_or_default(),
-            r#in: d.take("in", T, "string")?.unwrap_or_default(),
-            name: d.take("name", T, "string")?.unwrap_or_default(),
-            scheme: d.take("scheme", T, "string")?.unwrap_or_default(),
-            bearer_format: d.take("bearerFormat", T, "string")?.unwrap_or_default(),
-            flows: d.take("flows", T, "*toolauth.OAuthFlows")?,
-            issuer_url: d.take("issuer_url", T, "string")?.unwrap_or_default(),
-            open_id_connect_url: d.take("openIdConnectUrl", T, "string")?.unwrap_or_default(),
+            r#type: d.take("type", T, "SchemeType")?.unwrap_or_default(),
+            description: d.take("description", T, "String")?.unwrap_or_default(),
+            r#in: d.take("in", T, "String")?.unwrap_or_default(),
+            name: d.take("name", T, "String")?.unwrap_or_default(),
+            scheme: d.take("scheme", T, "String")?.unwrap_or_default(),
+            bearer_format: d.take("bearerFormat", T, "String")?.unwrap_or_default(),
+            flows: d.take("flows", T, "OAuthFlows")?,
+            issuer_url: d.take("issuer_url", T, "String")?.unwrap_or_default(),
+            open_id_connect_url: d.take("openIdConnectUrl", T, "String")?.unwrap_or_default(),
             authorization_endpoint: d
-                .take("authorization_endpoint", T, "string")?
+                .take("authorization_endpoint", T, "String")?
                 .unwrap_or_default(),
-            token_endpoint: d.take("token_endpoint", T, "string")?.unwrap_or_default(),
+            token_endpoint: d.take("token_endpoint", T, "String")?.unwrap_or_default(),
             userinfo_endpoint: d
-                .take("userinfo_endpoint", T, "string")?
+                .take("userinfo_endpoint", T, "String")?
                 .unwrap_or_default(),
             revocation_endpoint: d
-                .take("revocation_endpoint", T, "string")?
+                .take("revocation_endpoint", T, "String")?
                 .unwrap_or_default(),
             token_endpoint_auth_methods_supported: d
                 .take_string_list("token_endpoint_auth_methods_supported", T)?,

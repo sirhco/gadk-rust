@@ -65,9 +65,7 @@ fn as_float64(v: GoJson) -> Result<GoJson, String> {
                 .parse::<f64>()
                 .ok()
                 .filter(|f| f.is_finite())
-                .ok_or_else(|| {
-                    format!("json: cannot unmarshal number {text} into Go value of type float64")
-                })?;
+                .ok_or_else(|| format!("invalid number {text}: out of range for f64"))?;
             GoJson::Number(go_json_float(f))
         }
         GoJson::Array(items) => GoJson::Array(
