@@ -16,7 +16,8 @@ name = "gadk-console"
 path = "src/main.rs"
 
 [dependencies]
-gadk-model = { workspace = true, features = ["gcp-auth"] }
+gadk-model = { workspace = true }
+gadk-cloudtrace = { workspace = true }
 gadk-eval = { workspace = true }
 gadk-eval-monitor = { workspace = true }
 gadk-prompts = { workspace = true }
@@ -26,8 +27,6 @@ axum = { workspace = true, features = ["form"] }
 bytes = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
-# Names `google_cloud_auth::credentials::Credentials` (the lazily built ADC).
-google-cloud-auth = { workspace = true }
 http = { workspace = true }
 maud = { workspace = true }
 rand = { workspace = true }

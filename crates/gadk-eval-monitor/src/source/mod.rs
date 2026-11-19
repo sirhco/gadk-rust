@@ -15,7 +15,9 @@
 //! Transcript sources: where production runs come from.
 
 pub mod bigquery;
+pub mod cloud_trace;
 pub mod mapping;
+pub mod trace_mapping;
 
 use chrono::{DateTime, Utc};
 use gadk_eval::RunTranscript;

@@ -15,7 +15,8 @@
 //! Production eval monitors: grade real agent runs with gadk-eval's scorers.
 //!
 //! A [`TranscriptSource`] lists recent runs as [`ProductionRun`]s
-//! ([`BigQueryTranscriptSource`] reads the agent-analytics table). A [`Monitor`] scores each run
+//! ([`BigQueryTranscriptSource`] reads the agent-analytics table, [`CloudTraceTranscriptSource`]
+//! the spans in Cloud Trace). A [`Monitor`] scores each run
 //! against a [`MonitorSpec`] (YAML) and returns a [`MonitorReport`], which a [`ReportStore`]
 //! keeps in a local directory or a `gs://` bucket. The `gadk-eval` binary ([`cli`]) runs all of
 //! it.
@@ -57,6 +58,7 @@ pub use judge::vertex_judge;
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
 pub use report::{MonitorReport, MonitoredRun, Window};
 pub use source::bigquery::BigQueryTranscriptSource;
+pub use source::cloud_trace::CloudTraceTranscriptSource;
 pub use source::{ProductionRun, TranscriptQuery, TranscriptSource};
 pub use spec::{JudgeSpec, MonitorSpec, SourceSpec};
 pub use store::{ReportMeta, ReportStore};

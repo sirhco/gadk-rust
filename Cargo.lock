@@ -1556,6 +1556,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "gadk-cloudtrace"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "gadk-model",
+ "google-cloud-auth",
+ "http",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "gadk-configurable"
 version = "0.3.0"
 dependencies = [
@@ -1594,13 +1612,13 @@ dependencies = [
  "chrono",
  "clap",
  "futures",
+ "gadk-cloudtrace",
  "gadk-eval",
  "gadk-eval-monitor",
  "gadk-model",
  "gadk-prompts",
  "gadk-prompts-cli",
  "gadk-telemetry",
- "google-cloud-auth",
  "http",
  "maud",
  "opentelemetry",
@@ -1686,6 +1704,7 @@ dependencies = [
  "chrono",
  "clap",
  "futures",
+ "gadk-cloudtrace",
  "gadk-eval",
  "gadk-gemini",
  "gadk-genai",

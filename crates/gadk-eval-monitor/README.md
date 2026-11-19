@@ -2,7 +2,8 @@
 
 Production eval monitors for gadk: grade real agent runs with
 [`gadk-eval`](../gadk-eval/README.md)'s scorers. A monitor reads recent invocations from the
-BigQuery agent-analytics table (written by `gadk-agentanalytics`), scores each one against a YAML
+BigQuery agent-analytics table (written by `gadk-agentanalytics`) or from the agent's spans in
+Cloud Trace ([Cloud Trace source](#cloud-trace-source)), scores each one against a YAML
 monitor spec, writes a JSON report to a local directory or `gs://`, and fails below a pass-rate
 threshold, so it runs from CI or a scheduler.
 
@@ -21,8 +22,9 @@ gadk-eval report gs://my-bucket/monitors support-bot-prod-20261117T080000Z.json
 
 ```yaml
 name: support-bot-prod            # [A-Za-z0-9_-]{1,64}; names the reports
-source:
+source:                           # exactly one of:
   bigquery: { project: my-proj, dataset: agent_analytics, table: agent_events }
+  # cloud_trace: { project: my-proj }   (see "Cloud Trace source")
 window: 24h                       # <n>m | <n>h | <n>d: runs started in [now - window, now)
 agent: support_bot                # optional: only runs whose root agent is this
 limit: 100                        # 1-1000, default 100: the newest runs in the window
@@ -107,6 +109,70 @@ structured payloads (for example a tool's `args`, which then read `[REDACTED]`) 
 `args` and `llm_judge` rubrics should tolerate redaction markers. Heavy truncation, redaction of
 free text or offloading lowers the number of gradable runs.
 
+## Cloud Trace source
+
+Agents that export their spans to Cloud Trace (with `gadk-telemetry`) but do not log to an
+analytics table can be monitored from their traces:
+
+```yaml
+source:
+  cloud_trace: { project: my-proj }   # [A-Za-z0-9_-]+: the project the traces are in
+```
+
+The agent must record message content on its spans: run it with
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` (or `SPAN_AND_EVENT`). With
+`EVENT_ONLY`, another true value or no value, the content goes to log records or nowhere, and
+every run is content incomplete.
+
+The monitor lists the traces in the window that have an `invoke_agent` span (with `agent`, a span
+whose `gen_ai.agent.name` is that agent), newest first, 100 a page, and rebuilds each trace's
+runs:
+
+- one run per distinct `gcp.vertex.agent.invocation_id` on `invoke_agent` spans. The
+  invocation's top-level spans are its `invoke_agent` spans with no `invoke_agent` ancestor of
+  the same invocation (several when a workflow agent runs sub-agents side by side under its
+  `invoke_workflow` span); the earliest is the run's root and gives the run's agent
+  (`gen_ai.agent.name`), session (`gen_ai.conversation.id`) and start time. The run's spans are
+  every top-level span and its descendants, stopping at an `invoke_agent` span of another
+  invocation (which is a run of its own). Runs whose root started
+  outside the window, or whose root agent is not `agent`, are dropped;
+- one turn per run: `user` is the text of the last message of the run's first
+  `generate_content` span's `gen_ai.input.messages` when that message is the user's (earlier
+  messages are history); `reply` is the text parts (not `reasoning`) of every
+  `gen_ai.output.messages` of the run's `generate_content` spans, in start order, joined with
+  newlines;
+- each `execute_tool` span is a tool call, in start order (ties by span id), except the
+  `execute_tool (merged)` span that groups parallel calls. The name is `gen_ai.tool.name`; the
+  arguments are `gen_ai.tool.call.arguments`, or `gcp.vertex.agent.tool_call_args` in the legacy
+  schema (JSON `null` reads as `{}`). With content capture on, the default schema leaves empty
+  arguments off the span, so a call without an arguments attribute has `{}`;
+- the run error is `error.type: <value>` from the root's `error.type`, else from the earliest
+  sub-agent span that has one.
+
+A run is marked **content incomplete**, with a note per problem, when it has no
+`generate_content` span; when the first one has no `gen_ai.input.messages`; when a
+`generate_content` span without `error.type` has no `gen_ai.output.messages`; when a message
+attribute is not JSON or not a message list; when the last input message is not the user's (a
+resumed invocation, continuing after a tool confirmation); when the user text is empty; or when
+the reply is empty and the run has no error. Its **tool calls are incomplete** when a call span
+has no `gen_ai.tool.name`, its arguments are not a JSON object, or it has no arguments attribute
+in a run that shows no content capture. Scorers treat incomplete runs as described under [How
+runs are rebuilt](#how-runs-are-rebuilt).
+
+Limits:
+
+- Cloud Trace v1 returns span labels, not span status, so a run error is only `error.type` (no
+  message), and the legacy telemetry schema records no `error.type`: its failed runs have no
+  error, and a failed model call there marks the run content incomplete.
+- A message attribute whose JSON is over 60 KiB is left off the span by the telemetry, so long
+  conversations show up as incomplete.
+- Parallel tool calls start together, so their order may differ from the order the model chose.
+- A resumed invocation (the same invocation id continuing in a new trace) is one run per trace
+  here, where the BigQuery source gives one run.
+- A listing reads at most 50 pages (5,000 traces) and stops early once `limit` runs are found.
+  `COMPLETE` pages carry every span, so they can be large.
+- Access: Cloud Trace User (`roles/cloudtrace.user`) on the project.
+
 ## Command line and exit codes
 
 | Command | Does |
@@ -155,6 +221,7 @@ written to as you would the analytics table.
 
 - BigQuery Data Viewer on the analytics dataset (it also allows reading the table schema) and
   BigQuery Job User on the project that runs the queries (the source project).
+- Cloud Trace User on the trace project (only with a `cloud_trace` source).
 - Vertex AI User on the judge project (only with `llm_judge` scorers).
 - Storage Object Admin on the bucket for `gs://` output (`report` needs only Storage Object
   Viewer).
@@ -167,9 +234,19 @@ that started in the window, then the rows of at most `limit` of them. Both filte
 short and the event types filtered. Judge cost grows with `limit` times the number of
 `llm_judge` scorers; runs are graded 8 at a time.
 
+With the Cloud Trace source, each monitor run makes up to 50 `COMPLETE` `traces.list` calls of
+100 traces each, counted against the Cloud Trace API read quota.
+
 ## Live test
 
 ```sh
 GADK_EVAL_MONITOR_LIVE_PROJECT=<project> GADK_EVAL_MONITOR_LIVE_DATASET=<dataset> \
   cargo test -p gadk-eval-monitor --test bigquery_live -- --ignored --nocapture
+```
+
+The Cloud Trace source has its own read-only live test:
+
+```sh
+GADK_EVAL_MONITOR_LIVE_TRACE_PROJECT=<project> \
+  cargo test -p gadk-eval-monitor --test cloudtrace_live -- --ignored --nocapture
 ```

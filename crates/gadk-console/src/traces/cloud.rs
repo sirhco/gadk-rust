@@ -19,26 +19,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use chrono::{DateTime, SecondsFormat, Utc};
-use gadk_model::gcp_auth::{adc_credentials, credential_headers};
+use chrono::{DateTime, Utc};
+use gadk_cloudtrace::{Adc, AuthHeaders, CloudTraceClient, Filter, ListRequest, TraceError, View};
 use gadk_model::{HttpClient, ModelError, ReqwestClient, collect_body, transport_error_detail};
-use google_cloud_auth::credentials::Credentials;
 use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderValue, Method};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use tokio::sync::OnceCell;
 
 use super::{
     LogEntry, LogSet, RawSpan, Service, SourceError, TraceDetail, TraceId, TracePage, TraceQuery,
-    TraceSource, TraceSummary, excerpt, span_id_hex,
+    TraceSource, TraceSummary, excerpt,
 };
 use crate::url::percent_encode;
 
-const TRACE_BASE: &str = "https://cloudtrace.googleapis.com";
 const LOGGING_BASE: &str = "https://logging.googleapis.com";
-const SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 /// Traces per list page.
 const LIST_PAGE_SIZE: u32 = 50;
 /// Log entries kept per trace (and the Logging page size).
@@ -49,42 +45,17 @@ const MAX_LOG_PAGES: usize = 20;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const ERROR_INFO: &str = "type.googleapis.com/google.rpc.ErrorInfo";
 const QUOTA_PROJECT: &str = "x-goog-user-project";
+const AGENT_LABEL: &str = "gen_ai.agent.name";
+const SESSION_LABEL: &str = "gen_ai.conversation.id";
 
-/// Request-header source (test seam).
-#[async_trait::async_trait]
-pub(crate) trait AuthHeaders: Send + Sync {
-    /// The headers that authenticate one request; `Err` is [`SourceError::Credentials`].
-    async fn headers(&self) -> Result<HeaderMap, SourceError>;
-}
-
-/// Application Default Credentials, built on first use so the console starts without them.
-#[derive(Default)]
-struct Adc {
-    credentials: OnceCell<Credentials>,
-}
-
-#[async_trait::async_trait]
-impl AuthHeaders for Adc {
-    async fn headers(&self) -> Result<HeaderMap, SourceError> {
-        let credentials = self
-            .credentials
-            .get_or_try_init(|| async {
-                adc_credentials(None, &[SCOPE]).map_err(|e| SourceError::Credentials(e.to_string()))
-            })
-            .await?;
-        credential_headers(credentials)
-            .await
-            .map_err(|e| SourceError::Credentials(e.to_string()))
-    }
-}
-
-/// Reads traces from Cloud Trace v1 and their log entries from Cloud Logging.
+/// Reads traces from Cloud Trace v1 (through [`CloudTraceClient`]) and their log entries from
+/// Cloud Logging.
 pub struct CloudTraceSource {
+    client: CloudTraceClient,
     http: Arc<dyn HttpClient>,
     auth: Arc<dyn AuthHeaders>,
     project: String,
     log_id: String,
-    trace_base: String,
     logging_base: String,
     now: fn() -> DateTime<Utc>,
 }
@@ -96,15 +67,15 @@ impl CloudTraceSource {
             .timeout(REQUEST_TIMEOUT)
             .build()
             .unwrap_or_default();
-        Self {
-            http: Arc::new(ReqwestClient::new(client)),
-            auth: Arc::new(Adc::default()),
-            project: project.into(),
-            log_id: log_id.into(),
-            trace_base: TRACE_BASE.to_owned(),
-            logging_base: LOGGING_BASE.to_owned(),
-            now: Utc::now,
-        }
+        Self::from_parts(
+            Arc::new(ReqwestClient::new(client)),
+            Arc::new(Adc::lazy()),
+            project.into(),
+            log_id.into(),
+            gadk_cloudtrace::ENDPOINT,
+            LOGGING_BASE,
+            Utc::now,
+        )
     }
 
     /// Every part injected (tests).
@@ -118,52 +89,70 @@ impl CloudTraceSource {
         logging_base: &str,
         now: fn() -> DateTime<Utc>,
     ) -> Self {
-        Self {
+        Self::from_parts(
             http,
             auth,
-            project: project.to_owned(),
-            log_id: log_id.to_owned(),
-            trace_base: trace_base.to_owned(),
+            project.to_owned(),
+            log_id.to_owned(),
+            trace_base,
+            logging_base,
+            now,
+        )
+    }
+
+    /// The Trace client and the Logging path share one HTTP client and one credential source.
+    fn from_parts(
+        http: Arc<dyn HttpClient>,
+        auth: Arc<dyn AuthHeaders>,
+        project: String,
+        log_id: String,
+        trace_base: &str,
+        logging_base: &str,
+        now: fn() -> DateTime<Utc>,
+    ) -> Self {
+        Self {
+            client: CloudTraceClient::with_parts(
+                project.clone(),
+                http.clone(),
+                auth.clone(),
+                trace_base,
+            ),
+            http,
+            auth,
+            project,
+            log_id,
             logging_base: logging_base.to_owned(),
             now,
         }
     }
 
-    /// `GET {trace_base}/v1/projects/{p}/traces?…` for one page of `query`.
-    fn list_url(&self, query: &TraceQuery) -> String {
+    /// The `traces.list` request for one page of `query`: the range ending now, root spans
+    /// only, newest first, [`LIST_PAGE_SIZE`] per page.
+    fn list_request(&self, query: &TraceQuery) -> ListRequest {
         let end = (self.now)();
-        let start = end - query.range.duration();
-        let mut url = format!(
-            "{}/v1/projects/{}/traces?view=ROOTSPAN&orderBy=start%20desc&pageSize={LIST_PAGE_SIZE}\
-             &startTime={}&endTime={}",
-            self.trace_base,
-            percent_encode(&self.project),
-            percent_encode(&rfc3339(start)),
-            percent_encode(&rfc3339(end)),
-        );
-        let terms: Vec<String> = [
-            ("root:", &query.name),
-            ("+gen_ai.agent.name:", &query.agent),
-            ("+gen_ai.conversation.id:", &query.session),
-        ]
-        .into_iter()
-        .filter_map(|(key, value)| {
-            let value = value.as_deref().filter(|v| !v.is_empty())?;
-            Some(format!("{key}{}", quote(value)))
-        })
-        .collect();
-        if !terms.is_empty() {
-            url.push_str("&filter=");
-            url.push_str(&percent_encode(&terms.join(" ")));
+        let mut filters = Vec::new();
+        if let Some(name) = &query.name {
+            filters.push(Filter::Root(name.clone()));
         }
-        if let Some(token) = query.page_token.as_deref().filter(|t| !t.is_empty()) {
-            url.push_str("&pageToken=");
-            url.push_str(&percent_encode(token));
+        if let Some(agent) = &query.agent {
+            filters.push(Filter::LabelExact(AGENT_LABEL.to_owned(), agent.clone()));
         }
-        url
+        if let Some(session) = &query.session {
+            filters.push(Filter::LabelExact(
+                SESSION_LABEL.to_owned(),
+                session.clone(),
+            ));
+        }
+        let mut req = ListRequest::new(end - query.range.duration(), end);
+        req.view = View::RootSpan;
+        req.filters = filters;
+        req.start_descending = true;
+        req.page_size = LIST_PAGE_SIZE;
+        req.page_token = query.page_token.clone();
+        req
     }
 
-    /// Sends one request; the 2xx body, or the mapped error.
+    /// Sends one Cloud Logging request; the 2xx body, or the mapped error.
     async fn call(
         &self,
         service: Service,
@@ -171,7 +160,11 @@ impl CloudTraceSource {
         url: &str,
         body: Option<&Value>,
     ) -> Result<Bytes, SourceError> {
-        let mut headers = self.auth.headers().await?;
+        let mut headers: HeaderMap = self
+            .auth
+            .headers()
+            .await
+            .map_err(SourceError::Credentials)?;
         let project = HeaderValue::from_str(&self.project).map_err(|e| SourceError::Transport {
             service,
             detail: format!("project id {:?}: {e}", self.project),
@@ -280,10 +273,11 @@ impl CloudTraceSource {
 #[async_trait::async_trait]
 impl TraceSource for CloudTraceSource {
     async fn list(&self, query: &TraceQuery) -> Result<TracePage, SourceError> {
-        let raw = self
-            .call(Service::Trace, Method::GET, &self.list_url(query), None)
-            .await?;
-        let page: TracesPage = decode(Service::Trace, &raw)?;
+        let page = self
+            .client
+            .list(&self.list_request(query))
+            .await
+            .map_err(trace_error)?;
         let traces = page
             .traces
             .into_iter()
@@ -291,65 +285,18 @@ impl TraceSource for CloudTraceSource {
             .collect::<Result<_, _>>()?;
         Ok(TracePage {
             traces,
-            next: page.next_page_token.filter(|t| !t.is_empty()),
+            next: page.next_page_token,
         })
     }
 
     async fn get(&self, id: &TraceId) -> Result<TraceDetail, SourceError> {
-        let url = format!(
-            "{}/v1/projects/{}/traces/{}",
-            self.trace_base,
-            percent_encode(&self.project),
-            id.as_str(),
-        );
-        let raw = match self.call(Service::Trace, Method::GET, &url, None).await {
-            Err(SourceError::Upstream { status: 404, .. }) => return Err(SourceError::NotFound),
-            other => other?,
-        };
-        let trace: V1Trace = decode(Service::Trace, &raw)?;
-        let spans = trace
-            .spans
-            .into_iter()
-            .map(raw_span)
-            .collect::<Result<_, _>>()?;
+        let trace = self.client.get(id.as_str()).await.map_err(trace_error)?;
         Ok(TraceDetail {
             trace_id: id.clone(),
-            spans,
+            spans: trace.spans.into_iter().map(raw_span).collect(),
             logs: self.logs(id).await,
         })
     }
-}
-
-/// Cloud Trace v1 `ListTracesResponse`.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TracesPage {
-    #[serde(default)]
-    traces: Vec<V1Trace>,
-    next_page_token: Option<String>,
-}
-
-/// Cloud Trace v1 `Trace` (`projectId` is ignored).
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct V1Trace {
-    trace_id: String,
-    #[serde(default)]
-    spans: Vec<V1Span>,
-}
-
-/// Cloud Trace v1 `TraceSpan` (`kind` is ignored).
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct V1Span {
-    span_id: String,
-    #[serde(default)]
-    name: String,
-    start_time: DateTime<Utc>,
-    end_time: DateTime<Utc>,
-    parent_span_id: Option<String>,
-    #[serde(default)]
-    labels: BTreeMap<String, String>,
 }
 
 /// Cloud Logging `ListLogEntriesResponse`.
@@ -371,9 +318,40 @@ struct V2Entry {
     json_payload: Option<Value>,
 }
 
+/// A Cloud Trace failure as the console's error, attributed to [`Service::Trace`].
+fn trace_error(err: TraceError) -> SourceError {
+    match err {
+        TraceError::Http {
+            status,
+            reason,
+            excerpt,
+        } => SourceError::Upstream {
+            service: Service::Trace,
+            status,
+            excerpt,
+            reason,
+        },
+        TraceError::NotFound => SourceError::NotFound,
+        TraceError::Transport(detail) => SourceError::Transport {
+            service: Service::Trace,
+            detail,
+        },
+        TraceError::Decode(detail) => SourceError::Decode {
+            service: Service::Trace,
+            detail,
+        },
+        TraceError::Credentials(detail) => SourceError::Credentials(detail),
+        // `TraceError` is non-exhaustive: a future kind reads as a transport failure.
+        other => SourceError::Transport {
+            service: Service::Trace,
+            detail: other.to_string(),
+        },
+    }
+}
+
 /// A list row from a `ROOTSPAN` trace: its single span is the root. A trace with no spans has
 /// an empty name, a zero duration and the Unix epoch as its start.
-fn summary(trace: V1Trace) -> Result<TraceSummary, SourceError> {
+fn summary(trace: gadk_cloudtrace::Trace) -> Result<TraceSummary, SourceError> {
     let trace_id = parse_trace_id(&trace.trace_id)?;
     let Some(root) = trace.spans.into_iter().next() else {
         return Ok(TraceSummary {
@@ -385,17 +363,21 @@ fn summary(trace: V1Trace) -> Result<TraceSummary, SourceError> {
             session: None,
         });
     };
-    let micros = (root.end_time - root.start_time)
+    let micros = (root.end - root.start)
         .num_microseconds()
         .unwrap_or_default();
     Ok(TraceSummary {
         trace_id,
         duration_ms: micros as f64 / 1000.0,
-        start: root.start_time,
-        agent: root.labels.get("gen_ai.agent.name").cloned(),
-        session: root.labels.get("gen_ai.conversation.id").cloned(),
+        start: root.start,
+        agent: label(&root.labels, AGENT_LABEL),
+        session: label(&root.labels, SESSION_LABEL),
         root_name: root.name,
     })
+}
+
+fn label(labels: &BTreeMap<String, String>, key: &str) -> Option<String> {
+    labels.get(key).cloned()
 }
 
 fn parse_trace_id(s: &str) -> Result<TraceId, SourceError> {
@@ -405,25 +387,17 @@ fn parse_trace_id(s: &str) -> Result<TraceId, SourceError> {
     })
 }
 
-/// A v1 span with hex ids; a parent that is absent, zero or unparsable is `None`.
-fn raw_span(span: V1Span) -> Result<RawSpan, SourceError> {
-    let span_id = span_id_hex(&span.span_id).ok_or_else(|| SourceError::Decode {
-        service: Service::Trace,
-        detail: format!("span id {:?} is not a decimal u64", span.span_id),
-    })?;
-    let parent_id = span
-        .parent_span_id
-        .as_deref()
-        .and_then(span_id_hex)
-        .filter(|p| p != "0000000000000000");
-    Ok(RawSpan {
-        span_id,
-        parent_id,
+/// A client span as the console's span (ids already hex; a parent that is absent, zero or
+/// unparsable is already `None`).
+fn raw_span(span: gadk_cloudtrace::Span) -> RawSpan {
+    RawSpan {
+        span_id: span.span_id,
+        parent_id: span.parent_id,
         name: span.name,
-        start: span.start_time,
-        end: span.end_time,
+        start: span.start,
+        end: span.end,
         labels: span.labels,
-    })
+    }
 }
 
 fn decode<T: DeserializeOwned>(service: Service, body: &[u8]) -> Result<T, SourceError> {
@@ -451,16 +425,6 @@ fn error_reason(body: &[u8]) -> Option<String> {
         .get("reason")?
         .as_str()
         .map(str::to_owned)
-}
-
-/// RFC 3339 in UTC with a `Z` suffix and only the fractional digits needed.
-fn rfc3339(t: DateTime<Utc>) -> String {
-    t.to_rfc3339_opts(SecondsFormat::AutoSi, true)
-}
-
-/// A v1 filter value: double-quoted, with `\` and `"` backslash-escaped.
-fn quote(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 #[cfg(test)]
@@ -551,7 +515,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl AuthHeaders for FixedAuth {
-        async fn headers(&self) -> Result<HeaderMap, SourceError> {
+        async fn headers(&self) -> Result<HeaderMap, String> {
             let mut h = HeaderMap::new();
             h.insert("authorization", HeaderValue::from_static("Bearer t0k"));
             h.insert("x-goog-user-project", HeaderValue::from_static("other"));
@@ -563,8 +527,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl AuthHeaders for NoAuth {
-        async fn headers(&self) -> Result<HeaderMap, SourceError> {
-            Err(SourceError::Credentials("no ADC".into()))
+        async fn headers(&self) -> Result<HeaderMap, String> {
+            Err("no ADC".into())
         }
     }
 

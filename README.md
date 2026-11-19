@@ -116,9 +116,10 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 | `gadk-goyaml` | YAML library that reads and writes YAML exactly as ADK does (internal) ([README](crates/gadk-goyaml/README.md)) |
 | `gadk-configurable` | YAML agent configs, conformance record/replay, `adkcli` (internal) ([README](crates/gadk-configurable/README.md)) |
 | `gadk-httprr` | HTTP record/replay for deterministic tests |
+| [`gadk-cloudtrace`](crates/gadk-cloudtrace/README.md) | Cloud Trace v1 read client (list and get traces), used by the console and the eval monitors |
 | [`gadk-console`](crates/gadk-console/README.md) | Local web console: Cloud Trace traces with their Cloud Logging entries, and the prompt registry |
 | [`gadk-eval`](crates/gadk-eval/README.md) | Offline agent evaluation: YAML eval sets, deterministic, tool-trajectory and LLM-judge scorers, per-variant reports |
-| [`gadk-eval-monitor`](crates/gadk-eval-monitor/README.md) | Production eval monitors: grade logged runs from the BigQuery analytics table with gadk-eval scorers; the `gadk-eval` CLI |
+| [`gadk-eval-monitor`](crates/gadk-eval-monitor/README.md) | Production eval monitors: grade logged runs from the BigQuery analytics table or Cloud Trace with gadk-eval scorers; the `gadk-eval` CLI |
 
 Binaries: `gadk` (the deploy CLI, [README](crates/gadk-cli/README.md)), `gadk-console` (the
 local web console, [README](crates/gadk-console/README.md)), `gadk-eval` (production eval

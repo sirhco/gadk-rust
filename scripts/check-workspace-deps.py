@@ -89,9 +89,12 @@
   `gadk-engine`); the façade depends on it optionally (feature `eval`), and `gadk-console` (its
   Evals pages) depends on it.
 - eval-monitor: `gadk-eval-monitor` (production eval monitors and the `gadk-eval` binary) depends
-  on exactly `gadk-eval`, `gadk-gemini` (the Vertex AI judge), `gadk-model` (HTTP seam,
-  `gcp-auth`) and `gadk-platform`; it never depends on `gadk-engine` directly, and only
-  `gadk-console` (its Evals pages) depends on it.
+  on exactly `gadk-cloudtrace` (the Cloud Trace transcript source), `gadk-eval`, `gadk-gemini`
+  (the Vertex AI judge), `gadk-model` (HTTP seam, `gcp-auth`) and `gadk-platform`; it never
+  depends on `gadk-engine` directly, and only `gadk-console` (its Evals pages) depends on it.
+- cloudtrace: `gadk-cloudtrace` (the Cloud Trace v1 read client) depends on exactly `gadk-model`
+  (HTTP seam, `gcp-auth`); `gadk-console` (its trace reads) and `gadk-eval-monitor` (the Cloud
+  Trace transcript source) depend on it.
 """
 import pathlib, sys, tomllib
 
@@ -136,11 +139,13 @@ ALLOWED = {
     "gadk-prompts": {"gadk-agent", "gadk-engine"},
     "gadk-prompts-firestore": {"gadk-prompts", "gadk-model", "gadk-platform"},
     "gadk-prompts-cli": {"gadk-prompts", "gadk-prompts-firestore"},
-    "gadk-console": {"gadk-model", "gadk-prompts", "gadk-prompts-cli", "gadk-eval",
-                     "gadk-eval-monitor"},
+    "gadk-cloudtrace": {"gadk-model"},
+    "gadk-console": {"gadk-cloudtrace", "gadk-model", "gadk-prompts", "gadk-prompts-cli",
+                     "gadk-eval", "gadk-eval-monitor"},
     "gadk-eval": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
                   "gadk-prompts", "gadk-session"},
-    "gadk-eval-monitor": {"gadk-eval", "gadk-gemini", "gadk-model", "gadk-platform"},
+    "gadk-eval-monitor": {"gadk-cloudtrace", "gadk-eval", "gadk-gemini", "gadk-model",
+                          "gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
