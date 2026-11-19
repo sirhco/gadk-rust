@@ -72,7 +72,7 @@ async fn facade_auth_paths_resolve() {
     let err = new_provider(ProviderConfig::default())
         .err()
         .expect("an empty scheme name is rejected");
-    assert_eq!(err.to_string(), "gcp: NewProvider requires a scheme Name");
+    assert_eq!(err.to_string(), "gcp: new_provider requires a scheme name");
 
     // gadk::auth::Identity is gadk::agent::Identity.
     let id: gadk::agent::Identity = Identity::default();

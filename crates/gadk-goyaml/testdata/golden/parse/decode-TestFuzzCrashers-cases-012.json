@@ -186,5 +186,5 @@
     "marshal_b64": "PyAgICJcdUZFRkYiOgo6Cg=="
   },
   "value": null,
-  "value_error": "yaml: invalid map key: map[string]interface {}{\"\\ufeff\":interface {}(nil)}"
+  "value_error": "yaml: invalid map key: {\"\\ufeff\": null}"
 }

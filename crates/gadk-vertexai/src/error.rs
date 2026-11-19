@@ -463,13 +463,13 @@ mod tests {
     #[test]
     fn memory_error_is_backend() {
         let err = memory_error(wrap(
-            "v.client.RetrieveMemories failed",
+            "retrieve memories failed",
             http(500, Some("INTERNAL"), "boom"),
         ));
         assert!(matches!(err, MemoryError::Backend(_)));
         assert_eq!(
             err.to_string(),
-            "v.client.RetrieveMemories failed: rpc error: code = Internal desc = boom"
+            "retrieve memories failed: rpc error: code = Internal desc = boom"
         );
     }
 

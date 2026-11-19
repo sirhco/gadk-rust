@@ -27,7 +27,7 @@
     ],
     "body": "streaming JSONL failed: invalid streaming_agent_run_with_events request: failed to decode input.request_json: unexpected end of JSON input\n"
   },
-  "log": "invalid streaming_agent_run_with_events request: failed to decode input.request_json: unexpected end of JSON input\nhandleQuery failed: streaming JSONL failed: invalid streaming_agent_run_with_events request: failed to decode input.request_json: unexpected end of JSON input\n",
+  "log": "invalid streaming_agent_run_with_events request: failed to decode input.request_json: unexpected end of JSON input\nfailed to handle query: streaming JSONL failed: invalid streaming_agent_run_with_events request: failed to decode input.request_json: unexpected end of JSON input\n",
   "methods": null,
   "compare": "exact"
 }

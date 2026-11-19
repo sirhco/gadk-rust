@@ -7,6 +7,70 @@ the public API.
 
 ## [Unreleased]
 
+### Changed
+
+- Runtime messages no longer name Go packages, receivers, methods or types; they use plain
+  context or Rust names instead. Only message text changed: error variants, HTTP statuses and
+  decisions are the same.
+  - `gadk-server`: Agent Engine handlers say `failed to create session: …`, `failed to get
+    session: …`, `failed to list sessions: …`, `failed to delete session: …`, `failed to run
+    agent: …`, `failed to ensure backend session: …`, `failed to emit JSON chunk: …` and
+    `failed to emit JSON error chunk: …` (were `c.sessionservice.Create() failed`, `s.run()
+    failed`, `helper.EmitJSON() failed`, …); the controller logs `failed to handle query: …`
+    (was `handleQuery failed`) and `failed to set write deadline: …`; a duplicate method is
+    `failed to create the agent engine API controller (for …): …`; the dev-feature 501 bodies
+    say `… is not implemented in the gadk server` instead of ADK Go, and the eval one points to
+    the `gadk-eval` crate and CLI and the `gadk-console` Evals pages (was adk-python); a live upgrade failure is `websocket: the connection cannot be
+    upgraded` (was `… does not implement http.Hijacker`); live runs log `live run failed`;
+    `authn: google_oidc requires …` (was `NewGoogleOIDC`).
+  - `gadk-vertexai`: Memory Bank errors read `generate memories failed`, `waiting for the
+    generate-memories operation failed`, `adding the whole session to memory failed`, `adding
+    new session events to memory failed`, `retrieve memories failed`, `reading state key <key>
+    failed` and `failed to create the Memory Bank client` (were `v.client.GenerateMemories
+    failed`, `op.Wait for GenerateMemories (whole session) failed`, …). The client-construction
+    error is now one wrapper, `failed to create the Memory Bank client: …`, instead of the two
+    nested `newVertexAIClient failed: aiplatform.NewMemoryBankClient failed: …`; the wait
+    wrapper no longer says `(whole session)` on the newer-events path.
+  - `gadk-platform` and `gadk-cli`: bad int and bool flag values read `parsing "x" as an
+    integer: invalid syntax` / `parsing "x" as a boolean: …` (were `strconv.ParseInt: parsing
+    "x": …`); safe-subpath says `failed to compute relative path` (was `filepath.Rel failed`);
+    an invalid IPv6 host is `invalid host: unable to parse IP "…"`; the deploy `--temp_dir`
+    help says `the system temp directory` (was `os.TempDir()`); duration errors (CLI
+    `--mem_ttl`, launcher duration flags, Agent Engine duration fields) drop Go's `time: `
+    prefix (`invalid duration "x"`, `unknown unit "d" in duration "1d"`).
+  - `gadk-auth`: `gcp: new_provider requires a scheme name` and `gcp: new_provider: …` (were
+    `gcp: NewProvider …`).
+  - `gadk-a2a`: `the runner config has no agent` (was `runner.Config.Agent is not provided`);
+    the auth-with-custom-client-provider error names the Rust API (`A2AConfig::auth`,
+    `client_provider`, `ClientContext::Invocation` / `Detached`, `credential_scope`).
+  - `gadk-engine`: `workflow: run_node called outside a dynamic node`, `finish task tool: "x"
+    is not an LLM agent`, `sub-agent x live run failed` and the task-mode validation hint
+    `via run_node` (were `RunNode`, `NewFinishTaskTool`, `RunLive`).
+  - `gadk-model`: an over-long SSE line is `SSE line too long` (was `bufio.Scanner: token too
+    long`).
+  - `gadk-session`: an out-of-range timestamp is `timestamp year outside of range [0,9999]`
+    (was `Time.MarshalJSON: …`).
+  - `gadk-telemetry`: GCP detector integer errors read `parsing "x" as an integer: …` (was
+    `strconv.Atoi: …`).
+  - `gadk-launcher`: `failed to create the agent engine handler: …` (was
+    `agentengine.NewHandler failed`).
+  - `gadk-agentanalytics`: `agentanalytics: a write client is required when the plugin is
+    enabled` and `no write client` (were `writeClient must not be nil` / `writeClient is
+    nil`); `send called after the request stream was closed` (was `SendMsg called after
+    CloseSend`).
+  - The `agentengine` example logs `failed to set session state`, `no memory service is
+    configured` and `failed to add session to memory`.
+  - Internal crates (`publish = false`): `gadk-goyaml` type errors name Rust targets (`into
+    i64`, `into String`, `into Vec<u8>`, the serde struct name, `into a sequence`, `into a
+    mapping`; were `int64`, `string`, `[]uint8`, `[]interface {}`, `map[string]interface {}`)
+    and `invalid map key` shows the key as `["a", "b"]` / `{"k": null}`; YAML parse and emit
+    output is unchanged. `gadk-configurable` callback type errors say `BeforeAgentCallback` /
+    `AfterAgentCallback` (`GO_TYPE_NAME` → `TYPE_NAME`, `Callback::go_type_name` →
+    `type_name`), duplicate registrations name `register_tool_factory` /
+    `register_toolset_factory` / `register_callback`, and config structs' serde names are their
+    Rust paths (`gadk_configurable::config::AgentRefConfig`), so YAML errors no longer print
+    `configurable.agentRefConfig`.
+
 ## [0.4.2] - 2026-11-19
 
 ### Added

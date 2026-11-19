@@ -282,10 +282,11 @@ mod tests {
             e.to_string(),
             "gcp: no acting user: no ADK invocation identity on the context"
         );
-        let e = Error::new(r#"resource "x y" has invalid characters"#).prefixed("gcp: NewProvider");
+        let e =
+            Error::new(r#"resource "x y" has invalid characters"#).prefixed("gcp: new_provider");
         assert_eq!(
             e.to_string(),
-            r#"gcp: NewProvider: resource "x y" has invalid characters"#
+            r#"gcp: new_provider: resource "x y" has invalid characters"#
         );
         assert_eq!(e.kind(), None);
         let e = Error::from_kind(ErrorKind::PollTimeout).with_resource("projects/p/x");

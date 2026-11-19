@@ -834,7 +834,7 @@ impl Inverse<'_> {
         self.walk_struct(elem, v)
     }
 
-    /// The yaml.v3 type-error text for node `v` decoded into the declared type `into`.
+    /// The type-error text for node `v` decoded into `into`, in gadk-goyaml's wording.
     fn terror(&mut self, v: NodeId, into: &str) {
         let n = &self.doc[v];
         let tag = self.doc.short_tag(v);
@@ -873,7 +873,7 @@ impl Inverse<'_> {
 
     /// A byte slice: yaml.v3 decodes a sequence element by element into `uint8` (a failing
     /// element is dropped with a type error, a null one silently) and rejects any non-null
-    /// scalar or mapping (`cannot unmarshal !!str `x` into []uint8`). A `!!binary` scalar with
+    /// scalar or mapping (`cannot unmarshal !!str `x` into Vec<u8>`). A `!!binary` scalar with
     /// invalid base64 aborts the decode first (yaml.v3's `scalar` resolves before the target
     /// type matters), as does any hard failure inside the sequence.
     ///
@@ -895,7 +895,7 @@ impl Inverse<'_> {
                 if self.doc[v].kind == Kind::Scalar {
                     self.binary_data(v)?;
                 }
-                self.terror(v, "[]uint8");
+                self.terror(v, "Vec<u8>");
                 self.set_null(v);
             }
             _ => {}

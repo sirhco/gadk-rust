@@ -103,7 +103,7 @@ mod tests {
 
     // Expected texts: Go `yaml.Marshal` of `node.Encode(&recordings)` (no cleaning), and Go's
     // `yaml.Unmarshal` errors (an `UnmarshalText` error aborts the decode, type errors are
-    // collected; Go's `into int` is gadk-goyaml's `into int64`, ledger 6c-1).
+    // collected and name Rust types, e.g. `into i64`).
     #[test]
     fn empty_roots_encode_as_go() {
         assert_eq!(marshal(&Recordings::default()), "recordings: []\n");
@@ -177,7 +177,7 @@ mod tests {
         let (_, terr) = from_go_node_partial(&doc, doc.root()).unwrap();
         assert_eq!(
             terr.unwrap().to_string(),
-            "yaml: unmarshal errors:\n  line 9: cannot unmarshal !!binary `aGk=` into []uint8"
+            "yaml: unmarshal errors:\n  line 9: cannot unmarshal !!binary `aGk=` into Vec<u8>"
         );
     }
 

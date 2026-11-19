@@ -2,7 +2,7 @@
   "shape": "collections",
   "case": "mismatch",
   "input_b64": "Y291bnRzOiB7YTogeCwgYjogMn0KaW50czogWzEsIHldCg==",
-  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into int64\n  line 2: cannot unmarshal !!str `y` into int64",
+  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into i64\n  line 2: cannot unmarshal !!str `y` into i64",
   "marshal_b64": "Ynl0ZXM6IFtdCmludHM6CiAgICAtIDEKY291bnRzOgogICAgYjogMgphbnk6IHt9Cml0ZW1zOiBbXQo=",
   "marshal_error": null,
   "node": {

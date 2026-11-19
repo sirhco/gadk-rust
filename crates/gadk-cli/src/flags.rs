@@ -448,7 +448,8 @@ mod tests {
         assert_eq!(stray(&m), ["a", "b", "--c", "-"]);
     }
 
-    /// pflag's error texts (`errors.go`; the cause is the value's Go parse error).
+    /// pflag's error texts (`errors.go`); the cause is the value's parse error
+    /// (`parsing "x" as an integer: …`).
     #[test]
     fn parse_errors_are_pflag_texts() {
         let cases: &[(&[&str], &str)] = &[
@@ -462,23 +463,23 @@ mod tests {
             (&["--a2a", "-a"], "flag needs an argument: 'a' in -a"),
             (
                 &["--server_port=x"],
-                r#"invalid argument "x" for "--server_port" flag: strconv.ParseInt: parsing "x": invalid syntax"#,
+                r#"invalid argument "x" for "--server_port" flag: parsing "x" as an integer: invalid syntax"#,
             ),
             (
                 &["--server_port", "99999999999999999999"],
-                r#"invalid argument "99999999999999999999" for "--server_port" flag: strconv.ParseInt: parsing "99999999999999999999": value out of range"#,
+                r#"invalid argument "99999999999999999999" for "--server_port" flag: parsing "99999999999999999999" as an integer: value out of range"#,
             ),
             (
                 &["--a2a=x"],
-                r#"invalid argument "x" for "--a2a" flag: strconv.ParseBool: parsing "x": invalid syntax"#,
+                r#"invalid argument "x" for "--a2a" flag: parsing "x" as a boolean: invalid syntax"#,
             ),
             (
                 &["--a2a="],
-                r#"invalid argument "" for "--a2a" flag: strconv.ParseBool: parsing "": invalid syntax"#,
+                r#"invalid argument "" for "--a2a" flag: parsing "" as a boolean: invalid syntax"#,
             ),
             (
                 &["--mem_ttl", "1d"],
-                r#"invalid argument "1d" for "--mem_ttl" flag: time: unknown unit "d" in duration "1d""#,
+                r#"invalid argument "1d" for "--mem_ttl" flag: unknown unit "d" in duration "1d""#,
             ),
         ];
         for (args, want) in cases {
@@ -499,7 +500,7 @@ mod tests {
         let e = c.clone().try_get_matches_from(&raw).unwrap_err();
         assert_eq!(
             pflag_error(&e, &c, &raw[1..]),
-            r#"invalid argument "x" for "-p, --port" flag: strconv.ParseInt: parsing "x": invalid syntax"#
+            r#"invalid argument "x" for "-p, --port" flag: parsing "x" as an integer: invalid syntax"#
         );
     }
 

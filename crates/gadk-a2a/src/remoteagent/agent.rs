@@ -135,9 +135,8 @@ pub struct A2AConfig {
     pub remote_task_cleanup_callback: Option<A2ARemoteTaskCleanupCallback>,
 }
 
-/// The error when `auth` and a custom `client_provider` are both set, byte-identical to an ADK
-/// agent's error text; see the literal.
-const AUTH_WITH_CLIENT_PROVIDER: &str = "A2AConfig.Auth cannot be combined with a custom ClientProvider; wire the credential into your ClientProvider instead. When this agent runs, the context the provider receives is the ADK invocation context: compute remoteagent.CredentialScope(ctx.Session(), name) there and have the client it returns attach it with a2aclient.AttachSessionID on every call, the cleanup CancelTask included. An adka2a server cancelling an abandoned child task calls the provider with its own request context instead, which is not an agent.InvocationContext, so check the assertion. See A2AConfig.ClientProvider";
+/// The error when `auth` and a custom `client_provider` are both set; see the literal.
+const AUTH_WITH_CLIENT_PROVIDER: &str = "A2AConfig::auth cannot be combined with a custom client_provider; wire the credential into your A2AClientProvider instead. When this agent runs, create_client receives ClientContext::Invocation: compute remoteagent::credential_scope(app_name, user_id, session_id, agent_name) from it and have the client it returns attach the credential on every call, the cleanup cancel_task included. A2A server cleanup of an abandoned child task calls the provider with ClientContext::Detached instead, so handle both. See A2AConfig::client_provider";
 
 /// The text of the response error a cancelled invocation ends with.
 const CONTEXT_CANCELED: &str = "context canceled";

@@ -691,7 +691,7 @@ mod tests {
             ),
             (
                 "edges:\n  - - START\n    - a\n    - {A: [x]}\n",
-                "invalid route map format: yaml: unmarshal errors:\n  line 4: cannot unmarshal !!seq into string",
+                "invalid route map format: yaml: unmarshal errors:\n  line 4: cannot unmarshal !!seq into String",
             ),
             (
                 "edges:\n  - - START\n    - a\n    - {A: ~}\n",
@@ -868,7 +868,7 @@ mod tests {
             ),
             (
                 "name: [a]\n",
-                "failed to parse config {path}: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into string",
+                "failed to parse config {path}: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into String",
             ),
             (
                 "name: f\nagent_class: FunctionNode\nfunc_code: a\nparallel_worker: x\n",
@@ -876,7 +876,7 @@ mod tests {
             ),
             (
                 "name: t\nagent_class: ToolNode\ntool_code: test_tool\nargs: x\n",
-                "failed to parse ToolNode config {path}: yaml: unmarshal errors:\n  line 4: cannot unmarshal !!str `x` into map[string]interface {}",
+                "failed to parse ToolNode config {path}: yaml: unmarshal errors:\n  line 4: cannot unmarshal !!str `x` into a mapping",
             ),
         ] {
             let (res, path, _guard) = yaml_node(&r, &ctx, "n.yaml", content).await;
@@ -1116,15 +1116,15 @@ mod tests {
     async fn workflow_agent_unmarshal_errors_are_wrapped() {
         let r = registry();
         for (content, want) in [
-            // Go: `into int` (gadk-goyaml names an i64 entry point `int64`; ledger 6c-2).
+            // An i64 entry point is named `i64`.
             (
                 "agent_class: Workflow\nname: w\nmax_concurrency: x\n",
-                "failed to unmarshal Workflow config: yaml: unmarshal errors:\n  line 3: cannot unmarshal !!str `x` into int64",
+                "failed to unmarshal Workflow config: yaml: unmarshal errors:\n  line 3: cannot unmarshal !!str `x` into i64",
             ),
-            // Go: `into []yaml.Node` (gadk-goyaml names a sequence `[]interface {}`; ledger 6c-2).
+            // serde exposes no element type, so the target is `a sequence`.
             (
                 "agent_class: Workflow\nname: w\nedges: x\n",
-                "failed to unmarshal Workflow config: yaml: unmarshal errors:\n  line 3: cannot unmarshal !!str `x` into []interface {}",
+                "failed to unmarshal Workflow config: yaml: unmarshal errors:\n  line 3: cannot unmarshal !!str `x` into a sequence",
             ),
         ] {
             let (res, _path) = load(&r, content).await;

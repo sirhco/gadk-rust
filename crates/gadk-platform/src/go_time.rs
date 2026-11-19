@@ -67,17 +67,17 @@ impl fmt::Display for GoDuration {
 
 /// Parses a duration string: a possibly signed sequence of decimal numbers, each with an
 /// optional fraction and a unit suffix (`ns`, `us`/`µs`/`μs`, `ms`, `s`, `m`, `h`), such as
-/// `"300ms"`, `"-1.5h"` or `"2h45m"`. `Err` is the message, e.g. `time: invalid duration "x"`,
-/// `time: missing unit in duration "1"`, `time: unknown unit "d" in duration "1d"`.
+/// `"300ms"`, `"-1.5h"` or `"2h45m"`. `Err` is the message, e.g. `invalid duration "x"`,
+/// `missing unit in duration "1"`, `unknown unit "d" in duration "1d"`.
 pub fn go_parse_duration(s: &str) -> Result<GoDuration, String> {
     parse_duration_bytes(s.as_bytes())
 }
 
 const LIMIT: u64 = 1 << 63;
 
-/// The error message for a malformed duration: `time: {message} "<quoted input>"`.
+/// The error message for a malformed duration: `{message} "<quoted input>"`.
 fn duration_error(message: &str, orig: &[u8]) -> String {
-    format!("time: {message} {}", time_quote(orig))
+    format!("{message} {}", time_quote(orig))
 }
 
 /// Parses a duration over bytes (which need not be UTF-8).
@@ -411,13 +411,13 @@ mod tests {
     #[test]
     fn parse_duration_errors_on_non_utf8_input() {
         let cases: &[(&[u8], &str)] = &[
-            (b"\x85\x85", r#"time: invalid duration "\x85\x85""#),
-            (b"\xffff", r#"time: invalid duration "\xffff""#),
+            (b"\x85\x85", r#"invalid duration "\x85\x85""#),
+            (b"\xffff", r#"invalid duration "\xffff""#),
             (
                 b"hello \xffff world",
-                r#"time: invalid duration "hello \xffff world""#,
+                r#"invalid duration "hello \xffff world""#,
             ),
-            (b"1\xff", r#"time: unknown unit "\xff" in duration "1\xff""#),
+            (b"1\xff", r#"unknown unit "\xff" in duration "1\xff""#),
         ];
         for (input, want) in cases {
             assert_eq!(parse_duration_bytes(input).unwrap_err(), *want, "{input:?}");

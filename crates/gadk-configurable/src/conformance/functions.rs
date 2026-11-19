@@ -607,7 +607,7 @@ mod tests {
         let r = registered();
         assert_eq!(
             register_functions(&r).cfg_err().to_string(),
-            "error registering validate email tool: RegisterToolFactory called twice for tool \
+            "error registering validate email tool: register_tool_factory called twice for tool \
              tools_agent_002.tools.validate_email"
         );
     }
@@ -624,7 +624,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             register_functions(&r).cfg_err().to_string(),
-            "error registering ask for approval tool: RegisterToolFactory called twice for tool \
+            "error registering ask for approval tool: register_tool_factory called twice for tool \
              tools_agent_009.tools.ask_for_approval"
         );
         // Go registers in order and stops at the first failure: the earlier six are in.

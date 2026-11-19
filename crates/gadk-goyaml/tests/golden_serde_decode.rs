@@ -12,44 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Replays the probe's serde goldens on decode: Go's `yaml.Unmarshal(in, &s)` error
-//! text (`decode_error`) against `gadk_goyaml::unmarshal`, and the value Go leaves in `s`
-//! (also after a `TypeError`) against `gadk_goyaml::from_node_partial`, compared with
-//! `ShapeValue::assert_same`.
+//! Replays the probe's serde goldens on decode: Go's `yaml.Unmarshal(in, &s)` error text
+//! (`decode_error`, with Rust type names) against `gadk_goyaml::unmarshal`, and the value Go
+//! leaves in `s` (also after a `TypeError`) against `gadk_goyaml::from_node_partial`,
+//! compared with `ShapeValue::assert_same`.
 
 mod support;
 
 use gadk_goyaml::unmarshal_node;
-use support::golden::{SERDE_GOLDEN_COUNT, SerdeGolden, serde_goldens};
+use support::golden::{
+    SERDE_GOLDEN_COUNT, SerdeGolden, diff_goldens, parse_goldens, serde_goldens,
+};
 use support::shapes::{ShapeValue, options};
 
-/// The serde cases whose Go error text names a type serde cannot name: Go prints the
-/// package-qualified struct (`main.Inner`) where serde gives the bare struct name, and the
-/// element type of a slice (`[]yaml.Node`) where serde exposes none (`[]interface {}`).
-/// Ledgered divergence (6c-1): "TypeError type names". Each entry is (`shape-case`, Go's
-/// text, the port's text); the rest of the message is unchanged.
-const TYPE_NAME_ADAPTATIONS: [(&str, &str, &str); 5] = [
-    ("nested-inner-not-map", "main.Inner", "Inner"),
-    ("nested-list-mismatch", "main.Inner", "Inner"),
-    ("scalars-not-a-map", "main.Scalars", "Scalars"),
-    ("scalars-scalar-root", "main.Scalars", "Scalars"),
-    ("node-edges-not-seq", "[]yaml.Node", "[]interface {}"),
-];
-
-/// The `decode_error` the port must return for `g`: Go's text with the case's adaptation.
+/// The `decode_error` the port must return for `g`. The recorded texts were rewritten once
+/// from yaml.v3's Go type names to the Rust names gadk-goyaml prints (`i64`, `String`,
+/// `Vec<u8>`, the bare serde struct name, `a sequence`, `a mapping`).
 fn expected_error(g: &SerdeGolden) -> Option<String> {
-    let name = format!("{}-{}", g.shape, g.case);
-    let want = g.decode_error.clone()?;
-    match TYPE_NAME_ADAPTATIONS
-        .iter()
-        .find(|(case, _, _)| *case == name)
-    {
-        Some((_, go, port)) => {
-            assert!(want.contains(go), "{name}: Go's text {want:?} lacks {go:?}");
-            Some(want.replace(go, port))
-        }
-        None => Some(want),
-    }
+    g.decode_error.clone()
 }
 
 /// `unmarshal` against the golden `decode_error`, then the decoded value against Go's.
@@ -119,29 +99,65 @@ fn golden_serde_decode_matches_go() {
     );
 }
 
-#[test]
-fn type_name_adaptations_name_real_cases() {
-    let goldens = serde_goldens();
-    for (case, go, _) in TYPE_NAME_ADAPTATIONS {
-        let g = goldens
+/// Whether an error text names a Go type: a type-error target (the text after ` into `) or an
+/// `invalid map key` rendering in Go syntax.
+fn names_go_type(text: &str) -> bool {
+    let go_target = |t: &str| {
+        let t = t.trim_start();
+        let digits = |rest: &str| rest.chars().all(|c| c.is_ascii_digit());
+        let word: String = t
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
+        ["[]", "map[", "main.", "interface", "*"]
             .iter()
-            .find(|g| format!("{}-{}", g.shape, g.case) == case)
-            .unwrap_or_else(|| panic!("no serde golden {case}"));
-        assert!(
-            g.decode_error.as_deref().is_some_and(|e| e.contains(go)),
-            "{case}"
-        );
-    }
-    // No other golden names a Go type serde cannot reproduce.
-    for g in &goldens {
-        let case = format!("{}-{}", g.shape, g.case);
-        if TYPE_NAME_ADAPTATIONS.iter().any(|(c, _, _)| *c == case) {
-            continue;
-        }
+            .any(|p| t.starts_with(p))
+            || word
+                .strip_prefix("uint")
+                .or_else(|| word.strip_prefix("int"))
+                .is_some_and(digits)
+            || word
+                .strip_prefix("float")
+                .is_some_and(|r| !r.is_empty() && digits(r))
+            || word == "string"
+    };
+    text.split(" into ").skip(1).any(go_target)
+        || text.split("invalid map key: ").skip(1).any(go_target)
+        || text.contains("interface {}")
+}
+
+#[test]
+fn golden_errors_name_rust_types() {
+    for g in &serde_goldens() {
         let text = g.decode_error.as_deref().unwrap_or("");
-        assert!(
-            !text.contains("main.") && !text.contains("yaml.Node"),
-            "{case}: {text}"
-        );
+        assert!(!names_go_type(text), "{}-{}: {text}", g.shape, g.case);
+    }
+    for g in parse_goldens().iter().chain(&diff_goldens()) {
+        let text = g.value_error.as_deref().unwrap_or("");
+        assert!(!names_go_type(text), "{text}");
+    }
+    // The check itself.
+    for go in [
+        "line 1: cannot unmarshal !!str `x` into int64",
+        "line 1: cannot unmarshal !!str `x` into int",
+        "line 1: cannot unmarshal !!str `x` into float64",
+        "line 1: cannot unmarshal !!seq into string",
+        "line 1: cannot unmarshal !!str `x` into []uint8",
+        "line 1: cannot unmarshal !!str `x` into main.Inner",
+        "line 1: cannot unmarshal !!str `x` into map[string]interface {}",
+        "yaml: invalid map key: []interface {}{\"a\"}",
+    ] {
+        assert!(names_go_type(go), "{go}");
+    }
+    for rust in [
+        "line 1: cannot unmarshal !!str `x` into i64",
+        "line 1: cannot unmarshal !!seq into String",
+        "line 1: cannot unmarshal !!str `x` into Vec<u8>",
+        "line 1: cannot unmarshal !!str `x` into a sequence",
+        "line 1: cannot unmarshal !!str `x` into Inner",
+        "yaml: invalid map key: [\"a\", \"b\"]",
+        "yaml: invalid map key: {\".\": null}",
+    ] {
+        assert!(!names_go_type(rust), "{rust}");
     }
 }

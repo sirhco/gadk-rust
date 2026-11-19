@@ -66,8 +66,8 @@ impl StreamingAgentRunWithEventsHandler {
     /// `StreamingAgentRunWithEventsRequest`), its `request_json`
     /// ([`decode_streaming_agent_run_with_events_request`];
     /// `invalid streaming_agent_run_with_events request: <err>`), runs
-    /// [`Self::ensure_backend_session`] (`s.ensureBackendSession() failed: <err>`), builds the
-    /// runner (`s.run() failed: …`) — each error also logged — then streams as `stream_query`
+    /// [`Self::ensure_backend_session`] (`failed to ensure backend session: <err>`), builds the
+    /// runner (`failed to run agent: …`) — each error also logged — then streams as `stream_query`
     /// does, each event as one `emit_json(&StreamingAgentRunWithEventsResponse { events:
     /// vec![event], session_id: <backend session ID> })` line.
     pub(crate) async fn stream_jsonl(&self, payload: Bytes) -> Result<Response, String> {
@@ -93,11 +93,11 @@ impl StreamingAgentRunWithEventsHandler {
             })?;
         self.ensure_backend_session(&mut run_req, &requested_session_id)
             .await
-            .map_err(|err| fail(format!("s.ensureBackendSession() failed: {err}")))?;
+            .map_err(|err| fail(format!("failed to ensure backend session: {err}")))?;
 
         let events = self
             .run(&run_req)
-            .map_err(|err| fail(format!("s.run() failed: {err}")))?;
+            .map_err(|err| fail(format!("failed to run agent: {err}")))?;
 
         let session_id = run_req.session_id;
 
@@ -111,7 +111,7 @@ impl StreamingAgentRunWithEventsHandler {
     /// With a non-empty `requested_session_id`, requires `user_id`
     /// (`user_id is required for backend session handling`), reuses the session when `get`
     /// finds it (setting `req.session_id` to its ID), else creates one for the user
-    /// (`sessionService.Create() failed: <err>`) and sets `req.session_id` to the new ID. The
+    /// (`failed to create session: <err>`) and sets `req.session_id` to the new ID. The
     /// config always has a session service, so there is no "service missing" error.
     pub(crate) async fn ensure_backend_session(
         &self,
@@ -147,7 +147,7 @@ impl StreamingAgentRunWithEventsHandler {
                 state: None,
             })
             .await
-            .map_err(|err| format!("sessionService.Create() failed: {err}"))?;
+            .map_err(|err| format!("failed to create session: {err}"))?;
         req.session_id = created.id().to_owned();
         Ok(())
     }

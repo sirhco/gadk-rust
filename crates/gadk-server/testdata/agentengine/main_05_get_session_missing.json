@@ -25,9 +25,9 @@
         "nosniff"
       ]
     ],
-    "body": "c.sessionservice.Get() failed: session not found: \"nope\"\n"
+    "body": "failed to get session: session not found: \"nope\"\n"
   },
-  "log": "handleQuery failed: c.sessionservice.Get() failed: session not found: \"nope\"\n",
+  "log": "failed to handle query: failed to get session: session not found: \"nope\"\n",
   "methods": null,
   "compare": "exact"
 }

@@ -22,8 +22,8 @@
 //! the entry point (`0`, `false`, `""`, an empty map, an empty sequence for a slice, `len` zero
 //! elements for an array or tuple) and records the error; the success flag of each decode
 //! travels in [`DecodeState::good`] so sequences and maps drop the entries yaml.v3 drops. The
-//! type names in `TypeError` texts come from the serde entry point (`int64`, `[]uint8`, the
-//! serde struct name, `[]interface {}`, `map[string]interface {}`).
+//! targets in `TypeError` texts are Rust names from the serde entry point (`i64`, `String`,
+//! `Vec<u8>`, the serde struct name, `a sequence`, `a mapping`).
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -47,7 +47,7 @@ use crate::resolve::{
     BINARY_TAG, MAP_TAG, MERGE_TAG, NULL_TAG, SEQ_TAG, STR_TAG, resolve, short_tag,
 };
 use crate::value::{
-    GO_VALUE_MARKER, GoValue, GoValueDeserializer, InlineEntries, go_sharp_v, hand_over,
+    GO_VALUE_MARKER, GoValue, GoValueDeserializer, InlineEntries, hand_over, key_text,
     unmarshal_value, unmarshal_value_entered,
 };
 
@@ -127,8 +127,8 @@ pub(crate) struct Entered {
 }
 
 impl DecodeState<'_> {
-    /// Records `line N: cannot unmarshal <tag>[ `value`] into <out_type>`, `out_type` being the
-    /// type name yaml.v3 prints for the target.
+    /// Records `line N: cannot unmarshal <tag>[ `value`] into <out_type>`, `out_type` naming the
+    /// Rust target (`i64`, `String`, `Vec<u8>`, a struct name, `a sequence`, `a mapping`).
     pub(crate) fn terror(&mut self, n: &NodeData, tag: &str, out_type: &str) {
         let tag = if n.tag.is_empty() {
             tag
@@ -403,12 +403,12 @@ fn string_entered(
         }
         Kind::Mapping => {
             if check_unique_keys(d, doc, n) {
-                d.terror(node, MAP_TAG, "string");
+                d.terror(node, MAP_TAG, "String");
             }
             Ok(None)
         }
         Kind::Sequence => {
-            d.terror(node, SEQ_TAG, "string");
+            d.terror(node, SEQ_TAG, "String");
             Ok(None)
         }
         Kind::Zero if node.is_zero() => Ok(None),
@@ -501,21 +501,21 @@ enum Prim {
 }
 
 impl Prim {
-    /// The type name in `TypeError` texts.
-    fn go_name(self) -> &'static str {
+    /// The Rust type name in `TypeError` texts.
+    fn type_name(self) -> &'static str {
         match self {
             Prim::Bool => "bool",
-            Prim::Int(8) => "int8",
-            Prim::Int(16) => "int16",
-            Prim::Int(32) => "int32",
-            Prim::Int(_) => "int64",
-            Prim::Uint(8) => "uint8",
-            Prim::Uint(16) => "uint16",
-            Prim::Uint(32) => "uint32",
-            Prim::Uint(_) => "uint64",
-            Prim::Float(32) => "float32",
-            Prim::Float(_) => "float64",
-            Prim::Str => "string",
+            Prim::Int(8) => "i8",
+            Prim::Int(16) => "i16",
+            Prim::Int(32) => "i32",
+            Prim::Int(_) => "i64",
+            Prim::Uint(8) => "u8",
+            Prim::Uint(16) => "u16",
+            Prim::Uint(32) => "u32",
+            Prim::Uint(_) => "u64",
+            Prim::Float(32) => "f32",
+            Prim::Float(_) => "f64",
+            Prim::Str => "String",
         }
     }
 
@@ -622,20 +622,21 @@ impl Prim {
 /// The sequence-shaped serde entry points.
 #[derive(Clone, Copy)]
 enum SeqWant {
-    /// `deserialize_seq`: a `[]interface {}`.
+    /// `deserialize_seq`: any sequence.
     Seq,
-    /// `deserialize_bytes` / `deserialize_byte_buf`: a `[]uint8`.
+    /// `deserialize_bytes` / `deserialize_byte_buf`: a `Vec<u8>`.
     Bytes,
     /// `deserialize_tuple` / `deserialize_tuple_struct`: an array of this length.
     Tuple(usize),
 }
 
 impl SeqWant {
-    fn go_name(self) -> &'static str {
+    /// The target in `TypeError` texts; serde exposes no element type, so a sequence or
+    /// tuple target is just `a sequence`.
+    fn type_name(self) -> &'static str {
         match self {
-            SeqWant::Bytes => "[]uint8",
-            // serde exposes no element type, while yaml.v3 names it (`[]int64`, `[2]int`).
-            SeqWant::Seq | SeqWant::Tuple(_) => "[]interface {}",
+            SeqWant::Bytes => "Vec<u8>",
+            SeqWant::Seq | SeqWant::Tuple(_) => "a sequence",
         }
     }
 
@@ -657,7 +658,7 @@ impl SeqWant {
 /// The map-shaped serde entry points.
 #[derive(Clone, Copy)]
 enum Mode {
-    /// `deserialize_map`: a `map[string]interface {}` (any key type).
+    /// `deserialize_map`: any mapping (any key type).
     Map,
     /// `deserialize_struct`: the struct of that name.
     Struct {
@@ -667,13 +668,11 @@ enum Mode {
 }
 
 impl Mode {
-    fn go_name(self) -> &'static str {
+    /// The target in `TypeError` texts: `a mapping` for a map (serde exposes no key or
+    /// element type), else the struct name serde gives.
+    fn type_name(self) -> &'static str {
         match self {
-            // serde exposes no key or element type, while yaml.v3 names them
-            // (`map[string]int64`).
-            Mode::Map => "map[string]interface {}",
-            // yaml.v3 prints the package-qualified type name; serde gives the bare struct
-            // name.
+            Mode::Map => "a mapping",
             Mode::Struct { name, .. } => name,
         }
     }
@@ -767,7 +766,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
                         want.visit(v, visitor)
                     }
                     None => {
-                        self.d.terror(node, &tag, want.go_name());
+                        self.d.terror(node, &tag, want.type_name());
                         self.d.good = false;
                         want.zero(visitor)
                     }
@@ -775,13 +774,13 @@ impl<'a, 'o> NodeDe<'a, 'o> {
             }
             Kind::Mapping => {
                 if check_unique_keys(self.d, self.doc, n) {
-                    self.d.terror(node, MAP_TAG, want.go_name());
+                    self.d.terror(node, MAP_TAG, want.type_name());
                 }
                 self.d.good = false;
                 want.zero(visitor)
             }
             Kind::Sequence => {
-                self.d.terror(node, SEQ_TAG, want.go_name());
+                self.d.terror(node, SEQ_TAG, want.type_name());
                 self.d.good = false;
                 want.zero(visitor)
             }
@@ -831,7 +830,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
                     // A null sets a slice to nil (an array is left untouched).
                     self.d.good = !matches!(want, SeqWant::Tuple(_));
                 } else {
-                    self.d.terror(node, &tag, want.go_name());
+                    self.d.terror(node, &tag, want.type_name());
                     self.d.good = false;
                 }
                 let good = self.d.good;
@@ -841,7 +840,7 @@ impl<'a, 'o> NodeDe<'a, 'o> {
             }
             Kind::Mapping => {
                 if check_unique_keys(self.d, doc, n) {
-                    self.d.terror(node, MAP_TAG, want.go_name());
+                    self.d.terror(node, MAP_TAG, want.type_name());
                 }
                 let r = want.zero(self.d, doc, visitor);
                 self.d.good = false;
@@ -885,12 +884,12 @@ impl<'a, 'o> NodeDe<'a, 'o> {
                 if resolved == GoValue::Null {
                     matches!(mode, Mode::Map)
                 } else {
-                    self.d.terror(node, &tag, mode.go_name());
+                    self.d.terror(node, &tag, mode.type_name());
                     false
                 }
             }
             Kind::Sequence => {
-                self.d.terror(node, SEQ_TAG, mode.go_name());
+                self.d.terror(node, SEQ_TAG, mode.type_name());
                 false
             }
             Kind::Zero if node.is_zero() => matches!(mode, Mode::Map),
@@ -1074,7 +1073,7 @@ impl<'de> Deserializer<'de> for NodeDe<'_, '_> {
     }
 
     /// Bytes: a sequence of `u8`; yaml.v3 v3.0.1 rejects a `!!str`/`!!binary` scalar
-    /// (`cannot unmarshal !!binary `…` into []uint8`).
+    /// (`cannot unmarshal !!binary `…` into Vec<u8>`).
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         self.run(|c, n| c.sequence(n, SeqWant::Bytes, visitor))
     }
@@ -1522,7 +1521,7 @@ impl<'a, 'o> MapWalk<'a, 'o> {
                     if let Some(&(_, fi)) = self.keys.iter().find(|(k, _)| *k == sname) {
                         if self.d.unique_keys {
                             if done[fi] {
-                                // yaml.v3 names the type package-qualified.
+                                // The type is the serde struct name.
                                 self.d.terrors.push(format!(
                                     "line {}: field {sname} already set in type {name}",
                                     doc[kn].line
@@ -1566,7 +1565,7 @@ impl<'a, 'o> MapWalk<'a, 'o> {
             mf.push(k.clone());
         }
         if matches!(k, GoValue::Seq(_) | GoValue::Map(_) | GoValue::MapAny(_)) {
-            return Err(failf(format_args!("invalid map key: {}", go_sharp_v(&k))));
+            return Err(failf(format_args!("invalid map key: {}", key_text(&k))));
         }
         Ok(true)
     }
@@ -1858,7 +1857,7 @@ mod tests {
         let err = from_node::<Point>(&doc, doc.root(), &opts()).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `a` into int64\n  line 3: cannot unmarshal !!seq into string"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `a` into i64\n  line 3: cannot unmarshal !!seq into String"
         );
         let (p, terr) = from_node_partial::<Point>(&doc, doc.root(), &opts()).unwrap();
         assert_eq!(
@@ -1889,7 +1888,7 @@ mod tests {
         let err = unmarshal::<i64>(b"abcdefghijklmnop", &opts()).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `abcdefg...` into int64"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `abcdefg...` into i64"
         );
     }
 
@@ -1903,7 +1902,7 @@ mod tests {
 
     /// Go's array target: a null leaves it untouched (no error), a scalar is a type error,
     /// and only good elements are stored, compacted toward the front (decode.go `sequence`'s
-    /// `j`). Go names the type `[2]int64` (ledgered: the port says `[]interface {}`).
+    /// `j`). The error names the target `a sequence`.
     #[test]
     fn fixed_length_targets_take_null_mismatch_and_compact_like_go() {
         let partial = |src: &str| {
@@ -1926,7 +1925,7 @@ mod tests {
             (
                 want([0, 0], (0, 0)),
                 Some(
-                    "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into []interface {}\n  line 2: cannot unmarshal !!str `x` into []interface {}"
+                    "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into a sequence\n  line 2: cannot unmarshal !!str `x` into a sequence"
                         .to_owned()
                 )
             )
@@ -1936,7 +1935,7 @@ mod tests {
             (
                 want([1, 0], (1, 0)),
                 Some(
-                    "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into int64\n  line 2: cannot unmarshal !!str `x` into int64"
+                    "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into i64\n  line 2: cannot unmarshal !!str `x` into i64"
                         .to_owned()
                 )
             )
@@ -1950,7 +1949,7 @@ mod tests {
             unmarshal::<[[i64; 2]; 2]>(b"[~, [x, 3]]", &opts())
                 .unwrap_err()
                 .to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into int64"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into i64"
         );
         let doc = unmarshal_node(b"[~, [x, 3]]").unwrap();
         let (v, _) = from_node_partial::<[[i64; 2]; 2]>(&doc, doc.root(), &opts()).unwrap();
@@ -2128,16 +2127,16 @@ mod tests {
 
     #[test]
     fn terror_keeps_the_raw_value_of_seq_and_map_tags() {
-        // Go: `cannot unmarshal !!mapfoo into int64` (value appended without backticks).
+        // Go: `cannot unmarshal !!mapfoo into i64` (value appended without backticks).
         let err = unmarshal::<BTreeMap<String, i64>>(b"a: !!map foo\n", &opts()).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!mapfoo into int64"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!mapfoo into i64"
         );
         let err = unmarshal::<BTreeMap<String, i64>>(b"a: !!seq bar\n", &opts()).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seqbar into int64"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seqbar into i64"
         );
     }
 
@@ -2154,7 +2153,7 @@ mod tests {
         let err = unmarshal::<Shape>(b"{[1]: 1}", &opts()).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into string"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into String"
         );
     }
 
@@ -2165,7 +2164,7 @@ mod tests {
         assert_eq!(v, vec!["a".to_string(), "b".to_string()]);
         assert_eq!(
             terr.unwrap().to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into string"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into String"
         );
         let doc = unmarshal_node(b"{a: 1, b: ~, c: x}").unwrap();
         let (m, _) = from_node_partial::<BTreeMap<String, i64>>(&doc, doc.root(), &opts()).unwrap();
@@ -2225,7 +2224,7 @@ mod tests {
         let err = unmarshal::<B>(b"b: !!binary aGVsbG8=\n", &opts()).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!binary `aGVsbG8=` into []uint8"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!binary `aGVsbG8=` into Vec<u8>"
         );
         let b: B = unmarshal(b"b: [1, 255]\n", &opts()).unwrap();
         assert_eq!(b.b, vec![1, 255]);

@@ -16,9 +16,9 @@
 //! The YAML config structs for agents and workflows, decoded by gadk-goyaml with yaml.v3's
 //! rules.
 //!
-//! Shape rules: every struct's serde name is its package-qualified type name
-//! (`configurable.llmAgentYAMLConfig`), so yaml.v3 type errors name the struct as ADK's own
-//! config loader does, and each is listed in [`options`]' `verbatim_structs` (each field's YAML
+//! Shape rules: every struct's serde name is its Rust path
+//! (`gadk_configurable::config::LlmAgentYamlConfig`), so YAML type errors name the struct
+//! unambiguously, and each is listed in [`options`]' `verbatim_structs` (each field's YAML
 //! key equals the serde field name). Every struct is `#[serde(default)]` (absent keys are
 //! zero-filled); an optional value is `Option<T>`. The fields of the base agent config are
 //! repeated field by field in each concrete agent struct, with the catch-all of unknown keys
@@ -41,7 +41,7 @@ use crate::govalue::GoMap;
 
 /// A reference to a function or callback by registered name.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.codeConfig")]
+#[serde(default, rename = "gadk_configurable::config::CodeConfig")]
 pub struct CodeConfig {
     /// The `name` key: the registered name (`my_pkg.security.Check`).
     pub name: String,
@@ -51,7 +51,7 @@ pub struct CodeConfig {
 
 /// A reference to a sub-agent.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.agentRefConfig")]
+#[serde(default, rename = "gadk_configurable::config::AgentRefConfig")]
 pub struct AgentRefConfig {
     /// The `config_path` key: another agent's YAML file.
     pub config_path: String,
@@ -61,7 +61,7 @@ pub struct AgentRefConfig {
 
 /// A tool or toolset reference with its arguments.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.ToolConfig")]
+#[serde(default, rename = "gadk_configurable::config::ToolConfig")]
 pub struct ToolConfig {
     /// The `name` key.
     pub name: String,
@@ -72,7 +72,7 @@ pub struct ToolConfig {
 /// The fields every agent config shares; [`crate::Registry::from_config`]
 /// decodes it first to read `agent_class`.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.baseAgentConfig")]
+#[serde(default, rename = "gadk_configurable::config::BaseAgentConfig")]
 pub struct BaseAgentConfig {
     /// The `agent_class` key (empty → `LlmAgent`).
     pub agent_class: String,
@@ -98,7 +98,7 @@ pub struct BaseAgentConfig {
 
 /// The LLM agent config: the base agent fields plus the LLM agent's own.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.llmAgentYAMLConfig")]
+#[serde(default, rename = "gadk_configurable::config::LlmAgentYamlConfig")]
 pub struct LlmAgentYamlConfig {
     /// Same as [`BaseAgentConfig::agent_class`].
     pub agent_class: String,
@@ -134,7 +134,7 @@ pub struct LlmAgentYamlConfig {
 
 /// The loop agent config: the base agent fields plus `max_iterations`.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.loopAgentYAMLConfig")]
+#[serde(default, rename = "gadk_configurable::config::LoopAgentYamlConfig")]
 pub struct LoopAgentYamlConfig {
     /// Same as [`BaseAgentConfig::agent_class`].
     pub agent_class: String,
@@ -160,7 +160,7 @@ pub struct LoopAgentYamlConfig {
 
 /// The parallel agent config: the base agent fields only.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.parallelAgentYAMLConfig")]
+#[serde(default, rename = "gadk_configurable::config::ParallelAgentYamlConfig")]
 pub struct ParallelAgentYamlConfig {
     /// Same as [`BaseAgentConfig::agent_class`].
     pub agent_class: String,
@@ -184,7 +184,10 @@ pub struct ParallelAgentYamlConfig {
 
 /// The sequential agent config: the base agent fields only.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.sequentialAgentYAMLConfig")]
+#[serde(
+    default,
+    rename = "gadk_configurable::config::SequentialAgentYamlConfig"
+)]
 pub struct SequentialAgentYamlConfig {
     /// Same as [`BaseAgentConfig::agent_class`].
     pub agent_class: String,
@@ -208,7 +211,7 @@ pub struct SequentialAgentYamlConfig {
 
 /// The workflow agent config: the base agent fields plus `edges` and `max_concurrency`.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.workflowYAMLConfig")]
+#[serde(default, rename = "gadk_configurable::config::WorkflowYamlConfig")]
 pub struct WorkflowYamlConfig {
     /// Same as [`BaseAgentConfig::agent_class`].
     pub agent_class: String,
@@ -236,7 +239,7 @@ pub struct WorkflowYamlConfig {
 
 /// A function node of a workflow.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.functionNodeYAMLConfig")]
+#[serde(default, rename = "gadk_configurable::config::FunctionNodeYamlConfig")]
 pub struct FunctionNodeYamlConfig {
     /// The `name` key.
     pub name: String,
@@ -250,7 +253,7 @@ pub struct FunctionNodeYamlConfig {
 
 /// A join node of a workflow.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.joinNodeYAMLConfig")]
+#[serde(default, rename = "gadk_configurable::config::JoinNodeYamlConfig")]
 pub struct JoinNodeYamlConfig {
     /// The `name` key.
     pub name: String,
@@ -258,7 +261,7 @@ pub struct JoinNodeYamlConfig {
 
 /// A tool node of a workflow.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(default, rename = "configurable.toolNodeYAMLConfig")]
+#[serde(default, rename = "gadk_configurable::config::ToolNodeYamlConfig")]
 pub struct ToolNodeYamlConfig {
     /// The `name` key.
     pub name: String,
@@ -274,18 +277,18 @@ pub struct ToolNodeYamlConfig {
 
 /// The serde names of every yaml-tagged config struct (their keys are the field names).
 pub const VERBATIM_STRUCTS: [&str; 12] = [
-    "configurable.codeConfig",
-    "configurable.agentRefConfig",
-    "configurable.ToolConfig",
-    "configurable.baseAgentConfig",
-    "configurable.llmAgentYAMLConfig",
-    "configurable.loopAgentYAMLConfig",
-    "configurable.parallelAgentYAMLConfig",
-    "configurable.sequentialAgentYAMLConfig",
-    "configurable.workflowYAMLConfig",
-    "configurable.functionNodeYAMLConfig",
-    "configurable.joinNodeYAMLConfig",
-    "configurable.toolNodeYAMLConfig",
+    "gadk_configurable::config::CodeConfig",
+    "gadk_configurable::config::AgentRefConfig",
+    "gadk_configurable::config::ToolConfig",
+    "gadk_configurable::config::BaseAgentConfig",
+    "gadk_configurable::config::LlmAgentYamlConfig",
+    "gadk_configurable::config::LoopAgentYamlConfig",
+    "gadk_configurable::config::ParallelAgentYamlConfig",
+    "gadk_configurable::config::SequentialAgentYamlConfig",
+    "gadk_configurable::config::WorkflowYamlConfig",
+    "gadk_configurable::config::FunctionNodeYamlConfig",
+    "gadk_configurable::config::JoinNodeYamlConfig",
+    "gadk_configurable::config::ToolNodeYamlConfig",
 ];
 
 static OPTIONS: LazyLock<Options> = LazyLock::new(|| Options {
@@ -433,11 +436,10 @@ custom_key: kept
         assert_eq!(cfg.max_iterations, 4);
         assert!(cfg.additional_properties.is_empty());
         let err = unmarshal::<LoopAgentYamlConfig>(b"max_iterations: -1\n").unwrap_err();
-        // Go names its `uint` field type `uint`; gadk-goyaml names a u64 `uint64` (the 6c-1
-        // serde-entry-point type names).
+        // gadk-goyaml names the target by its serde entry point: `u64`.
         assert_eq!(
             err.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!int `-1` into uint64"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!int `-1` into u64"
         );
     }
 
@@ -514,12 +516,12 @@ custom_key: kept
         let err = unmarshal::<LlmAgentYamlConfig>(b"sub_agents: [x]\n").unwrap_err();
         assert_eq!(
             err.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into configurable.agentRefConfig"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into gadk_configurable::config::AgentRefConfig"
         );
         let err = unmarshal::<BaseAgentConfig>(b"name: [a]\n").unwrap_err();
         assert_eq!(
             err.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into string"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into String"
         );
     }
 
@@ -534,7 +536,10 @@ custom_key: kept
         let opts = options();
         assert_eq!(opts.verbatim_structs.len(), VERBATIM_STRUCTS.len());
         assert_eq!(
-            opts.key_for("configurable.llmAgentYAMLConfig", "generate_content_config"),
+            opts.key_for(
+                "gadk_configurable::config::LlmAgentYamlConfig",
+                "generate_content_config"
+            ),
             "generate_content_config"
         );
         assert_eq!(

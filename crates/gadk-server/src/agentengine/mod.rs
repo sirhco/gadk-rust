@@ -106,7 +106,7 @@ pub enum Error {
     /// Two handlers of one controller share a method name (`kind` is `non-streaming` or
     /// `streaming`). Unreachable with the six built-in methods.
     #[error(
-        "controllers.NewAgentEngineAPIController failed (for {kind}): duplicate method name: {name}"
+        "failed to create the agent engine API controller (for {kind}): duplicate method name: {name}"
     )]
     DuplicateMethod {
         /// `non-streaming` or `streaming`.
@@ -374,7 +374,7 @@ mod tests {
         };
         assert_eq!(
             e.to_string(),
-            "controllers.NewAgentEngineAPIController failed (for streaming): duplicate method name: async_stream_query"
+            "failed to create the agent engine API controller (for streaming): duplicate method name: async_stream_query"
         );
         assert_eq!(
             Error::Encode("x".into()).to_string(),

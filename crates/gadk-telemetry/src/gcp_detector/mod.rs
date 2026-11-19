@@ -347,7 +347,7 @@ impl ResourceBuilder {
     }
 }
 
-/// Parses a decimal integer; the error texts are byte-identical to ADK's (see the literals here).
+/// Parses a decimal integer; errors read `parsing "<s>" as an integer: <reason>`.
 fn atoi(s: &str) -> Result<i64, String> {
     s.parse::<i64>().map_err(|e| {
         let reason = match e.kind() {
@@ -357,7 +357,7 @@ fn atoi(s: &str) -> Result<i64, String> {
             _ => "invalid syntax",
         };
         format!(
-            "strconv.Atoi: parsing {}: {reason}",
+            "parsing {} as an integer: {reason}",
             gadk_platform::go_quote(s)
         )
     })

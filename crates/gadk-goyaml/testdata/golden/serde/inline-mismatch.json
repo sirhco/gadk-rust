@@ -2,7 +2,7 @@
   "shape": "inline",
   "case": "mismatch",
   "input_b64": "bmFtZTogWzFdCmV4dHJhOiAxCg==",
-  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into string",
+  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into String",
   "marshal_b64": "bmFtZTogIiIKZXh0cmE6IDEK",
   "marshal_error": null,
   "node": {

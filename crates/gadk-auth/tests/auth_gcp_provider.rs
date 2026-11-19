@@ -985,23 +985,23 @@ fn test_new_provider_validates_scheme() {
         }
     }
 
-    // Go's exact texts for the two messages this function writes itself.
+    // The exact texts of the two messages this function writes itself.
     let text = |cfg| match new_provider(cfg) {
         Err(e) => e.to_string(),
         Ok(_) => panic!("NewProvider() = a provider, want an error"),
     };
     assert_eq!(
         text(ProviderConfig::default()),
-        "gcp: NewProvider requires a scheme Name"
+        "gcp: new_provider requires a scheme name"
     );
     assert_eq!(
         text(cfg_for("Bearer")),
-        r#"gcp: NewProvider: scheme Name "Bearer" is neither projects/*/locations/*/connectors/* nor projects/*/locations/*/authProviders/*"#
+        r#"gcp: new_provider: scheme name "Bearer" is neither projects/*/locations/*/connectors/* nor projects/*/locations/*/authProviders/*"#
     );
     assert!(
         text(cfg_for("projects/p/locations/l/authProviders/a b"))
-            .starts_with("gcp: NewProvider: resource "),
-        "a validate_resource failure is prefixed with \"gcp: NewProvider: \""
+            .starts_with("gcp: new_provider: resource "),
+        "a validate_resource failure is prefixed with \"gcp: new_provider: \""
     );
 }
 

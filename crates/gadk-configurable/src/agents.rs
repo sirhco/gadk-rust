@@ -230,8 +230,8 @@ pub(crate) fn resolve_callbacks<T: CallbackType>(
                 return Err(ConfigError::msg(format!(
                     "callback {} is of type {} and not {}",
                     r.name,
-                    c.go_type_name(),
-                    T::GO_TYPE_NAME
+                    c.type_name(),
+                    T::TYPE_NAME
                 )));
             };
             cbs.push(cb);
@@ -375,7 +375,7 @@ mod tests {
             ),
             (
                 "name: a\nmodel: [x]\n",
-                "failed to parse LLM agent config: yaml: unmarshal errors:\n  line 2: cannot unmarshal !!seq into string",
+                "failed to parse LLM agent config: yaml: unmarshal errors:\n  line 2: cannot unmarshal !!seq into String",
             ),
         ] {
             let p = write(&base, "a.yaml", yaml);
@@ -434,16 +434,15 @@ mod tests {
         }
         // Every field of these three configs is a base field, so a type error is caught by
         // FromConfig's base peek first (`invalid YAML content: …`); the factories' own parse
-        // errors are reached by calling them directly. Divergence candidate (ledger 6c-2):
-        // gadk-goyaml names the slice `[]interface {}` where Go prints
-        // `[]configurable.agentRefConfig`.
+        // errors are reached by calling them directly. serde exposes no element type, so
+        // the target is `a sequence`.
         let p = write(
             &base,
             "a.yaml",
             "agent_class: LoopAgent\nname: a\nsub_agents: x\n",
         );
         let elem_err =
-            "yaml: unmarshal errors:\n  line 3: cannot unmarshal !!str `x` into []interface {}";
+            "yaml: unmarshal errors:\n  line 3: cannot unmarshal !!str `x` into a sequence";
         assert_eq!(
             load(&r, &p).await.cfg_err().to_string(),
             format!("invalid YAML content: {elem_err}")
@@ -472,7 +471,7 @@ mod tests {
                 .to_string(),
             format!("failed to parse Sequential agent config: {elem_err}")
         );
-        // Divergence candidate (ledger 6c-2): Go names the type `uint`.
+        // A u64 field is named `u64`.
         let p = write(
             &base,
             "a.yaml",
@@ -480,7 +479,7 @@ mod tests {
         );
         assert_eq!(
             load(&r, &p).await.cfg_err().to_string(),
-            "failed to parse Loop agent config: yaml: unmarshal errors:\n  line 3: cannot unmarshal !!int `-1` into uint64"
+            "failed to parse Loop agent config: yaml: unmarshal errors:\n  line 3: cannot unmarshal !!int `-1` into u64"
         );
     }
 
@@ -741,12 +740,12 @@ mod tests {
             (
                 "before_agent_callbacks",
                 "a1",
-                "failed to create LLM agent config: callback a1 is of type agent.AfterAgentCallback and not agent.BeforeAgentCallback",
+                "failed to create LLM agent config: callback a1 is of type AfterAgentCallback and not BeforeAgentCallback",
             ),
             (
                 "after_agent_callbacks",
                 "b1",
-                "failed to create LLM agent config: callback b1 is of type agent.BeforeAgentCallback and not agent.AfterAgentCallback",
+                "failed to create LLM agent config: callback b1 is of type BeforeAgentCallback and not AfterAgentCallback",
             ),
         ] {
             let p = write(
@@ -772,7 +771,7 @@ mod tests {
             Ok(_) => panic!("expected an error"),
             Err(e) => assert_eq!(
                 e.to_string(),
-                "callback a is of type agent.AfterAgentCallback and not agent.BeforeAgentCallback"
+                "callback a is of type AfterAgentCallback and not BeforeAgentCallback"
             ),
         }
         assert!(

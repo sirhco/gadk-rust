@@ -61,7 +61,7 @@ async fn serve(resp: Response) -> (StatusCode, String, String) {
 #[tokio::test]
 async fn test_new_not_implemented_handler() {
     const FEATURE: &str = "the widget tab";
-    const DETAIL: &str = "ADK Go has no widgets.";
+    const DETAIL: &str = "gadk has no widgets.";
     let h = new_not_implemented_handler(FEATURE, DETAIL);
     let (status, content_type, raw) = serve(h(get("/dev/apps/test-app/widgets")).await).await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED);

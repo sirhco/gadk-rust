@@ -209,34 +209,28 @@ fn test_parse_duration_errors() {
     }
 }
 
-/// Go `ParseDuration`'s full error texts (`parseDurationError.Error()` with `time.quote`).
+/// The full duration error texts: Go `ParseDuration`'s, without its `time: ` prefix.
 #[test]
-fn parse_duration_error_texts_match_go() {
+fn parse_duration_error_texts() {
     let cases: &[(&str, &str)] = &[
-        ("", r#"time: invalid duration """#),
-        ("x", r#"time: invalid duration "x""#),
-        ("3", r#"time: missing unit in duration "3""#),
-        ("1.5", r#"time: missing unit in duration "1.5""#),
-        ("1d", r#"time: unknown unit "d" in duration "1d""#),
-        (
-            "1s2days",
-            r#"time: unknown unit "days" in duration "1s2days""#,
-        ),
-        ("5 s", r#"time: unknown unit " s" in duration "5 s""#),
-        (
-            "1é",
-            r#"time: unknown unit "\xc3\xa9" in duration "1\xc3\xa9""#,
-        ),
-        ("1\"\\", r#"time: unknown unit "\"\\" in duration "1\"\\""#),
-        ("1\n", r#"time: unknown unit "\x0a" in duration "1\x0a""#),
-        ("3000000h", r#"time: invalid duration "3000000h""#),
+        ("", r#"invalid duration """#),
+        ("x", r#"invalid duration "x""#),
+        ("3", r#"missing unit in duration "3""#),
+        ("1.5", r#"missing unit in duration "1.5""#),
+        ("1d", r#"unknown unit "d" in duration "1d""#),
+        ("1s2days", r#"unknown unit "days" in duration "1s2days""#),
+        ("5 s", r#"unknown unit " s" in duration "5 s""#),
+        ("1é", r#"unknown unit "\xc3\xa9" in duration "1\xc3\xa9""#),
+        ("1\"\\", r#"unknown unit "\"\\" in duration "1\"\\""#),
+        ("1\n", r#"unknown unit "\x0a" in duration "1\x0a""#),
+        ("3000000h", r#"invalid duration "3000000h""#),
         (
             "9223372036854775808ns1ns",
-            r#"time: invalid duration "9223372036854775808ns1ns""#,
+            r#"invalid duration "9223372036854775808ns1ns""#,
         ),
         (
             "-9223372036854775808ns1ns",
-            r#"time: invalid duration "-9223372036854775808ns1ns""#,
+            r#"invalid duration "-9223372036854775808ns1ns""#,
         ),
     ];
     for (input, want) in cases {

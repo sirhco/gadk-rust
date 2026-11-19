@@ -2,7 +2,7 @@
   "shape": "scalars",
   "case": "mismatch",
   "input_b64": "YjogeWVzCmkzMjogYWJjCmY2NDogdHJ1ZQpzOiBbMSwgMl0KdTMyOiB7fQo=",
-  "decode_error": "yaml: unmarshal errors:\n  line 2: cannot unmarshal !!str `abc` into int32\n  line 3: cannot unmarshal !!bool `true` into float64\n  line 4: cannot unmarshal !!seq into string\n  line 5: cannot unmarshal !!map into uint32",
+  "decode_error": "yaml: unmarshal errors:\n  line 2: cannot unmarshal !!str `abc` into i32\n  line 3: cannot unmarshal !!bool `true` into f64\n  line 4: cannot unmarshal !!seq into String\n  line 5: cannot unmarshal !!map into u32",
   "marshal_b64": "YjogdHJ1ZQppODogMAppMTY6IDAKaTMyOiAwCmk2NDogMAp1ODogMAp1MTY6IDAKdTMyOiAwCnU2NDogMApmMzI6IDAKZjY0OiAwCnM6ICIiCg==",
   "marshal_error": null,
   "node": {

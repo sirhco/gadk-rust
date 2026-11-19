@@ -107,7 +107,7 @@ impl MethodHandler for GetSessionHandler {
             .await
             .map_err(|e| {
                 format!(
-                    "c.sessionservice.Get() failed: {}",
+                    "failed to get session: {}",
                     session_error_text(&e, &session_id)
                 )
             })?;
@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(
             err.as_deref(),
             Some(
-                "c.sessionservice.Get() failed: app_name, user_id, session_id are required, got app_name: \"test-engine\", user_id: \"u\", session_id: \"\""
+                "failed to get session: app_name, user_id, session_id are required, got app_name: \"test-engine\", user_id: \"u\", session_id: \"\""
             )
         );
         let err = h
@@ -190,7 +190,7 @@ mod tests {
             .err();
         assert_eq!(
             err.as_deref(),
-            Some(r#"c.sessionservice.Get() failed: session not found: "a\"b""#)
+            Some(r#"failed to get session: session not found: "a\"b""#)
         );
     }
 

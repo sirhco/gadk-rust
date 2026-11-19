@@ -104,12 +104,7 @@ impl MethodHandler for CreateSessionHandler {
                 state: req.input.state,
             })
             .await
-            .map_err(|e| {
-                format!(
-                    "c.sessionservice.Create() failed: {}",
-                    session_error_text(&e, "")
-                )
-            })?;
+            .map_err(|e| format!("failed to create session: {}", session_error_text(&e, "")))?;
         encode_plain(&CreateSessionResponse {
             output: from_session(&*sess),
         })
@@ -175,7 +170,7 @@ mod tests {
         assert_eq!(
             err.as_deref(),
             Some(
-                "c.sessionservice.Create() failed: app_name and user_id are required, got app_name: \"test-engine\", user_id: \"\""
+                "failed to create session: app_name and user_id are required, got app_name: \"test-engine\", user_id: \"\""
             )
         );
     }

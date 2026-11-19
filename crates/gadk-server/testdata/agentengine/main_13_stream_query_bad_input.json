@@ -27,7 +27,7 @@
     ],
     "body": "streaming JSONL failed: could not decode the request as StreamQueryRequest (invalid `StreamQueryRequest.input.message`: expected a JSON object, found a number) or StreamQueryTextRequest (invalid `StreamQueryTextRequest.input.message`: expected a string, found a number)\n"
   },
-  "log": "could not decode the request as StreamQueryRequest (invalid `StreamQueryRequest.input.message`: expected a JSON object, found a number) or StreamQueryTextRequest (invalid `StreamQueryTextRequest.input.message`: expected a string, found a number)\nhandleQuery failed: streaming JSONL failed: could not decode the request as StreamQueryRequest (invalid `StreamQueryRequest.input.message`: expected a JSON object, found a number) or StreamQueryTextRequest (invalid `StreamQueryTextRequest.input.message`: expected a string, found a number)\n",
+  "log": "could not decode the request as StreamQueryRequest (invalid `StreamQueryRequest.input.message`: expected a JSON object, found a number) or StreamQueryTextRequest (invalid `StreamQueryTextRequest.input.message`: expected a string, found a number)\nfailed to handle query: streaming JSONL failed: could not decode the request as StreamQueryRequest (invalid `StreamQueryRequest.input.message`: expected a JSON object, found a number) or StreamQueryTextRequest (invalid `StreamQueryTextRequest.input.message`: expected a string, found a number)\n",
   "methods": null,
   "compare": "exact"
 }

@@ -153,7 +153,7 @@ pub(crate) fn validate_no_task_mode_graph_nodes(edges: &[Edge]) -> Result<(), Wo
                 return Err(WorkflowError::new(
                     WorkflowErrorKind::Other,
                     format!(
-                        "Agent {} has mode='task' and cannot be used as a workflow graph node. Use a chat coordinator with task sub-agents, or dispatch dynamically via RunNode from a function node",
+                        "Agent {} has mode='task' and cannot be used as a workflow graph node. Use a chat coordinator with task sub-agents, or dispatch dynamically via run_node from a function node",
                         go_quote(node.name())
                     ),
                 ));

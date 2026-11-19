@@ -616,7 +616,7 @@ async fn append_rows_streams_requests_and_responses() {
             .await
             .unwrap_err()
             .to_string(),
-        "rpc error: code = Internal desc = SendMsg called after CloseSend"
+        "rpc error: code = Internal desc = send called after the request stream was closed"
     );
     let got: Vec<(usize, String)> = server
         .append_requests()

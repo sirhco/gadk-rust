@@ -284,27 +284,27 @@ mod tests {
         for (name, go_type) in [
             (
                 "callback_agent_001.callbacks.before_agent_callback1",
-                "agent.BeforeAgentCallback",
+                "BeforeAgentCallback",
             ),
             (
                 "callback_agent_001.callbacks.before_agent_callback2",
-                "agent.BeforeAgentCallback",
+                "BeforeAgentCallback",
             ),
             (
                 "callback_agent_002.callbacks.shortcut_agent_execution",
-                "agent.BeforeAgentCallback",
+                "BeforeAgentCallback",
             ),
             (
                 "callback_agent_003.callbacks.after_agent_callback1",
-                "agent.AfterAgentCallback",
+                "AfterAgentCallback",
             ),
             (
                 "callback_agent_003.callbacks.after_agent_callback2",
-                "agent.AfterAgentCallback",
+                "AfterAgentCallback",
             ),
         ] {
             let cb = r.resolve_callback_reference(name).unwrap();
-            assert_eq!(cb.go_type_name(), go_type, "{name}");
+            assert_eq!(cb.type_name(), go_type, "{name}");
         }
         assert_eq!(r.inner.read().callbacks.len(), 5);
 
@@ -326,7 +326,7 @@ mod tests {
         register_callbacks(&r).unwrap();
         assert_eq!(
             register_callbacks(&r).cfg_err().to_string(),
-            "error registering before agent callback 1: RegisterCallback called twice for \
+            "error registering before agent callback 1: register_callback called twice for \
              callback callback_agent_001.callbacks.before_agent_callback1"
         );
     }
@@ -341,7 +341,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             register_callbacks(&r).cfg_err().to_string(),
-            "error registering after agent callback 1: RegisterCallback called twice for \
+            "error registering after agent callback 1: register_callback called twice for \
              callback callback_agent_003.callbacks.after_agent_callback1"
         );
         // Go stops at the first failure: the three before it are in, the last one is not.

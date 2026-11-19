@@ -496,25 +496,25 @@ fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
-/// Parses a bool; `Err` is the number-parse error text (`parsing "<s>": invalid syntax`
-/// prefixed with the parser's name), the message for an invalid bool flag value.
+/// Parses a bool; `Err` is the parse error text (`parsing "<s>" as a boolean: invalid syntax`),
+/// the message for an invalid bool flag value.
 pub fn go_parse_bool(s: &str) -> Result<bool, String> {
-    parse_bool(s).ok_or_else(|| num_error("ParseBool", s, "invalid syntax"))
+    parse_bool(s).ok_or_else(|| num_error("a boolean", s, "invalid syntax"))
 }
 
 /// Parses an int64 (optional sign, base prefix `0x`/`0o`/`0b`/`0`, underscores); `Err` is
-/// the number-parse error text (`parsing "<s>": invalid syntax` or `…: value out of range`,
-/// prefixed with the parser's name), the messages for an invalid int flag value.
+/// the parse error text (`parsing "<s>" as an integer: invalid syntax` or `…: value out of
+/// range`), the messages for an invalid int flag value.
 pub fn go_parse_int(s: &str) -> Result<i64, String> {
     parse_int(s).map_err(|e| match e {
-        IntError::Syntax => num_error("ParseInt", s, "invalid syntax"),
-        IntError::Range(_) => num_error("ParseInt", s, "value out of range"),
+        IntError::Syntax => num_error("an integer", s, "invalid syntax"),
+        IntError::Range(_) => num_error("an integer", s, "value out of range"),
     })
 }
 
-/// The text `strconv.<func>: parsing <quoted num>: <err>`.
-fn num_error(func: &str, num: &str, err: &str) -> String {
-    format!("strconv.{func}: parsing {}: {err}", go_quote(num))
+/// The text `parsing <quoted num> as <what>: <err>`.
+fn num_error(what: &str, num: &str, err: &str) -> String {
+    format!("parsing {} as {what}: {err}", go_quote(num))
 }
 
 /// An integer-parse failure.

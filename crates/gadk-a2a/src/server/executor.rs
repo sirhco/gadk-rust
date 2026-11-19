@@ -914,7 +914,7 @@ fn default_runner_provider(base: Option<gadk_engine::runner::RunnerConfig>) -> R
         let base = base.clone();
         Box::pin(async move {
             let Some(mut cfg) = base else {
-                return Err(Error::msg("runner.Config.Agent is not provided"));
+                return Err(Error::msg("the runner config has no agent"));
             };
             cfg.plugin_config.plugins.push(plugin);
             let runner_config = RunnerConfig {
@@ -1203,7 +1203,7 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(
             got[0].as_ref().unwrap_err().message,
-            "failed to create a runner: runner.Config.Agent is not provided"
+            "failed to create a runner: the runner config has no agent"
         );
     }
 

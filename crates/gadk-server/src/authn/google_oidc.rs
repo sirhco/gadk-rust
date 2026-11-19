@@ -98,19 +98,19 @@ pub fn google_oidc_with_log(
 pub(crate) fn new_google_oidc(cfg: GoogleOidcConfig) -> Result<GoogleOidc, AuthnError> {
     if cfg.audience.is_empty() {
         return Err(AuthnError::Other(
-            "authn: NewGoogleOIDC requires an audience".into(),
+            "authn: google_oidc requires an audience".into(),
         ));
     }
     if cfg.allowed_service_accounts.is_empty() {
         return Err(AuthnError::Other(
-            "authn: NewGoogleOIDC requires at least one allowed service account; the audience alone does not identify the caller"
+            "authn: google_oidc requires at least one allowed service account; the audience alone does not identify the caller"
                 .into(),
         ));
     }
     for account in &cfg.allowed_service_accounts {
         if account.is_empty() || account != account.trim() {
             return Err(AuthnError::Other(format!(
-                "authn: NewGoogleOIDC allowed service account {} is empty or has surrounding whitespace",
+                "authn: google_oidc allowed service account {} is empty or has surrounding whitespace",
                 go_quote(account)
             )));
         }

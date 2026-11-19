@@ -541,9 +541,9 @@ pub async fn new_bigquery_agent_analytics_plugin_with_config(
 ///
 /// # Errors
 ///
-/// The config's validation error; `agentanalytics: writeClient must not be nil when plugin is
-/// enabled`; `failed to create GCS offloader: …`; the table setup error; `failed to initialize
-/// batch processor: …`.
+/// The config's validation error; `agentanalytics: a write client is required when the
+/// plugin is enabled`; `failed to create GCS offloader: …`; the table setup error;
+/// `failed to initialize batch processor: …`.
 pub async fn new_bigquery_agent_analytics_plugin_with_clients(
     ctx: &Context,
     config: Config,
@@ -579,7 +579,7 @@ pub(crate) async fn new_plugin(
     };
     let Some(write_client) = write_client else {
         return Err(Error::msg(
-            "agentanalytics: writeClient must not be nil when plugin is enabled",
+            "agentanalytics: a write client is required when the plugin is enabled",
         ));
     };
     validate_event_filter_lists(&config);
@@ -953,7 +953,7 @@ mod tests {
                 new_bigquery_agent_analytics_plugin_with_clients(&ctx, config.clone(), None, None)
                     .await
             ),
-            "agentanalytics: writeClient must not be nil when plugin is enabled"
+            "agentanalytics: a write client is required when the plugin is enabled"
         );
         let server = FakeWriteServer::new();
         let bad = Config {

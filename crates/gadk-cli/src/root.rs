@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(
             err,
             format!(
-                "Error: invalid argument \"x\" for \"--server_port\" flag: strconv.ParseInt: parsing \"x\": invalid syntax\n{}\n",
+                "Error: invalid argument \"x\" for \"--server_port\" flag: parsing \"x\" as an integer: invalid syntax\n{}\n",
                 usage(&["deploy", "agentengine"])
             )
         );

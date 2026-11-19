@@ -2,7 +2,7 @@
   "shape": "recordings",
   "case": "mismatch",
   "input_b64": "cmVjb3JkaW5nczoKICAtIHVzZXJfbWVzc2FnZV9pbmRleDogeAogICAgYWdlbnRfbmFtZTogW2FdCg==",
-  "decode_error": "yaml: unmarshal errors:\n  line 2: cannot unmarshal !!str `x` into int64\n  line 3: cannot unmarshal !!seq into string",
+  "decode_error": "yaml: unmarshal errors:\n  line 2: cannot unmarshal !!str `x` into i64\n  line 3: cannot unmarshal !!seq into String",
   "marshal_b64": "cmVjb3JkaW5nczoKICAgIC0gdXNlcl9tZXNzYWdlX2luZGV4OiAwCiAgICAgIGFnZW50X25hbWU6ICIiCg==",
   "marshal_error": null,
   "node": {

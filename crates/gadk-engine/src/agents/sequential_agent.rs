@@ -300,7 +300,7 @@ fn sequential_live_stream(
             let (sub_sess, mut inner) = match live.run_live(sub_ctx).await {
                 Ok(v) => v,
                 Err(e) => {
-                    yield Err(wrap(format!("sub-agent {} RunLive failed", sub.name()), e));
+                    yield Err(wrap(format!("sub-agent {} live run failed", sub.name()), e));
                     return;
                 }
             };

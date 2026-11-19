@@ -767,7 +767,7 @@ mod tests {
         write_recordings(dir.path(), "recordings:\n  - user_message_index: x\n");
         assert_eq!(
             load(json!({"dir": base, "user_message_index": 0})),
-            Err("failed to decode recordings: yaml: unmarshal errors:\n  line 2: cannot unmarshal !!str `x` into int64".into())
+            Err("failed to decode recordings: yaml: unmarshal errors:\n  line 2: cannot unmarshal !!str `x` into i64".into())
         );
     }
 

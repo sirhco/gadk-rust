@@ -204,7 +204,7 @@ pub fn command() -> Command {
             "temp_dir",
             Some('t'),
             "",
-            "Temp dir for build, defaults to os.TempDir() if not specified",
+            "Temp dir for build, defaults to the system temp directory if not specified",
         ))
         .arg(int_flag("server_port", None, "8080", "agentEngine server port"))
         // `-e` names a Cargo package.

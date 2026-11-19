@@ -273,7 +273,7 @@ async fn test_run_node_err_invalid_run_node_context_on_static_context() {
     );
     assert_eq!(
         err.to_string(),
-        "workflow: RunNode called outside a dynamic node"
+        "workflow: run_node called outside a dynamic node"
     );
 }
 

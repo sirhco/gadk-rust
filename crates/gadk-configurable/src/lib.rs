@@ -136,17 +136,17 @@ pub enum Callback {
 
 impl Callback {
     /// The type name of the stored callback, as shown in error messages.
-    pub fn go_type_name(&self) -> &'static str {
+    pub fn type_name(&self) -> &'static str {
         match self {
-            Callback::BeforeAgent(_) => BeforeAgent::GO_TYPE_NAME,
-            Callback::AfterAgent(_) => AfterAgent::GO_TYPE_NAME,
+            Callback::BeforeAgent(_) => BeforeAgent::TYPE_NAME,
+            Callback::AfterAgent(_) => AfterAgent::TYPE_NAME,
         }
     }
 }
 
 impl std::fmt::Debug for Callback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.go_type_name())
+        f.write_str(self.type_name())
     }
 }
 
@@ -154,9 +154,9 @@ impl std::fmt::Debug for Callback {
 pub(crate) trait CallbackType {
     /// The Rust callback type.
     type Fn;
-    /// The type name of `T` in error messages (a qualified name such as the
-    /// before-agent callback's).
-    const GO_TYPE_NAME: &'static str;
+    /// The type name of `T` in error messages (the callback type alias, such as
+    /// `BeforeAgentCallback`).
+    const TYPE_NAME: &'static str;
     /// The callback when it has this type.
     fn from_callback(c: &Callback) -> Option<Self::Fn>;
 }
@@ -169,7 +169,7 @@ pub(crate) struct AfterAgent;
 
 impl CallbackType for BeforeAgent {
     type Fn = BeforeAgentCallback;
-    const GO_TYPE_NAME: &'static str = "agent.BeforeAgentCallback";
+    const TYPE_NAME: &'static str = "BeforeAgentCallback";
     fn from_callback(c: &Callback) -> Option<BeforeAgentCallback> {
         match c {
             Callback::BeforeAgent(f) => Some(f.clone()),
@@ -180,7 +180,7 @@ impl CallbackType for BeforeAgent {
 
 impl CallbackType for AfterAgent {
     type Fn = AfterAgentCallback;
-    const GO_TYPE_NAME: &'static str = "agent.AfterAgentCallback";
+    const TYPE_NAME: &'static str = "AfterAgentCallback";
     fn from_callback(c: &Callback) -> Option<AfterAgentCallback> {
         match c {
             Callback::AfterAgent(f) => Some(f.clone()),
@@ -351,7 +351,7 @@ impl Registry {
         Ok(())
     }
 
-    /// Registers a tool factory: `RegisterToolFactory called twice for tool {name}` on a
+    /// Registers a tool factory: `register_tool_factory called twice for tool {name}` on a
     /// duplicate (tools and toolsets share one namespace).
     pub fn register_tool_factory(
         &self,
@@ -361,14 +361,14 @@ impl Registry {
         let mut g = self.inner.write();
         if g.tools.contains_key(name) {
             return Err(ConfigError::msg(format!(
-                "RegisterToolFactory called twice for tool {name}"
+                "register_tool_factory called twice for tool {name}"
             )));
         }
         g.tools.insert(name.to_owned(), ToolEntry::Tool(factory));
         Ok(())
     }
 
-    /// Registers a toolset factory: `RegisterToolsetFactory called twice for toolset {name}`.
+    /// Registers a toolset factory: `register_toolset_factory called twice for toolset {name}`.
     pub fn register_toolset_factory(
         &self,
         name: &str,
@@ -377,19 +377,19 @@ impl Registry {
         let mut g = self.inner.write();
         if g.tools.contains_key(name) {
             return Err(ConfigError::msg(format!(
-                "RegisterToolsetFactory called twice for toolset {name}"
+                "register_toolset_factory called twice for toolset {name}"
             )));
         }
         g.tools.insert(name.to_owned(), ToolEntry::Toolset(factory));
         Ok(())
     }
 
-    /// Registers a callback: `RegisterCallback called twice for callback {name}`.
+    /// Registers a callback: `register_callback called twice for callback {name}`.
     pub fn register_callback(&self, name: &str, callback: Callback) -> Result<(), ConfigError> {
         let mut g = self.inner.write();
         if g.callbacks.contains_key(name) {
             return Err(ConfigError::msg(format!(
-                "RegisterCallback called twice for callback {name}"
+                "register_callback called twice for callback {name}"
             )));
         }
         g.callbacks.insert(name.to_owned(), callback);
@@ -899,14 +899,14 @@ mod tests {
             r.register_tool_factory("t", test_tool_factory(tseen.clone()))
                 .cfg_err()
                 .to_string(),
-            "RegisterToolFactory called twice for tool t"
+            "register_tool_factory called twice for tool t"
         );
         // Tools and toolsets share one namespace.
         assert_eq!(
             r.register_toolset_factory("t", test_toolset_factory("t", tseen.clone()))
                 .cfg_err()
                 .to_string(),
-            "RegisterToolsetFactory called twice for toolset t"
+            "register_toolset_factory called twice for toolset t"
         );
         r.register_toolset_factory("ts", test_toolset_factory("ts", tseen.clone()))
             .unwrap();
@@ -914,7 +914,7 @@ mod tests {
             r.register_tool_factory("ts", test_tool_factory(tseen))
                 .cfg_err()
                 .to_string(),
-            "RegisterToolFactory called twice for tool ts"
+            "register_tool_factory called twice for tool ts"
         );
         assert!(matches!(r.inner.read().tools["t"], ToolEntry::Tool(_)));
         assert!(matches!(r.inner.read().tools["ts"], ToolEntry::Toolset(_)));
@@ -924,11 +924,11 @@ mod tests {
             r.register_callback("cb", Callback::AfterAgent(noop_before()))
                 .cfg_err()
                 .to_string(),
-            "RegisterCallback called twice for callback cb"
+            "register_callback called twice for callback cb"
         );
         assert_eq!(
-            r.inner.read().callbacks["cb"].go_type_name(),
-            "agent.BeforeAgentCallback"
+            r.inner.read().callbacks["cb"].type_name(),
+            "BeforeAgentCallback"
         );
     }
 
@@ -1060,7 +1060,7 @@ mod tests {
         let p = write(&base, "bad.yaml", "agent_class: [a]\n");
         assert_eq!(
             r.from_config(&p).await.cfg_err().to_string(),
-            "invalid YAML content: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into string"
+            "invalid YAML content: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into String"
         );
         let p = write(&base, "bad2.yaml", "name: [unclosed\n");
         let err = r.from_config(&p).await.cfg_err().to_string();
@@ -1460,12 +1460,12 @@ mod tests {
     }
 
     #[test]
-    fn callback_go_type_names() {
+    fn callback_type_names() {
         let before = Callback::BeforeAgent(noop_before());
         let after = Callback::AfterAgent(noop_before());
-        assert_eq!(before.go_type_name(), "agent.BeforeAgentCallback");
-        assert_eq!(after.go_type_name(), "agent.AfterAgentCallback");
-        assert_eq!(format!("{before:?}"), "agent.BeforeAgentCallback");
+        assert_eq!(before.type_name(), "BeforeAgentCallback");
+        assert_eq!(after.type_name(), "AfterAgentCallback");
+        assert_eq!(format!("{before:?}"), "BeforeAgentCallback");
     }
 
     #[test]
@@ -1476,8 +1476,8 @@ mod tests {
         let after = Callback::AfterAgent(noop_before());
         assert!(AfterAgent::from_callback(&after).is_some());
         assert!(BeforeAgent::from_callback(&after).is_none());
-        assert_eq!(BeforeAgent::GO_TYPE_NAME, "agent.BeforeAgentCallback");
-        assert_eq!(AfterAgent::GO_TYPE_NAME, "agent.AfterAgentCallback");
+        assert_eq!(BeforeAgent::TYPE_NAME, "BeforeAgentCallback");
+        assert_eq!(AfterAgent::TYPE_NAME, "AfterAgentCallback");
     }
 
     #[test]

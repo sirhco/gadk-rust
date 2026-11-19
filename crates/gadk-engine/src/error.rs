@@ -146,7 +146,7 @@ impl WorkflowError {
             K::NodeFailed => "workflow: dynamic child failed",
             K::NodeInterrupted => "workflow: dynamic child interrupted",
             K::NodeWaitingForOutput => "workflow: dynamic child interrupted: waiting for output",
-            K::InvalidRunNodeContext => "workflow: RunNode called outside a dynamic node",
+            K::InvalidRunNodeContext => "workflow: run_node called outside a dynamic node",
             K::InvalidRunId => "workflow: invalid run id",
             K::ParallelHitlUnsupported => "workflow: parallel HITL is not supported",
             K::InputValidation => "workflow: input validation failed",

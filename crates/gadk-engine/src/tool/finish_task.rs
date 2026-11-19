@@ -63,7 +63,7 @@ impl FinishTaskTool {
     pub(crate) fn new(task_agent: &dyn Agent) -> Result<Arc<FinishTaskTool>, ToolError> {
         let state = reveal(task_agent).ok_or_else(|| {
             ToolError::InvalidArgument(format!(
-                "NewFinishTaskTool: {} is not an LLMAgent",
+                "finish task tool: {} is not an LLM agent",
                 go_quote(task_agent.name())
             ))
         })?;
@@ -293,7 +293,7 @@ mod tests {
         let err = FinishTaskTool::new(custom.as_ref()).err().unwrap();
         assert_eq!(
             err.to_string(),
-            "NewFinishTaskTool: \"custom\" is not an LLMAgent"
+            "finish task tool: \"custom\" is not an LLM agent"
         );
     }
 

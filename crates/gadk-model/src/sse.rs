@@ -37,7 +37,7 @@ pub struct SseEvent {
 pub const ANTHROPIC_SDK_MAX_LINE: usize = (64 * 1024) << 9;
 
 /// The error text for a line over the limit.
-const TOKEN_TOO_LONG: &str = "bufio.Scanner: token too long";
+const TOKEN_TOO_LONG: &str = "SSE line too long";
 
 struct Parser {
     body: BodyStream,
@@ -138,7 +138,7 @@ pub fn sse_events(body: BodyStream) -> BoxStream<'static, Result<SseEvent, Model
 
 /// [`sse_events`] with a line limit: a line whose
 /// bytes plus its `\n` exceed `max_line`, or an unterminated tail of `max_line` bytes, ends the
-/// stream with a [`ModelError::Other`] whose text is the `TOKEN_TOO_LONG` literal.
+/// stream with a [`ModelError::Other`] whose text is `SSE line too long`.
 pub fn sse_events_with_max_line(
     body: BodyStream,
     max_line: usize,
@@ -331,14 +331,14 @@ mod tests {
             assert_eq!(out.len(), 1, "{out:?}");
             assert_eq!(
                 out[0].as_ref().unwrap_err().to_string(),
-                "bufio.Scanner: token too long"
+                "SSE line too long"
             );
         }
         // An unterminated tail of exactly `max` bytes is too long, even at EOF.
         let out: Vec<_> = limited(vec![b"data: abcd".to_vec()], 10).collect().await;
         assert_eq!(
             out[0].as_ref().unwrap_err().to_string(),
-            "bufio.Scanner: token too long"
+            "SSE line too long"
         );
         let out: Vec<_> = limited(vec![b"data: abc".to_vec()], 10).collect().await;
         assert_eq!(out[0].as_ref().unwrap(), &data("abc"));

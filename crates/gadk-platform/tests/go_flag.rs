@@ -15,7 +15,8 @@
 
 //! `gadk_platform::go_flag` against Go's `flag` package: ports of the `src/flag/flag_test.go`
 //! cases that apply to the supported flag kinds and `ContinueOnError`, plus tables whose
-//! expectations were produced by Go 1.27's `flag` (outputs and error texts byte for byte).
+//! expectations were produced by Go 1.27's `flag` (outputs and error texts byte for byte,
+//! except that a bad number or bool reads `parsing "<s>" as an integer|a boolean: …`).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -554,10 +555,10 @@ fn int_flag_values_match_go_strconv() {
     }
 }
 
-/// `go_parse_int` is Go `strconv.ParseInt(s, 0, 64)` with the `*strconv.NumError` text (the
-/// cause pflag's int flags print); expectations are Go 1.27 output.
+/// `go_parse_int` accepts Go `strconv.ParseInt(s, 0, 64)` syntax; failures read
+/// `parsing "<s>" as an integer: <reason>` (the cause int flags print).
 #[test]
-fn go_parse_int_returns_strconv_num_errors() {
+fn go_parse_int_returns_parse_errors() {
     let cases: &[(&str, Result<i64, &str>)] = &[
         ("0x10", Ok(16)),
         ("010", Ok(8)),
@@ -565,19 +566,16 @@ fn go_parse_int_returns_strconv_num_errors() {
         ("1_000", Ok(1000)),
         ("-0x10", Ok(-16)),
         ("8080", Ok(8080)),
-        ("x", Err(r#"strconv.ParseInt: parsing "x": invalid syntax"#)),
-        ("", Err(r#"strconv.ParseInt: parsing "": invalid syntax"#)),
-        (
-            "1_",
-            Err(r#"strconv.ParseInt: parsing "1_": invalid syntax"#),
-        ),
+        ("x", Err(r#"parsing "x" as an integer: invalid syntax"#)),
+        ("", Err(r#"parsing "" as an integer: invalid syntax"#)),
+        ("1_", Err(r#"parsing "1_" as an integer: invalid syntax"#)),
         (
             "9223372036854775808",
-            Err(r#"strconv.ParseInt: parsing "9223372036854775808": value out of range"#),
+            Err(r#"parsing "9223372036854775808" as an integer: value out of range"#),
         ),
         (
             "-9223372036854775809",
-            Err(r#"strconv.ParseInt: parsing "-9223372036854775809": value out of range"#),
+            Err(r#"parsing "-9223372036854775809" as an integer: value out of range"#),
         ),
     ];
     for (input, want) in cases {
@@ -589,9 +587,10 @@ fn go_parse_int_returns_strconv_num_errors() {
     }
 }
 
-/// `go_parse_bool` is Go `strconv.ParseBool` with the `*strconv.NumError` text.
+/// `go_parse_bool` accepts Go `strconv.ParseBool` spellings; failures read
+/// `parsing "<s>" as a boolean: invalid syntax`.
 #[test]
-fn go_parse_bool_returns_strconv_num_errors() {
+fn go_parse_bool_returns_parse_errors() {
     for s in ["1", "t", "T", "true", "TRUE", "True"] {
         assert_eq!(go_parse_bool(s), Ok(true), "{s:?}");
     }
@@ -600,11 +599,11 @@ fn go_parse_bool_returns_strconv_num_errors() {
     }
     assert_eq!(
         go_parse_bool("yes"),
-        Err(r#"strconv.ParseBool: parsing "yes": invalid syntax"#.to_string())
+        Err(r#"parsing "yes" as a boolean: invalid syntax"#.to_string())
     );
     assert_eq!(
         go_parse_bool(""),
-        Err(r#"strconv.ParseBool: parsing "": invalid syntax"#.to_string())
+        Err(r#"parsing "" as a boolean: invalid syntax"#.to_string())
     );
 }
 

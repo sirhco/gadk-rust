@@ -175,7 +175,7 @@ fn test_new_a2_a_auth_with_client_provider_is_error() {
     .expect("Auth combined with a custom ClientProvider must be refused");
     assert!(
         err.to_string()
-            .contains("cannot be combined with a custom ClientProvider"),
+            .contains("cannot be combined with a custom client_provider"),
         "{err}"
     );
 }

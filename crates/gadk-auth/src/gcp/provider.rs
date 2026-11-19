@@ -237,14 +237,14 @@ impl ClientInit {
 pub(crate) fn build_provider(cfg: ProviderConfig) -> Result<Provider, Error> {
     let name = cfg.scheme.name.as_str();
     if name.is_empty() {
-        return Err(Error::new("gcp: NewProvider requires a scheme Name"));
+        return Err(Error::new("gcp: new_provider requires a scheme name"));
     }
     // A malformed name is a wiring mistake, so catch it here rather than on every request from
     // inside a transport.
-    validate_resource(name).map_err(|e| e.prefixed("gcp: NewProvider"))?;
+    validate_resource(name).map_err(|e| e.prefixed("gcp: new_provider"))?;
     if !CONNECTOR_RESOURCE_RE.is_match(name) && !AUTH_PROVIDER_RESOURCE_RE.is_match(name) {
         return Err(Error::new(format!(
-            "gcp: NewProvider: scheme Name {} is neither projects/*/locations/*/connectors/* nor projects/*/locations/*/authProviders/*",
+            "gcp: new_provider: scheme name {} is neither projects/*/locations/*/connectors/* nor projects/*/locations/*/authProviders/*",
             go_quote(name)
         )));
     }
@@ -268,8 +268,8 @@ pub(crate) fn build_provider(cfg: ProviderConfig) -> Result<Provider, Error> {
     })
 }
 
-/// Builds the per-user credential provider. Errors: "gcp: NewProvider requires a scheme Name";
-/// "gcp: NewProvider: <validate_resource error>"; "gcp: NewProvider: scheme Name \"NAME\" is
+/// Builds the per-user credential provider. Errors: "gcp: new_provider requires a scheme name";
+/// "gcp: new_provider: <validate_resource error>"; "gcp: new_provider: scheme name \"NAME\" is
 /// neither projects/*/locations/*/connectors/* nor projects/*/locations/*/authProviders/*". The
 /// provider's `as_refreshing()` is `Some`.
 ///

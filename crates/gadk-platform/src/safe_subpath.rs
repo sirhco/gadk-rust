@@ -147,8 +147,9 @@ pub fn safe_subpath(base: &Path, rel: &str) -> Result<(PathBuf, String), SafeSub
     // check if rel stays below absBase. Rel + IsLocal, not a string prefix: the prefix
     // absBase+separator is wrong for a filesystem root ("//").
     let res = go_path_join(&[abs_base.as_str(), rel]);
-    let r = go_filepath_rel(&abs_base, &res)
-        .map_err(|e| SafeSubpathError::not_valid(&format!("filepath.Rel failed: {e}")))?;
+    let r = go_filepath_rel(&abs_base, &res).map_err(|e| {
+        SafeSubpathError::not_valid(&format!("failed to compute relative path: {e}"))
+    })?;
     if r == "." {
         // rel is effectively empty
         return Err(SafeSubpathError::not_valid("rel is effectively empty"));

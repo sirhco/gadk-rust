@@ -70,7 +70,7 @@ impl StreamQueryHandler {
     /// `StreamQueryTextRequest` (both through `go_unmarshal`; both failing →
     /// an `Err` naming both request types with both decode errors, also
     /// logged; a text message becomes a user
-    /// `Content` with one text part), builds the runner (`Err("s.run() failed: failed to create
+    /// `Content` with one text part), builds the runner (`Err("failed to run agent: failed to create
     /// runner: <err>")`, logged), and answers 200 with `Content-Type: application/json`,
     /// `Cache-Control: no-cache`, `Connection: keep-alive` and a streaming body: per runner
     /// item, log `Processing event: … err: …`; a compaction error is logged `agentengine: <err>`
@@ -112,7 +112,7 @@ impl StreamQueryHandler {
         };
 
         let events = self.run(&req).map_err(|err| {
-            let err = format!("s.run() failed: {err}");
+            let err = format!("failed to run agent: {err}");
             self.log.print(&err);
             err
         })?;
@@ -203,7 +203,7 @@ where
             return match line(&event, &log) {
                 Ok(chunk) => Some((Ok(chunk), Some((events, log, line)))),
                 Err(err) => {
-                    let e = format!("helper.EmitJSON() failed: {err}");
+                    let e = format!("failed to emit JSON chunk: {err}");
                     log.print(&e);
                     let chunk = error_line(&e, &log)?;
                     Some((Ok(chunk), None))
@@ -226,7 +226,7 @@ fn error_line(text: &str, log: &Log) -> Option<Bytes> {
     match emit_json_error(text, log) {
         Ok(chunk) => Some(chunk),
         Err(e) => {
-            log.print(&format!("helper.EmitJSONError() failed: {e}"));
+            log.print(&format!("failed to emit JSON error chunk: {e}"));
             None
         }
     }
@@ -405,10 +405,10 @@ mod tests {
         });
         assert_eq!(
             body_text(resp).await,
-            "{\"error\":\"helper.EmitJSON() failed: failed to encode SSE response chunk: bad\"}\n"
+            "{\"error\":\"failed to emit JSON chunk: failed to encode SSE response chunk: bad\"}\n"
         );
         assert!(lines.lock().unwrap().contains(
-            &"helper.EmitJSON() failed: failed to encode SSE response chunk: bad".to_owned()
+            &"failed to emit JSON chunk: failed to encode SSE response chunk: bad".to_owned()
         ));
     }
 
