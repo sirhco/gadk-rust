@@ -48,7 +48,7 @@ pub fn go_value_to_json(v: &GoValue) -> Result<Value, String> {
             Some(n) => Value::Number(n),
             None => {
                 return Err(format!(
-                    "json: unsupported value: {}",
+                    "cannot encode {} as JSON",
                     gadk_platform::go_format_float_v(*f)
                 ));
             }
@@ -57,9 +57,9 @@ pub fn go_value_to_json(v: &GoValue) -> Result<Value, String> {
         GoValue::Bytes(b) => Value::String(go_json_string_of_bytes(b)),
         GoValue::Timestamp(t) => {
             if !(0..=9999).contains(&t.year()) {
-                return Err("json: error calling MarshalJSON for type time.Time: \
-                            Time.MarshalJSON: year outside of range [0,9999]"
-                    .to_owned());
+                return Err(
+                    "cannot encode timestamp as JSON: year outside of range [0,9999]".to_owned(),
+                );
             }
             Value::String(gadk_platform::go_format_rfc3339_nano(t))
         }
@@ -77,7 +77,7 @@ pub fn go_value_to_json(v: &GoValue) -> Result<Value, String> {
             Value::Object(m)
         }
         GoValue::MapAny(_) => {
-            return Err("json: unsupported type: map[interface {}]interface {}".to_owned());
+            return Err("cannot encode a mapping with non-string keys as JSON".to_owned());
         }
     })
 }
@@ -290,18 +290,18 @@ mod tests {
     }
 
     #[test]
-    fn go_value_to_json_rejects_what_go_rejects() {
+    fn go_value_to_json_rejects_values_without_a_json_form() {
         assert_eq!(
             go_value_to_json(&GoValue::Float(f64::NAN)).unwrap_err(),
-            "json: unsupported value: NaN"
+            "cannot encode NaN as JSON"
         );
         assert_eq!(
             go_value_to_json(&GoValue::Float(f64::INFINITY)).unwrap_err(),
-            "json: unsupported value: +Inf"
+            "cannot encode +Inf as JSON"
         );
         assert_eq!(
             go_value_to_json(&GoValue::MapAny(vec![])).unwrap_err(),
-            "json: unsupported type: map[interface {}]interface {}"
+            "cannot encode a mapping with non-string keys as JSON"
         );
     }
 

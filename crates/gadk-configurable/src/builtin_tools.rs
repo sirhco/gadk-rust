@@ -34,7 +34,7 @@ use gadk_mcp::{CommandBuilder, McpTransport};
 use gadk_tools::example::{self, Example, ExampleToolConfig};
 use serde::Deserialize;
 
-use crate::govalue::{go_sprint, go_type_name, go_value_to_json};
+use crate::govalue::go_value_to_json;
 use crate::{ConfigError, GoMap, Registry, ToolCtx, ToolEntry};
 
 /// The built-in factories in registration order, for [`Registry::new`].
@@ -325,8 +325,27 @@ pub(crate) async fn mcp_toolset(
     Ok(Arc::new(mcp_set))
 }
 
+/// A decoded config value as a type error names it: its kind with an article (`an integer`,
+/// `a list`, `a mapping`) and, unless it is null or has no JSON form, its JSON text in parentheses.
+fn describe_value(v: &GoValue) -> String {
+    let kind = match v {
+        GoValue::Null => return "null".to_owned(),
+        GoValue::Bool(_) => "a boolean",
+        GoValue::Int(_) | GoValue::Uint(_) => "an integer",
+        GoValue::Float(_) => "a number",
+        GoValue::String(_) | GoValue::Bytes(_) => "a string",
+        GoValue::Timestamp(_) => "a timestamp",
+        GoValue::Seq(_) => "a list",
+        GoValue::Map(_) | GoValue::MapAny(_) => "a mapping",
+    };
+    match go_value_to_json(v) {
+        Ok(json) => format!("{kind} ({json})"),
+        Err(_) => kind.to_owned(),
+    }
+}
+
 /// Collects the elements as strings; a non-string element fails with
-/// `<what>[{i}]: expected string, got {type} ({value})`.
+/// `<what>[{i}]: expected a string, found <kind> (<value as JSON>)`.
 fn string_elements(items: &[GoValue], what: &str) -> Result<Vec<String>, ConfigError> {
     items
         .iter()
@@ -334,9 +353,8 @@ fn string_elements(items: &[GoValue], what: &str) -> Result<Vec<String>, ConfigE
         .map(|(i, item)| {
             go_string(Some(item)).ok_or_else(|| {
                 ConfigError::msg(format!(
-                    "{what}[{i}]: expected string, got {} ({})",
-                    go_type_name(item),
-                    go_sprint(item)
+                    "{what}[{i}]: expected a string, found {}",
+                    describe_value(item)
                 ))
             })
         })
@@ -1103,53 +1121,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_toolset_rejects_non_string_elements_with_go_type_and_value() {
+    async fn mcp_toolset_rejects_non_string_elements_with_kind_and_value() {
         let cases = [
             (
                 mcp_args(
                     GoValue::Seq(vec![s("a"), GoValue::Int(1), GoValue::Int(2)]),
                     GoValue::Seq(vec![s("a")]),
                 ),
-                "server_params.args[1]: expected string, got int (1)",
+                "server_params.args[1]: expected a string, found an integer (1)",
             ),
             (
                 mcp_args(
                     GoValue::Seq(vec![GoValue::Float(1.5)]),
                     GoValue::Seq(vec![]),
                 ),
-                "server_params.args[0]: expected string, got float64 (1.5)",
+                "server_params.args[0]: expected a string, found a number (1.5)",
             ),
             (
                 mcp_args(GoValue::Seq(vec![GoValue::Null]), GoValue::Seq(vec![])),
-                "server_params.args[0]: expected string, got <nil> (<nil>)",
+                "server_params.args[0]: expected a string, found null",
             ),
             (
                 mcp_args(
                     GoValue::Seq(vec![GoValue::Seq(vec![s("a"), s("b")])]),
                     GoValue::Seq(vec![]),
                 ),
-                "server_params.args[0]: expected string, got []interface {} ([a b])",
+                r#"server_params.args[0]: expected a string, found a list (["a","b"])"#,
             ),
             (
                 mcp_args(
                     GoValue::Seq(vec![m(&[("k", s("v"))])]),
                     GoValue::Seq(vec![]),
                 ),
-                "server_params.args[0]: expected string, got map[string]interface {} (map[k:v])",
+                r#"server_params.args[0]: expected a string, found a mapping ({"k":"v"})"#,
             ),
             (
                 mcp_args(
                     GoValue::Seq(vec![s("a")]),
                     GoValue::Seq(vec![GoValue::Bool(true)]),
                 ),
-                "tool_filter[0]: expected string, got bool (true)",
+                "tool_filter[0]: expected a string, found a boolean (true)",
             ),
             (
                 mcp_args(
                     GoValue::Seq(vec![GoValue::Int(1)]),
                     GoValue::Seq(vec![GoValue::Bool(true)]),
                 ),
-                "server_params.args[0]: expected string, got int (1)",
+                "server_params.args[0]: expected a string, found an integer (1)",
             ),
         ];
         for (a, want) in cases {
