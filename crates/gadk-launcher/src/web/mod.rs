@@ -149,27 +149,27 @@ pub fn new(sublaunchers: Vec<Box<dyn WebSublauncher>>) -> WebLauncher {
     let write_timeout = fs.duration(
         "write-timeout",
         GoDuration::from_secs(15),
-        "Server write timeout (i.e. '10s', '2m' - see time.ParseDuration for details) - for writing the response after reading the headers & body",
+        "Server write timeout (e.g. '10s', '2m', '1h30m': decimal numbers with units ns, us, ms, s, m, h) - for writing the response after reading the headers & body",
     );
     let read_timeout = fs.duration(
         "read-timeout",
         GoDuration::from_secs(15),
-        "Server read timeout (i.e. '10s', '2m' - see time.ParseDuration for details) - for reading the whole request including body",
+        "Server read timeout (e.g. '10s', '2m', '1h30m': decimal numbers with units ns, us, ms, s, m, h) - for reading the whole request including body",
     );
     let idle_timeout = fs.duration(
         "idle-timeout",
         GoDuration::from_secs(60),
-        "Server idle timeout (i.e. '10s', '2m' - see time.ParseDuration for details) - for waiting for the next request (only when keep-alive is enabled)",
+        "Server idle timeout (e.g. '10s', '2m', '1h30m': decimal numbers with units ns, us, ms, s, m, h) - for waiting for the next request (only when keep-alive is enabled)",
     );
     let shutdown_timeout = fs.duration(
         "shutdown-timeout",
         GoDuration::from_secs(15),
-        "Server shutdown timeout (i.e. '10s', '2m' - see time.ParseDuration for details) - for waiting for active requests to finish during shutdown",
+        "Server shutdown timeout (e.g. '10s', '2m', '1h30m': decimal numbers with units ns, us, ms, s, m, h) - for waiting for active requests to finish during shutdown",
     );
     let otel_to_cloud = fs.bool(
         "otel_to_cloud",
         false,
-        "Enables OpenTelemetry export to GCP: telemetry.googleapis.com. When not set, a telemetry.WithOtelToCloud option in launcher.Config.TelemetryOptions decides. See adk-go/telemetry package for details about supported options, credentials and environment variables.",
+        "Enables OpenTelemetry export to GCP: telemetry.googleapis.com. When not set, a gadk_telemetry::with_otel_to_cloud option in Config::telemetry_options decides. See the gadk-telemetry crate's README for details about supported options, credentials and environment variables.",
     );
     let use_h2c = fs.bool(
         "h2c",

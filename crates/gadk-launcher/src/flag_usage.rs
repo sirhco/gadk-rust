@@ -38,12 +38,12 @@ mod tests {
         fs.duration(
             "shutdown-timeout",
             gadk_platform::GoDuration::from_secs(2),
-            "Console shutdown timeout (i.e. '10s', '2m' - see time.ParseDuration for details) - for waiting for active requests to finish during shutdown",
+            "Console shutdown timeout (e.g. '10s', '2m', '1h30m': decimal numbers with units ns, us, ms, s, m, h) - for waiting for active requests to finish during shutdown",
         );
         fs.string("streaming_mode", "", "defines streaming mode (none|sse)");
         assert_eq!(
             format_flag_usage(&fs),
-            "  -shutdown-timeout duration\n    \tConsole shutdown timeout (i.e. '10s', '2m' - see time.ParseDuration for details) - for waiting for active requests to finish during shutdown (default 2s)\n  -streaming_mode string\n    \tdefines streaming mode (none|sse)\n"
+            "  -shutdown-timeout duration\n    \tConsole shutdown timeout (e.g. '10s', '2m', '1h30m': decimal numbers with units ns, us, ms, s, m, h) - for waiting for active requests to finish during shutdown (default 2s)\n  -streaming_mode string\n    \tdefines streaming mode (none|sse)\n"
         );
         assert!(out.lock().unwrap().is_empty());
     }
