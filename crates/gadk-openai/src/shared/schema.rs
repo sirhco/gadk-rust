@@ -179,7 +179,7 @@ mod tests {
         let err = normalize_schema(Some(&json!("object"))).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "openai: unmarshal json schema: json: cannot unmarshal string into Go value of type map[string]interface {}"
+            "openai: unmarshal json schema: expected a JSON object, found a string"
         );
     }
 

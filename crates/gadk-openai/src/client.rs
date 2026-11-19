@@ -252,15 +252,14 @@ fn api_error(status: u16, body: Bytes) -> OpenAiError {
         .and_then(|mut top| top.remove("error"))
     {
         let kind = match raw.get().as_bytes().first() {
-            Some(b'"') => Some("string"),
-            Some(b'[') => Some("array"),
-            Some(b't' | b'f') => Some("bool"),
-            Some(b'-' | b'0'..=b'9') => Some("number"),
+            Some(b'"' | b'[' | b't' | b'f' | b'-' | b'0'..=b'9') => {
+                Some(gadk_platform::json_text_kind_article(raw.get()))
+            }
             _ => None,
         };
         if let Some(kind) = kind {
             return OpenAiError::plain(format!(
-                "json: cannot unmarshal {kind} into Go value of type apierror.Error"
+                "invalid API error response: `error` must be a JSON object, found {kind}"
             ));
         }
     }
@@ -286,8 +285,7 @@ pub(crate) fn encode_body<T: Serialize>(params: &T, stream: bool) -> Result<Byte
 
 /// Decodes a non-streaming body into `T`:
 /// - a `Content-Type` whose media type is neither `application/json`-containing nor `+json`
-///   fails with `expected destination type of 'string' or '[]byte' for responses
-///   with content-type '<ct>' that is not 'application/json'`;
+///   fails with `unexpected response content-type '<ct>': expected 'application/json'`;
 /// - otherwise the first JSON value is decoded and anything
 ///   after it is ignored; an empty body is `error parsing response json: EOF`, a truncated one
 ///   `error parsing response json: unexpected EOF`, any other failure
@@ -304,7 +302,7 @@ pub(crate) fn decode_body<T: DeserializeOwned>(
         .to_ascii_lowercase();
     if !(media_type.contains("application/json") || media_type.ends_with("+json")) {
         return Err(OpenAiError::plain(format!(
-            "expected destination type of 'string' or '[]byte' for responses with content-type '{content_type}' that is not 'application/json'"
+            "unexpected response content-type '{content_type}': expected 'application/json'"
         )));
     }
     let mut de = serde_json::Deserializer::from_slice(body);
@@ -617,12 +615,12 @@ mod tests {
             ),
             (
                 r#"{"error":"str"}"#,
-                "json: cannot unmarshal string into Go value of type apierror.Error",
+                "invalid API error response: `error` must be a JSON object, found a string",
                 false,
             ),
             (
                 r#"{"error":5}"#,
-                "json: cannot unmarshal number into Go value of type apierror.Error",
+                "invalid API error response: `error` must be a JSON object, found a number",
                 false,
             ),
         ] {
@@ -815,7 +813,7 @@ mod tests {
             decode_body::<R>("text/plain; charset=utf-8", b"{}")
                 .unwrap_err()
                 .to_string(),
-            "expected destination type of 'string' or '[]byte' for responses with content-type 'text/plain; charset=utf-8' that is not 'application/json'"
+            "unexpected response content-type 'text/plain; charset=utf-8': expected 'application/json'"
         );
     }
 

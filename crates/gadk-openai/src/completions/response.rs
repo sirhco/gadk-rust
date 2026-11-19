@@ -251,7 +251,7 @@ mod tests {
         );
         assert_eq!(
             err_text(&with_call(call("", "call_9", "f", "[1]"))),
-            "openai: parse function call args: json: cannot unmarshal array into Go value of type map[string]interface {} (name \"f\", call_id \"call_9\")"
+            "openai: parse function call args: expected a JSON object, found an array (name \"f\", call_id \"call_9\")"
         );
     }
 

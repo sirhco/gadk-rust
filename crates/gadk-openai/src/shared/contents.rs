@@ -41,9 +41,7 @@ pub(crate) fn flatten_content_text(content: Option<&Content>) -> Result<String, 
     let mut out = String::new();
     for part in &content.parts {
         if part.text.is_empty() {
-            return Err(OpenAiError::plain(
-                "non-text system instruction part *genai.Part",
-            ));
+            return Err(OpenAiError::plain("non-text system instruction part"));
         }
         // Only the text is sent, so anything else on the part would be dropped while the text
         // beside it goes out. A call and its result count as sent in contents, not here.

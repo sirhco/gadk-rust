@@ -169,7 +169,7 @@ fn test_convert_function_declaration() {
                 parameters_json_schema: Some(json!([])),
                 ..decl("test_func")
             }),
-            "json: cannot unmarshal array",
+            "expected a JSON object, found an array",
         ),
     ];
     for (name, declaration, want_err) in tests {
