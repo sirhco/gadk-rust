@@ -828,7 +828,7 @@ mod tests {
         let err = service(&http).delete(req.clone()).await.err().unwrap();
         assert_eq!(
             backend_text(&err),
-            "failed to delete session: unsupported result type <nil>: <nil>"
+            "failed to delete session: operation finished without a response"
         );
         let reqs = http.requests();
         assert_eq!(route(&reqs[1]), ("DELETE".into(), SESSION.into()));

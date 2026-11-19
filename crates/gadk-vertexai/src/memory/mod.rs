@@ -24,7 +24,7 @@ use gadk_genai::{Content, ROLE_USER};
 use gadk_memory::{MemoryEntry, MemoryError, MemoryService, SearchRequest, SearchResponse};
 use gadk_model::HttpClient;
 use gadk_platform::env::{EnvProvider, ProcessEnv};
-use gadk_platform::{go_parse_rfc3339, go_sprint_value, go_type_name};
+use gadk_platform::{go_parse_rfc3339, json_kind_article};
 use gadk_session::Session;
 use google_cloud_auth::credentials::Credentials;
 use http::Method;
@@ -173,7 +173,7 @@ impl VertexAiMemoryService {
             .map_err(|e| wrap("v.client.GenerateMemories failed", e))?;
         if self.wait_for_completion {
             // A done operation without a result is success: the
-            // `unsupported result type <nil>: <nil>` error is accepted, on both paths.
+            // `operation finished without a response` error is accepted, on both paths.
             self.client
                 .wait_operation(op)
                 .await
@@ -189,8 +189,7 @@ fn user_scope(user_id: &str) -> Value {
 }
 
 /// The time a state value holds: an RFC 3339 string. Anything else fails with
-/// a "want a timestamp, got" error naming the type and the value, the value rendered as a
-/// decoded JSON value (see [`gadk_platform::go_sprint_value`] and [`gadk_platform::go_type_name`]).
+/// `expected an RFC 3339 timestamp, found <kind> (<value as JSON>)`.
 fn state_time(value: &Value) -> Result<DateTime<Utc>, BoxError> {
     if let Value::String(s) = value
         && let Some(t) = go_parse_rfc3339(s)
@@ -198,9 +197,8 @@ fn state_time(value: &Value) -> Result<DateTime<Utc>, BoxError> {
         return Ok(t);
     }
     Err(format!(
-        "want type time.Time, got : {} ({})",
-        go_type_name(value),
-        go_sprint_value(value)
+        "expected an RFC 3339 timestamp, found {} ({value})",
+        json_kind_article(value)
     )
     .into())
 }
