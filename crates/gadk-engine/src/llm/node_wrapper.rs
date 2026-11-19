@@ -57,7 +57,7 @@ fn error_stream(err: AgentError) -> EventStream {
 pub fn run_llm_agent_as_node(ctx: Context, agent: Arc<dyn Agent>, input: Value) -> EventStream {
     if reveal(agent.as_ref()).is_none() {
         return error_stream(AgentError::other(format!(
-            "RunLLMAgentAsNode: {} is not an LlmAgent",
+            "run_llm_agent_as_node: {} is not an LlmAgent",
             go_quote(agent.name())
         )));
     }
@@ -68,7 +68,7 @@ pub fn run_llm_agent_as_node(ctx: Context, agent: Arc<dyn Agent>, input: Value) 
     // kept as a defensive error.
     if !matches!(mode, Mode::Task | Mode::SingleTurn | Mode::Chat) {
         return error_stream(AgentError::other(format!(
-            "RunLLMAgentAsNode: LlmAgent {} only supports task, single_turn, and chat mode, got {}",
+            "run_llm_agent_as_node: LlmAgent {} only supports task, single_turn, and chat mode, got {}",
             go_quote(agent.name()),
             go_quote(mode.as_str())
         )));
@@ -717,7 +717,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "RunLLMAgentAsNode: \"custom\" is not an LlmAgent"
+            "run_llm_agent_as_node: \"custom\" is not an LlmAgent"
         );
     }
 

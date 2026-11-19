@@ -25,9 +25,9 @@
         "nosniff"
       ]
     ],
-    "body": "s.streamJSONL() failed: decodeStreamingAgentRunWithEventsRequest() failed: json.Unmarshal(input.request_json) failed: unexpected end of JSON input\n"
+    "body": "streaming JSONL failed: decodeStreamingAgentRunWithEventsRequest() failed: json.Unmarshal(input.request_json) failed: unexpected end of JSON input\n"
   },
-  "log": "decodeStreamingAgentRunWithEventsRequest() failed: json.Unmarshal(input.request_json) failed: unexpected end of JSON input\nhandleQuery failed: s.streamJSONL() failed: decodeStreamingAgentRunWithEventsRequest() failed: json.Unmarshal(input.request_json) failed: unexpected end of JSON input\n",
+  "log": "decodeStreamingAgentRunWithEventsRequest() failed: json.Unmarshal(input.request_json) failed: unexpected end of JSON input\nhandleQuery failed: streaming JSONL failed: decodeStreamingAgentRunWithEventsRequest() failed: json.Unmarshal(input.request_json) failed: unexpected end of JSON input\n",
   "methods": null,
   "compare": "exact"
 }

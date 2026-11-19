@@ -473,7 +473,7 @@ pub(crate) mod replay {
                 (status, body.as_str()),
                 (
                     500,
-                    "s.streamJSONL() failed: decodeStreamingAgentRunWithEventsRequest() failed: \
+                    "streaming JSONL failed: decodeStreamingAgentRunWithEventsRequest() failed: \
                      json.Unmarshal(input.request_json) failed: exceeded max depth\n"
                 )
             );
@@ -481,7 +481,7 @@ pub(crate) mod replay {
                 *scenario.log.lock().unwrap(),
                 "decodeStreamingAgentRunWithEventsRequest() failed: \
                  json.Unmarshal(input.request_json) failed: exceeded max depth\n\
-                 handleQuery failed: s.streamJSONL() failed: \
+                 handleQuery failed: streaming JSONL failed: \
                  decodeStreamingAgentRunWithEventsRequest() failed: \
                  json.Unmarshal(input.request_json) failed: exceeded max depth\n"
             );

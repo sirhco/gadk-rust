@@ -25,9 +25,9 @@
         "nosniff"
       ]
     ],
-    "body": "s.streamJSONL() failed: json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\n"
+    "body": "streaming JSONL failed: json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\n"
   },
-  "log": "json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\nhandleQuery failed: s.streamJSONL() failed: json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\n",
+  "log": "json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\nhandleQuery failed: streaming JSONL failed: json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\n",
   "methods": null,
   "compare": "exact"
 }

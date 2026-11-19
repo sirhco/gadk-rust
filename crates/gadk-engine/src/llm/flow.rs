@@ -95,7 +95,7 @@ pub(crate) const MAX_CONSECUTIVE_THOUGHT_ONLY_TURNS: usize = 10;
 
 /// Error text when the flow has no model.
 pub(crate) const ERR_MODEL_NOT_CONFIGURED: &str =
-    "model not configured; ensure Model is set in llmagent.Config";
+    "model not configured; ensure LlmAgentConfig::model is set";
 
 /// The step's callback actions: shared by the model callbacks and stamped on every model-response
 /// event of the step (the state-delta and artifact-delta maps).
@@ -810,7 +810,7 @@ mod tests {
         let err = items.into_iter().next().unwrap().unwrap_err();
         assert_eq!(
             err.to_string(),
-            "agent \"a\": model not configured; ensure Model is set in llmagent.Config"
+            "agent \"a\": model not configured; ensure LlmAgentConfig::model is set"
         );
     }
 
