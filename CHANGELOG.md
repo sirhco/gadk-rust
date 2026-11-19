@@ -7,6 +7,29 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-cloudtrace`: `Debug` for `CloudTraceClient` (project and endpoint) and `Adc` (whether the
+  credentials are built); `gadk-eval-monitor`: `Debug` for `CloudTraceTranscriptSource` (project).
+  None prints credentials or tokens.
+
+### Changed
+
+- `gadk-launcher`: duration flag help states the accepted syntax (`'10s'`, `'2m'`, `'1h30m'`;
+  units `ns`, `us`, `ms`, `s`, `m`, `h`), and `-otel_to_cloud` help points at
+  `gadk_telemetry::with_otel_to_cloud` in `Config::telemetry_options` and the `gadk-telemetry`
+  README.
+- Error messages name Rust items: a missing model says `ensure LlmAgentConfig::model is set`,
+  `run_llm_agent_as_node` errors carry that prefix, and the agent engine stream methods report
+  `streaming JSONL failed: <err>`.
+- Docs: `gadk-eval-monitor`'s Application Default Credentials `# Errors` sections say some
+  credential failures only show on the first request; `Filter::LabelExact` notes the label key
+  is sent verbatim (only the value is quoted).
+
+### Fixed
+
+- `gadk` examples use `gemini-2.5-flash` (`gemini-flash-latest` returns 404 on Vertex AI).
+
 ## [0.4.0] - 2026-11-18
 
 ### Added
