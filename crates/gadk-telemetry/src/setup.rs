@@ -179,7 +179,7 @@ pub(crate) fn resolve_project(
     let project = project.trim();
     if require_project && project.is_empty() {
         return Err(format!(
-            "telemetry.googleapis.com requires setting the {project_type} project. Refer to telemetry.config for the available options to set the {project_type} project"
+            "telemetry.googleapis.com requires setting the {project_type} project. Set it with `with_gcp_{project_type}_project` or the GOOGLE_CLOUD_PROJECT environment variable"
         ));
     }
     Ok(project.to_owned())
@@ -777,7 +777,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "failed to resolve GCP quota project: telemetry.googleapis.com requires setting the quota project. Refer to telemetry.config for the available options to set the quota project"
+            "failed to resolve GCP quota project: telemetry.googleapis.com requires setting the quota project. Set it with `with_gcp_quota_project` or the GOOGLE_CLOUD_PROJECT environment variable"
         );
     }
 
@@ -796,7 +796,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "failed to resolve GCP resource project: telemetry.googleapis.com requires setting the resource project. Refer to telemetry.config for the available options to set the resource project"
+            "failed to resolve GCP resource project: telemetry.googleapis.com requires setting the resource project. Set it with `with_gcp_resource_project` or the GOOGLE_CLOUD_PROJECT environment variable"
         );
     }
 

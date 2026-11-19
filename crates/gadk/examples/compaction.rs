@@ -44,7 +44,7 @@ use gadk::launcher::{CancellationToken, Config, Launcher, full};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let model = GeminiModel::new("gemini-flash-latest", ClientConfig::default()).await?;
+    let model = GeminiModel::new("gemini-2.5-flash", ClientConfig::default()).await?;
     let agent = gadk::engine::llm::agent::new(LlmAgentConfig {
         name: "assistant".to_string(),
         model: Some(model),

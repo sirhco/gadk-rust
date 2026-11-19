@@ -236,12 +236,12 @@ impl MethodHandler for StreamingAgentRunWithEventsHandler {
     }
 
     /// Runs [`StreamingAgentRunWithEventsHandler::stream_jsonl`], an error wrapped as
-    /// `s.streamJSONL() failed: <err>`.
+    /// `streaming JSONL failed: <err>`.
     async fn handle(&self, payload: Bytes) -> Result<Response, String> {
         // stream_jsonl fails only before streaming; the controller answers that with a status.
         self.stream_jsonl(payload)
             .await
-            .map_err(|err| format!("s.streamJSONL() failed: {err}"))
+            .map_err(|err| format!("streaming JSONL failed: {err}"))
     }
 
     fn metadata(&self) -> Map<String, Value> {

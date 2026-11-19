@@ -64,7 +64,7 @@ async fn rejects_non_llm_agent() {
     let err = s.next().await.unwrap().unwrap_err();
     assert_eq!(
         err.to_string(),
-        "RunLLMAgentAsNode: \"custom\" is not an LlmAgent"
+        "run_llm_agent_as_node: \"custom\" is not an LlmAgent"
     );
 }
 

@@ -54,7 +54,8 @@ pub enum Filter {
     Root(String),
     /// Some span's name starts with this prefix: `span:"<prefix>"`.
     Span(String),
-    /// Some span has label `key` set to exactly `value`: `+<key>:"<value>"`.
+    /// Some span has label `key` set to exactly `value`: `+<key>:"<value>"`. The key is sent
+    /// verbatim, so callers must pass a valid label key; only the value is quoted.
     LabelExact(String, String),
 }
 

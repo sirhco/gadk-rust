@@ -71,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     })?);
 
-    let model = GeminiModel::new("gemini-flash-latest", ClientConfig::default()).await?;
+    let model = GeminiModel::new("gemini-2.5-flash", ClientConfig::default()).await?;
     let agent = gadk::engine::llm::agent::new(LlmAgentConfig {
         name: "remembering_assistant".to_string(),
         model: Some(model),

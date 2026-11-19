@@ -70,7 +70,7 @@ pub fn new(agent_engine_id: &str) -> AgentEngineLauncher {
     let sse_write_timeout = fs.duration(
         "sse-write-timeout",
         GoDuration::from_secs(120),
-        "SSE server write timeout (i.e. '10s', '2m' - see time.ParseDuration for details) - for writing the SSE response after reading the headers & body",
+        "SSE server write timeout (e.g. '10s', '2m', '1h30m': decimal numbers with units ns, us, ms, s, m, h) - for writing the SSE response after reading the headers & body",
     );
     let prefix = path_prefix.get();
     AgentEngineLauncher {

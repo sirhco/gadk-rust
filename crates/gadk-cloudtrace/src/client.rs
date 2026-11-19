@@ -43,6 +43,16 @@ pub struct CloudTraceClient {
     base: String,
 }
 
+/// Shows the project and endpoint, never the credentials or a token.
+impl std::fmt::Debug for CloudTraceClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudTraceClient")
+            .field("project", &self.project)
+            .field("base", &self.base)
+            .finish_non_exhaustive()
+    }
+}
+
 impl CloudTraceClient {
     /// The real endpoint, a reqwest client with a 60 s timeout and lazily built Application
     /// Default Credentials ([`Adc::lazy`]).
@@ -355,6 +365,16 @@ mod tests {
 
     fn label(key: &str, value: &str) -> Filter {
         Filter::LabelExact(key.into(), value.into())
+    }
+
+    #[test]
+    fn debug_shows_the_project_and_no_credentials() {
+        let out = format!("{:?}", client(Arc::new(FakeHttp::default())));
+        assert_eq!(
+            out,
+            r#"CloudTraceClient { project: "proj", base: "https://trace.test", .. }"#
+        );
+        assert!(!out.contains("t0k") && !out.contains("Bearer"), "{out}");
     }
 
     // ---- list URLs (the cases gadk-console's own tests use) ----

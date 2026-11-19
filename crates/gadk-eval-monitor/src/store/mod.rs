@@ -87,7 +87,9 @@ impl ReportStore {
     /// # Errors
     ///
     /// [`MonitorError::Store`] for an empty URL, a URL with another scheme (such as `s3://`), a
-    /// `gs://` URL without a valid bucket, or when no credentials are found.
+    /// `gs://` URL without a valid bucket, or when no credentials can be built; some credential
+    /// failures (such as metadata-server credentials with no metadata server) only show on the
+    /// first request.
     pub fn open(url: &str) -> Result<Self, MonitorError> {
         if url.starts_with("gs://") {
             let auth = AdcTokenSource::adc().map_err(|e| {

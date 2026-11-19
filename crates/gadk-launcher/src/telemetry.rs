@@ -35,7 +35,7 @@ use crate::error::Error;
 use crate::golog::Logger;
 
 /// The log line written when a global subscriber is already installed.
-pub(crate) const KEPT_EXISTING_SUBSCRIBER: &str = "a global tracing subscriber is already installed; the launcher keeps it and does not install its telemetry layers (launcher.Config.TelemetryOptions)";
+pub(crate) const KEPT_EXISTING_SUBSCRIBER: &str = "a global tracing subscriber is already installed; the launcher keeps it and does not install its telemetry layers (`Config::telemetry_options`)";
 
 /// Sets the global OpenTelemetry providers.
 type SetProviders = Box<dyn FnOnce(&Providers) + Send>;

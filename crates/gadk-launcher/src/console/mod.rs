@@ -81,12 +81,12 @@ pub fn new() -> ConsoleLauncher {
     let shutdown_timeout = fs.duration(
         "shutdown-timeout",
         GoDuration(2_000_000_000),
-        "Console shutdown timeout (i.e. '10s', '2m' - see time.ParseDuration for details) - for waiting for active requests to finish during shutdown",
+        "Console shutdown timeout (e.g. '10s', '2m', '1h30m': decimal numbers with units ns, us, ms, s, m, h) - for waiting for active requests to finish during shutdown",
     );
     let otel_to_cloud = fs.bool(
         "otel_to_cloud",
         false,
-        "Enables OpenTelemetry export to GCP: telemetry.googleapis.com. When not set, a telemetry.WithOtelToCloud option in launcher.Config.TelemetryOptions decides. See adk-go/telemetry package for details about supported options, credentials and environment variables.",
+        "Enables OpenTelemetry export to GCP: telemetry.googleapis.com. When not set, a gadk_telemetry::with_otel_to_cloud option in Config::telemetry_options decides. See the gadk-telemetry crate's README for details about supported options, credentials and environment variables.",
     );
     ConsoleLauncher {
         flags: Mutex::new(fs),

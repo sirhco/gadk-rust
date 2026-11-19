@@ -32,7 +32,7 @@ use gadk::tools::gemini::GoogleSearch;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let model = GeminiModel::new(
-        "gemini-flash-latest",
+        "gemini-2.5-flash",
         ClientConfig {
             api_key: std::env::var("GOOGLE_API_KEY").ok(),
             ..Default::default()
