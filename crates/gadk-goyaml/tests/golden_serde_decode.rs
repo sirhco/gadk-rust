@@ -20,7 +20,9 @@
 mod support;
 
 use gadk_goyaml::unmarshal_node;
-use support::golden::{SERDE_GOLDEN_COUNT, SerdeGolden, serde_goldens};
+use support::golden::{
+    SERDE_GOLDEN_COUNT, SerdeGolden, diff_goldens, parse_goldens, serde_goldens,
+};
 use support::shapes::{ShapeValue, options};
 
 /// The `decode_error` the port must return for `g`. The recorded texts were rewritten once
@@ -97,20 +99,65 @@ fn golden_serde_decode_matches_go() {
     );
 }
 
+/// Whether an error text names a Go type: a type-error target (the text after ` into `) or an
+/// `invalid map key` rendering in Go syntax.
+fn names_go_type(text: &str) -> bool {
+    let go_target = |t: &str| {
+        let t = t.trim_start();
+        let digits = |rest: &str| rest.chars().all(|c| c.is_ascii_digit());
+        let word: String = t
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
+        ["[]", "map[", "main.", "interface", "*"]
+            .iter()
+            .any(|p| t.starts_with(p))
+            || word
+                .strip_prefix("uint")
+                .or_else(|| word.strip_prefix("int"))
+                .is_some_and(digits)
+            || word
+                .strip_prefix("float")
+                .is_some_and(|r| !r.is_empty() && digits(r))
+            || word == "string"
+    };
+    text.split(" into ").skip(1).any(go_target)
+        || text.split("invalid map key: ").skip(1).any(go_target)
+        || text.contains("interface {}")
+}
+
 #[test]
 fn golden_errors_name_rust_types() {
     for g in &serde_goldens() {
-        let case = format!("{}-{}", g.shape, g.case);
         let text = g.decode_error.as_deref().unwrap_or("");
-        for go in [
-            "main.",
-            "yaml.Node",
-            "interface {}",
-            "[]uint8",
-            "int64",
-            "string",
-        ] {
-            assert!(!text.contains(go), "{case}: {text}");
-        }
+        assert!(!names_go_type(text), "{}-{}: {text}", g.shape, g.case);
+    }
+    for g in parse_goldens().iter().chain(&diff_goldens()) {
+        let text = g.value_error.as_deref().unwrap_or("");
+        assert!(!names_go_type(text), "{text}");
+    }
+    // The check itself.
+    for go in [
+        "line 1: cannot unmarshal !!str `x` into int64",
+        "line 1: cannot unmarshal !!str `x` into int",
+        "line 1: cannot unmarshal !!str `x` into float64",
+        "line 1: cannot unmarshal !!seq into string",
+        "line 1: cannot unmarshal !!str `x` into []uint8",
+        "line 1: cannot unmarshal !!str `x` into main.Inner",
+        "line 1: cannot unmarshal !!str `x` into map[string]interface {}",
+        "yaml: invalid map key: []interface {}{\"a\"}",
+    ] {
+        assert!(names_go_type(go), "{go}");
+    }
+    for rust in [
+        "line 1: cannot unmarshal !!str `x` into i64",
+        "line 1: cannot unmarshal !!seq into String",
+        "line 1: cannot unmarshal !!str `x` into Vec<u8>",
+        "line 1: cannot unmarshal !!str `x` into a sequence",
+        "line 1: cannot unmarshal !!str `x` into Inner",
+        "yaml: invalid map key: [\"a\", \"b\"]",
+        "yaml: invalid map key: {\".\": null}",
+    ] {
+        assert!(!names_go_type(rust), "{rust}");
     }
 }

@@ -1191,7 +1191,7 @@ mod tests {
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"videoMetadata":{"startOffset":"zz"}}]}}}"#,
-                r#"time: invalid duration "zz""#,
+                r#"invalid duration "zz""#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
@@ -1292,7 +1292,7 @@ mod tests {
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"videoMetadata":{"endOffset":"1s","startOffset":"zz"}}]}}}"#,
-                r#"time: invalid duration "zz""#,
+                r#"invalid duration "zz""#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,

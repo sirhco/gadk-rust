@@ -19,15 +19,18 @@ the public API.
     failed`, `helper.EmitJSON() failed`, …); the controller logs `failed to handle query: …`
     (was `handleQuery failed`) and `failed to set write deadline: …`; a duplicate method is
     `failed to create the agent engine API controller (for …): …`; the dev-feature 501 bodies
-    name gadk instead of ADK Go; a live upgrade failure is `websocket: the connection cannot be
+    say `… is not implemented in the gadk server` instead of ADK Go, and the eval one points to
+    the `gadk-eval` crate and CLI and the `gadk-console` Evals pages (was adk-python); a live upgrade failure is `websocket: the connection cannot be
     upgraded` (was `… does not implement http.Hijacker`); live runs log `live run failed`;
     `authn: google_oidc requires …` (was `NewGoogleOIDC`).
   - `gadk-vertexai`: Memory Bank errors read `generate memories failed`, `waiting for the
     generate-memories operation failed`, `adding the whole session to memory failed`, `adding
     new session events to memory failed`, `retrieve memories failed`, `reading state key <key>
     failed` and `failed to create the Memory Bank client` (were `v.client.GenerateMemories
-    failed`, `op.Wait for GenerateMemories (whole session) failed`, `newVertexAIClient failed:
-    aiplatform.NewMemoryBankClient failed`, …).
+    failed`, `op.Wait for GenerateMemories (whole session) failed`, …). The client-construction
+    error is now one wrapper, `failed to create the Memory Bank client: …`, instead of the two
+    nested `newVertexAIClient failed: aiplatform.NewMemoryBankClient failed: …`; the wait
+    wrapper no longer says `(whole session)` on the newer-events path.
   - `gadk-platform` and `gadk-cli`: bad int and bool flag values read `parsing "x" as an
     integer: invalid syntax` / `parsing "x" as a boolean: …` (were `strconv.ParseInt: parsing
     "x": …`); safe-subpath says `failed to compute relative path` (was `filepath.Rel failed`);

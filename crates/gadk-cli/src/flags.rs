@@ -479,7 +479,7 @@ mod tests {
             ),
             (
                 &["--mem_ttl", "1d"],
-                r#"invalid argument "1d" for "--mem_ttl" flag: time: unknown unit "d" in duration "1d""#,
+                r#"invalid argument "1d" for "--mem_ttl" flag: unknown unit "d" in duration "1d""#,
             ),
         ];
         for (args, want) in cases {
