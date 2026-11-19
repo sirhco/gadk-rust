@@ -158,12 +158,12 @@ impl Client {
     /// Dropping the returned future abandons the retrieval, including a pending poll's wait.
     pub async fn retrieve_credential(&self, req: Request) -> Result<Retrieval, Error> {
         if req.resource.is_empty() {
-            return Err(Error::new("gcp: RetrieveCredential requires a Resource"));
+            return Err(Error::new("gcp: retrieve_credential requires a resource"));
         }
         if req.user_id.is_empty() {
-            return Err(Error::new("gcp: RetrieveCredential requires a UserID"));
+            return Err(Error::new("gcp: retrieve_credential requires a user_id"));
         }
-        validate_resource(&req.resource).map_err(|e| e.prefixed("gcp: RetrieveCredential"))?;
+        validate_resource(&req.resource).map_err(|e| e.prefixed("gcp: retrieve_credential"))?;
         // Named once here, and only the resource: it is configuration, where every other id in
         // scope comes off the request. The service text inside an error was scrubbed where it
         // entered (do_post, map_credential, the connector operation). It is deliberately not

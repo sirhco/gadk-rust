@@ -158,7 +158,7 @@ impl std::fmt::Display for ExampleStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidStoreName => f.write_str(
-                "vertexai: ExampleStoreName must match projects/{project}/locations/{location}/exampleStores/{example_store}",
+                "vertexai: example_store_name must match projects/{project}/locations/{location}/exampleStores/{example_store}",
             ),
             Self::CreateClient(e) => write!(f, "vertexai: create example store client: {e}"),
         }

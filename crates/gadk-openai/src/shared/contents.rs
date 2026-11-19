@@ -46,9 +46,9 @@ pub(crate) fn flatten_content_text(content: Option<&Content>) -> Result<String, 
         // Only the text is sent, so anything else on the part would be dropped while the text
         // beside it goes out. A call and its result count as sent in contents, not here.
         let field = if part.function_call.is_some() {
-            Some("FunctionCall")
+            Some("function_call")
         } else if part.function_response.is_some() {
-            Some("FunctionResponse")
+            Some("function_response")
         } else {
             unsupported_payload(part, &[])
         };
@@ -115,30 +115,30 @@ pub(crate) fn unsupported_payload(part: &Part, emitted: &[PartField]) -> Option<
     // genai `Part` declaration order: the first set field is the one reported.
     [
         (
-            "MediaResolution",
+            "media_resolution",
             qualifies_sent_media && media_resolution.is_some(),
         ),
         (
-            "CodeExecutionResult",
+            "code_execution_result",
             !emits_code && code_execution_result.is_some(),
         ),
-        ("ExecutableCode", !emits_code && executable_code.is_some()),
-        ("FileData", !emits_media && file_data.is_some()),
-        ("InlineData", !emits_media && inline_data.is_some()),
+        ("executable_code", !emits_code && executable_code.is_some()),
+        ("file_data", !emits_media && file_data.is_some()),
+        ("inline_data", !emits_media && inline_data.is_some()),
         (
-            "VideoMetadata",
+            "video_metadata",
             qualifies_sent_media && video_metadata.is_some(),
         ),
-        ("ToolCall", tool_call.is_some()),
-        ("ToolResponse", tool_response.is_some()),
-        ("AudioTranscription", audio_transcription.is_some()),
+        ("tool_call", tool_call.is_some()),
+        ("tool_response", tool_response.is_some()),
+        ("audio_transcription", audio_transcription.is_some()),
         (
-            "MediaProcessing",
+            "media_processing",
             media_processing
                 .as_ref()
                 .is_some_and(|v| !v.as_str().is_empty()),
         ),
-        ("SpeechMetadata", speech_metadata.is_some()),
+        ("speech_metadata", speech_metadata.is_some()),
     ]
     .into_iter()
     .find_map(|(name, set)| set.then_some(name))

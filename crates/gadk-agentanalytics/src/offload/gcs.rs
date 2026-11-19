@@ -155,7 +155,7 @@ impl GcsOffloader {
             return Err(creating(Error::wrap(
                 "dialing",
                 Error::msg(
-                    "options.WithoutAuthentication is incompatible with any option that \
+                    "ClientOptions.without_authentication is incompatible with any option that \
                      provides credentials",
                 ),
             )));
@@ -456,7 +456,7 @@ impl ResumableUpload<'_> {
                 Last::Err(err) => return Err(err),
                 Last::None => {
                     return Err(Error::msg(format!(
-                        "upload request to {} not sent, choose larger value for ChunkRetryDeadline",
+                        "upload request to {} not sent, choose a larger chunk retry deadline",
                         self.uri
                     )));
                 }

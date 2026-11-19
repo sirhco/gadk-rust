@@ -33,10 +33,10 @@ use crate::error::{ErrorKind, OpenAiError};
 use crate::oaishared::ReasoningEffort;
 
 /// The `HTTPOptions` fields neither API translates nor rejects.
-pub(crate) const IGNORED_HTTP_OPTION_FIELDS: &[&str] = &["Headers"];
+pub(crate) const IGNORED_HTTP_OPTION_FIELDS: &[&str] = &["headers"];
 
 /// The `HTTPOptions` fields both APIs support.
-pub(crate) const SUPPORTED_HTTP_OPTION_FIELDS: &[&str] = &["Timeout"];
+pub(crate) const SUPPORTED_HTTP_OPTION_FIELDS: &[&str] = &["timeout"];
 
 /// The dynamic thinking budget: "let the model size its own thinking".
 pub(crate) const DYNAMIC_THINKING_BUDGET: i32 = -1;
@@ -44,27 +44,27 @@ pub(crate) const DYNAMIC_THINKING_BUDGET: i32 = -1;
 /// The `GenerateContentConfig` fields both APIs support (CamelCase field
 /// names). Each API adds the ones only it supports.
 pub(crate) const SUPPORTED_CONFIG_FIELDS: &[&str] = &[
-    "HTTPOptions",
-    "SystemInstruction",
-    "Temperature",
-    "TopP",
-    "MaxOutputTokens",
-    "ResponseLogprobs",
-    "Logprobs",
-    "ResponseMIMEType",
-    "ResponseSchema",
-    "ResponseJsonSchema",
-    "Tools",
-    "ToolConfig",
-    "ThinkingConfig",
-    "ServiceTier",
-    "CandidateCount",
-    "AutomaticContinuation",
+    "http_options",
+    "system_instruction",
+    "temperature",
+    "top_p",
+    "max_output_tokens",
+    "response_logprobs",
+    "logprobs",
+    "response_mime_type",
+    "response_schema",
+    "response_json_schema",
+    "tools",
+    "tool_config",
+    "thinking_config",
+    "service_tier",
+    "candidate_count",
+    "automatic_continuation",
 ];
 
 /// The `ThinkingConfig` fields both APIs support.
 pub(crate) const SUPPORTED_THINKING_CONFIG_FIELDS: &[&str] =
-    &["IncludeThoughts", "ThinkingBudget", "ThinkingLevel"];
+    &["include_thoughts", "thinking_budget", "thinking_level"];
 
 /// The caller's `http_options.timeout`, or `None` for none (a zero
 /// duration is none).
@@ -105,7 +105,7 @@ pub(crate) fn reasoning_effort_for(
         // otherwise carry the nonsense value through unmentioned.
         return Err(OpenAiError::new(
             ErrorKind::UnsupportedConfigField,
-            format!("ThinkingConfig.ThinkingBudget {budget}"),
+            format!("thinking_config.thinking_budget {budget}"),
         ));
     }
     // A level outranks a budget only when it names one: UNSPECIFIED with a budget set defers
@@ -120,7 +120,10 @@ pub(crate) fn reasoning_effort_for(
             Some(effort) => Ok(Some(effort)),
             None => Err(OpenAiError::new(
                 ErrorKind::UnsupportedConfigField,
-                format!("ThinkingConfig.ThinkingLevel {}", go_quote(level.as_str())),
+                format!(
+                    "thinking_config.thinking_level {}",
+                    go_quote(level.as_str())
+                ),
             )),
         };
     }
@@ -146,19 +149,19 @@ pub(crate) fn reject_untranslatable_values(
     if cfg.logprobs.is_some() && !cfg.response_logprobs {
         return Err(OpenAiError::new(
             ErrorKind::UnsupportedConfigField,
-            "Logprobs without ResponseLogprobs",
+            "logprobs without response_logprobs",
         ));
     }
     if cfg.max_output_tokens < 0 {
         return Err(OpenAiError::new(
             ErrorKind::UnsupportedConfigField,
-            "negative MaxOutputTokens",
+            "negative max_output_tokens",
         ));
     }
     if cfg.candidate_count < 0 {
         return Err(OpenAiError::new(
             ErrorKind::UnsupportedConfigField,
-            "negative CandidateCount",
+            "negative candidate_count",
         ));
     }
     if let Some(options) = http_options {
@@ -167,13 +170,13 @@ pub(crate) fn reject_untranslatable_values(
             .chain(IGNORED_HTTP_OPTION_FIELDS)
             .copied()
             .collect();
-        reject_unsupported_fields("HTTPOptions.", &http_option_fields(options), &allowed)?;
+        reject_unsupported_fields("http_options.", &http_option_fields(options), &allowed)?;
         // A zero timeout is "no deadline" to the transport, so forwarding it would lift the
         // caller's bound rather than apply it. A `Duration` cannot be negative.
         if options.timeout.is_some_and(|timeout| timeout.is_zero()) {
             return Err(OpenAiError::new(
                 ErrorKind::UnsupportedConfigField,
-                "non-positive HTTPOptions.Timeout 0s",
+                "non-positive http_options.timeout 0s",
             ));
         }
     }
@@ -191,7 +194,7 @@ pub(crate) fn reject_unsupported_config_fields(
     reject_unsupported_fields("", &config_fields(cfg, http_options), supported)?;
     match &cfg.thinking_config {
         Some(thinking) => reject_unsupported_fields(
-            "ThinkingConfig.",
+            "thinking_config.",
             &thinking_config_fields(thinking),
             SUPPORTED_THINKING_CONFIG_FIELDS,
         ),
@@ -265,59 +268,62 @@ pub(crate) fn config_fields(
         store,
     } = cfg;
     vec![
-        ("HTTPOptions", http_options.is_some()),
-        ("SystemInstruction", system_instruction.is_some()),
-        ("Temperature", temperature.is_some()),
-        ("TopP", top_p.is_some()),
-        ("TopK", top_k.is_some()),
-        ("CandidateCount", *candidate_count != 0),
-        ("MaxOutputTokens", *max_output_tokens != 0),
-        ("StopSequences", !stop_sequences.is_empty()),
-        ("ResponseLogprobs", *response_logprobs),
-        ("Logprobs", logprobs.is_some()),
-        ("PresencePenalty", presence_penalty.is_some()),
-        ("FrequencyPenalty", frequency_penalty.is_some()),
-        ("Seed", seed.is_some()),
-        ("ResponseMIMEType", !response_mime_type.is_empty()),
-        ("ResponseSchema", response_schema.is_some()),
-        ("ResponseJsonSchema", response_json_schema.is_some()),
-        ("RoutingConfig", routing_config.is_some()),
-        ("ModelSelectionConfig", model_selection_config.is_some()),
-        ("SafetySettings", !safety_settings.is_empty()),
-        ("Tools", !tools.is_empty()),
-        ("ToolConfig", tool_config.is_some()),
-        ("Labels", !labels.is_empty()),
-        ("CachedContent", !cached_content.is_empty()),
-        ("ResponseModalities", !response_modalities.is_empty()),
+        ("http_options", http_options.is_some()),
+        ("system_instruction", system_instruction.is_some()),
+        ("temperature", temperature.is_some()),
+        ("top_p", top_p.is_some()),
+        ("top_k", top_k.is_some()),
+        ("candidate_count", *candidate_count != 0),
+        ("max_output_tokens", *max_output_tokens != 0),
+        ("stop_sequences", !stop_sequences.is_empty()),
+        ("response_logprobs", *response_logprobs),
+        ("logprobs", logprobs.is_some()),
+        ("presence_penalty", presence_penalty.is_some()),
+        ("frequency_penalty", frequency_penalty.is_some()),
+        ("seed", seed.is_some()),
+        ("response_mime_type", !response_mime_type.is_empty()),
+        ("response_schema", response_schema.is_some()),
+        ("response_json_schema", response_json_schema.is_some()),
+        ("routing_config", routing_config.is_some()),
+        ("model_selection_config", model_selection_config.is_some()),
+        ("safety_settings", !safety_settings.is_empty()),
+        ("tools", !tools.is_empty()),
+        ("tool_config", tool_config.is_some()),
+        ("labels", !labels.is_empty()),
+        ("cached_content", !cached_content.is_empty()),
+        ("response_modalities", !response_modalities.is_empty()),
         (
-            "MediaResolution",
+            "media_resolution",
             media_resolution
                 .as_ref()
                 .is_some_and(|v| !v.as_str().is_empty()),
         ),
-        ("SpeechConfig", speech_config.is_some()),
-        ("AudioTimestamp", *audio_timestamp),
-        ("ThinkingConfig", thinking_config.is_some()),
-        ("ImageConfig", image_config.is_some()),
+        ("speech_config", speech_config.is_some()),
+        ("audio_timestamp", *audio_timestamp),
+        ("thinking_config", thinking_config.is_some()),
+        ("image_config", image_config.is_some()),
         (
-            "EnableEnhancedCivicAnswers",
+            "enable_enhanced_civic_answers",
             enable_enhanced_civic_answers.is_some(),
         ),
-        ("ModelArmorConfig", model_armor_config.is_some()),
+        ("model_armor_config", model_armor_config.is_some()),
         (
-            "ServiceTier",
+            "service_tier",
             service_tier
                 .as_ref()
                 .is_some_and(|v| !v.as_str().is_empty()),
         ),
         (
-            "AudioTranscriptionConfig",
+            "audio_transcription_config",
             audio_transcription_config.is_some(),
         ),
-        ("ContinuationToken", continuation_token.is_some()),
-        ("AutomaticContinuation", automatic_continuation.is_some()),
-        ("GenerationOutputConfig", generation_output_config.is_some()),
-        ("Store", store.is_some()),
+        ("continuation_token", continuation_token.is_some()),
+        ("automatic_continuation", automatic_continuation.is_some()),
+        (
+            "generation_output_config",
+            generation_output_config.is_some(),
+        ),
+        ("store", store.is_some()),
     ]
 }
 
@@ -329,10 +335,10 @@ pub(crate) fn thinking_config_fields(cfg: &ThinkingConfig) -> Vec<(&'static str,
         thinking_level,
     } = cfg;
     vec![
-        ("IncludeThoughts", *include_thoughts),
-        ("ThinkingBudget", thinking_budget.is_some()),
+        ("include_thoughts", *include_thoughts),
+        ("thinking_budget", thinking_budget.is_some()),
         (
-            "ThinkingLevel",
+            "thinking_level",
             thinking_level
                 .as_ref()
                 .is_some_and(|v| !v.as_str().is_empty()),
@@ -352,14 +358,14 @@ pub(crate) fn http_option_fields(http_options: &HttpOptions) -> Vec<(&'static st
         extras_request_provider,
     } = http_options;
     vec![
-        ("BaseURL", base_url.as_ref().is_some_and(|v| !v.is_empty())),
+        ("base_url", base_url.as_ref().is_some_and(|v| !v.is_empty())),
         (
-            "APIVersion",
+            "api_version",
             api_version.as_ref().is_some_and(|v| !v.is_empty()),
         ),
-        ("Headers", !headers.is_empty()),
-        ("Timeout", timeout.is_some()),
-        ("ExtrasRequestProvider", extras_request_provider.is_some()),
+        ("headers", !headers.is_empty()),
+        ("timeout", timeout.is_some()),
+        ("extras_request_provider", extras_request_provider.is_some()),
     ]
 }
 
@@ -418,14 +424,14 @@ mod tests {
             (
                 thinking(Some(-5), Some(ThinkingLevel::High)),
                 Err(
-                    "openai: unsupported generation config field: ThinkingConfig.ThinkingBudget -5"
+                    "openai: unsupported generation config field: thinking_config.thinking_budget -5"
                         .to_string(),
                 ),
             ),
             (
                 thinking(None, Some(ThinkingLevel::Unknown("ULTRA".to_string()))),
                 Err(
-                    r#"openai: unsupported generation config field: ThinkingConfig.ThinkingLevel "ULTRA""#
+                    r#"openai: unsupported generation config field: thinking_config.thinking_level "ULTRA""#
                         .to_string(),
                 ),
             ),
@@ -451,7 +457,7 @@ mod tests {
         };
         assert_eq!(
             msg(&logprobs, None),
-            Some(format!("{prefix}Logprobs without ResponseLogprobs"))
+            Some(format!("{prefix}logprobs without response_logprobs"))
         );
         let negative = GenerateContentConfig {
             max_output_tokens: -1,
@@ -460,7 +466,7 @@ mod tests {
         };
         assert_eq!(
             msg(&negative, None),
-            Some(format!("{prefix}negative MaxOutputTokens"))
+            Some(format!("{prefix}negative max_output_tokens"))
         );
         let candidates = GenerateContentConfig {
             candidate_count: -1,
@@ -468,7 +474,7 @@ mod tests {
         };
         assert_eq!(
             msg(&candidates, None),
-            Some(format!("{prefix}negative CandidateCount"))
+            Some(format!("{prefix}negative candidate_count"))
         );
 
         let cfg = GenerateContentConfig::default();
@@ -487,7 +493,7 @@ mod tests {
         };
         assert_eq!(
             msg(&cfg, Some(&base_url)),
-            Some(format!("{prefix}HTTPOptions.BaseURL"))
+            Some(format!("{prefix}http_options.base_url"))
         );
         let zero = HttpOptions {
             timeout: Some(Duration::ZERO),
@@ -495,7 +501,7 @@ mod tests {
         };
         assert_eq!(
             msg(&cfg, Some(&zero)),
-            Some(format!("{prefix}non-positive HTTPOptions.Timeout 0s"))
+            Some(format!("{prefix}non-positive http_options.timeout 0s"))
         );
     }
 
@@ -504,10 +510,10 @@ mod tests {
         let fields = config_fields(&GenerateContentConfig::default(), None);
         assert_eq!(fields.len(), 37);
         assert!(fields.iter().all(|(_, set)| !set));
-        assert_eq!(fields[0].0, "HTTPOptions");
-        assert_eq!(fields[34].0, "AutomaticContinuation");
-        assert_eq!(fields[35].0, "GenerationOutputConfig");
-        assert_eq!(fields[36].0, "Store");
+        assert_eq!(fields[0].0, "http_options");
+        assert_eq!(fields[34].0, "automatic_continuation");
+        assert_eq!(fields[35].0, "generation_output_config");
+        assert_eq!(fields[36].0, "store");
         let set: Vec<&str> = config_fields(
             &GenerateContentConfig {
                 top_k: Some(0.0),
@@ -519,18 +525,18 @@ mod tests {
         .into_iter()
         .filter_map(|(name, set)| set.then_some(name))
         .collect();
-        assert_eq!(set, ["HTTPOptions", "TopK", "ImageConfig"]);
+        assert_eq!(set, ["http_options", "top_k", "image_config"]);
         assert_eq!(
             http_option_fields(&HttpOptions {
                 api_version: Some(String::new()),
                 ..HttpOptions::default()
             }),
             [
-                ("BaseURL", false),
-                ("APIVersion", false),
-                ("Headers", false),
-                ("Timeout", false),
-                ("ExtrasRequestProvider", false),
+                ("base_url", false),
+                ("api_version", false),
+                ("headers", false),
+                ("timeout", false),
+                ("extras_request_provider", false),
             ]
         );
     }
@@ -547,7 +553,7 @@ mod tests {
         assert!(err.is(ErrorKind::UnsupportedConfigField));
         assert_eq!(
             err.to_string(),
-            "openai: unsupported generation config field: TopK"
+            "openai: unsupported generation config field: top_k"
         );
     }
 
@@ -560,14 +566,14 @@ mod tests {
                     generation_output_config: Some(Default::default()),
                     ..GenerateContentConfig::default()
                 },
-                "GenerationOutputConfig",
+                "generation_output_config",
             ),
             (
                 GenerateContentConfig {
                     store: Some(false),
                     ..GenerateContentConfig::default()
                 },
-                "Store",
+                "store",
             ),
         ] {
             let err =

@@ -532,7 +532,7 @@ fn test_build_params_unsupported_part() {
                 }),
                 ..inline_part("image/png", &[1])
             },
-            "unsupported content part: MediaResolution",
+            "unsupported content part: media_resolution",
         ),
         (
             "video metadata beside file data",
@@ -541,7 +541,7 @@ fn test_build_params_unsupported_part() {
                 video_metadata: Some(VideoMetadata::default()),
                 ..Part::default()
             },
-            "unsupported content part: VideoMetadata",
+            "unsupported content part: video_metadata",
         ),
         (
             "empty part",
@@ -941,7 +941,7 @@ fn test_apply_generation_config_refuses_fields_outside_the_supported_lists() {
     // "Temperature": the top-level list without it.
     let supported: Vec<&str> = supported_config_fields()
         .into_iter()
-        .filter(|name| *name != "Temperature")
+        .filter(|name| *name != "temperature")
         .collect();
     let err = match build_params_with(
         "m",
@@ -951,14 +951,14 @@ fn test_apply_generation_config_refuses_fields_outside_the_supported_lists() {
         }),
         &supported,
     ) {
-        Ok(_) => panic!("Temperature: err = nil, want {:?}", want("Temperature")),
+        Ok(_) => panic!("Temperature: err = nil, want {:?}", want("temperature")),
         Err(err) => err,
     };
     assert!(
         err.is(ErrorKind::UnsupportedConfigField),
         "Temperature: err = {err}"
     );
-    assert_eq!(err.to_string(), want("Temperature"), "Temperature");
+    assert_eq!(err.to_string(), want("temperature"), "temperature");
 
     // "HTTPOptions.Timeout": SupportedHTTPOptionFields = nil leaves only the ignored ones.
     let options = HttpOptions {
@@ -966,7 +966,7 @@ fn test_apply_generation_config_refuses_fields_outside_the_supported_lists() {
         ..HttpOptions::default()
     };
     let err = match reject_unsupported_fields(
-        "HTTPOptions.",
+        "http_options.",
         &http_option_fields(&options),
         IGNORED_HTTP_OPTION_FIELDS,
     ) {
@@ -979,8 +979,8 @@ fn test_apply_generation_config_refuses_fields_outside_the_supported_lists() {
     );
     assert_eq!(
         err.to_string(),
-        want("HTTPOptions.Timeout"),
-        "HTTPOptions.Timeout"
+        want("http_options.timeout"),
+        "http_options.timeout"
     );
 
     // "ThinkingConfig.ThinkingLevel": SupportedThinkingConfigFields without ThinkingLevel.
@@ -989,21 +989,21 @@ fn test_apply_generation_config_refuses_fields_outside_the_supported_lists() {
         ..ThinkingConfig::default()
     };
     let err = match reject_unsupported_fields(
-        "ThinkingConfig.",
+        "thinking_config.",
         &thinking_config_fields(&thinking),
-        &["IncludeThoughts", "ThinkingBudget"],
+        &["include_thoughts", "thinking_budget"],
     ) {
-        Ok(()) => panic!("ThinkingConfig.ThinkingLevel: err = nil"),
+        Ok(()) => panic!("thinking_config.thinking_level: err = nil"),
         Err(err) => err,
     };
     assert!(
         err.is(ErrorKind::UnsupportedConfigField),
-        "ThinkingConfig.ThinkingLevel: err = {err}"
+        "thinking_config.thinking_level: err = {err}"
     );
     assert_eq!(
         err.to_string(),
-        want("ThinkingConfig.ThinkingLevel"),
-        "ThinkingConfig.ThinkingLevel"
+        want("thinking_config.thinking_level"),
+        "thinking_config.thinking_level"
     );
 }
 

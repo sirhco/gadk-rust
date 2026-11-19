@@ -643,7 +643,7 @@ mod tests {
         let (_d, base) = temp_dir();
         let r = test_registry();
         let failing: ToolFactory =
-            Arc::new(|_r, _c, _a| async { Err(ConfigError::msg("args is nil")) }.boxed());
+            Arc::new(|_r, _c, _a| async { Err(ConfigError::msg("args is missing")) }.boxed());
         r.register_tool_factory("bad", failing).unwrap();
         for (tool, want) in [
             (
@@ -652,7 +652,7 @@ mod tests {
             ),
             (
                 "bad",
-                "failed to create LLM agent config: failed to resolve tool reference bad: args is nil",
+                "failed to create LLM agent config: failed to resolve tool reference bad: args is missing",
             ),
         ] {
             let p = write(

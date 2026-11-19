@@ -39,7 +39,7 @@ pub(crate) fn tools_processor<'a>(
         let agent = ctx.agent();
         let Some(state) = reveal(&*agent) else {
             return Err(AgentError::other(format!(
-                "agent {} is not an LLMAgent",
+                "agent {} is not an LlmAgent",
                 agent.name()
             )));
         };

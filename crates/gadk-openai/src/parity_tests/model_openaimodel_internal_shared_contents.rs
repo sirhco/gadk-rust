@@ -113,7 +113,7 @@ fn test_flatten_content_text() {
                 inline_data: Some(png_blob()),
                 ..text("describe it")
             }]),
-            "InlineData",
+            "inline_data",
         ),
         // The text gathered before the refused part is not returned.
         err(
@@ -129,7 +129,7 @@ fn test_flatten_content_text() {
                     ..text("describe it")
                 },
             ]),
-            "FileData",
+            "file_data",
         ),
         err(
             "text part carrying executable code",
@@ -140,7 +140,7 @@ fn test_flatten_content_text() {
                 }),
                 ..text("run this")
             }]),
-            "ExecutableCode",
+            "executable_code",
         ),
         // UnsupportedPayload counts a call as sent, which holds for contents but not for an
         // instruction.
@@ -153,7 +153,7 @@ fn test_flatten_content_text() {
                 }),
                 ..text("be terse")
             }]),
-            "FunctionCall",
+            "function_call",
         ),
         err(
             "text part carrying a function response",
@@ -165,7 +165,7 @@ fn test_flatten_content_text() {
                 }),
                 ..text("be terse")
             }]),
-            "FunctionResponse",
+            "function_response",
         ),
         // A signature and caller metadata carry nothing a model reads, so the text still goes
         // out alone.
@@ -215,7 +215,7 @@ fn test_unsupported_payload_media_is_reported_until_an_endpoint_claims_it() {
                 inline_data: Some(png_blob()),
                 ..Part::default()
             },
-            "InlineData",
+            "inline_data",
         ),
         (
             "file_data",
@@ -227,7 +227,7 @@ fn test_unsupported_payload_media_is_reported_until_an_endpoint_claims_it() {
                 }),
                 ..Part::default()
             },
-            "FileData",
+            "file_data",
         ),
         // A part carrying both is reported for FileData, which genai.Part declares ahead of
         // InlineData; ClassifyMedia emits them the other way round, and that is not a defect
@@ -243,7 +243,7 @@ fn test_unsupported_payload_media_is_reported_until_an_endpoint_claims_it() {
                 }),
                 ..Part::default()
             },
-            "FileData",
+            "file_data",
         ),
     ];
 
@@ -274,7 +274,7 @@ fn test_unsupported_payload_emitting_media_does_not_hide_anything_else() {
     };
     assert_eq!(
         unsupported_payload(&part, &[PartField::Media]),
-        Some("ExecutableCode")
+        Some("executable_code")
     );
     assert_eq!(
         unsupported_payload(&part, &[PartField::Media, PartField::CodeExecution]),
@@ -378,7 +378,7 @@ fn test_unsupported_payload_media_resolution_is_lost_no_longer_silently() {
                 media_resolution: high(),
                 ..Part::default()
             },
-            Some("MediaResolution"),
+            Some("media_resolution"),
         ),
         (
             "on_file_data_that_is_sent_it_is_reported",
@@ -391,7 +391,7 @@ fn test_unsupported_payload_media_resolution_is_lost_no_longer_silently() {
                 media_resolution: high(),
                 ..Part::default()
             },
-            Some("MediaResolution"),
+            Some("media_resolution"),
         ),
         // A GIF part with an FPS: the image is sent, the FPS has no field.
         (
@@ -404,7 +404,7 @@ fn test_unsupported_payload_media_resolution_is_lost_no_longer_silently() {
                 video_metadata: Some(VideoMetadata::default()),
                 ..Part::default()
             },
-            Some("VideoMetadata"),
+            Some("video_metadata"),
         ),
         // Nothing for it to qualify, so nothing is lost by dropping it.
         (
@@ -434,7 +434,7 @@ fn test_unsupported_payload_media_resolution_is_lost_no_longer_silently() {
         if part.inline_data.is_some() || part.file_data.is_some() {
             assert_ne!(
                 unsupported_payload(&part, &[]),
-                Some("MediaResolution"),
+                Some("media_resolution"),
                 "{name}: UnsupportedPayload() must name the media field itself"
             );
         }

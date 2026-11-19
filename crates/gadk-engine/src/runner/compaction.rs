@@ -48,7 +48,7 @@ pub(crate) fn resolve_compaction_config(
         return Ok(None);
     };
     cfg.validate()
-        .map_err(|e| AgentError::Config(format!("invalid Compaction: {e}")))?;
+        .map_err(|e| AgentError::Config(format!("invalid compaction config: {e}")))?;
     // Copy so the caller's config is not mutated by the summarizer default.
     let mut resolved = cfg.clone();
     if resolved.summarizer.is_some() {

@@ -77,10 +77,10 @@ pub(crate) fn build_params(
 pub(crate) fn supported_config_fields() -> Vec<&'static str> {
     let mut fields = SUPPORTED_CONFIG_FIELDS.to_vec();
     fields.extend([
-        "StopSequences",
-        "PresencePenalty",
-        "FrequencyPenalty",
-        "Seed",
+        "stop_sequences",
+        "presence_penalty",
+        "frequency_penalty",
+        "seed",
     ]);
     fields
 }
@@ -525,7 +525,7 @@ fn apply_generation_config(
         params.service_tier = Some(service_tier(tier).ok_or_else(|| {
             OpenAiError::new(
                 ErrorKind::UnsupportedConfigField,
-                format!("ServiceTier {}", go_quote(tier.as_str())),
+                format!("service_tier {}", go_quote(tier.as_str())),
             )
         })?);
     }

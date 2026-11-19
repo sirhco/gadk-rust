@@ -366,7 +366,7 @@ fn test_new_llm_summarizer() {
         (
             "missing model",
             LlmSummarizerConfig::default(),
-            Some("LLMSummarizerConfig.Model is required"),
+            Some("LlmSummarizerConfig.model is required"),
         ),
         (
             "custom template with the placeholder",
@@ -382,7 +382,7 @@ fn test_new_llm_summarizer() {
                 prompt_template: "summarize please".into(),
                 ..with_model(fakeModel::new(vec![]))
             },
-            Some("PromptTemplate must contain the placeholder \"{conversation_history}\""),
+            Some("prompt_template must contain the placeholder \"{conversation_history}\""),
         ),
     ];
     for (name, cfg, want_err) in cases {

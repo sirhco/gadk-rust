@@ -590,7 +590,7 @@ async fn test_handle_function_calls_no_args_reach_on_tool_error_for_unknown_tool
 /// A set_model_response call without args gives the same structured output as a call with
 /// empty args, the empty object, rather than the {"result": null} sent for a tool that
 /// returns nothing.
-// parity: adapted: Go's "nil args" and "empty args" rows are both the empty map in Rust, so one row stands for both.
+// parity: adapted: Go's "no args" and "empty args" rows are both the empty map in Rust, so one row stands for both.
 #[tokio::test]
 async fn test_handle_function_calls_set_model_response_without_args() {
     let agent = gadk_engine::llm::agent::new(LlmAgentConfig {

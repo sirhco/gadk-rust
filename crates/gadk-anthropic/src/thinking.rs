@@ -51,12 +51,12 @@ pub(crate) fn validate_thinking_config(tc: Option<&ThinkingConfig>) -> Result<()
         .is_some_and(|level| !level.as_str().is_empty())
     {
         return Err(invalid_config(
-            "ThinkingConfig.ThinkingLevel is not supported on Claude; configure ClientConfig.Effort instead",
+            "thinking_config.thinking_level is not supported on Claude; configure ClientConfig.effort instead",
         ));
     }
     if tc.thinking_budget.is_none() {
         return Err(invalid_config(
-            "ThinkingConfig.ThinkingBudget must be set explicitly when ThinkingConfig is provided (0 to disable, >0 for manual budget, <0 for adaptive thinking)",
+            "thinking_config.thinking_budget must be set explicitly when thinking_config is set (0 to disable, >0 for manual budget, <0 for adaptive thinking)",
         ));
     }
     Ok(())
@@ -93,25 +93,25 @@ pub(crate) fn validate_output_format_config(
     let has_schema = cfg.response_schema.is_some() || cfg.response_json_schema.is_some();
     if cfg.response_schema.is_some() && cfg.response_json_schema.is_some() {
         return Err(invalid_config(
-            "ResponseSchema and ResponseJsonSchema cannot both be set",
+            "response_schema and response_json_schema cannot both be set",
         ));
     }
     let mime = go_to_lower(cfg.response_mime_type.trim());
     if !mime.is_empty() && mime != "text/plain" && mime != "application/json" {
         return Err(invalid_config(format!(
-            "ResponseMIMEType {} is not supported",
+            "response_mime_type {} is not supported",
             go_quote(&cfg.response_mime_type)
         )));
     }
     if mime == "text/plain" && has_schema {
         return Err(invalid_config(format!(
-            "ResponseMIMEType {} cannot be combined with ResponseSchema or ResponseJsonSchema",
+            "response_mime_type {} cannot be combined with response_schema or response_json_schema",
             go_quote(&cfg.response_mime_type)
         )));
     }
     if mime == "application/json" && !has_schema {
         return Err(invalid_config(
-            "ResponseMIMEType \"application/json\" requires ResponseSchema or ResponseJsonSchema",
+            "response_mime_type \"application/json\" requires response_schema or response_json_schema",
         ));
     }
     if has_schema {
@@ -130,9 +130,9 @@ pub(crate) fn build_output_format_schema(
         return Ok(None);
     };
     let (marshalled, field_name) = if let Some(raw) = cfg.response_json_schema.as_ref() {
-        (serde_json::to_value(raw), "ResponseJsonSchema")
+        (serde_json::to_value(raw), "response_json_schema")
     } else if let Some(schema) = cfg.response_schema.as_ref() {
-        (serde_json::to_value(schema), "ResponseSchema")
+        (serde_json::to_value(schema), "response_schema")
     } else {
         return Ok(None);
     };
@@ -335,7 +335,7 @@ mod tests {
         let err = validate_thinking_config(Some(&include_only)).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "anthropicmodel: invalid configuration: ThinkingConfig.ThinkingBudget must be set explicitly when ThinkingConfig is provided (0 to disable, >0 for manual budget, <0 for adaptive thinking)"
+            "anthropicmodel: invalid configuration: thinking_config.thinking_budget must be set explicitly when thinking_config is set (0 to disable, >0 for manual budget, <0 for adaptive thinking)"
         );
         assert_eq!(err.kinds(), &[ErrorKind::InvalidConfig]);
 
@@ -347,7 +347,7 @@ mod tests {
         let err = validate_thinking_config(Some(&level)).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "anthropicmodel: invalid configuration: ThinkingConfig.ThinkingLevel is not supported on Claude; configure ClientConfig.Effort instead"
+            "anthropicmodel: invalid configuration: thinking_config.thinking_level is not supported on Claude; configure ClientConfig.effort instead"
         );
         // ThinkingLevel is checked first, as in Go.
         let level_no_budget = ThinkingConfig {
@@ -358,7 +358,7 @@ mod tests {
             validate_thinking_config(Some(&level_no_budget))
                 .unwrap_err()
                 .to_string()
-                .contains("ThinkingLevel")
+                .contains("thinking_level")
         );
         // An empty level is Go's unset "".
         let empty_level = ThinkingConfig {
@@ -415,7 +415,7 @@ mod tests {
                     response_mime_type: "application/json".into(),
                     ..Default::default()
                 },
-                "ResponseMIMEType \"application/json\" requires ResponseSchema or ResponseJsonSchema",
+                "response_mime_type \"application/json\" requires response_schema or response_json_schema",
             ),
             (
                 "response_mime_type_non_json_with_schema",
@@ -427,7 +427,7 @@ mod tests {
                     }),
                     ..Default::default()
                 },
-                "ResponseMIMEType \"text/plain\" cannot be combined with ResponseSchema or ResponseJsonSchema",
+                "response_mime_type \"text/plain\" cannot be combined with response_schema or response_json_schema",
             ),
             (
                 "response_schema_and_response_json_schema_both_set",
@@ -439,7 +439,7 @@ mod tests {
                     response_json_schema: Some(json!({"type": "object"})),
                     ..Default::default()
                 },
-                "ResponseSchema and ResponseJsonSchema cannot both be set",
+                "response_schema and response_json_schema cannot both be set",
             ),
             (
                 "unsupported_mime_type_quoted_as_given",
@@ -447,17 +447,17 @@ mod tests {
                     response_mime_type: " Text/CSV".into(),
                     ..Default::default()
                 },
-                "ResponseMIMEType \" Text/CSV\" is not supported",
+                "response_mime_type \" Text/CSV\" is not supported",
             ),
             (
                 "empty_response_json_schema_rejected",
                 json_schema_cfg("", json!({})),
-                "ResponseJsonSchema must be a non-empty JSON schema",
+                "response_json_schema must be a non-empty JSON schema",
             ),
             (
                 "non_object_response_json_schema",
                 json_schema_cfg("", json!("string")),
-                "ResponseJsonSchema must be a non-empty JSON schema",
+                "response_json_schema must be a non-empty JSON schema",
             ),
             (
                 "empty_response_schema",
@@ -465,7 +465,7 @@ mod tests {
                     response_schema: Some(Schema::default()),
                     ..Default::default()
                 },
-                "ResponseSchema must be a non-empty JSON schema",
+                "response_schema must be a non-empty JSON schema",
             ),
         ];
         for (name, cfg, want) in cases {
@@ -774,7 +774,7 @@ mod tests {
         let err = build_output_config_param(Some(Effort::Low), Some(&cfg)).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "anthropicmodel: invalid configuration: ResponseJsonSchema must be a non-empty JSON schema"
+            "anthropicmodel: invalid configuration: response_json_schema must be a non-empty JSON schema"
         );
     }
 }

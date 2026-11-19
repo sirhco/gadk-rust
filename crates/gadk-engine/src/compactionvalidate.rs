@@ -76,7 +76,7 @@ fn check(
     base: &RunnerConfig,
 ) -> Result<(), AgentError> {
     cfg.validate()
-        .map_err(|e| AgentError::Other(Box::new(GoWrapped::new("invalid Compaction", e))))?;
+        .map_err(|e| AgentError::Other(Box::new(GoWrapped::new("invalid compaction config", e))))?;
     for (name, agent) in agents {
         // Two runs, so only a compaction problem is reported: anything else a runner needs may
         // legitimately be missing at construction time, and the app fails its own requests.

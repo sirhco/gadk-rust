@@ -1193,7 +1193,7 @@ async fn output_schema_empty_response_json_schema_rejected(m: &dyn Llm) {
         };
         assert!(
             is_invalid_config,
-            "{name}: empty ResponseJsonSchema error = {:?}, want ErrInvalidConfig",
+            "{name}: empty response_json_schema error = {:?}, want ErrInvalidConfig",
             item.err().map(|e| e.to_string())
         );
     }

@@ -2002,7 +2002,7 @@ pub(crate) fn parse_payload_column_denylist(cols: &[String]) -> Result<BTreeSet<
             }
             _ => {
                 return Err(Error::msg(format!(
-                    "unsupported PayloadColumnDenylist entry {}: allowed values are {}, {}, {} and {}",
+                    "unsupported payload_column_denylist entry {}: allowed values are {}, {}, {} and {}",
                     go_quote(c),
                     go_quote(COLUMN_CONTENT),
                     go_quote(COLUMN_CONTENT_PARTS),
@@ -2493,7 +2493,7 @@ mod tests {
         let err = parse_payload_column_denylist(&["content".into(), "status".into()]).unwrap_err();
         assert_eq!(
             err.to_string(),
-            r#"unsupported PayloadColumnDenylist entry "status": allowed values are "content", "content_parts", "attributes" and "latency_ms""#
+            r#"unsupported payload_column_denylist entry "status": allowed values are "content", "content_parts", "attributes" and "latency_ms""#
         );
     }
 

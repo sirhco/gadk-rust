@@ -297,7 +297,7 @@ pub(crate) fn match_type(
     is_input: bool,
 ) -> Result<bool, String> {
     let Some(schema) = schema else {
-        return Err("schema is nil".to_string());
+        return Err("schema is missing".to_string());
     };
     if value.is_null() {
         return Ok(schema.nullable == Some(true));

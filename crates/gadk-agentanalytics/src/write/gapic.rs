@@ -613,7 +613,7 @@ fn set_deadline<T>(request: &mut tonic::Request<T>, ctx: &Context) {
 fn resolve_credentials(options: &ClientOptions) -> Result<Option<Credentials>, Error> {
     if options.without_authentication && options.credentials.is_some() {
         return Err(Error::msg(
-            "options.WithoutAuthentication is incompatible with any option that provides \
+            "ClientOptions.without_authentication is incompatible with any option that provides \
              credentials",
         ));
     }

@@ -135,7 +135,7 @@ impl FromStr for Effort {
             other => Err(AnthropicError::new(
                 ErrorKind::InvalidConfig,
                 format!(
-                    "unsupported Effort {}; valid values are low, medium, high, xhigh, max",
+                    "unsupported effort {}; valid values are low, medium, high, xhigh, max",
                     go_quote(other)
                 ),
             )),
@@ -187,7 +187,7 @@ impl FromStr for PromptCacheTtl {
             other => Err(AnthropicError::new(
                 ErrorKind::InvalidConfig,
                 format!(
-                    "unsupported PromptCache.TTL {}; valid values are 5m, 1h",
+                    "unsupported prompt_cache.ttl {}; valid values are 5m, 1h",
                     go_quote(other)
                 ),
             )),
@@ -486,7 +486,7 @@ mod tests {
         }
         assert_eq!(
             "extreme".parse::<Effort>().err().map(|e| e.to_string()),
-            Some("anthropicmodel: invalid configuration: unsupported Effort \"extreme\"; valid values are low, medium, high, xhigh, max".to_string())
+            Some("anthropicmodel: invalid configuration: unsupported effort \"extreme\"; valid values are low, medium, high, xhigh, max".to_string())
         );
         assert!("".parse::<Effort>().is_err());
     }
@@ -507,7 +507,7 @@ mod tests {
         );
         assert_eq!(
             "10m".parse::<PromptCacheTtl>().err().map(|e| e.to_string()),
-            Some("anthropicmodel: invalid configuration: unsupported PromptCache.TTL \"10m\"; valid values are 5m, 1h".to_string())
+            Some("anthropicmodel: invalid configuration: unsupported prompt_cache.ttl \"10m\"; valid values are 5m, 1h".to_string())
         );
         assert_eq!(
             PromptCacheConfig::default().ttl,
@@ -628,14 +628,14 @@ mod tests {
 
     #[test]
     fn validate_base_url_like_go() {
-        assert!(validate_base_url("BaseURL", "https://example.com").is_ok());
-        assert!(validate_base_url("BaseURL", " http://127.0.0.1:8080/prefix ").is_ok());
+        assert!(validate_base_url("base_url", "https://example.com").is_ok());
+        assert!(validate_base_url("base_url", " http://127.0.0.1:8080/prefix ").is_ok());
         assert_eq!(
-            validate_base_url("BaseURL", "   ")
+            validate_base_url("base_url", "   ")
                 .err()
                 .map(|e| e.to_string()),
             Some(
-                "anthropicmodel: invalid configuration: BaseURL must not be whitespace-only"
+                "anthropicmodel: invalid configuration: base_url must not be whitespace-only"
                     .to_string()
             )
         );

@@ -42,7 +42,7 @@ fn test_ensure_function_tool_only() {
     };
     // (name, tool, want error text, want ErrUnsupportedConfigField)
     let tests: Vec<(&str, Option<Tool>, &str, bool)> = vec![
-        ("nil tool", None, "tool 0 is nil", false),
+        ("nil tool", None, "tool 0 is missing", false),
         (
             "GoogleSearch alone",
             Some(Tool {

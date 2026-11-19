@@ -295,7 +295,7 @@ fn fan_out_to_join(nodes: &[Arc<dyn Node>]) -> Vec<Edge> {
     "invalid",
     true,
     Some(
-        r#"node "invalid_node" references state field "foo" which is not declared in StateSchema"#
+        r#"node "invalid_node" references state field "foo" which is not declared in state_schema"#
     )
 )]
 #[case::nil_schema_skips_validation("invalid", false, None)]

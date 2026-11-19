@@ -369,7 +369,7 @@ async fn test_finish_task_tool_run() {
             false,
             vec!["finish_task", "validation errors"],
         ),
-        ("nil args", None, Value::Null, true, vec![]),
+        ("no args", None, Value::Null, true, vec![]),
         ("non-map args", None, json!("not a map"), true, vec![]),
     ];
     for (name, output_schema, args, want_err, want_err_substr) in cases {

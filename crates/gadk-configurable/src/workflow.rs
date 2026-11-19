@@ -341,7 +341,7 @@ pub(crate) async fn resolve_node_from_yaml(
 
         // The nil tool of a toolset reference is passed on to the named tool node.
         let Some(t) = t else {
-            return Err(ConfigError::msg("tool cannot be nil"));
+            return Err(ConfigError::msg("tool is missing"));
         };
         let node = ToolNode::named(&cfg.name, t, node_config).map_err(ConfigError::other)?;
         return Ok(node);
@@ -1001,7 +1001,7 @@ mod tests {
             ),
             (
                 "agent_class: ToolNode\nname: t\ntool_code: ts\n",
-                "tool cannot be nil",
+                "tool is missing",
             ),
         ] {
             let (res, _path, _guard) = yaml_node(&r, &ctx, "t.yaml", content).await;

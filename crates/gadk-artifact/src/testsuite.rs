@@ -158,7 +158,7 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
             .await
         {
             Ok(got) if got.version == want_version => {}
-            got => fail!(s, "[{i}] Save() = {got:?}, want ({want_version}, nil)"),
+            got => fail!(s, "[{i}] Save() = {got:?}, want Ok({want_version})"),
         }
     }
 
@@ -172,7 +172,7 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
             Ok(got) if got.part.as_ref() == Some(&want) => {}
             got => fail!(
                 format!("{s}/Load/{name}"),
-                "Load({version}) = {got:?}, want ({want:?}, nil)"
+                "Load({version}) = {got:?}, want Ok({want:?})"
             ),
         }
     }
@@ -314,7 +314,7 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
     for (i, (file_name, session_id, want_version, part, md)) in test_data.into_iter().enumerate() {
         match srv.save(save_req(session_id, file_name, part, md)).await {
             Ok(got) if got.version == want_version => {}
-            got => fail!(s, "[{i}] Save() = {got:?}, want ({want_version}, nil)"),
+            got => fail!(s, "[{i}] Save() = {got:?}, want Ok({want_version})"),
         }
     }
 
@@ -335,7 +335,7 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
             Ok(got) if got.part.as_ref() == Some(&want) => {}
             got => fail!(
                 format!("{s}/Load/{name}"),
-                "Load({version}) = {got:?}, want ({want:?}, nil)"
+                "Load({version}) = {got:?}, want Ok({want:?})"
             ),
         }
     }
@@ -612,7 +612,7 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
         let want_version = i64::try_from(i + 1).unwrap();
         match srv.save(save_req(SESSION, file_name, part, md)).await {
             Ok(got) if got.version == want_version => {}
-            got => fail!(s, "[{i}] Save() = {got:?}, want ({want_version}, nil)"),
+            got => fail!(s, "[{i}] Save() = {got:?}, want Ok({want_version})"),
         }
     }
 

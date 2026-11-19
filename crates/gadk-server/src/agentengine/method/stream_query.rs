@@ -237,8 +237,8 @@ fn error_line(text: &str, log: &Log) -> Option<Bytes> {
 /// replay fixtures drop these lines.
 fn processing_event(item: &Result<Event, gadk_agent::AgentError>) -> String {
     match item {
-        Ok(event) => format!("Processing event: {event:?} err: <nil>\n"),
-        Err(err) => format!("Processing event: <nil> err: {err}\n"),
+        Ok(event) => format!("Processing event: {event:?} err: none\n"),
+        Err(err) => format!("Processing event: none err: {err}\n"),
     }
 }
 
@@ -447,7 +447,7 @@ mod tests {
         assert!(logged[0].starts_with("Processing event: Event {"));
         assert_eq!(
             logged[1],
-            "Processing event: <nil> err: context compaction failed: squeeze\n"
+            "Processing event: none err: context compaction failed: squeeze\n"
         );
         assert_eq!(logged[2], "agentengine: context compaction failed: squeeze");
         assert!(logged[3].starts_with("Processing event: Event {"));

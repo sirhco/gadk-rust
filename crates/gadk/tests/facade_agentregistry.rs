@@ -37,6 +37,6 @@ async fn facade_agentregistry_client_requires_project_and_location() {
     let err = Client::new(Config::default()).await.err().unwrap();
     assert_eq!(
         err.to_string(),
-        "agentregistry: ProjectID and Location must be set"
+        "agentregistry: project_id and location must be set"
     );
 }

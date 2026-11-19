@@ -1394,8 +1394,8 @@ async fn test_gcs_offloading_skips_client_when_content_parts_disabled() {
             .await
             .unwrap_or_else(|e| panic!("{name}: Close() error: {e}"));
         assert!(
-            logger.contains("GCSBucketName \"unused-bucket\" is ignored"),
-            "{name}: expected warning that GCSBucketName is ignored, got:\n{logger}"
+            logger.contains("gcs_bucket_name \"unused-bucket\" is ignored"),
+            "{name}: expected warning that gcs_bucket_name is ignored, got:\n{logger}"
         );
     }
 }
@@ -1749,7 +1749,7 @@ async fn test_gcs_offloading_built_in_offloader_error_preserves_scrubbed_detail(
 fn count_prefix_warnings(l: &RecordingLogger) -> usize {
     l.lines()
         .iter()
-        .filter(|line| line.contains("WARNING: Config.GCSPathPrefix"))
+        .filter(|line| line.contains("WARNING: Config.gcs_path_prefix"))
         .count()
 }
 

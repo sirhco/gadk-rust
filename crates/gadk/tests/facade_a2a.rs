@@ -60,7 +60,7 @@ fn facade_a2a_builds_an_executor_and_a_remote_agent() {
     .expect("a remote agent without a card is refused");
     assert_eq!(
         err.to_string(),
-        "either AgentCard or AgentCardProvider must be provided"
+        "either agent_card or agent_card_provider must be set"
     );
     let agent = new_a2a(A2AConfig {
         name: "remote".into(),

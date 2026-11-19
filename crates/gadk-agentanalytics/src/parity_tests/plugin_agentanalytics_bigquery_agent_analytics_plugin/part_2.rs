@@ -1329,12 +1329,12 @@ async fn test_new_big_query_agent_analytics_plugin_with_clients_closes_unused_wr
         Case {
             name: "invalid BatchSize",
             mutate: |c| c.batch_size = -1,
-            want_err: "BatchSize and QueueMaxSize must be >= 1",
+            want_err: "batch_size and queue_max_size must be >= 1",
         },
         Case {
             name: "invalid PayloadColumnDenylist",
             mutate: |c| c.payload_column_denylist = vec!["bogus".into()],
-            want_err: r#"unsupported PayloadColumnDenylist entry "bogus""#,
+            want_err: r#"unsupported payload_column_denylist entry "bogus""#,
         },
         Case {
             name: "disabled",

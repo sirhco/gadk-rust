@@ -708,7 +708,7 @@ pub async fn sync_analytics_views(
         && failed > 0
     {
         logf.printf(format_args!(
-            "agentanalytics: view creation finished: {created} created, {failed} failed of {}; call SyncViews to retry",
+            "agentanalytics: view creation finished: {created} created, {failed} failed of {}; call sync_views to retry",
             defs.len()
         ));
     }

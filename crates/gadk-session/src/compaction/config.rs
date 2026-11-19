@@ -105,49 +105,49 @@ impl Config {
         let err = |m: String| Err(CompactionConfigError::new(m));
         if self.compaction_interval < 0 {
             return err(format!(
-                "CompactionInterval must not be negative, got {}",
+                "compaction_interval must not be negative, got {}",
                 self.compaction_interval
             ));
         }
         if self.overlap_size < 0 {
             return err(format!(
-                "OverlapSize must not be negative, got {}",
+                "overlap_size must not be negative, got {}",
                 self.overlap_size
             ));
         }
         if self.token_threshold < 0 {
             return err(format!(
-                "TokenThreshold must not be negative, got {}",
+                "token_threshold must not be negative, got {}",
                 self.token_threshold
             ));
         }
         if self.event_retention_size < 0 {
             return err(format!(
-                "EventRetentionSize must not be negative, got {}",
+                "event_retention_size must not be negative, got {}",
                 self.event_retention_size
             ));
         }
         if self.overlap_size > 0 && self.compaction_interval == 0 {
             return err(format!(
-                "OverlapSize is set to {} but CompactionInterval is 0, so sliding-window compaction never runs",
+                "overlap_size is set to {} but compaction_interval is 0, so sliding-window compaction never runs",
                 self.overlap_size
             ));
         }
         if self.token_threshold > 0 && self.event_retention_size == 0 {
             return err(format!(
-                "TokenThreshold is set to {} but EventRetentionSize is 0, so a compaction would summarize the whole conversation including the turn being answered",
+                "token_threshold is set to {} but event_retention_size is 0, so a compaction would summarize the whole conversation including the turn being answered",
                 self.token_threshold
             ));
         }
         if self.event_retention_size > 0 && self.token_threshold == 0 {
             return err(format!(
-                "EventRetentionSize is set to {} but TokenThreshold is 0, so tail-retention compaction never runs",
+                "event_retention_size is set to {} but token_threshold is 0, so tail-retention compaction never runs",
                 self.event_retention_size
             ));
         }
         if !self.has_sliding_window() && !self.has_tail_retention() {
             return err(
-                "no compaction strategy is enabled, set CompactionInterval or TokenThreshold (or leave the whole config nil to disable compaction)"
+                "no compaction strategy is enabled, set compaction_interval or token_threshold (or leave the compaction config as None to disable compaction)"
                     .to_string(),
             );
         }
@@ -189,32 +189,35 @@ mod tests {
         let cases = [
             (
                 cfg(-1, 0, 0, 0),
-                "CompactionInterval must not be negative, got -1",
+                "compaction_interval must not be negative, got -1",
             ),
-            (cfg(2, -2, 0, 0), "OverlapSize must not be negative, got -2"),
+            (
+                cfg(2, -2, 0, 0),
+                "overlap_size must not be negative, got -2",
+            ),
             (
                 cfg(2, 0, -3, 0),
-                "TokenThreshold must not be negative, got -3",
+                "token_threshold must not be negative, got -3",
             ),
             (
                 cfg(2, 0, 0, -4),
-                "EventRetentionSize must not be negative, got -4",
+                "event_retention_size must not be negative, got -4",
             ),
             (
                 cfg(0, 1, 0, 0),
-                "OverlapSize is set to 1 but CompactionInterval is 0, so sliding-window compaction never runs",
+                "overlap_size is set to 1 but compaction_interval is 0, so sliding-window compaction never runs",
             ),
             (
                 cfg(0, 0, 100, 0),
-                "TokenThreshold is set to 100 but EventRetentionSize is 0, so a compaction would summarize the whole conversation including the turn being answered",
+                "token_threshold is set to 100 but event_retention_size is 0, so a compaction would summarize the whole conversation including the turn being answered",
             ),
             (
                 cfg(0, 0, 0, 5),
-                "EventRetentionSize is set to 5 but TokenThreshold is 0, so tail-retention compaction never runs",
+                "event_retention_size is set to 5 but token_threshold is 0, so tail-retention compaction never runs",
             ),
             (
                 cfg(0, 0, 0, 0),
-                "no compaction strategy is enabled, set CompactionInterval or TokenThreshold (or leave the whole config nil to disable compaction)",
+                "no compaction strategy is enabled, set compaction_interval or token_threshold (or leave the compaction config as None to disable compaction)",
             ),
         ];
         for (c, want) in cases {
@@ -229,29 +232,29 @@ mod tests {
         // Every check fails: the first one (CompactionInterval) is reported.
         assert_eq!(
             cfg(-1, -2, -3, -4).validate().unwrap_err().message(),
-            "CompactionInterval must not be negative, got -1"
+            "compaction_interval must not be negative, got -1"
         );
         // Negative checks come before the pairing checks.
         assert_eq!(
             cfg(0, -2, 100, 0).validate().unwrap_err().message(),
-            "OverlapSize must not be negative, got -2"
+            "overlap_size must not be negative, got -2"
         );
         assert_eq!(
             cfg(0, 1, -3, 0).validate().unwrap_err().message(),
-            "TokenThreshold must not be negative, got -3"
+            "token_threshold must not be negative, got -3"
         );
         assert_eq!(
             cfg(0, 1, 0, -4).validate().unwrap_err().message(),
-            "EventRetentionSize must not be negative, got -4"
+            "event_retention_size must not be negative, got -4"
         );
         // OverlapSize pairing before TokenThreshold pairing, before EventRetentionSize pairing.
         assert_eq!(
             cfg(0, 1, 100, 0).validate().unwrap_err().message(),
-            "OverlapSize is set to 1 but CompactionInterval is 0, so sliding-window compaction never runs"
+            "overlap_size is set to 1 but compaction_interval is 0, so sliding-window compaction never runs"
         );
         assert_eq!(
             cfg(2, 0, 100, 0).validate().unwrap_err().message(),
-            "TokenThreshold is set to 100 but EventRetentionSize is 0, so a compaction would summarize the whole conversation including the turn being answered"
+            "token_threshold is set to 100 but event_retention_size is 0, so a compaction would summarize the whole conversation including the turn being answered"
         );
     }
 

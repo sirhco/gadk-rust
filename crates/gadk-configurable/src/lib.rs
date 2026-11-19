@@ -1128,7 +1128,7 @@ mod tests {
             .unwrap();
         r.register_toolset_factory("ts", test_toolset_factory("my_set", seen.clone()))
             .unwrap();
-        r.register_tool_factory("bad", failing_tool_factory("args is nil"))
+        r.register_tool_factory("bad", failing_tool_factory("args is missing"))
             .unwrap();
         let ctx = LoadCtx::default();
 
@@ -1151,7 +1151,7 @@ mod tests {
                 .await
                 .cfg_err()
                 .to_string(),
-            "args is nil"
+            "args is missing"
         );
 
         let (tool, toolset) = r.resolve_tool_reference(&ctx, "t", None).await.unwrap();

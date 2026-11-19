@@ -48,7 +48,7 @@ fn test_original_call_from() {
         (
             "Failure - Nil Input",
             FunctionCall::default(),
-            Some("cannot be nil"),
+            Some("are missing"),
         ),
         (
             "Failure - Missing Key",

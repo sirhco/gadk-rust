@@ -252,12 +252,12 @@ fn trigger_compaction_warning_texts() {
     assert_eq!(
         String::from_utf8(buf.0.lock().clone()).unwrap(),
         "adk: sliding-window compaction is configured on a trigger controller with \
-         CompactionInterval 1, so it fires on every delivery and writes a summary into a session \
-         that is discarded when the delivery ends. Use TokenThreshold and EventRetentionSize to \
+         compaction_interval 1, so it fires on every delivery and writes a summary into a session \
+         that is discarded when the delivery ends. Use token_threshold and event_retention_size to \
          compact within a single run.\n\
          adk: sliding-window compaction is configured on a trigger controller, but a delivery \
          handled in one attempt runs a single invocation, so the window will not reach its \
-         interval. Use TokenThreshold and EventRetentionSize to compact within a single run.\n"
+         interval. Use token_threshold and event_retention_size to compact within a single run.\n"
     );
 }
 

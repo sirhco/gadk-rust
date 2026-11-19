@@ -255,47 +255,47 @@ fn part_fields() -> Vec<(&'static str, PartSetter)> {
         speech_metadata: _,
     } = Part::default();
     vec![
-        ("MediaResolution", |p| {
+        ("media_resolution", |p| {
             p.media_resolution = Some(PartMediaResolution::default());
         }),
-        ("CodeExecutionResult", |p| {
+        ("code_execution_result", |p| {
             p.code_execution_result = Some(CodeExecutionResult::default());
         }),
-        ("ExecutableCode", |p| {
+        ("executable_code", |p| {
             p.executable_code = Some(ExecutableCode::default());
         }),
-        ("FileData", |p| p.file_data = Some(FileData::default())),
-        ("FunctionCall", |p| {
+        ("file_data", |p| p.file_data = Some(FileData::default())),
+        ("function_call", |p| {
             p.function_call = Some(FunctionCall::default());
         }),
-        ("FunctionResponse", |p| {
+        ("function_response", |p| {
             p.function_response = Some(FunctionResponse::default());
         }),
-        ("InlineData", |p| p.inline_data = Some(Blob::default())),
-        ("Text", |p| p.text = "x".to_string()),
-        ("Thought", |p| p.thought = true),
-        ("ThoughtSignature", |p| {
+        ("inline_data", |p| p.inline_data = Some(Blob::default())),
+        ("text", |p| p.text = "x".to_string()),
+        ("thought", |p| p.thought = true),
+        ("thought_signature", |p| {
             p.thought_signature = Bytes::from_static(&[0]);
         }),
-        ("VideoMetadata", |p| {
+        ("video_metadata", |p| {
             p.video_metadata = Some(VideoMetadata::default());
         }),
-        ("ToolCall", |p| p.tool_call = Some(ToolCall::default())),
-        ("ToolResponse", |p| {
+        ("tool_call", |p| p.tool_call = Some(ToolCall::default())),
+        ("tool_response", |p| {
             p.tool_response = Some(ToolResponse::default());
         }),
         // Go's `reflect.MakeMap` is an empty non-nil map, which Go counts as set; a gadk map is
         // set when it holds an entry.
-        ("PartMetadata", |p| {
+        ("part_metadata", |p| {
             p.part_metadata = object(json!({"x": "x"}));
         }),
-        ("AudioTranscription", |p| {
+        ("audio_transcription", |p| {
             p.audio_transcription = Some(Transcription::default());
         }),
-        ("MediaProcessing", |p| {
+        ("media_processing", |p| {
             p.media_processing = Some("x".parse::<MediaProcessing>().unwrap());
         }),
-        ("SpeechMetadata", |p| {
+        ("speech_metadata", |p| {
             p.speech_metadata = Some(SpeechMetadata::default());
         }),
     ]
@@ -1623,30 +1623,33 @@ fn test_replayed_reasoning() {
 /// what to do with, and why. Restated rather than derived from the production code, so a
 /// field genai adds is absent from it by construction.
 const ACCOUNTED_FOR_FIELDS: &[(&str, &str)] = &[
-    ("Text", "sent, or dropped when it is reasoning"),
-    ("Thought", "the marker deciding which"),
+    ("text", "sent, or dropped when it is reasoning"),
+    ("thought", "the marker deciding which"),
     (
-        "ThoughtSignature",
+        "thought_signature",
         "no request field on either endpoint carries one",
     ),
-    ("FunctionCall", "sent as a call"),
-    ("FunctionResponse", "sent as the call's result"),
-    ("VideoMetadata", "qualifies media carried in another field"),
+    ("function_call", "sent as a call"),
+    ("function_response", "sent as the call's result"),
+    ("video_metadata", "qualifies media carried in another field"),
     (
-        "MediaResolution",
+        "media_resolution",
         "qualifies media carried in another field",
     ),
-    ("PartMetadata", "caller bookkeeping, never content"),
+    ("part_metadata", "caller bookkeeping, never content"),
     (
-        "InlineData",
+        "inline_data",
         "sent as an input_image or input_file carrying the bytes",
     ),
     (
-        "FileData",
+        "file_data",
         "sent as an input_image or input_file naming an upload or a location",
     ),
-    ("ExecutableCode", "sent as a fenced python block"),
-    ("CodeExecutionResult", "sent as a fenced code_output block"),
+    ("executable_code", "sent as a fenced python block"),
+    (
+        "code_execution_result",
+        "sent as a fenced code_output block",
+    ),
 ];
 
 fn accounted_for(field: &str) -> Option<&'static str> {
@@ -1760,20 +1763,20 @@ fn test_call_tracker_new_function_response_unknown_call_id() {
 /// carry beside its text, restated rather than derived.
 const SYSTEM_INSTRUCTION_ACCEPTED_FIELDS: &[(&str, &str)] = &[
     (
-        "Thought",
+        "thought",
         "a marker no wire field carries; the text is sent, as adk-python does",
     ),
     (
-        "ThoughtSignature",
+        "thought_signature",
         "no request field on either endpoint carries one",
     ),
-    ("PartMetadata", "caller bookkeeping, never content"),
+    ("part_metadata", "caller bookkeeping, never content"),
     (
-        "VideoMetadata",
+        "video_metadata",
         "qualifies media, and the part carries none",
     ),
     (
-        "MediaResolution",
+        "media_resolution",
         "qualifies media, and the part carries none",
     ),
 ];
@@ -1784,7 +1787,7 @@ const SYSTEM_INSTRUCTION_ACCEPTED_FIELDS: &[(&str, &str)] = &[
 #[test]
 fn test_build_params_system_instruction_walks_every_part_field() {
     for (field, set) in part_fields() {
-        if field == "Text" {
+        if field == "text" {
             continue;
         }
         let mut part = text("describe it");

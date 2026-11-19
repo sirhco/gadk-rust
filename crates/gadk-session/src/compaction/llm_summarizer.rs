@@ -112,7 +112,7 @@ impl LlmSummarizer {
     pub fn new(cfg: LlmSummarizerConfig) -> Result<LlmSummarizer, CompactionConfigError> {
         let Some(model) = cfg.model else {
             return Err(CompactionConfigError::new(
-                "LLMSummarizerConfig.Model is required",
+                "LlmSummarizerConfig.model is required",
             ));
         };
         let template = if cfg.prompt_template.is_empty() {
@@ -122,7 +122,7 @@ impl LlmSummarizer {
         };
         if !template.contains(CONVERSATION_HISTORY_PLACEHOLDER) {
             return Err(CompactionConfigError::new(format!(
-                "PromptTemplate must contain the placeholder \"{CONVERSATION_HISTORY_PLACEHOLDER}\""
+                "prompt_template must contain the placeholder \"{CONVERSATION_HISTORY_PLACEHOLDER}\""
             )));
         }
         let max_transcript = if cfg.max_transcript_chars == 0 {

@@ -730,7 +730,7 @@ fn client_options_follow_storage_new_client() {
         GcsOffloader::new_with_env("b", &conflict, &env)
             .unwrap_err()
             .to_string(),
-        "failed to create Cloud Storage client: dialing: options.WithoutAuthentication is \
+        "failed to create Cloud Storage client: dialing: ClientOptions.without_authentication is \
          incompatible with any option that provides credentials"
     );
     env.0
