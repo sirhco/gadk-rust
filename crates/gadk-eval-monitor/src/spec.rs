@@ -26,7 +26,7 @@
 //! judge:                            # required if and only if a scorer is llm_judge
 //!   model: gemini-3.8-flash
 //!   project: my-proj                # default: the source project
-//!   location: us                    # default us-central1; newer models need us or global
+//!   location: us                    # default us (the US multi-region)
 //!   timeout: 120s                   # <n>s | <n>m, default 120s
 //! scorers:                          # gadk-eval scorer syntax; no reference or equals
 //!   - not_contains: "I cannot help"
@@ -49,7 +49,7 @@ pub const DEFAULT_LIMIT: usize = 100;
 /// The largest `limit`.
 pub const MAX_LIMIT: usize = 1000;
 /// The default `judge.location`.
-pub const DEFAULT_JUDGE_LOCATION: &str = "us-central1";
+pub const DEFAULT_JUDGE_LOCATION: &str = "us";
 /// The default `judge.timeout`.
 pub const DEFAULT_JUDGE_TIMEOUT: Duration = Duration::from_secs(120);
 

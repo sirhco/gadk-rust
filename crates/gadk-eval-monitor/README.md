@@ -32,7 +32,7 @@ min_pass_rate: 0.9                # optional, 0.0-1.0: below it the command exit
 judge:                            # required if and only if a scorer is llm_judge
   model: gemini-3.8-flash         # Gemini on Vertex AI
   project: my-proj                # default: the source project
-  location: us                    # default us-central1; newer models need us or global
+  location: us                    # default us (the US multi-region)
   timeout: 120s                   # <n>s | <n>m, default 120s
 scorers:                          # gadk-eval scorer syntax
   - not_contains: "I cannot help"
