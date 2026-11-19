@@ -16,9 +16,9 @@
 //! The YAML config structs for agents and workflows, decoded by gadk-goyaml with yaml.v3's
 //! rules.
 //!
-//! Shape rules: every struct's serde name is its package-qualified type name
-//! (`gadk_configurable::config::LlmAgentYamlConfig`), so yaml.v3 type errors name the struct as ADK's own
-//! config loader does, and each is listed in [`options`]' `verbatim_structs` (each field's YAML
+//! Shape rules: every struct's serde name is its Rust path
+//! (`gadk_configurable::config::LlmAgentYamlConfig`), so YAML type errors name the struct
+//! unambiguously, and each is listed in [`options`]' `verbatim_structs` (each field's YAML
 //! key equals the serde field name). Every struct is `#[serde(default)]` (absent keys are
 //! zero-filled); an optional value is `Option<T>`. The fields of the base agent config are
 //! repeated field by field in each concrete agent struct, with the catch-all of unknown keys
@@ -436,8 +436,7 @@ custom_key: kept
         assert_eq!(cfg.max_iterations, 4);
         assert!(cfg.additional_properties.is_empty());
         let err = unmarshal::<LoopAgentYamlConfig>(b"max_iterations: -1\n").unwrap_err();
-        // Go names its `uint` field type `uint`; gadk-goyaml names a u64 `uint64` (the 6c-1
-        // serde-entry-point type names).
+        // gadk-goyaml names the target by its serde entry point: `u64`.
         assert_eq!(
             err.to_string(),
             "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!int `-1` into u64"

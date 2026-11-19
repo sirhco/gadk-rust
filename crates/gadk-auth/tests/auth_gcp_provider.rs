@@ -985,7 +985,7 @@ fn test_new_provider_validates_scheme() {
         }
     }
 
-    // Go's exact texts for the two messages this function writes itself.
+    // The exact texts of the two messages this function writes itself.
     let text = |cfg| match new_provider(cfg) {
         Err(e) => e.to_string(),
         Ok(_) => panic!("NewProvider() = a provider, want an error"),

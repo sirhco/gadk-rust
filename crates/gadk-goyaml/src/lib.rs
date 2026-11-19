@@ -15,7 +15,7 @@
 
 //! gadk-goyaml: a pure-Rust YAML library that reproduces `gopkg.in/yaml.v3` v3.0.1 byte for
 //! byte, so gadk reads and writes YAML exactly as ADK does: the same node trees, error texts
-//! and emitted bytes. This file is the public API.
+//! (with Rust type names in type errors) and emitted bytes. This file is the public API.
 //!
 //! - [`unmarshal_node`] / [`marshal_node`]: parse to and emit from the [`Document`] node
 //!   arena.

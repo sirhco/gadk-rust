@@ -21,7 +21,10 @@ writes YAML exactly as ADK does. Its only dependent is the internal `gadk-config
   only when the field names already are yaml.v3's default keys (lowercase, no `_`) or the variant is in
   `verbatim_structs`; prefer externally tagged enums.
 - Node trees, error texts and emitted bytes match yaml.v3 v3.0.1 except for the accepted
-  deviations, each explained in a comment in the source.
+  deviations, each explained in a comment in the source. Error texts name Rust types where
+  yaml.v3 names Go ones: type errors say `into i64`, `into String`, `into Vec<u8>`, the serde
+  struct name, `into a sequence` or `into a mapping`, and `invalid map key` shows the key as
+  `["a", "b"]` / `{"k": null}`.
 
 ## Nesting depth
 
@@ -39,7 +42,8 @@ and a deliberate deviation.
 - `tests/` replays the goldens in `testdata/golden/` (parse, emit, `interface{}` values, serde
   encode/decode/round trip, and the seeded differential corpus).
 - The goldens were recorded from yaml.v3 v3.0.1 when the crate was written; they are
-  committed and not regenerated.
+  committed and not regenerated. The `decode_error` / `value_error` texts that named Go types
+  were rewritten once to the Rust names above.
 
 ## License
 

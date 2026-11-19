@@ -1116,12 +1116,12 @@ mod tests {
     async fn workflow_agent_unmarshal_errors_are_wrapped() {
         let r = registry();
         for (content, want) in [
-            // Go: `into int` (gadk-goyaml names an i64 entry point `int64`; ledger 6c-2).
+            // An i64 entry point is named `i64`.
             (
                 "agent_class: Workflow\nname: w\nmax_concurrency: x\n",
                 "failed to unmarshal Workflow config: yaml: unmarshal errors:\n  line 3: cannot unmarshal !!str `x` into i64",
             ),
-            // Go: `into []yaml.Node` (gadk-goyaml names a sequence `[]interface {}`; ledger 6c-2).
+            // serde exposes no element type, so the target is `a sequence`.
             (
                 "agent_class: Workflow\nname: w\nedges: x\n",
                 "failed to unmarshal Workflow config: yaml: unmarshal errors:\n  line 3: cannot unmarshal !!str `x` into a sequence",

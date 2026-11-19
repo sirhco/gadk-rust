@@ -471,7 +471,7 @@ mod tests {
                 .to_string(),
             format!("failed to parse Sequential agent config: {elem_err}")
         );
-        // Divergence candidate (ledger 6c-2): Go names the type `uint`.
+        // A u64 field is named `u64`.
         let p = write(
             &base,
             "a.yaml",

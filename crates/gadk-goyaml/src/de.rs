@@ -1521,7 +1521,7 @@ impl<'a, 'o> MapWalk<'a, 'o> {
                     if let Some(&(_, fi)) = self.keys.iter().find(|(k, _)| *k == sname) {
                         if self.d.unique_keys {
                             if done[fi] {
-                                // yaml.v3 names the type package-qualified.
+                                // The type is the serde struct name.
                                 self.d.terrors.push(format!(
                                     "line {}: field {sname} already set in type {name}",
                                     doc[kn].line

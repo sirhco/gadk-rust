@@ -16,11 +16,13 @@
 //! Errors: the [`Error`] type every fallible operation returns, and the collected
 //! [`TypeError`].
 //!
-//! Failures are returned as [`Error`] values; `Display` is exactly the text yaml.v3 reports.
+//! Failures are returned as [`Error`] values; `Display` is the text yaml.v3 reports, except that
+//! type errors and `invalid map key` errors name Rust types and values.
 
 use std::fmt;
 
-/// Every error the crate returns. `Display` is the exact text yaml.v3 returns.
+/// Every error the crate returns. `Display` is yaml.v3's text, with Rust type names (see the
+/// module docs).
 #[derive(Debug)]
 pub enum Error {
     /// A `failf` error: the complete text including the `yaml: ` prefix
@@ -89,7 +91,7 @@ impl serde::de::Error for Error {
 /// decoded into the requested types.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TypeError {
-    /// The individual messages, in document order (`line 3: cannot unmarshal !!str `x` into isize`).
+    /// The individual messages, in document order (`line 3: cannot unmarshal !!str `x` into i64`).
     pub errors: Vec<String>,
 }
 
@@ -139,13 +141,13 @@ mod tests {
     fn type_error_text_matches_go() {
         let e = TypeError {
             errors: vec![
-                "line 1: cannot unmarshal !!str `a` into isize".to_string(),
+                "line 1: cannot unmarshal !!str `a` into i64".to_string(),
                 "line 2: cannot unmarshal !!seq into String".to_string(),
             ],
         };
         assert_eq!(
             e.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `a` into isize\n  line 2: cannot unmarshal !!seq into String"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `a` into i64\n  line 2: cannot unmarshal !!seq into String"
         );
         assert_eq!(Error::from(e.clone()).to_string(), e.to_string());
     }

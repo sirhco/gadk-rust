@@ -14,7 +14,8 @@
 // limitations under the License.
 
 //! URL parsing, escaping and serialization whose accepted inputs and error texts are
-//! byte-identical to an ADK server's. It covers [`parse`] (acceptance rules and error texts),
+//! byte-identical to an ADK server's (except an invalid IPv6 host literal, reported as
+//! `invalid host: unable to parse IP "…"`). It covers [`parse`] (acceptance rules and error texts),
 //! [`Url::hostname`], [`Url::port`], [`Url::escaped_path`], [`Url::escaped_fragment`],
 //! [`Url::join_path`] and [`Url::to_go_string`], the user, path/raw path, raw query and
 //! fragment/raw fragment fields, the path encoding ([`escape_path`], [`unescape_path`] and

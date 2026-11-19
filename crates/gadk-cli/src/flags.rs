@@ -448,7 +448,8 @@ mod tests {
         assert_eq!(stray(&m), ["a", "b", "--c", "-"]);
     }
 
-    /// pflag's error texts (`errors.go`; the cause is the value's Go parse error).
+    /// pflag's error texts (`errors.go`); the cause is the value's parse error
+    /// (`parsing "x" as an integer: …`).
     #[test]
     fn parse_errors_are_pflag_texts() {
         let cases: &[(&[&str], &str)] = &[

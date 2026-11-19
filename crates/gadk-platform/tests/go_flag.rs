@@ -15,7 +15,8 @@
 
 //! `gadk_platform::go_flag` against Go's `flag` package: ports of the `src/flag/flag_test.go`
 //! cases that apply to the supported flag kinds and `ContinueOnError`, plus tables whose
-//! expectations were produced by Go 1.27's `flag` (outputs and error texts byte for byte).
+//! expectations were produced by Go 1.27's `flag` (outputs and error texts byte for byte,
+//! except that a bad number or bool reads `parsing "<s>" as an integer|a boolean: …`).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
