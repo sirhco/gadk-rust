@@ -15,7 +15,7 @@
         "application/json; charset=UTF-8"
       ]
     ],
-    "body": "{\"error\":\"the tests tab is not implemented in ADK Go\",\"detail\":\"ADK Go does not implement the web UI tests tab. Write Go tests against runner.Run instead.\"}\n"
+    "body": "{\"error\":\"the tests tab is not implemented in gadk\",\"detail\":\"gadk does not implement the web UI tests tab. Write Rust tests against the Runner instead.\"}\n"
   },
   "compare": "exact"
 }

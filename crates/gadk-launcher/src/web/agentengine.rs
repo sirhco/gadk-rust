@@ -153,7 +153,7 @@ impl WebSublauncher for AgentEngineLauncher {
     /// `router.handle_prefix(&[Method::POST], prefix, strip_prefix(prefix, handler))`.
     fn setup_subrouters(&self, router: &mut WebRouter, config: &mut Config) -> Result<(), Error> {
         let wrap = |e: &dyn std::fmt::Display| {
-            Error::Config(format!("agentengine.NewHandler failed: {e}"))
+            Error::Config(format!("failed to create the agent engine handler: {e}"))
         };
         config.validate().map_err(|e| wrap(&e))?;
         let cfg = engine_config(config).map_err(|e| wrap(&e))?;
@@ -341,7 +341,7 @@ mod tests {
             l.setup_subrouters(&mut WebRouter::new(true), &mut config)
                 .unwrap_err()
                 .to_string(),
-            "agentengine.NewHandler failed: no session service configured"
+            "failed to create the agent engine handler: no session service configured"
         );
         crate::web::apply_service_defaults(&mut config);
         config.compaction = Some(gadk_session::compaction::Config::default());
@@ -349,7 +349,7 @@ mod tests {
             l.setup_subrouters(&mut WebRouter::new(true), &mut config)
                 .unwrap_err()
                 .to_string(),
-            format!("agentengine.NewHandler failed: {NO_STRATEGY}")
+            format!("failed to create the agent engine handler: {NO_STRATEGY}")
         );
 
         // The web launcher adds Go's `<keyword> subrouter setup failed: ` (web.go buildRouter).
@@ -358,7 +358,7 @@ mod tests {
         assert_eq!(
             web.build_router(&mut config).err().unwrap().to_string(),
             format!(
-                "agentengine subrouter setup failed: agentengine.NewHandler failed: {NO_STRATEGY}"
+                "agentengine subrouter setup failed: failed to create the agent engine handler: {NO_STRATEGY}"
             )
         );
     }

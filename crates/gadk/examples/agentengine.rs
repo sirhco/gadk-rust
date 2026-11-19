@@ -118,7 +118,7 @@ fn memory_plugin() -> Plugin {
                     .state()
                     .set(STATE_KEY_SESSION_LAST_UPDATE_TIME, last_update_time)
                 {
-                    Logger::stderr().print(&format!("state.Set failed: {e}\n"));
+                    Logger::stderr().print(&format!("failed to set session state: {e}\n"));
                     return Err(gadk::agent::AgentError::Other(Box::new(e)));
                 }
                 Ok(None)
@@ -128,12 +128,11 @@ fn memory_plugin() -> Plugin {
         after_run_callback: Some(Arc::new(|ic| {
             async move {
                 let Some(memory) = ic.memory() else {
-                    Logger::stderr().print("ic.Memory() is nil\n");
+                    Logger::stderr().print("no memory service is configured\n");
                     return;
                 };
                 if let Err(e) = memory.add_session_to_memory(ic.session()).await {
-                    Logger::stderr()
-                        .print(&format!("ic.Memory().AddSessionToMemory failed: {e}\n"));
+                    Logger::stderr().print(&format!("failed to add session to memory: {e}\n"));
                 }
             }
             .boxed()

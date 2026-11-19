@@ -29,15 +29,15 @@ pub const NOT_INSTALLED_DETAIL: &str = "not installed";
 
 /// The `detail` of the agent builder's 501 body.
 const BUILDER_DETAIL: &str =
-    "ADK Go agents are defined in Go code, so there is no server-side agent configuration to edit.";
+    "gadk agents are defined in Rust code, so there is no server-side agent configuration to edit.";
 /// The `detail` of the tests tab's 501 body.
 const TESTS_DETAIL: &str =
-    "ADK Go does not implement the web UI tests tab. Write Go tests against runner.Run instead.";
+    "gadk does not implement the web UI tests tab. Write Rust tests against the Runner instead.";
 
 /// The `detail` of the eval endpoints' 501 body.
 fn eval_detail() -> String {
     format!(
-        "agent evaluation is {NOT_INSTALLED_DETAIL} in ADK Go. Use adk-python for eval workflows."
+        "agent evaluation is {NOT_INSTALLED_DETAIL} in the gadk server. Use adk-python for eval workflows."
     )
 }
 
@@ -55,7 +55,7 @@ pub struct ErrorResponse {
 /// `detail` is `detail`.
 pub fn new_not_implemented_handler(feature: &str, detail: &str) -> Handler {
     let body = ErrorResponse {
-        error: format!("{feature} is not implemented in ADK Go"),
+        error: format!("{feature} is not implemented in gadk"),
         detail: detail.to_owned(),
     };
     handler(move |_req| {
@@ -241,7 +241,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             body.as_ref(),
-            &b"{\"error\":\"eval is not implemented in ADK Go\",\"detail\":\"agent evaluation is not installed in ADK Go. Use adk-python for eval workflows.\"}\n"[..]
+            &b"{\"error\":\"eval is not implemented in gadk\",\"detail\":\"agent evaluation is not installed in the gadk server. Use adk-python for eval workflows.\"}\n"[..]
         );
     }
 

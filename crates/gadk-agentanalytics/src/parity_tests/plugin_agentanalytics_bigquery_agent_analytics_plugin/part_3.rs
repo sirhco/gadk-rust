@@ -1327,8 +1327,8 @@ async fn test_new_big_query_agent_analytics_plugin_with_clients_closes_write_cli
             .map(|e| e.to_string())
             .unwrap_or_default();
         assert!(
-            err.contains("writeClient must not be nil"),
-            "NewBigQueryAgentAnalyticsPluginWithClients(writeClient=nil) error = {err:?}, want error containing \"writeClient must not be nil\""
+            err.contains("a write client is required"),
+            "NewBigQueryAgentAnalyticsPluginWithClients(writeClient=nil) error = {err:?}, want error containing \"a write client is required\""
         );
     }
 

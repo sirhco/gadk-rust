@@ -322,7 +322,7 @@ async fn test_detect() {
                 ..Default::default()
             }),
             expect_err: Some(
-                r#"partial resource: strconv.Atoi: parsing "bad-value": invalid syntax"#,
+                r#"partial resource: parsing "bad-value" as an integer: invalid syntax"#,
             ),
             expected_resource: resource(&[
                 PROVIDER,

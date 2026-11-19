@@ -105,14 +105,14 @@ pub fn append_rows_request(
 ///
 /// # Errors
 ///
-/// `writeClient is nil` without a client; `failed to create committed write stream: <err>`.
+/// `no write client` without a client; `failed to create committed write stream: <err>`.
 pub(crate) async fn create_committed_write_stream(
     ctx: &Context,
     client: Option<&WriteClient>,
     config: &Config,
 ) -> Result<String, Error> {
     let Some(client) = client else {
-        return Err(Error::msg("writeClient is nil"));
+        return Err(Error::msg("no write client"));
     };
     let parent = format!(
         "projects/{}/datasets/{}/tables/{}",
@@ -190,7 +190,7 @@ pub(crate) struct StreamState {
 /// A persistent AppendRows stream on one write stream.
 pub(crate) struct StreamWriter {
     /// The client rotation and stream opening use; `None` makes rotation fail with
-    /// `writeClient is nil` (opening a stream is not possible).
+    /// `no write client` (opening a stream is not possible).
     pub(crate) write_client: Option<WriteClient>,
     /// The serialized Arrow writer schema of every request.
     pub(crate) schema_bytes: Vec<u8>,
@@ -475,8 +475,8 @@ impl StreamWriter {
                 let stop_open = cancel_stream_after(ctx, &stream_ctx);
                 let opened = match &self.write_client {
                     Some(client) => client.append_rows(&stream_ctx).await,
-                    // Without a client the open fails with `writeClient is nil`.
-                    None => Err(Error::msg("writeClient is nil")),
+                    // Without a client the open fails with `no write client`.
+                    None => Err(Error::msg("no write client")),
                 };
                 if !stop_open.stop() {
                     stream_ctx.cancel();
@@ -2177,19 +2177,19 @@ pub(crate) mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "max retries exceeded: failed to open append rows stream: writeClient is nil"
+            "max retries exceeded: failed to open append rows stream: no write client"
         );
         let err = create_committed_write_stream(&Context::background(), None, &config)
             .await
             .unwrap_err();
-        assert_eq!(err.to_string(), "writeClient is nil");
+        assert_eq!(err.to_string(), "no write client");
         // Rotation fails the same way (and arms the cooldown).
         let mut state = writer.state.lock().await;
         let err = writer
             .rotate_committed_stream(&mut state, &Context::background())
             .await
             .unwrap_err();
-        assert_eq!(err.to_string(), "writeClient is nil");
+        assert_eq!(err.to_string(), "no write client");
         assert!(state.rotate_retry_at.is_some());
     }
 

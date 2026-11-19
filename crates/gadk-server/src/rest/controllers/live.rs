@@ -122,7 +122,7 @@ impl RuntimeApiController {
             // The same failure as an upgrade over a connection that cannot be taken over.
             return upgrade_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "websocket: response does not implement http.Hijacker",
+                "websocket: the connection cannot be upgraded",
             );
         };
         // The upgrade bypasses the request-body limit; negative turns the read limit off.
