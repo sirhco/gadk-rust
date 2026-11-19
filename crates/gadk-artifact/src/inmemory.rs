@@ -311,7 +311,7 @@ impl ArtifactService for InMemoryArtifactService {
         let Some(part) = req.part else {
             // Unreachable: validate() rejects a missing part.
             return Err(ArtifactError::InvalidRequest(
-                "request validation failed: invalid save request: missing required fields: Part"
+                "request validation failed: invalid save request: missing required fields: part"
                     .into(),
             ));
         };

@@ -142,11 +142,11 @@ impl Config {
     }
 
     /// Reports a config that cannot work, before anything starts
-    /// serving. An unusable compaction config is `invalid Compaction: <cause>`; `None` is fine.
+    /// serving. An unusable compaction config is `invalid compaction config: <cause>`; `None` is fine.
     pub fn validate(&self) -> Result<(), Error> {
         if let Some(compaction) = &self.compaction {
             compaction.validate().map_err(|e| Error::Wrapped {
-                context: "invalid Compaction".to_owned(),
+                context: "invalid compaction config".to_owned(),
                 source: Box::new(e),
             })?;
         }

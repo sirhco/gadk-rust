@@ -225,10 +225,10 @@ fn test_new_server_rejects_invalid_compaction_config() {
         ..Default::default()
     });
     let Err(err) = Server::new(cfg) else {
-        panic!("Server::new() accepted an invalid Compaction, want it refused at startup");
+        panic!("Server::new() accepted an invalid compaction config, want it refused at startup");
     };
     assert!(
-        err.to_string().contains("Compaction"),
+        err.to_string().contains("compaction"),
         "error {err:?} does not name the offending field"
     );
 }

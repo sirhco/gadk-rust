@@ -201,7 +201,7 @@ impl WorkflowError {
         };
         let message = match &info.cause {
             Some(cause) => format!("workflow: dynamic child {path}: {cause}"),
-            None => format!("workflow: dynamic child {path}: <nil cause>"),
+            None => format!("workflow: dynamic child {path}: <no cause>"),
         };
         let kind = info
             .cause
@@ -332,7 +332,7 @@ mod tests {
         });
         assert_eq!(
             nil_cause.to_string(),
-            "workflow: dynamic child x/y@1: <nil cause>"
+            "workflow: dynamic child x/y@1: <no cause>"
         );
         assert_eq!(nil_cause.kind(), WorkflowErrorKind::NodeFailed);
         assert!(nil_cause.cause().is_none());

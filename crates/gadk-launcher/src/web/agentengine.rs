@@ -216,7 +216,7 @@ mod tests {
     /// `testdata/agentengine`.
     const DIR: &str = "agentengine";
     /// Go's `Config.Validate` text for `&compaction.Config{}` ("no strategy at all").
-    const NO_STRATEGY: &str = "invalid Compaction: no compaction strategy is enabled, set CompactionInterval or TokenThreshold (or leave the whole config nil to disable compaction)";
+    const NO_STRATEGY: &str = "invalid compaction config: no compaction strategy is enabled, set compaction_interval or token_threshold (or leave the compaction config as None to disable compaction)";
 
     /// A launcher config over the agentengine probe's `assistant` agent (the 5a scenario's,
     /// C.11; not the 6 launcher probe's streaming one).

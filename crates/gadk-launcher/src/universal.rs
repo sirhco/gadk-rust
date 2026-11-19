@@ -372,7 +372,10 @@ mod tests {
             .execute(CancellationToken::new(), cfg, args(&["web"]))
             .await
             .unwrap_err();
-        assert!(err.to_string().starts_with("invalid Compaction: "), "{err}");
+        assert!(
+            err.to_string().starts_with("invalid compaction config: "),
+            "{err}"
+        );
         assert!(seen.lock().unwrap().parsed.is_empty());
     }
 

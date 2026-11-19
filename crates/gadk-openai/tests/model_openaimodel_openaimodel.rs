@@ -193,7 +193,7 @@ async fn test_sentinels_alias_the_internal_ones() {
         (
             "ErrRequestNil",
             ErrorKind::RequestNil,
-            "openai: request is nil",
+            "openai: request is missing",
         ),
         (
             "ErrNoContents",

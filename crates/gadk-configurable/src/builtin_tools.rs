@@ -129,7 +129,7 @@ pub(crate) async fn google_maps_grounding(
     ))
 }
 
-/// The `AgentTool` factory. Errors: `args is nil`, `agent not found in args`,
+/// The `AgentTool` factory. Errors: `args is missing`, `agent not found in args`,
 /// `parentPath not found in context`, `config_path not found in args`. Resolves the agent
 /// inside the context's config directory (the parent path) and wraps it in an [`AgentTool`]
 /// with `skip_summarization`.
@@ -139,7 +139,7 @@ pub(crate) async fn agent_tool(
     args: Option<GoMap>,
 ) -> Result<Arc<dyn Tool>, ConfigError> {
     let Some(args) = args else {
-        return Err(ConfigError::msg("args is nil"));
+        return Err(ConfigError::msg("args is missing"));
     };
     let Some(GoValue::Map(a)) = args.get("agent") else {
         return Err(ConfigError::msg("agent not found in args"));
@@ -165,7 +165,7 @@ fn skip_summarization(a: &[(String, GoValue)]) -> bool {
     matches!(map_get(a, "skip_summarization"), Some(GoValue::Bool(true)))
 }
 
-/// The `LongRunningFunctionTool` factory. Errors: `args is nil`, `func not found in args`;
+/// The `LongRunningFunctionTool` factory. Errors: `args is missing`, `func not found in args`;
 /// resolves `func` with the same args, `tool '{name}' not found` when it names a toolset.
 pub(crate) async fn long_running_function_tool(
     registry: Registry,
@@ -173,7 +173,7 @@ pub(crate) async fn long_running_function_tool(
     args: Option<GoMap>,
 ) -> Result<Arc<dyn Tool>, ConfigError> {
     let Some(map) = &args else {
-        return Err(ConfigError::msg("args is nil"));
+        return Err(ConfigError::msg("args is missing"));
     };
     let Some(func_name) = go_string(map.get("func")) else {
         return Err(ConfigError::msg("func not found in args"));
@@ -187,7 +187,7 @@ pub(crate) async fn long_running_function_tool(
     }
 }
 
-/// The `ExampleTool` factory. Errors: `args is nil`, `examples not found in args`,
+/// The `ExampleTool` factory. Errors: `args is missing`, `examples not found in args`,
 /// `examples is not a list`. Wraps a non-list `output` in a list and round-trips the examples
 /// through JSON (`failed to decode normalized examples: {cause}`) into [`Example`]s.
 pub(crate) async fn example_tool(
@@ -196,7 +196,7 @@ pub(crate) async fn example_tool(
     args: Option<GoMap>,
 ) -> Result<Arc<dyn Tool>, ConfigError> {
     let Some(args) = args else {
-        return Err(ConfigError::msg("args is nil"));
+        return Err(ConfigError::msg("args is missing"));
     };
     let Some(raw) = args.get("examples") else {
         return Err(ConfigError::msg("examples not found in args"));
@@ -497,9 +497,9 @@ mod tests {
                 ("google_search", "google_search".to_owned()),
                 ("url_context", "url_context".to_owned()),
                 ("google_maps_grounding", "google_maps_grounding".to_owned()),
-                ("AgentTool", "args is nil".to_owned()),
-                ("LongRunningFunctionTool", "args is nil".to_owned()),
-                ("ExampleTool", "args is nil".to_owned()),
+                ("AgentTool", "args is missing".to_owned()),
+                ("LongRunningFunctionTool", "args is missing".to_owned()),
+                ("ExampleTool", "args is missing".to_owned()),
                 (
                     "McpToolset",
                     "stdio_connection_params not found in args".to_owned()
@@ -581,7 +581,7 @@ mod tests {
     #[tokio::test]
     async fn agent_tool_rejects_nil_args() {
         let got = tool_err(agent_tool(Registry::empty(), parent_ctx(), None)).await;
-        assert_eq!(got, "args is nil");
+        assert_eq!(got, "args is missing");
     }
 
     #[tokio::test]
@@ -724,7 +724,7 @@ mod tests {
             None,
         ))
         .await;
-        assert_eq!(got, "args is nil");
+        assert_eq!(got, "args is missing");
     }
 
     #[tokio::test]
@@ -836,7 +836,7 @@ mod tests {
     #[tokio::test]
     async fn example_tool_rejects_nil_args() {
         let got = tool_err(example_tool(Registry::empty(), LoadCtx::default(), None)).await;
-        assert_eq!(got, "args is nil");
+        assert_eq!(got, "args is missing");
     }
 
     #[tokio::test]
@@ -1048,11 +1048,7 @@ mod tests {
     async fn mcp_toolset_requires_each_field_in_go_order() {
         let server = |entries: &[(&str, GoValue)]| m(&[("server_params", m(entries))]);
         let cases = [
-            (
-                "nil args",
-                None,
-                "stdio_connection_params not found in args",
-            ),
+            ("no args", None, "stdio_connection_params not found in args"),
             (
                 "stdio_connection_params not a map",
                 args(&[("stdio_connection_params", s("x"))]),

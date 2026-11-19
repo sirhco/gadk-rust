@@ -250,91 +250,91 @@ fn test_apply_generation_config() {
 fn test_apply_generation_config_rejects_unsupported_fields() {
     let tests: Vec<(&str, GenerateContentConfig)> = vec![
         (
-            "Seed",
+            "seed",
             GenerateContentConfig {
                 seed: Some(7),
                 ..cfg()
             },
         ),
         (
-            "RoutingConfig",
+            "routing_config",
             GenerateContentConfig {
                 routing_config: Some(GenerationConfigRoutingConfig::default()),
                 ..cfg()
             },
         ),
         (
-            "ModelSelectionConfig",
+            "model_selection_config",
             GenerateContentConfig {
                 model_selection_config: Some(ModelSelectionConfig::default()),
                 ..cfg()
             },
         ),
         (
-            "CachedContent",
+            "cached_content",
             GenerateContentConfig {
                 cached_content: "cached".to_string(),
                 ..cfg()
             },
         ),
         (
-            "ResponseModalities",
+            "response_modalities",
             GenerateContentConfig {
                 response_modalities: vec!["AUDIO".to_string()],
                 ..cfg()
             },
         ),
         (
-            "MediaResolution",
+            "media_resolution",
             GenerateContentConfig {
                 media_resolution: Some(MediaResolution::Low),
                 ..cfg()
             },
         ),
         (
-            "SpeechConfig",
+            "speech_config",
             GenerateContentConfig {
                 speech_config: Some(SpeechConfig::default()),
                 ..cfg()
             },
         ),
         (
-            "AudioTimestamp",
+            "audio_timestamp",
             GenerateContentConfig {
                 audio_timestamp: true,
                 ..cfg()
             },
         ),
         (
-            "ImageConfig",
+            "image_config",
             GenerateContentConfig {
                 image_config: Some(ImageConfig::default()),
                 ..cfg()
             },
         ),
         (
-            "EnableEnhancedCivicAnswers",
+            "enable_enhanced_civic_answers",
             GenerateContentConfig {
                 enable_enhanced_civic_answers: Some(true),
                 ..cfg()
             },
         ),
         (
-            "ModelArmorConfig",
+            "model_armor_config",
             GenerateContentConfig {
                 model_armor_config: Some(ModelArmorConfig::default()),
                 ..cfg()
             },
         ),
         (
-            "AudioTranscriptionConfig",
+            "audio_transcription_config",
             GenerateContentConfig {
                 audio_transcription_config: Some(AudioTranscriptionConfig::default()),
                 ..cfg()
             },
         ),
         (
-            "ContinuationToken",
+            "continuation_token",
             GenerateContentConfig {
                 continuation_token: Some(Bytes::from_static(b"token")),
                 ..cfg()
@@ -354,10 +354,10 @@ fn test_apply_generation_config_rejects_unsupported_fields() {
 fn test_apply_generation_config_refuses_fields_outside_the_supported_lists() {
     let top: Vec<&str> = supported_config_fields()
         .into_iter()
-        .filter(|name| *name != "Temperature")
+        .filter(|name| *name != "temperature")
         .collect();
     let http_allowed: Vec<&str> = IGNORED_HTTP_OPTION_FIELDS.to_vec(); // SupportedHTTPOptionFields = nil
-    let thinking = ["IncludeThoughts", "ThinkingBudget"];
+    let thinking = ["include_thoughts", "thinking_budget"];
 
     let temperature = GenerateContentConfig {
         temperature: Some(0.5),
@@ -367,17 +367,17 @@ fn test_apply_generation_config_refuses_fields_outside_the_supported_lists() {
     let low = thinking_cfg(level(ThinkingLevel::Low));
     let tests: Vec<(&str, Result<(), OpenAiError>)> = vec![
         (
-            "Temperature",
+            "temperature",
             reject_unsupported_fields("", &config_fields(&temperature, None), &top),
         ),
         (
-            "HTTPOptions.Timeout",
-            reject_unsupported_fields("HTTPOptions.", &http_option_fields(&second), &http_allowed),
+            "http_options.timeout",
+            reject_unsupported_fields("http_options.", &http_option_fields(&second), &http_allowed),
         ),
         (
-            "ThinkingConfig.ThinkingLevel",
+            "thinking_config.thinking_level",
             reject_unsupported_fields(
-                "ThinkingConfig.",
+                "thinking_config.",
                 &thinking_config_fields(&level(ThinkingLevel::Low)),
                 &thinking,
             ),
@@ -397,7 +397,7 @@ fn test_apply_generation_config_refuses_fields_outside_the_supported_lists() {
     assert!(apply(&temperature).1.is_ok());
     assert!(apply_with(&cfg(), Some(&second)).1.is_ok());
     assert!(apply(&low).1.is_ok());
-    assert!(SUPPORTED_THINKING_CONFIG_FIELDS.contains(&"ThinkingLevel"));
+    assert!(SUPPORTED_THINKING_CONFIG_FIELDS.contains(&"thinking_level"));
 }
 
 // AutomaticContinuation has no effect on these APIs, so a config shared with a Gemini model
@@ -557,7 +557,7 @@ fn test_apply_generation_config_rejects_negative_thinking_budget() {
     ];
     for (name, thinking) in tests {
         let (_, result) = apply(&thinking_cfg(thinking));
-        assert_names(name, &result, "ThinkingBudget");
+        assert_names(name, &result, "thinking_budget");
     }
 }
 
@@ -611,7 +611,7 @@ fn test_apply_generation_config_rejects_unknown_thinking_level() {
     assert_names("EXHAUSTIVE", &result, "EXHAUSTIVE");
     assert_eq!(
         result.unwrap_err().to_string(),
-        r#"openai: unsupported generation config field: ThinkingConfig.ThinkingLevel "EXHAUSTIVE""#
+        r#"openai: unsupported generation config field: thinking_config.thinking_level "EXHAUSTIVE""#
     );
 }
 
@@ -709,23 +709,23 @@ fn test_apply_generation_config_rejects_untranslatable_values() {
                 logprobs: Some(5),
                 ..cfg()
             },
-            "Logprobs",
+            "logprobs",
         ),
         (
-            "negative MaxOutputTokens",
+            "negative max_output_tokens",
             GenerateContentConfig {
                 max_output_tokens: -1,
                 ..cfg()
             },
-            "MaxOutputTokens",
+            "max_output_tokens",
         ),
         (
-            "negative CandidateCount",
+            "negative candidate_count",
             GenerateContentConfig {
                 candidate_count: -1,
                 ..cfg()
             },
-            "CandidateCount",
+            "candidate_count",
         ),
     ];
     for (name, config, names) in tests {
@@ -789,7 +789,7 @@ fn test_apply_generation_config_rejects_explicit_off() {
         enable_enhanced_civic_answers: Some(false),
         ..cfg()
     });
-    assert_names("explicit off", &result, "EnableEnhancedCivicAnswers");
+    assert_names("explicit off", &result, "enable_enhanced_civic_answers");
 }
 
 // Every tier genai names has a Responses equivalent; a tier genai adds later is named.
@@ -827,7 +827,7 @@ fn test_apply_generation_config_service_tier() {
     assert_names("unknown tier", &result, "platinum");
     assert_eq!(
         result.unwrap_err().to_string(),
-        r#"openai: unsupported generation config field: ServiceTier "platinum""#
+        r#"openai: unsupported generation config field: service_tier "platinum""#
     );
 }
 
@@ -880,10 +880,10 @@ fn test_request_timeout_honors_a_positive_timeout() {
 fn test_apply_generation_config_rejects_non_positive_timeout() {
     let options = timeout(Duration::ZERO);
     let (_, result) = apply_with(&cfg(), Some(&options));
-    assert_names("timeout 0s", &result, "Timeout");
+    assert_names("timeout 0s", &result, "timeout");
     assert_eq!(
         result.unwrap_err().to_string(),
-        "openai: unsupported generation config field: non-positive HTTPOptions.Timeout 0s"
+        "openai: unsupported generation config field: non-positive http_options.timeout 0s"
     );
 }
 
@@ -989,21 +989,21 @@ fn test_apply_generation_config_keeps_named_error_precedence() {
 fn test_apply_generation_config_rejects_gemini_shaped_http_options() {
     let tests: Vec<(&str, HttpOptions)> = vec![
         (
-            "BaseURL",
+            "base_url",
             HttpOptions {
                 base_url: Some("https://example.test".to_string()),
                 ..HttpOptions::default()
             },
         ),
         (
-            "APIVersion",
+            "api_version",
             HttpOptions {
                 api_version: Some("v1beta".to_string()),
                 ..HttpOptions::default()
             },
         ),
         (
-            "ExtrasRequestProvider",
+            "extras_request_provider",
             HttpOptions {
                 extras_request_provider: Some(std::sync::Arc::new(|m| m)),
                 ..HttpOptions::default()
@@ -1022,7 +1022,7 @@ fn test_apply_generation_config_rejects_gemini_shaped_http_options() {
 fn test_translated_fields_are_not_rejected() {
     let tests: Vec<(&str, GenerateContentConfig, Option<HttpOptions>)> = vec![
         (
-            "Temperature",
+            "temperature",
             GenerateContentConfig {
                 temperature: Some(0.5),
                 ..cfg()
@@ -1030,7 +1030,7 @@ fn test_translated_fields_are_not_rejected() {
             None,
         ),
         (
-            "TopP",
+            "top_p",
             GenerateContentConfig {
                 top_p: Some(0.9),
                 ..cfg()
@@ -1038,7 +1038,7 @@ fn test_translated_fields_are_not_rejected() {
             None,
         ),
         (
-            "MaxOutputTokens",
+            "max_output_tokens",
             GenerateContentConfig {
                 max_output_tokens: 128,
                 ..cfg()
@@ -1046,7 +1046,7 @@ fn test_translated_fields_are_not_rejected() {
             None,
         ),
         (
-            "SystemInstruction",
+            "system_instruction",
             GenerateContentConfig {
                 system_instruction: Some(Content::from_text("be terse", "user")),
                 ..cfg()
@@ -1054,7 +1054,7 @@ fn test_translated_fields_are_not_rejected() {
             None,
         ),
         (
-            "ResponseMIMEType",
+            "response_mime_type",
             GenerateContentConfig {
                 response_mime_type: "application/json".to_string(),
                 ..cfg()
@@ -1062,7 +1062,7 @@ fn test_translated_fields_are_not_rejected() {
             None,
         ),
         (
-            "ResponseLogprobs",
+            "response_logprobs",
             GenerateContentConfig {
                 response_logprobs: true,
                 ..cfg()
@@ -1070,7 +1070,7 @@ fn test_translated_fields_are_not_rejected() {
             None,
         ),
         (
-            "Logprobs",
+            "logprobs",
             GenerateContentConfig {
                 response_logprobs: true,
                 logprobs: Some(3),
@@ -1079,12 +1079,12 @@ fn test_translated_fields_are_not_rejected() {
             None,
         ),
         (
-            "ThinkingConfig",
+            "thinking_config",
             thinking_cfg(level(ThinkingLevel::Low)),
             None,
         ),
         (
-            "ServiceTier",
+            "service_tier",
             GenerateContentConfig {
                 service_tier: Some(ServiceTier::Flex),
                 ..cfg()
@@ -1092,7 +1092,7 @@ fn test_translated_fields_are_not_rejected() {
             None,
         ),
         (
-            "HTTPOptions.Timeout",
+            "http_options.timeout",
             cfg(),
             Some(timeout(Duration::from_secs(30))),
         ),
@@ -1104,7 +1104,7 @@ fn test_translated_fields_are_not_rejected() {
             "{field}: applyGenerationConfig() error = {result:?}, want nil: {field} is listed as translated"
         );
         // HTTPOptions.Timeout lands on the call, not the params.
-        if field == "HTTPOptions.Timeout" {
+        if field == "http_options.timeout" {
             assert!(
                 request_timeout(options.as_ref()).is_some(),
                 "RequestTimeout() = 0, want the configured bound"

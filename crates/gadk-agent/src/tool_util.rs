@@ -115,7 +115,7 @@ pub fn original_call_from(fc: &FunctionCall) -> Result<FunctionCall, ToolError> 
     const KEY: &str = "originalFunctionCall";
     if fc.args.is_empty() {
         return Err(ToolError::InvalidArgument(
-            "functionCall or its arguments cannot be nil".into(),
+            "function call or its arguments are missing".into(),
         ));
     }
     let Some(val) = fc.args.get(KEY) else {

@@ -2222,7 +2222,7 @@ async fn test_views_async_startup_and_close_lifecycle() {
         assert!(
             !(logger.contains("failed to create view")
                 || logger.contains("view creation finished")
-                || logger.contains("call SyncViews to retry")),
+                || logger.contains("call sync_views to retry")),
             "Close() cancellation should not log failure or retry summary, got:\n{logger}"
         );
     }
@@ -2347,7 +2347,7 @@ async fn test_views_async_startup_and_close_lifecycle() {
         );
         assert!(
             logger.contains(
-                "view creation finished: 24 created, 1 failed of 25; call SyncViews to retry"
+                "view creation finished: 24 created, 1 failed of 25; call sync_views to retry"
             ),
             "expected summary log line for partial failure, got logs:\n{logger}"
         );
@@ -3150,7 +3150,7 @@ async fn test_big_query_agent_analytics_plugin_sync_views() {
         assert!(
             !(logger.contains("failed to create view")
                 || logger.contains("view creation finished")
-                || logger.contains("call SyncViews to retry")),
+                || logger.contains("call sync_views to retry")),
             "preempted background view creation should not log context.Canceled warning or retry summary, got:\n{logger}"
         );
         let _ = close_plugin(&p).await;
@@ -3622,7 +3622,7 @@ async fn test_sync_analytics_views_context_ends_pass() {
             "syncAnalyticsViews() error = {err}, want failure of v_user_message_received"
         );
         assert_eq!(runner.executed_names().len(), defs.len(), "views run");
-        let want = "view creation finished: 24 created, 1 failed of 25; call SyncViews to retry";
+        let want = "view creation finished: 24 created, 1 failed of 25; call sync_views to retry";
         assert!(
             logger.contains(want),
             "log does not contain {want:?}; got:\n{logger}"
@@ -3631,7 +3631,7 @@ async fn test_sync_analytics_views_context_ends_pass() {
             logger.lines(),
             [
                 "agentanalytics: failed to create view v_user_message_received: context deadline exceeded",
-                "agentanalytics: view creation finished: 24 created, 1 failed of 25; call SyncViews to retry",
+                "agentanalytics: view creation finished: 24 created, 1 failed of 25; call sync_views to retry",
             ]
         );
     }

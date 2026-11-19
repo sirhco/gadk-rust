@@ -374,7 +374,7 @@ async fn test_inject_session_state() {
             svc: Svc::Default,
             want: "",
             want_err: Some(
-                "failed to load artifact : request validation failed: invalid load request: missing required fields: FileName",
+                "failed to load artifact : request validation failed: invalid load request: missing required fields: file_name",
             ),
         },
         Case {

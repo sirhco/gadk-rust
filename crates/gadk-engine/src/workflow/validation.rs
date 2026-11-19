@@ -396,7 +396,7 @@ pub(crate) fn validate_state_schema_consistency(
                 return Err(WorkflowError::new(
                     WorkflowErrorKind::Other,
                     format!(
-                        "node {} references state field {} which is not declared in StateSchema (declared: [{}])",
+                        "node {} references state field {} which is not declared in state_schema (declared: [{}])",
                         go_quote(n.name()),
                         go_quote(field),
                         fields.join(" ")

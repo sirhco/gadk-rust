@@ -537,7 +537,7 @@ mod tests {
         assert!(matches!(err, ArtifactError::InvalidRequest(_)), "{err:?}");
         assert_eq!(
             err.to_string(),
-            "request validation failed: invalid save request: missing required fields: AppName"
+            "request validation failed: invalid save request: missing required fields: app_name"
         );
         let err = svc
             .list(ListRequest {
@@ -549,7 +549,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "request validation failed: invalid list request: missing required fields: SessionID"
+            "request validation failed: invalid list request: missing required fields: session_id"
         );
         assert_eq!(fake.close_calls(), 0);
     }

@@ -245,7 +245,10 @@ mod tests {
             agent: Some(named_agent("child")),
             ..Default::default()
         });
-        assert!(!child.ended(), "Go NewInvocationContext starts not ended");
+        assert!(
+            !child.ended(),
+            "a fresh invocation context starts not ended"
+        );
         assert!(parent.ended(), "the parent's flag is untouched");
         assert_eq!(child.isolation_scope(), "");
         assert_eq!(child.function_call_id(), "");
@@ -313,7 +316,7 @@ mod tests {
         assert_eq!(
             fresh.live_session_resumption_handle(),
             "",
-            "Go NewInvocationContext starts with no handle"
+            "a fresh invocation context starts with no handle"
         );
         fresh.set_live_session_resumption_handle("new");
         assert_eq!(

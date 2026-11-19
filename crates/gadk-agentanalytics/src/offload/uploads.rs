@@ -998,7 +998,7 @@ pub(crate) fn resolve_gcs_path_prefix(c: &Config) -> String {
     let (cleaned, reason) = clean_gcs_prefix_with_reason(&c.gcs_path_prefix);
     if !reason.is_empty() {
         c.logf(format_args!(
-            "agentanalytics: WARNING: Config.GCSPathPrefix ({} raw bytes, {} trimmed bytes) was rewritten ({} effective bytes): {reason}",
+            "agentanalytics: WARNING: Config.gcs_path_prefix ({} raw bytes, {} trimmed bytes) was rewritten ({} effective bytes): {reason}",
             c.gcs_path_prefix.len(),
             trimmed.len(),
             cleaned.len(),

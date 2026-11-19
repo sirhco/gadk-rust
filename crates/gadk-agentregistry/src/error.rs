@@ -34,7 +34,7 @@ pub struct ApiError {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// [`Client::new`](crate::Client::new): the project ID or the location is empty.
-    #[error("agentregistry: ProjectID and Location must be set")]
+    #[error("agentregistry: project_id and location must be set")]
     Config,
     /// [`Client::new`](crate::Client::new): ADC could not be loaded (the
     /// cause is gadk-auth's text).

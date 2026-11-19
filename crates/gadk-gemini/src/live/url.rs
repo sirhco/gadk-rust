@@ -33,7 +33,7 @@ pub(crate) fn live_url(resolved: &ResolvedConfig) -> Result<Url, GeminiError> {
     let api_version = &resolved.api_version;
     if api_version.is_empty() {
         return Err(GeminiError::Config(
-            "live module requires APIVersion to be set. You can set APIVersion to v1beta1 for BackendVertexAI or v1apha for BackendGeminiAPI".into(),
+            "live module requires api_version to be set. You can set api_version to v1beta1 for Backend::VertexAi or v1alpha for Backend::GeminiApi".into(),
         ));
     }
     let base = Url::parse(&resolved.base_url)

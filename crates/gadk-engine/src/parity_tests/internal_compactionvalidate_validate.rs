@@ -135,7 +135,10 @@ fn invalid_shape_is_wrapped_as_invalid_compaction() {
     };
     let err: AgentError = against_agents(Some(&cfg), None, &base_config()).unwrap_err();
     let shape = cfg.validate().unwrap_err();
-    assert_eq!(err.to_string(), format!("invalid Compaction: {shape}"));
+    assert_eq!(
+        err.to_string(),
+        format!("invalid compaction config: {shape}")
+    );
 }
 
 #[test]

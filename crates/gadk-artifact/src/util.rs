@@ -89,11 +89,11 @@ mod tests {
     #[test]
     fn validation_failed_prefixes_invalid_requests_only() {
         let err = validation_failed(ArtifactError::InvalidRequest(
-            "invalid save request: missing required fields: AppName".into(),
+            "invalid save request: missing required fields: app_name".into(),
         ));
         assert_eq!(
             err.to_string(),
-            "request validation failed: invalid save request: missing required fields: AppName"
+            "request validation failed: invalid save request: missing required fields: app_name"
         );
         assert!(matches!(
             validation_failed(ArtifactError::NotFound),

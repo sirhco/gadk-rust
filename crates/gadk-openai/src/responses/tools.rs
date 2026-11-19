@@ -61,7 +61,9 @@ pub(crate) fn convert_function_declaration(
     decl: Option<&FunctionDeclaration>,
 ) -> Result<FunctionToolParam, OpenAiError> {
     let Some(decl) = decl else {
-        return Err(OpenAiError::plain("openai: nil function declaration"));
+        return Err(OpenAiError::plain(
+            "openai: function declaration is missing",
+        ));
     };
     if decl.name.is_empty() {
         return Err(OpenAiError::plain(

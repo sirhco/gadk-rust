@@ -7,6 +7,74 @@ the public API.
 
 ## [Unreleased]
 
+### Changed
+
+- Runtime messages name config fields by their Rust field names (snake_case) instead of Go's
+  PascalCase names, and no longer say `nil`. Only message text changed: error variants, HTTP
+  statuses and decisions are the same.
+  - `gadk-session`: compaction config errors read `compaction_interval must not be negative`,
+    `overlap_size is set to 1 but compaction_interval is 0, …`, `token_threshold …`,
+    `event_retention_size …` and `no compaction strategy is enabled, set compaction_interval or
+    token_threshold (or leave the compaction config as None to disable compaction)` (were
+    `CompactionInterval …`, `… leave the whole config nil …`); the summarizer says
+    `LlmSummarizerConfig.model is required` and `prompt_template must contain the placeholder
+    …`.
+  - `gadk-engine`, `gadk-launcher`: the compaction wrapper is `invalid compaction config: …`
+    (was `invalid Compaction: …`); `agent x is not an LlmAgent` (was `LLMAgent`); `… not
+    declared in state_schema` (was `StateSchema`); a dynamic child failure without a cause ends
+    `<no cause>` (was `<nil cause>`); `content for the first event is missing` and `schema is
+    missing` (were `… should not be nil` / `schema is nil`); the webui flag error is `failed to
+    parse webui flags: the flag set was not parsed` (was `…: <nil>`).
+  - `gadk-server`: the trigger-controller compaction warnings name `compaction_interval`,
+    `token_threshold` and `event_retention_size`; a missing token validator is `identity token
+    validation failed: no token validator is configured` (was a Go nil-pointer panic text); the
+    Agent Engine `Processing event` log line prints `none` for the absent side (was `<nil>`).
+  - `gadk-anthropic`: config errors use Rust field paths: `response_mime_type
+    "application/json" requires response_schema or response_json_schema`,
+    `thinking_config.thinking_budget must be set explicitly …`,
+    `tool_config.function_calling_config.allowed_function_names …`, `tools.google_search is not
+    supported by Claude`, `http_options.base_url is not supported; set ClientConfig.base_url
+    instead`, `top_k must be non-negative`, `seed is not supported`, `custom base_url on
+    Backend::Vertex requires explicit ClientConfig.credentials; …`, `unsupported prompt_cache.ttl
+    …`, `unsupported effort …` (were `ResponseMIMEType … ResponseSchema or ResponseJsonSchema`,
+    `ThinkingConfig.ThinkingBudget …`, `Tools.GoogleSearch …`, `HTTPOptions.BaseURL …
+    ClientConfig.BaseURL`, `BackendVertex`, `Credentials or TokenSource`, …).
+  - `gadk-openai`: unsupported-field errors name Rust fields (`openai: unsupported generation
+    config field: top_k`, `thinking_config.thinking_budget -5`, `negative max_output_tokens`,
+    `non-positive http_options.timeout 0s`, `unsupported content part: media_resolution`, …;
+    were `TopK`, `ThinkingConfig.ThinkingBudget`, …); `openai: request is missing`, `openai:
+    tool 0 is missing` and `openai: function declaration is missing` (were `… is nil` / `nil
+    function declaration`).
+  - `gadk-a2a`: `either agent_card or agent_card_provider must be set` from both the remote
+    agent constructor and card resolution (were `either AgentCard or AgentCardProvider must be
+    provided` / `… must be set`).
+  - `gadk-agentanalytics`: config errors read `batch_size and queue_max_size must be >= 1`,
+    `batch_flush_intv and shutdown_timeout must be > 0`, `max_content_len must be -1 or >= 1`,
+    `invalid retry_config: needs max_retries >= 0, … got {max_retries:… initial_delay:…
+    max_delay:… multiplier:…}`, `custom_metadata_allowlist cannot be used when
+    payload_column_denylist contains "attributes"`, `invalid view_prefix …`, `unsupported
+    payload_column_denylist entry …`; the warnings name `gcs_bucket_name`,
+    `Config.gcs_path_prefix` and `sync_views`; client construction says
+    `ClientOptions.without_authentication is incompatible with …` (was
+    `options.WithoutAuthentication`); a resumable upload that was never sent says `choose a
+    larger chunk retry deadline` (was `ChunkRetryDeadline`).
+  - `gadk-artifact`, `gadk-artifact-gcs`: `missing required fields: app_name, user_id,
+    session_id, file_name, part` and `part.inline_data or part.text has to be set` (were
+    `AppName, UserID, SessionID, FileName, Part` / `Part.InlineData or Part.Text`).
+  - `gadk-auth`: `gcp: retrieve_credential requires a resource` / `… a user_id` and the
+    `gcp: retrieve_credential: …` prefix (were `RetrieveCredential … Resource` / `UserID`).
+  - `gadk-gemini`: `live module requires api_version to be set. You can set api_version to
+    v1beta1 for Backend::VertexAi or v1alpha for Backend::GeminiApi` (was `APIVersion`,
+    `BackendVertexAI`, `BackendGeminiAPI`, and the `v1apha` typo).
+  - `gadk-agentregistry`: `agentregistry: project_id and location must be set` (was `ProjectID
+    and Location`); `gadk-vertexai`: `vertexai: example_store_name must match …` (was
+    `ExampleStoreName`).
+  - `gadk-agent`: `function call or its arguments are missing` (was `functionCall or its
+    arguments cannot be nil`); `gadk-configurable`: tool factories say `args is missing` and a
+    workflow tool node `tool is missing` (were `args is nil` / `tool cannot be nil`).
+  - Test kits (`gadk-artifact` and `gadk-session` `testsuite`): failure texts say `want
+    Ok(…)` / `got Ok` / `returned Ok` instead of Go's `(…, nil)` / `got nil` / `error = nil`.
+
 ## [0.4.3] - 2026-11-19
 
 ### Changed

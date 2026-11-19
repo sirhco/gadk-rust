@@ -54,7 +54,7 @@ pub(crate) async fn resolve_agent_card(cfg: &A2AServerConfig) -> Result<a2a::Age
         return provider().await;
     }
     Err(Error::msg(
-        "either AgentCard or AgentCardProvider must be set",
+        "either agent_card or agent_card_provider must be set",
     ))
 }
 
@@ -165,7 +165,7 @@ mod tests {
         let neither = config(None, None, fake_provider());
         assert_eq!(
             resolve_agent_card(&neither).await.unwrap_err().to_string(),
-            "either AgentCard or AgentCardProvider must be set"
+            "either agent_card or agent_card_provider must be set"
         );
     }
 

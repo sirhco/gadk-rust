@@ -31,7 +31,7 @@ pub enum ArtifactError {
     #[error("artifact not found: file does not exist")]
     NotFound,
     /// The request failed validation; the payload is the full error text, e.g.
-    /// `invalid save request: missing required fields: AppName`.
+    /// `invalid save request: missing required fields: app_name`.
     #[error("{0}")]
     InvalidRequest(String),
     /// A storage-backend failure.
@@ -113,19 +113,19 @@ fn file_fields<'a>(
 ) -> [RequiredField<'a>; 4] {
     [
         RequiredField {
-            name: "AppName",
+            name: "app_name",
             value: app_name,
         },
         RequiredField {
-            name: "UserID",
+            name: "user_id",
             value: user_id,
         },
         RequiredField {
-            name: "SessionID",
+            name: "session_id",
             value: session_id,
         },
         RequiredField {
-            name: "FileName",
+            name: "file_name",
             value: file_name,
         },
     ]
@@ -172,7 +172,7 @@ impl SaveRequest {
             &self.file_name,
         ));
         if self.part.is_none() {
-            missing_fields.push("Part");
+            missing_fields.push("part");
         }
         missing("save", &missing_fields)?;
         if let Some(part) = &self.part
@@ -181,7 +181,7 @@ impl SaveRequest {
             && !(allow_ref && is_artifact_ref(Some(part)))
         {
             return Err(ArtifactError::InvalidRequest(
-                "invalid save request: Part.InlineData or Part.Text has to be set".into(),
+                "invalid save request: part.inline_data or part.text has to be set".into(),
             ));
         }
         validate_file_name(&self.file_name)
@@ -278,15 +278,15 @@ impl ListRequest {
     pub fn validate(&self) -> Result<(), ArtifactError> {
         let fields = [
             RequiredField {
-                name: "AppName",
+                name: "app_name",
                 value: &self.app_name,
             },
             RequiredField {
-                name: "UserID",
+                name: "user_id",
                 value: &self.user_id,
             },
             RequiredField {
-                name: "SessionID",
+                name: "session_id",
                 value: &self.session_id,
             },
         ];

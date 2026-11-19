@@ -191,8 +191,7 @@ impl GoogleOidc {
     async fn validate_token(&self, token: &str) -> Result<Option<Payload>, String> {
         let Some(validate) = &self.validate else {
             return Err(
-                "identity token validation panicked: runtime error: invalid memory address or nil pointer dereference"
-                    .into(),
+                "identity token validation failed: no token validator is configured".into(),
             );
         };
         let fut = std::panic::catch_unwind(AssertUnwindSafe(|| {

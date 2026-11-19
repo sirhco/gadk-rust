@@ -39,23 +39,23 @@ pub(crate) fn validate_config(c: &Config) -> Result<BTreeSet<String>, Error> {
     let r = &c.retry_config;
     if c.batch_size < 1 || c.queue_max_size < 1 {
         return Err(Error::msg(
-            "invalid config: BatchSize and QueueMaxSize must be >= 1",
+            "invalid config: batch_size and queue_max_size must be >= 1",
         ));
     }
     if c.batch_flush_intv.is_zero() || c.shutdown_timeout.is_zero() {
         return Err(Error::msg(
-            "invalid config: BatchFlushIntv and ShutdownTimeout must be > 0",
+            "invalid config: batch_flush_intv and shutdown_timeout must be > 0",
         ));
     }
     if c.max_content_len == 0 || c.max_content_len < -1 {
         return Err(Error::msg(
-            "invalid config: MaxContentLen must be -1 or >= 1",
+            "invalid config: max_content_len must be -1 or >= 1",
         ));
     }
     if r.max_retries < 0 || r.multiplier < 1.0 || r.max_delay < r.initial_delay {
         return Err(Error::msg(format!(
-            "invalid config: invalid RetryConfig: needs MaxRetries >= 0, InitialDelay >= 0, \
-             Multiplier >= 1 and MaxDelay >= InitialDelay, got {}",
+            "invalid config: invalid retry_config: needs max_retries >= 0, initial_delay >= 0, \
+             multiplier >= 1 and max_delay >= initial_delay, got {}",
             retry_config_plus_v(r)
         )));
     }
@@ -63,23 +63,23 @@ pub(crate) fn validate_config(c: &Config) -> Result<BTreeSet<String>, Error> {
         .map_err(|e| Error::wrap("invalid config", e))?;
     if denied.contains(COLUMN_ATTRIBUTES) && !c.custom_metadata_allowlist.is_empty() {
         return Err(Error::msg(
-            "invalid config: CustomMetadataAllowlist cannot be used when PayloadColumnDenylist \
+            "invalid config: custom_metadata_allowlist cannot be used when payload_column_denylist \
              contains \"attributes\"",
         ));
     }
     if !c.view_prefix.is_empty() && !is_valid_identifier(&c.view_prefix) {
         return Err(Error::msg(format!(
-            "invalid config: invalid ViewPrefix {}",
+            "invalid config: invalid view_prefix {}",
             go_quote(&c.view_prefix)
         )));
     }
     Ok(denied)
 }
 
-/// The retry settings as `{MaxRetries:3 InitialDelay:100ms MaxDelay:10s Multiplier:2}`.
+/// The retry settings as `{max_retries:3 initial_delay:100ms max_delay:10s multiplier:2}`.
 fn retry_config_plus_v(r: &RetryConfig) -> String {
     format!(
-        "{{MaxRetries:{} InitialDelay:{} MaxDelay:{} Multiplier:{}}}",
+        "{{max_retries:{} initial_delay:{} max_delay:{} multiplier:{}}}",
         r.max_retries,
         GoDuration::from_std(r.initial_delay),
         GoDuration::from_std(r.max_delay),
@@ -109,7 +109,7 @@ mod tests {
         };
         assert_eq!(
             retry_config_plus_v(&r),
-            "{MaxRetries:1 InitialDelay:1h30m0.0015s MaxDelay:0s Multiplier:2.25}"
+            "{max_retries:1 initial_delay:1h30m0.0015s max_delay:0s multiplier:2.25}"
         );
     }
 }

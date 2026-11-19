@@ -1780,7 +1780,7 @@ async fn test_new_plugin_rejects_invalid_config() {
         (
             "unknown payload column",
             |c| c.payload_column_denylist = vec!["error_message".into()],
-            r#"unsupported PayloadColumnDenylist entry "error_message""#,
+            r#"unsupported payload_column_denylist entry "error_message""#,
         ),
         (
             "custom metadata without the attributes column",
@@ -1788,32 +1788,32 @@ async fn test_new_plugin_rejects_invalid_config() {
                 c.payload_column_denylist = vec![COLUMN_ATTRIBUTES.into()];
                 c.custom_metadata_allowlist = vec!["a2a:*".into()];
             },
-            "CustomMetadataAllowlist cannot be used",
+            "custom_metadata_allowlist cannot be used",
         ),
         (
             "MaxContentLen less than -1",
             |c| c.max_content_len = -2,
-            "MaxContentLen must be -1 or >= 1",
+            "max_content_len must be -1 or >= 1",
         ),
         (
             "negative BatchSize",
             |c| c.batch_size = -1,
-            "BatchSize and QueueMaxSize must be >= 1",
+            "batch_size and queue_max_size must be >= 1",
         ),
         (
             "negative QueueMaxSize",
             |c| c.queue_max_size = -1,
-            "BatchSize and QueueMaxSize must be >= 1",
+            "batch_size and queue_max_size must be >= 1",
         ),
         (
             "negative RetryConfig.MaxRetries",
             |c| c.retry_config.max_retries = -1,
-            "invalid RetryConfig",
+            "invalid retry_config",
         ),
         (
             "Multiplier less than 1",
             |c| c.retry_config.multiplier = 0.5,
-            "invalid RetryConfig",
+            "invalid retry_config",
         ),
         (
             "MaxDelay less than InitialDelay",
@@ -1821,12 +1821,12 @@ async fn test_new_plugin_rejects_invalid_config() {
                 c.retry_config.initial_delay = Duration::from_secs(10);
                 c.retry_config.max_delay = Duration::from_secs(5);
             },
-            "invalid RetryConfig",
+            "invalid retry_config",
         ),
         (
-            "invalid ViewPrefix with SQL injection characters",
+            "invalid view_prefix with SQL injection characters",
             |c| c.view_prefix = "v` OR 1=1 --".into(),
-            "invalid ViewPrefix",
+            "invalid view_prefix",
         ),
     ];
     for (name, mutate, want_err) in tests {

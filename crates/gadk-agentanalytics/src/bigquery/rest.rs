@@ -184,7 +184,7 @@ impl BigQueryClient {
         let constructing = |e: Error| Error::wrap("bigquery: constructing client", e);
         if options.without_authentication && options.credentials.is_some() {
             return Err(constructing(Error::msg(
-                "options.WithoutAuthentication is incompatible with any option that provides \
+                "ClientOptions.without_authentication is incompatible with any option that provides \
                  credentials",
             )));
         }
@@ -1138,7 +1138,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "bigquery: constructing client: options.WithoutAuthentication is incompatible with \
+            "bigquery: constructing client: ClientOptions.without_authentication is incompatible with \
              any option that provides credentials"
         );
     }

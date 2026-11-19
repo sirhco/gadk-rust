@@ -166,7 +166,7 @@ impl AnthropicModel {
         };
         let base_url = cfg.base_url.as_deref().filter(|u| !u.is_empty());
         if let Some(url) = base_url {
-            validate_base_url("BaseURL", url)?;
+            validate_base_url("base_url", url)?;
         }
         let has_custom_base_url = base_url.is_some();
 
@@ -223,7 +223,7 @@ impl AnthropicModel {
         if parsed.is_resource {
             if self.backend != Backend::Vertex {
                 return Err(invalid_config(
-                    "Vertex resource model name requires BackendVertex",
+                    "Vertex resource model name requires Backend::Vertex",
                 ));
             }
             if parsed.project != self.project {
@@ -335,7 +335,7 @@ fn resolve_anthropic(
 ) -> Result<Resolved, AnthropicError> {
     if is_resource {
         return Err(invalid_config(
-            "Vertex resource model name requires BackendVertex",
+            "Vertex resource model name requires Backend::Vertex",
         ));
     }
     let env = cfg.env.as_ref();
@@ -346,7 +346,7 @@ fn resolve_anthropic(
     if has_custom_base_url {
         if api_key.is_empty() && auth_token.is_empty() {
             return Err(invalid_config(
-                "custom BaseURL on BackendAnthropic requires an explicit APIKey or AuthToken in ClientConfig; ambient environment credentials are not sent to custom endpoints",
+                "custom base_url on Backend::Anthropic requires an explicit api_key or auth_token in ClientConfig; ambient environment credentials are not sent to custom endpoints",
             ));
         }
     } else {
@@ -369,7 +369,7 @@ fn resolve_anthropic(
         return Err(AnthropicError::wrap2(
             ErrorKind::InvalidConfig,
             ErrorKind::Authentication,
-            "no Anthropic credential found; set ClientConfig.APIKey, ClientConfig.AuthToken, ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN",
+            "no Anthropic credential found; set ClientConfig.api_key, ClientConfig.auth_token, ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN",
         ));
     }
 
@@ -403,14 +403,14 @@ fn resolve_vertex(
     if parsed.is_resource {
         if !cfg_project.is_empty() && cfg_project != parsed.project {
             return Err(invalid_config(format!(
-                "ClientConfig.Project {} does not match resource project {}",
+                "ClientConfig.project {} does not match resource project {}",
                 go_quote(cfg_project),
                 go_quote(&parsed.project)
             )));
         }
         if !cfg_location.is_empty() && cfg_location != parsed.location {
             return Err(invalid_config(format!(
-                "ClientConfig.Location {} does not match resource location {}",
+                "ClientConfig.location {} does not match resource location {}",
                 go_quote(cfg_location),
                 go_quote(&parsed.location)
             )));
@@ -432,12 +432,12 @@ fn resolve_vertex(
 
     if project.is_empty() {
         return Err(invalid_config(
-            "BackendVertex requires a project via ClientConfig.Project, a full resource model name, GOOGLE_CLOUD_PROJECT, or CLOUD_ML_PROJECT_ID",
+            "Backend::Vertex requires a project via ClientConfig.project, a full resource model name, GOOGLE_CLOUD_PROJECT, or CLOUD_ML_PROJECT_ID",
         ));
     }
     if location.is_empty() {
         return Err(invalid_config(
-            "BackendVertex requires a location via ClientConfig.Location, a full resource model name, GOOGLE_CLOUD_LOCATION, or CLOUD_ML_REGION",
+            "Backend::Vertex requires a location via ClientConfig.location, a full resource model name, GOOGLE_CLOUD_LOCATION, or CLOUD_ML_REGION",
         ));
     }
     validate_vertex_project(&project)?;
@@ -445,7 +445,7 @@ fn resolve_vertex(
 
     if has_custom_base_url && cfg.credentials.is_none() {
         return Err(invalid_config(
-            "custom BaseURL on BackendVertex requires explicit Credentials or TokenSource in ClientConfig; Application Default Credentials are not sent to custom endpoints",
+            "custom base_url on Backend::Vertex requires explicit ClientConfig.credentials; Application Default Credentials are not sent to custom endpoints",
         ));
     }
 
@@ -775,7 +775,7 @@ mod tests {
         let err = new_err(MODEL, cfg).await;
         assert_eq!(
             err.to_string(),
-            "anthropicmodel: invalid configuration: custom BaseURL on BackendAnthropic requires an explicit APIKey or AuthToken in ClientConfig; ambient environment credentials are not sent to custom endpoints"
+            "anthropicmodel: invalid configuration: custom base_url on Backend::Anthropic requires an explicit api_key or auth_token in ClientConfig; ambient environment credentials are not sent to custom endpoints"
         );
 
         let mut cfg = anthropic(
@@ -792,7 +792,7 @@ mod tests {
         let err = new_err(MODEL, anthropic(Some(""), &[])).await;
         assert_eq!(
             err.to_string(),
-            "anthropicmodel: invalid configuration: anthropicmodel: authentication failed: no Anthropic credential found; set ClientConfig.APIKey, ClientConfig.AuthToken, ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN"
+            "anthropicmodel: invalid configuration: anthropicmodel: authentication failed: no Anthropic credential found; set ClientConfig.api_key, ClientConfig.auth_token, ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN"
         );
         assert!(err.is(ErrorKind::InvalidConfig));
         assert!(err.is(ErrorKind::Authentication));
@@ -812,7 +812,7 @@ mod tests {
         cfg.base_url = Some("   ".to_string());
         assert_eq!(
             new_err(MODEL, cfg).await.to_string(),
-            "anthropicmodel: invalid configuration: BaseURL must not be whitespace-only"
+            "anthropicmodel: invalid configuration: base_url must not be whitespace-only"
         );
         // `Some("")` is unset (Go `cfg.BaseURL != ""`).
         let mut cfg = anthropic(Some("key"), &[]);
@@ -824,7 +824,7 @@ mod tests {
             new_err(RESOURCE, anthropic(Some("key"), &[]))
                 .await
                 .to_string(),
-            "anthropicmodel: invalid configuration: Vertex resource model name requires BackendVertex"
+            "anthropicmodel: invalid configuration: Vertex resource model name requires Backend::Vertex"
         );
         // ANTHROPIC_BASE_URL is validated.
         assert_eq!(
@@ -948,25 +948,25 @@ mod tests {
         cfg.project = Some("other".to_string());
         assert_eq!(
             new_err(RESOURCE, cfg).await.to_string(),
-            "anthropicmodel: invalid configuration: ClientConfig.Project \"other\" does not match resource project \"res-proj\""
+            "anthropicmodel: invalid configuration: ClientConfig.project \"other\" does not match resource project \"res-proj\""
         );
         let mut cfg = vertex(&[]);
         cfg.location = Some("global".to_string());
         assert_eq!(
             new_err(RESOURCE, cfg).await.to_string(),
-            "anthropicmodel: invalid configuration: ClientConfig.Location \"global\" does not match resource location \"us-east5\""
+            "anthropicmodel: invalid configuration: ClientConfig.location \"global\" does not match resource location \"us-east5\""
         );
         assert_eq!(
             new_err(MODEL, vertex(&[("GOOGLE_CLOUD_LOCATION", "us-east5")]))
                 .await
                 .to_string(),
-            "anthropicmodel: invalid configuration: BackendVertex requires a project via ClientConfig.Project, a full resource model name, GOOGLE_CLOUD_PROJECT, or CLOUD_ML_PROJECT_ID"
+            "anthropicmodel: invalid configuration: Backend::Vertex requires a project via ClientConfig.project, a full resource model name, GOOGLE_CLOUD_PROJECT, or CLOUD_ML_PROJECT_ID"
         );
         assert_eq!(
             new_err(MODEL, vertex(&[("GOOGLE_CLOUD_PROJECT", "p")]))
                 .await
                 .to_string(),
-            "anthropicmodel: invalid configuration: BackendVertex requires a location via ClientConfig.Location, a full resource model name, GOOGLE_CLOUD_LOCATION, or CLOUD_ML_REGION"
+            "anthropicmodel: invalid configuration: Backend::Vertex requires a location via ClientConfig.location, a full resource model name, GOOGLE_CLOUD_LOCATION, or CLOUD_ML_REGION"
         );
         assert_eq!(
             new_err(
@@ -999,7 +999,7 @@ mod tests {
         cfg.base_url = Some("https://proxy.example".to_string());
         assert_eq!(
             new_err(RESOURCE, cfg).await.to_string(),
-            "anthropicmodel: invalid configuration: custom BaseURL on BackendVertex requires explicit Credentials or TokenSource in ClientConfig; Application Default Credentials are not sent to custom endpoints"
+            "anthropicmodel: invalid configuration: custom base_url on Backend::Vertex requires explicit ClientConfig.credentials; Application Default Credentials are not sent to custom endpoints"
         );
         let mut cfg = vertex(&[]);
         cfg.base_url = Some(" https://proxy.example/prefix ".to_string());
@@ -1099,7 +1099,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             m.resolve_model_id(RESOURCE).unwrap_err().to_string(),
-            "anthropicmodel: invalid configuration: Vertex resource model name requires BackendVertex"
+            "anthropicmodel: invalid configuration: Vertex resource model name requires Backend::Vertex"
         );
     }
 
@@ -1249,7 +1249,7 @@ mod tests {
         });
         assert_eq!(
             m.build_message_params(&req).unwrap_err().to_string(),
-            "anthropicmodel: invalid configuration: HTTPOptions.BaseURL is not supported; set ClientConfig.BaseURL instead"
+            "anthropicmodel: invalid configuration: http_options.base_url is not supported; set ClientConfig.base_url instead"
         );
 
         let empty = LlmRequest::default();
@@ -1264,7 +1264,7 @@ mod tests {
         req.model = RESOURCE.to_string();
         assert_eq!(
             m.build_message_params(&req).unwrap_err().to_string(),
-            "anthropicmodel: invalid configuration: Vertex resource model name requires BackendVertex"
+            "anthropicmodel: invalid configuration: Vertex resource model name requires Backend::Vertex"
         );
     }
 

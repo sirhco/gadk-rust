@@ -143,7 +143,7 @@ fn test_reject_unsupported_fields_refuses_fields_added_later() {
 // parity: adapted: Go narrows the package variable SupportedThinkingConfigFields; gadk's list is a const, so the narrowed walk runs through reject_unsupported_fields over thinking_config_fields (what reject_unsupported_config_fields does with the real list), and the top-level-first order through reject_unsupported_config_fields itself
 #[test]
 fn test_reject_unsupported_config_fields_walks_thinking_config() {
-    let narrowed = ["IncludeThoughts", "ThinkingBudget"];
+    let narrowed = ["include_thoughts", "thinking_budget"];
     let mut cfg = GenerateContentConfig {
         thinking_config: Some(ThinkingConfig {
             thinking_level: Some(ThinkingLevel::Low),
@@ -153,7 +153,7 @@ fn test_reject_unsupported_config_fields_walks_thinking_config() {
     };
     let thinking = cfg.thinking_config.clone().unwrap_or_default();
     let err = reject_unsupported_fields(
-        "ThinkingConfig.",
+        "thinking_config.",
         &thinking_config_fields(&thinking),
         &narrowed,
     )
@@ -161,7 +161,7 @@ fn test_reject_unsupported_config_fields_walks_thinking_config() {
     assert_eq!(
         err.to_string(),
         format!(
-            "{}: ThinkingConfig.ThinkingLevel",
+            "{}: thinking_config.thinking_level",
             ErrorKind::UnsupportedConfigField.sentinel_text()
         )
     );
@@ -176,7 +176,7 @@ fn test_reject_unsupported_config_fields_walks_thinking_config() {
     assert_eq!(
         err.to_string(),
         format!(
-            "{}: ImageConfig",
+            "{}: image_config",
             ErrorKind::UnsupportedConfigField.sentinel_text()
         )
     );

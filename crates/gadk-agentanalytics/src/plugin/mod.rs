@@ -592,7 +592,7 @@ pub(crate) async fn new_plugin(
     if config.gcs_offloader.is_none() && !config.gcs_bucket_name.is_empty() {
         if parts_denied || !config.log_multi_modal_content() {
             config.logf(format_args!(
-                "agentanalytics: GCSBucketName {} is ignored because content_parts logging is disabled",
+                "agentanalytics: gcs_bucket_name {} is ignored because content_parts logging is disabled",
                 go_quote(&config.gcs_bucket_name)
             ));
         } else {
@@ -970,7 +970,7 @@ mod tests {
                 )
                 .await
             ),
-            "invalid config: MaxContentLen must be -1 or >= 1"
+            "invalid config: max_content_len must be -1 or >= 1"
         );
     }
 

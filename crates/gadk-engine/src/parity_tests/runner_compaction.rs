@@ -807,7 +807,7 @@ async fn test_new_rejects_bad_compaction_config() {
             }
         )
         .as_deref(),
-        Some("invalid Compaction: CompactionInterval must not be negative, got -1")
+        Some("invalid compaction config: compaction_interval must not be negative, got -1")
     );
     assert_eq!(
         err(

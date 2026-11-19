@@ -688,7 +688,7 @@ mod tests {
         );
         assert!(
             !ic.ended(),
-            "Go passes no EndInvocation: the flag starts false"
+            "no end-invocation flag is passed in: the flag starts false"
         );
         assert!(parent.ended());
         assert_eq!(ic.isolation_scope(), "scope-1");

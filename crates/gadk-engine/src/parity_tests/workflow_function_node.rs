@@ -691,7 +691,7 @@ async fn state_schema_consistency_with_from_state_nodes() {
     );
     let err = build(&invalid, Some(schema.clone())).expect_err("typo in tag causes error");
     assert!(
-        err.to_string().contains(r#"node "invalid_node" references state field "foo" which is not declared in StateSchema"#),
+        err.to_string().contains(r#"node "invalid_node" references state field "foo" which is not declared in state_schema"#),
         "got: {err}"
     );
     assert!(build(&invalid, None).is_ok(), "nil schema skips validation");

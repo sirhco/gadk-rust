@@ -117,7 +117,7 @@ impl WebSublauncher for WebUiLauncher {
             // The set was not parsed although no error was reported; the text is `<nil>`, as an
             // ADK launcher prints it.
             Ok(()) if !fs.parsed() => Err(Error::Parse(
-                "failed to parse webui flags: <nil>".to_owned(),
+                "failed to parse webui flags: the flag set was not parsed".to_owned(),
             )),
             Ok(()) => Ok(fs.args()),
         }

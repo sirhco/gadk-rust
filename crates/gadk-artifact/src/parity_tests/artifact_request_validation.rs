@@ -60,7 +60,7 @@ fn test_save_request_validate() {
                 app_name: String::new(),
                 ..full(bytes_part())
             },
-            Some("invalid save request: missing required fields: AppName"),
+            Some("invalid save request: missing required fields: app_name"),
         ),
         (
             "Missing multiple fields",
@@ -69,23 +69,23 @@ fn test_save_request_validate() {
                 part: bytes_part(),
                 ..Default::default()
             },
-            Some("invalid save request: missing required fields: UserID, SessionID, FileName"),
+            Some("invalid save request: missing required fields: user_id, session_id, file_name"),
         ),
         (
             "Missing Part (nil slice)",
             full(None),
-            Some("invalid save request: missing required fields: Part"),
+            Some("invalid save request: missing required fields: part"),
         ),
         (
             "Missing Part.Inline (nil slice)",
             full(Some(Part::from_function_call("example", Map::new()))),
-            Some("invalid save request: Part.InlineData or Part.Text has to be set"),
+            Some("invalid save request: part.inline_data or part.text has to be set"),
         ),
         (
             "Completely empty request",
             SaveRequest::default(),
             Some(
-                "invalid save request: missing required fields: AppName, UserID, SessionID, FileName, Part",
+                "invalid save request: missing required fields: app_name, user_id, session_id, file_name, part",
             ),
         ),
         (
@@ -111,7 +111,7 @@ fn test_save_request_validate() {
                     ..Default::default()
                 }))
             },
-            Some("invalid save request: Part.InlineData or Part.Text has to be set"),
+            Some("invalid save request: part.inline_data or part.text has to be set"),
         ),
     ];
     for (name, req, want) in cases {
@@ -136,7 +136,7 @@ fn test_load_request_validate() {
                 app_name: String::new(),
                 ..full.clone()
             },
-            Some("invalid load request: missing required fields: AppName"),
+            Some("invalid load request: missing required fields: app_name"),
         ),
         (
             "Missing multiple fields",
@@ -144,13 +144,13 @@ fn test_load_request_validate() {
                 app_name: "MyApp".into(),
                 ..Default::default()
             },
-            Some("invalid load request: missing required fields: UserID, SessionID, FileName"),
+            Some("invalid load request: missing required fields: user_id, session_id, file_name"),
         ),
         (
             "Completely empty request",
             LoadRequest::default(),
             Some(
-                "invalid load request: missing required fields: AppName, UserID, SessionID, FileName",
+                "invalid load request: missing required fields: app_name, user_id, session_id, file_name",
             ),
         ),
         (
@@ -184,7 +184,7 @@ fn test_delete_request_validate() {
                 app_name: String::new(),
                 ..full.clone()
             },
-            Some("invalid delete request: missing required fields: AppName"),
+            Some("invalid delete request: missing required fields: app_name"),
         ),
         (
             "Missing multiple fields",
@@ -192,13 +192,13 @@ fn test_delete_request_validate() {
                 app_name: "MyApp".into(),
                 ..Default::default()
             },
-            Some("invalid delete request: missing required fields: UserID, SessionID, FileName"),
+            Some("invalid delete request: missing required fields: user_id, session_id, file_name"),
         ),
         (
             "Completely empty request",
             DeleteRequest::default(),
             Some(
-                "invalid delete request: missing required fields: AppName, UserID, SessionID, FileName",
+                "invalid delete request: missing required fields: app_name, user_id, session_id, file_name",
             ),
         ),
         (
@@ -230,7 +230,7 @@ fn test_list_request_validate() {
                 app_name: String::new(),
                 ..full
             },
-            Some("invalid list request: missing required fields: AppName"),
+            Some("invalid list request: missing required fields: app_name"),
         ),
         (
             "Missing multiple fields",
@@ -238,12 +238,12 @@ fn test_list_request_validate() {
                 app_name: "MyApp".into(),
                 ..Default::default()
             },
-            Some("invalid list request: missing required fields: UserID, SessionID"),
+            Some("invalid list request: missing required fields: user_id, session_id"),
         ),
         (
             "Completely empty request",
             ListRequest::default(),
-            Some("invalid list request: missing required fields: AppName, UserID, SessionID"),
+            Some("invalid list request: missing required fields: app_name, user_id, session_id"),
         ),
     ];
     for (name, req, want) in cases {
@@ -267,7 +267,7 @@ fn test_versions_request_validate() {
                 app_name: String::new(),
                 ..full.clone()
             },
-            Some("invalid versions request: missing required fields: AppName"),
+            Some("invalid versions request: missing required fields: app_name"),
         ),
         (
             "Missing multiple fields",
@@ -275,13 +275,15 @@ fn test_versions_request_validate() {
                 app_name: "MyApp".into(),
                 ..Default::default()
             },
-            Some("invalid versions request: missing required fields: UserID, SessionID, FileName"),
+            Some(
+                "invalid versions request: missing required fields: user_id, session_id, file_name",
+            ),
         ),
         (
             "Completely empty request",
             VersionsRequest::default(),
             Some(
-                "invalid versions request: missing required fields: AppName, UserID, SessionID, FileName",
+                "invalid versions request: missing required fields: app_name, user_id, session_id, file_name",
             ),
         ),
         (
@@ -315,7 +317,7 @@ fn test_get_artifact_version_request_validate() {
                 app_name: String::new(),
                 ..full.clone()
             },
-            Some("invalid get artifact version request: missing required fields: AppName"),
+            Some("invalid get artifact version request: missing required fields: app_name"),
         ),
         (
             "Missing multiple fields",
@@ -324,14 +326,14 @@ fn test_get_artifact_version_request_validate() {
                 ..Default::default()
             },
             Some(
-                "invalid get artifact version request: missing required fields: UserID, SessionID, FileName",
+                "invalid get artifact version request: missing required fields: user_id, session_id, file_name",
             ),
         ),
         (
             "Completely empty request",
             GetArtifactVersionRequest::default(),
             Some(
-                "invalid get artifact version request: missing required fields: AppName, UserID, SessionID, FileName",
+                "invalid get artifact version request: missing required fields: app_name, user_id, session_id, file_name",
             ),
         ),
         (

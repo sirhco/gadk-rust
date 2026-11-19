@@ -402,7 +402,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 top_p: Some(0.9),
                 ..gcc()
             }),
-            "Temperature and TopP cannot both be set on Claude models",
+            "temperature and top_p cannot both be set on Claude models",
         ),
         rejected(
             "negative_top_k",
@@ -410,7 +410,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 top_k: Some(-1.0),
                 ..gcc()
             }),
-            "TopK must be non-negative",
+            "top_k must be non-negative",
         ),
         rejected(
             "candidate_count_gt_1",
@@ -418,7 +418,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 candidate_count: 2,
                 ..gcc()
             }),
-            "CandidateCount 2 is not supported; Claude only supports 1 candidate",
+            "candidate_count 2 is not supported; Claude only supports 1 candidate",
         ),
         rejected(
             "negative_max_output_tokens",
@@ -426,7 +426,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 max_output_tokens: -10,
                 ..gcc()
             }),
-            "MaxOutputTokens must be non-negative",
+            "max_output_tokens must be non-negative",
         ),
         rejected(
             "non_text_system_instruction",
@@ -440,7 +440,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 }),
                 ..gcc()
             }),
-            "SystemInstruction only supports text parts",
+            "system_instruction only supports text parts",
         ),
         rejected(
             "non_text_response_modality",
@@ -448,7 +448,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 response_modalities: vec!["AUDIO".to_string()],
                 ..gcc()
             }),
-            "ResponseModalities only supports TEXT",
+            "response_modalities only supports TEXT",
         ),
         rejected(
             "http_options_base_url",
@@ -456,12 +456,12 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 base_url: Some("https://other.example.com".to_string()),
                 ..Default::default()
             }),
-            "HTTPOptions.BaseURL is not supported; set ClientConfig.BaseURL instead",
+            "http_options.base_url is not supported; set ClientConfig.base_url instead",
         ),
         // parity: adapted: gadk_model::HttpOptions has no base_url_resource_scope field.
         adapted(
             "http_options_base_url_resource_scope",
-            "HTTPOptions.BaseURLResourceScope is not supported",
+            "http_options.base_url_resource_scope is not supported",
             "gadk_model::HttpOptions has no base_url_resource_scope field",
         ),
         rejected(
@@ -470,12 +470,12 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 api_version: Some("v1beta".to_string()),
                 ..Default::default()
             }),
-            "HTTPOptions.APIVersion is not supported",
+            "http_options.api_version is not supported",
         ),
         // parity: adapted: gadk_model::HttpOptions has no extra_body field.
         adapted(
             "http_options_extra_body",
-            "HTTPOptions.ExtraBody is not supported",
+            "http_options.extra_body is not supported",
             "gadk_model::HttpOptions has no extra_body field",
         ),
         rejected(
@@ -484,20 +484,20 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 extras_request_provider: Some(Arc::new(|b| b)),
                 ..Default::default()
             }),
-            "HTTPOptions.ExtrasRequestProvider is not supported",
+            "http_options.extras_request_provider is not supported",
         ),
         // parity: adapted: gadk_model::HttpOptions has no retry_options field (retries are
         // ClientConfig::max_retries).
         adapted(
             "http_options_retry_options",
-            "HTTPOptions.RetryOptions is not supported; set ClientConfig.MaxRetries instead",
+            "http_options.retry_options is not supported; set ClientConfig.max_retries instead",
             "gadk_model::HttpOptions has no retry_options field",
         ),
         // parity: adapted: HttpOptions::timeout is a std::time::Duration, which cannot be
         // negative.
         adapted(
             "http_options_negative_timeout",
-            "HTTPOptions.Timeout must be non-negative",
+            "http_options.timeout must be non-negative",
             "HttpOptions::timeout is an unsigned Duration",
         ),
         rejected(
@@ -506,7 +506,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 response_mime_type: "application/json".to_string(),
                 ..gcc()
             }),
-            r#"ResponseMIMEType "application/json" requires ResponseSchema or ResponseJsonSchema"#,
+            r#"response_mime_type "application/json" requires response_schema or response_json_schema"#,
         ),
         rejected(
             "response_mime_type_non_json_with_schema",
@@ -518,7 +518,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 }),
                 ..gcc()
             }),
-            r#"ResponseMIMEType "text/plain" cannot be combined with ResponseSchema or ResponseJsonSchema"#,
+            r#"response_mime_type "text/plain" cannot be combined with response_schema or response_json_schema"#,
         ),
         rejected(
             "response_schema_and_response_json_schema_both_set",
@@ -530,7 +530,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 response_json_schema: Some(json!({"type": "object"})),
                 ..gcc()
             }),
-            "ResponseSchema and ResponseJsonSchema cannot both be set",
+            "response_schema and response_json_schema cannot both be set",
         ),
         rejected(
             "response_logprobs",
@@ -538,7 +538,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 response_logprobs: true,
                 ..gcc()
             }),
-            "ResponseLogprobs is not supported",
+            "response_logprobs is not supported",
         ),
         rejected(
             "logprobs",
@@ -546,7 +546,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 logprobs: Some(1),
                 ..gcc()
             }),
-            "Logprobs is not supported",
+            "logprobs is not supported",
         ),
         rejected(
             "presence_penalty",
@@ -554,7 +554,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 presence_penalty: Some(0.5),
                 ..gcc()
             }),
-            "PresencePenalty is not supported",
+            "presence_penalty is not supported",
         ),
         rejected(
             "frequency_penalty",
@@ -562,7 +562,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 frequency_penalty: Some(0.5),
                 ..gcc()
             }),
-            "FrequencyPenalty is not supported",
+            "frequency_penalty is not supported",
         ),
         rejected(
             "seed",
@@ -570,7 +570,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 seed: Some(1),
                 ..gcc()
             }),
-            "Seed is not supported",
+            "seed is not supported",
         ),
         rejected(
             "safety_settings",
@@ -578,7 +578,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 safety_settings: vec![SafetySetting::default()],
                 ..gcc()
             }),
-            "SafetySettings is not supported",
+            "safety_settings is not supported",
         ),
         rejected(
             "cached_content",
@@ -586,7 +586,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 cached_content: "caches/123".to_string(),
                 ..gcc()
             }),
-            "CachedContent is not supported; use ClientConfig.PromptCache instead",
+            "cached_content is not supported; use ClientConfig.prompt_cache instead",
         ),
         rejected(
             "labels",
@@ -594,7 +594,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 labels: BTreeMap::from([("env".to_string(), "prod".to_string())]),
                 ..gcc()
             }),
-            "Labels is not supported",
+            "labels is not supported",
         ),
         rejected(
             "media_resolution",
@@ -602,7 +602,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 media_resolution: Some(MediaResolution::High),
                 ..gcc()
             }),
-            "MediaResolution is not supported",
+            "media_resolution is not supported",
         ),
         rejected(
             "speech_config",
@@ -610,7 +610,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 speech_config: Some(SpeechConfig::default()),
                 ..gcc()
             }),
-            "SpeechConfig is not supported",
+            "speech_config is not supported",
         ),
         rejected(
             "audio_timestamp",
@@ -618,7 +618,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 audio_timestamp: true,
                 ..gcc()
             }),
-            "AudioTimestamp is not supported",
+            "audio_timestamp is not supported",
         ),
         rejected(
             "image_config",
@@ -626,7 +626,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 image_config: Some(ImageConfig::default()),
                 ..gcc()
             }),
-            "ImageConfig is not supported",
+            "image_config is not supported",
         ),
         rejected(
             "routing_config",
@@ -634,7 +634,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 routing_config: Some(GenerationConfigRoutingConfig::default()),
                 ..gcc()
             }),
-            "RoutingConfig is not supported",
+            "routing_config is not supported",
         ),
         rejected(
             "model_selection_config",
@@ -642,7 +642,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 model_selection_config: Some(ModelSelectionConfig::default()),
                 ..gcc()
             }),
-            "ModelSelectionConfig is not supported",
+            "model_selection_config is not supported",
         ),
         rejected(
             "model_armor_config",
@@ -650,7 +650,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 model_armor_config: Some(ModelArmorConfig::default()),
                 ..gcc()
             }),
-            "ModelArmorConfig is not supported",
+            "model_armor_config is not supported",
         ),
         rejected(
             "enable_enhanced_civic_answers",
@@ -658,7 +658,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 enable_enhanced_civic_answers: Some(true),
                 ..gcc()
             }),
-            "EnableEnhancedCivicAnswers is not supported",
+            "enable_enhanced_civic_answers is not supported",
         ),
         rejected(
             "service_tier",
@@ -666,7 +666,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 service_tier: Some(ServiceTier::Flex),
                 ..gcc()
             }),
-            "ServiceTier is not supported",
+            "service_tier is not supported",
         ),
         rejected(
             "audio_transcription_config",
@@ -674,7 +674,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 audio_transcription_config: Some(AudioTranscriptionConfig::default()),
                 ..gcc()
             }),
-            "AudioTranscriptionConfig is not supported",
+            "audio_transcription_config is not supported",
         ),
         rejected(
             "continuation_token",
@@ -682,7 +682,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 continuation_token: Some(Bytes::from_static(b"tok")),
                 ..gcc()
             }),
-            "ContinuationToken is not supported",
+            "continuation_token is not supported",
         ),
         rejected(
             "generation_output_config",
@@ -690,7 +690,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 generation_output_config: Some(GenerationOutputConfig::default()),
                 ..gcc()
             }),
-            "GenerationOutputConfig is not supported",
+            "generation_output_config is not supported",
         ),
         rejected(
             "store",
@@ -698,7 +698,7 @@ fn rejected_cases() -> Vec<RejectedCase> {
                 store: Some(true),
                 ..gcc()
             }),
-            "Store is not supported",
+            "store is not supported",
         ),
     ]
 }
@@ -762,7 +762,7 @@ async fn test_generate_content_config_validation() {
     let got_custom_header = srv.last_request().header("X-Gemini-Only");
     assert_eq!(
         got_custom_header, "",
-        "{case}: HTTPOptions.Headers leaked X-Gemini-Only={got_custom_header:?} to server"
+        "{case}: http_options.headers leaked X-Gemini-Only={got_custom_header:?} to server"
     );
 }
 
@@ -1558,6 +1558,27 @@ fn assert_fields_match(type_name: &str, gadk: &[FieldRow], go: GoTable) -> Vec<S
 
 /// A request that sets exactly one field whose Go disposition is "rejected", with the whole
 /// error text Go returns for it.
+/// A Go field name as the Rust field name the error texts use (`ResponseMIMEType` →
+/// `response_mime_type`).
+fn snake_case(go_name: &str) -> String {
+    let chars: Vec<char> = go_name.chars().collect();
+    let mut out = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_ascii_uppercase() && i > 0 {
+            let prev = chars[i - 1];
+            let next_lower = chars.get(i + 1).is_some_and(|n| n.is_ascii_lowercase());
+            if prev.is_ascii_lowercase()
+                || prev.is_ascii_digit()
+                || (prev.is_ascii_uppercase() && next_lower)
+            {
+                out.push('_');
+            }
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out
+}
+
 fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
     let gcc = GenerateContentConfig::default;
     let with_tool = |tool: Tool| {
@@ -1570,7 +1591,8 @@ fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
     let invalid = |detail: &str| format!("{INVALID_CONFIG}: {detail}");
     let unsupported_tool = |field: &str| {
         format!(
-            "{INVALID_CONFIG}: anthropicmodel: unsupported tool type: Tools.{field} is not supported by Claude"
+            "{INVALID_CONFIG}: anthropicmodel: unsupported tool type: tools.{} is not supported by Claude",
+            snake_case(field)
         )
     };
     let mut out = vec![];
@@ -1725,9 +1747,9 @@ fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
     ] {
         let detail = match go_name {
             "CachedContent" => {
-                "CachedContent is not supported; use ClientConfig.PromptCache instead".to_string()
+                "cached_content is not supported; use ClientConfig.prompt_cache instead".to_string()
             }
-            _ => format!("{go_name} is not supported"),
+            _ => format!("{} is not supported", snake_case(go_name)),
         };
         out.push((go_name.to_string(), req, invalid(&detail)));
     }
@@ -1737,7 +1759,7 @@ fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
             base_url: Some("https://x.example".to_string()),
             ..Default::default()
         }),
-        invalid("HTTPOptions.BaseURL is not supported; set ClientConfig.BaseURL instead"),
+        invalid("http_options.base_url is not supported; set ClientConfig.base_url instead"),
     ));
     out.push((
         "HTTPOptions.APIVersion".to_string(),
@@ -1745,7 +1767,7 @@ fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
             api_version: Some("v1".to_string()),
             ..Default::default()
         }),
-        invalid("HTTPOptions.APIVersion is not supported"),
+        invalid("http_options.api_version is not supported"),
     ));
     out.push((
         "HTTPOptions.ExtrasRequestProvider".to_string(),
@@ -1753,7 +1775,7 @@ fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
             extras_request_provider: Some(Arc::new(|b| b)),
             ..Default::default()
         }),
-        invalid("HTTPOptions.ExtrasRequestProvider is not supported"),
+        invalid("http_options.extras_request_provider is not supported"),
     ));
     out.push((
         "ThinkingConfig.ThinkingLevel".to_string(),
@@ -1765,7 +1787,7 @@ fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
             }),
             ..gcc()
         }),
-        invalid("ThinkingConfig.ThinkingLevel is not supported on Claude; configure ClientConfig.Effort instead"),
+        invalid("thinking_config.thinking_level is not supported on Claude; configure ClientConfig.effort instead"),
     ));
     out.push((
         "ToolConfig.RetrievalConfig".to_string(),
@@ -1776,7 +1798,7 @@ fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
             }),
             ..gcc()
         }),
-        invalid("ToolConfig.RetrievalConfig is not supported"),
+        invalid("tool_config.retrieval_config is not supported"),
     ));
     out.push((
         "ToolConfig.IncludeServerSideToolInvocations".to_string(),
@@ -1787,7 +1809,7 @@ fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
             }),
             ..gcc()
         }),
-        invalid("ToolConfig.IncludeServerSideToolInvocations is not supported"),
+        invalid("tool_config.include_server_side_tool_invocations is not supported"),
     ));
     out.push((
         "ToolConfig.FunctionCallingConfig.StreamFunctionCallArguments".to_string(),
@@ -1801,7 +1823,9 @@ fn rejected_field_samples() -> Vec<(String, LlmRequest, String)> {
             }),
             ..gcc()
         }),
-        invalid("ToolConfig.FunctionCallingConfig.StreamFunctionCallArguments is not supported"),
+        invalid(
+            "tool_config.function_calling_config.stream_function_call_arguments is not supported",
+        ),
     ));
     for (field, t) in [
         (

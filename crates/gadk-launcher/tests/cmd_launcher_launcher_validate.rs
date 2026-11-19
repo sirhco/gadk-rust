@@ -73,12 +73,12 @@ fn test_config_validate_rejects_unusable_compaction() {
         }
         let err = err.expect_err(name);
         assert!(
-            err.to_string().contains("Compaction"),
+            err.to_string().contains("compaction"),
             "{name}: error {err:?} does not name the field"
         );
         assert!(
-            err.to_string().starts_with("invalid Compaction: "),
-            "{name}: error {err} is not Go's `invalid Compaction: %w`"
+            err.to_string().starts_with("invalid compaction config: "),
+            "{name}: error {err} does not start with `invalid compaction config: `"
         );
     }
 }
@@ -99,7 +99,7 @@ async fn test_full_launcher_refuses_unusable_compaction() {
         .await
         .expect_err("execute() started on a compaction config that cannot work");
     assert!(
-        err.to_string().contains("Compaction"),
+        err.to_string().contains("compaction"),
         "error {err} does not name the field an operator has to change"
     );
 }

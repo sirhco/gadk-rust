@@ -392,8 +392,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "GoogleSearch",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.GoogleSearch is not supported by Claude",
+                "google_search",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.google_search is not supported by Claude",
             ),
             (
                 "google_search_retrieval",
@@ -404,8 +404,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "GoogleSearchRetrieval",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.GoogleSearchRetrieval is not supported by Claude",
+                "google_search_retrieval",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.google_search_retrieval is not supported by Claude",
             ),
             (
                 "retrieval",
@@ -416,8 +416,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "Retrieval",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.Retrieval is not supported by Claude",
+                "retrieval",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.retrieval is not supported by Claude",
             ),
             (
                 "code_execution",
@@ -428,8 +428,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "CodeExecution",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.CodeExecution is not supported by Claude",
+                "code_execution",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.code_execution is not supported by Claude",
             ),
             (
                 "enterprise_web_search",
@@ -440,8 +440,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "EnterpriseWebSearch",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.EnterpriseWebSearch is not supported by Claude",
+                "enterprise_web_search",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.enterprise_web_search is not supported by Claude",
             ),
             (
                 "google_maps",
@@ -452,8 +452,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "GoogleMaps",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.GoogleMaps is not supported by Claude",
+                "google_maps",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.google_maps is not supported by Claude",
             ),
             (
                 "computer_use",
@@ -464,8 +464,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "ComputerUse",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.ComputerUse is not supported by Claude",
+                "computer_use",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.computer_use is not supported by Claude",
             ),
             (
                 "url_context",
@@ -476,8 +476,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "URLContext",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.URLContext is not supported by Claude",
+                "url_context",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.url_context is not supported by Claude",
             ),
             (
                 "file_search",
@@ -488,8 +488,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "FileSearch",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.FileSearch is not supported by Claude",
+                "file_search",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.file_search is not supported by Claude",
             ),
             (
                 "parallel_ai_search_with_function_declarations",
@@ -501,8 +501,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "ParallelAISearch",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.ParallelAISearch is not supported by Claude",
+                "parallel_ai_search",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.parallel_ai_search is not supported by Claude",
             ),
             (
                 "mcp_servers_with_function_declarations",
@@ -517,8 +517,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "MCPServers",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.MCPServers is not supported by Claude",
+                "mcp_servers",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.mcp_servers is not supported by Claude",
             ),
             (
                 "exa_ai_search_with_function_declarations",
@@ -530,8 +530,8 @@ async fn test_tools_and_tool_config() {
                     }],
                     ..Default::default()
                 },
-                "ExaAISearch",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.ExaAISearch is not supported by Claude",
+                "exa_ai_search",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.exa_ai_search is not supported by Claude",
             ),
             (
                 "empty_tool",
@@ -539,8 +539,8 @@ async fn test_tools_and_tool_config() {
                     tools: vec![Tool::default()],
                     ..Default::default()
                 },
-                "FunctionDeclarations",
-                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools entry contains no FunctionDeclarations",
+                "function_declarations",
+                "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools entry contains no function_declarations",
             ),
             (
                 "include_server_side_tool_invocations",
@@ -552,8 +552,8 @@ async fn test_tools_and_tool_config() {
                     }),
                     ..Default::default()
                 },
-                "IncludeServerSideToolInvocations",
-                "anthropicmodel: invalid configuration: ToolConfig.IncludeServerSideToolInvocations is not supported",
+                "include_server_side_tool_invocations",
+                "anthropicmodel: invalid configuration: tool_config.include_server_side_tool_invocations is not supported",
             ),
             (
                 "validated_mode",
@@ -566,7 +566,7 @@ async fn test_tools_and_tool_config() {
                     ..Default::default()
                 },
                 "VALIDATED",
-                "anthropicmodel: invalid configuration: unsupported ToolConfig.FunctionCallingConfig.Mode \"VALIDATED\"",
+                "anthropicmodel: invalid configuration: unsupported tool_config.function_calling_config.mode \"VALIDATED\"",
             ),
             (
                 "any_with_multiple_allowed_names",
@@ -582,8 +582,8 @@ async fn test_tools_and_tool_config() {
                     }),
                     ..Default::default()
                 },
-                "AllowedFunctionNames",
-                "anthropicmodel: invalid configuration: ToolConfig.FunctionCallingConfig.AllowedFunctionNames with multiple names is not supported by Claude",
+                "allowed_function_names",
+                "anthropicmodel: invalid configuration: tool_config.function_calling_config.allowed_function_names with multiple names is not supported by Claude",
             ),
             (
                 "any_without_tools",
@@ -595,7 +595,7 @@ async fn test_tools_and_tool_config() {
                     ..Default::default()
                 },
                 "ANY",
-                "anthropicmodel: invalid configuration: ToolConfig.FunctionCallingConfig.Mode ANY requires at least one declared function tool",
+                "anthropicmodel: invalid configuration: tool_config.function_calling_config.mode ANY requires at least one declared function tool",
             ),
             (
                 "any_with_thinking_enabled",
@@ -611,8 +611,8 @@ async fn test_tools_and_tool_config() {
                     }),
                     ..Default::default()
                 },
-                "ThinkingConfig",
-                "anthropicmodel: invalid configuration: ToolConfig.FunctionCallingConfig.Mode ANY cannot be combined with enabled ThinkingConfig on Claude",
+                "thinking_config",
+                "anthropicmodel: invalid configuration: tool_config.function_calling_config.mode ANY cannot be combined with an enabled thinking_config on Claude",
             ),
             (
                 "auto_with_allowed_names",
@@ -625,8 +625,8 @@ async fn test_tools_and_tool_config() {
                     }),
                     ..Default::default()
                 },
-                "AllowedFunctionNames",
-                "anthropicmodel: invalid configuration: ToolConfig.FunctionCallingConfig.AllowedFunctionNames is not supported with mode AUTO",
+                "allowed_function_names",
+                "anthropicmodel: invalid configuration: tool_config.function_calling_config.allowed_function_names is not supported with mode AUTO",
             ),
             (
                 "stream_function_call_arguments",
@@ -638,8 +638,8 @@ async fn test_tools_and_tool_config() {
                     }),
                     ..Default::default()
                 },
-                "StreamFunctionCallArguments",
-                "anthropicmodel: invalid configuration: ToolConfig.FunctionCallingConfig.StreamFunctionCallArguments is not supported",
+                "stream_function_call_arguments",
+                "anthropicmodel: invalid configuration: tool_config.function_calling_config.stream_function_call_arguments is not supported",
             ),
         ];
 
@@ -724,7 +724,7 @@ async fn test_extended_thinking_and_effort() {
             thinking_budget: Some(zero),
             ..Default::default()
         });
-        generate_ok_named(&*m, req, false, "ThinkingBudget=0").await;
+        generate_ok_named(&*m, req, false, "thinking_budget=0").await;
         let th = last_body(&srv)["thinking"].clone();
         assert_eq!(
             th["type"],
@@ -738,7 +738,7 @@ async fn test_extended_thinking_and_effort() {
             include_thoughts: false,
             ..Default::default()
         });
-        generate_ok_named(&*m, req, false, "ThinkingBudget>0").await;
+        generate_ok_named(&*m, req, false, "thinking_budget>0").await;
         let th = last_body(&srv)["thinking"].clone();
         assert!(
             th["type"] == json!("enabled") && th["budget_tokens"] == json!(512),
@@ -750,7 +750,7 @@ async fn test_extended_thinking_and_effort() {
             thinking_budget: Some(neg),
             ..Default::default()
         });
-        generate_ok_named(&*m, req, false, "ThinkingBudget<0").await;
+        generate_ok_named(&*m, req, false, "thinking_budget<0").await;
         let th = last_body(&srv)["thinking"].clone();
         assert_eq!(
             th["type"],
@@ -766,9 +766,9 @@ async fn test_extended_thinking_and_effort() {
         let items = generate(&*m, req, false).await;
         assert_invalid_config(
             &items,
-            "nil ThinkingBudget",
-            "ThinkingBudget",
-            "anthropicmodel: invalid configuration: ThinkingConfig.ThinkingBudget must be set explicitly when ThinkingConfig is provided (0 to disable, >0 for manual budget, <0 for adaptive thinking)",
+            "nil thinking_budget",
+            "thinking_budget",
+            "anthropicmodel: invalid configuration: thinking_config.thinking_budget must be set explicitly when thinking_config is set (0 to disable, >0 for manual budget, <0 for adaptive thinking)",
         );
 
         // 6. ThinkingLevel set -> error naming ThinkingLevel.
@@ -780,9 +780,9 @@ async fn test_extended_thinking_and_effort() {
         let items = generate(&*m, req, false).await;
         assert_invalid_config(
             &items,
-            "ThinkingLevel",
-            "ThinkingLevel",
-            "anthropicmodel: invalid configuration: ThinkingConfig.ThinkingLevel is not supported on Claude; configure ClientConfig.Effort instead",
+            "thinking_level",
+            "thinking_level",
+            "anthropicmodel: invalid configuration: thinking_config.thinking_level is not supported on Claude; configure ClientConfig.effort instead",
         );
     }
 
@@ -1027,7 +1027,7 @@ async fn test_thinking_and_effort_omit_sampling_params_and_default_max_tokens() 
                 &*m_top_p_thinking,
                 req,
                 false,
-                "GenerateContent(TopP + ThinkingConfig)",
+                "GenerateContent(top_p + ThinkingConfig)",
             )
             .await;
         }
@@ -1037,7 +1037,7 @@ async fn test_thinking_and_effort_omit_sampling_params_and_default_max_tokens() 
             "top_p was sent when thinking is enabled: {}",
             body["top_p"]
         );
-        assert_one_warning(&top_p_only_logs, " for TopP + ThinkingConfig");
+        assert_one_warning(&top_p_only_logs, " for top_p + ThinkingConfig");
 
         // Effort active without ThinkingConfig must also omit Temperature, TopP, and TopK and
         // log a warning.
@@ -1075,7 +1075,7 @@ async fn test_thinking_and_effort_omit_sampling_params_and_default_max_tokens() 
                 &*m_top_p_effort,
                 req,
                 false,
-                "GenerateContent(TopP + Effort)",
+                "GenerateContent(top_p + Effort)",
             )
             .await;
         }
@@ -1085,7 +1085,7 @@ async fn test_thinking_and_effort_omit_sampling_params_and_default_max_tokens() 
             "top_p was sent when effort is active: {}",
             body["top_p"]
         );
-        assert_one_warning(&top_p_effort_logs, " for TopP + Effort");
+        assert_one_warning(&top_p_effort_logs, " for top_p + Effort");
     }
 }
 

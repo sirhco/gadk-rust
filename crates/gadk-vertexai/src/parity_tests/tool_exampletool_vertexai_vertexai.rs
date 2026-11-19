@@ -217,7 +217,7 @@ async fn test_provider_config_validation() {
         ),
         ("empty project", "projects//locations/l/exampleStores/s"),
     ] {
-        let want = "vertexai: ExampleStoreName must match projects/{project}/locations/{location}/exampleStores/{example_store}";
+        let want = "vertexai: example_store_name must match projects/{project}/locations/{location}/exampleStores/{example_store}";
         match new_provider(config(store_name)) {
             Err(e @ ExampleStoreError::InvalidStoreName) => assert_eq!(e.to_string(), want),
             Err(e) => panic!("{name}: NewProvider() error = {e}, want InvalidStoreName"),

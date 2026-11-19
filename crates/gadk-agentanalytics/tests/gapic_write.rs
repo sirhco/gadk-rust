@@ -720,7 +720,7 @@ async fn new_builds_channels_from_client_options() {
     .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "options.WithoutAuthentication is incompatible with any option that provides \
+        "ClientOptions.without_authentication is incompatible with any option that provides \
          credentials"
     );
     assert!(

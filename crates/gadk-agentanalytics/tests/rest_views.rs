@@ -236,7 +236,7 @@ async fn sync_over_rest_runner_aggregates_like_go() {
         logger.lines(),
         [
             r#"agentanalytics: failed to create view v_d: {Location: "query"; Message: "bad"; Reason: "invalidQuery"}"#,
-            "agentanalytics: view creation finished: 3 created, 1 failed of 4; call SyncViews to retry",
+            "agentanalytics: view creation finished: 3 created, 1 failed of 4; call sync_views to retry",
         ]
     );
     let calls: Vec<String> = server

@@ -122,7 +122,7 @@ impl ErrorKind {
             Self::ModelNameRequired => "openai: model name is required",
             Self::UnsupportedApi => "openai: unsupported API",
             Self::NoChoices => "openai: response included no choices",
-            Self::RequestNil => "openai: request is nil",
+            Self::RequestNil => "openai: request is missing",
             Self::NoContents => "openai: LLM request has no contents to convert",
             Self::FunctionCallMissingName => "openai: function call missing name",
             Self::TopKNotSupported => "openai: topK is not supported",
@@ -533,7 +533,7 @@ mod tests {
             "openai: model name is required",
             "openai: unsupported API",
             "openai: response included no choices",
-            "openai: request is nil",
+            "openai: request is missing",
             "openai: LLM request has no contents to convert",
             "openai: function call missing name",
             "openai: topK is not supported",
@@ -569,10 +569,10 @@ mod tests {
 
     #[test]
     fn wrapping_keeps_kinds_and_renders_gos_text() {
-        let err = OpenAiError::new(ErrorKind::UnsupportedConfigField, "ThinkingConfig.Foo");
+        let err = OpenAiError::new(ErrorKind::UnsupportedConfigField, "thinking_config.foo");
         assert_eq!(
             err.to_string(),
-            "openai: unsupported generation config field: ThinkingConfig.Foo"
+            "openai: unsupported generation config field: thinking_config.foo"
         );
         let err = OpenAiError::sentinel(ErrorKind::FunctionCallMissingName)
             .suffixed(" (call_id \"c1\")")
@@ -584,9 +584,9 @@ mod tests {
         assert!(err.is(ErrorKind::FunctionCallMissingName));
         assert!(!err.is(ErrorKind::NoContents));
 
-        let plain = OpenAiError::plain("openai: tool 0 is nil");
+        let plain = OpenAiError::plain("openai: tool 0 is missing");
         assert!(plain.kinds().is_empty());
-        assert_eq!(plain.to_string(), "openai: tool 0 is nil");
+        assert_eq!(plain.to_string(), "openai: tool 0 is missing");
     }
 
     /// openai-go `(*apierror.Error).Error()`: Go `http.StatusText`, or no text.

@@ -152,7 +152,7 @@ pub(crate) const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 pub fn new_a2a(cfg: A2AConfig) -> Result<Arc<dyn Agent>, Error> {
     if cfg.agent_card.is_none() && cfg.agent_card_provider.is_none() {
         return Err(Error::msg(
-            "either AgentCard or AgentCardProvider must be provided",
+            "either agent_card or agent_card_provider must be set",
         ));
     }
     if cfg.auth.is_some() && cfg.client_provider.is_some() {
@@ -1223,7 +1223,7 @@ mod tests {
         let err = new_a2a(A2AConfig::default()).err().unwrap();
         assert_eq!(
             err.to_string(),
-            "either AgentCard or AgentCardProvider must be provided"
+            "either agent_card or agent_card_provider must be set"
         );
         let agent = new_a2a(A2AConfig {
             name: "remote".into(),

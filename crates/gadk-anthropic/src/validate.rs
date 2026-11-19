@@ -56,15 +56,15 @@ fn validate_http_options(http_options: Option<&HttpOptions>) -> Result<(), Anthr
     };
     if base_url.as_deref().is_some_and(|s| !s.is_empty()) {
         return Err(invalid_config(
-            "HTTPOptions.BaseURL is not supported; set ClientConfig.BaseURL instead",
+            "http_options.base_url is not supported; set ClientConfig.base_url instead",
         ));
     }
     if api_version.as_deref().is_some_and(|s| !s.is_empty()) {
-        return Err(invalid_config("HTTPOptions.APIVersion is not supported"));
+        return Err(invalid_config("http_options.api_version is not supported"));
     }
     if extras_request_provider.is_some() {
         return Err(invalid_config(
-            "HTTPOptions.ExtrasRequestProvider is not supported",
+            "http_options.extras_request_provider is not supported",
         ));
     }
     Ok(())
@@ -140,7 +140,9 @@ pub(crate) fn validate_generate_content_config(
                 || part.code_execution_result.is_some()
                 || part.video_metadata.is_some()
             {
-                return Err(invalid_config("SystemInstruction only supports text parts"));
+                return Err(invalid_config(
+                    "system_instruction only supports text parts",
+                ));
             }
         }
     }
@@ -151,24 +153,24 @@ pub(crate) fn validate_generate_content_config(
         && top_p.is_some()
     {
         return Err(invalid_config(
-            "Temperature and TopP cannot both be set on Claude models",
+            "temperature and top_p cannot both be set on Claude models",
         ));
     }
     if top_k.is_some_and(|k| k < 0.0) {
-        return Err(invalid_config("TopK must be non-negative"));
+        return Err(invalid_config("top_k must be non-negative"));
     }
     if *candidate_count < 0 || *candidate_count > 1 {
         return Err(invalid_config(format!(
-            "CandidateCount {candidate_count} is not supported; Claude only supports 1 candidate"
+            "candidate_count {candidate_count} is not supported; Claude only supports 1 candidate"
         )));
     }
     if *max_output_tokens < 0 {
-        return Err(invalid_config("MaxOutputTokens must be non-negative"));
+        return Err(invalid_config("max_output_tokens must be non-negative"));
     }
 
     for modality in response_modalities {
         if !modality.trim().eq_ignore_ascii_case("TEXT") {
-            return Err(invalid_config("ResponseModalities only supports TEXT"));
+            return Err(invalid_config("response_modalities only supports TEXT"));
         }
     }
 
@@ -189,77 +191,79 @@ pub(crate) fn validate_generate_content_config(
 
     // Reject unsupported GenerateContentConfig fields with errors naming the field.
     if *response_logprobs {
-        return Err(invalid_config("ResponseLogprobs is not supported"));
+        return Err(invalid_config("response_logprobs is not supported"));
     }
     if logprobs.is_some() {
-        return Err(invalid_config("Logprobs is not supported"));
+        return Err(invalid_config("logprobs is not supported"));
     }
     if presence_penalty.is_some() {
-        return Err(invalid_config("PresencePenalty is not supported"));
+        return Err(invalid_config("presence_penalty is not supported"));
     }
     if frequency_penalty.is_some() {
-        return Err(invalid_config("FrequencyPenalty is not supported"));
+        return Err(invalid_config("frequency_penalty is not supported"));
     }
     if seed.is_some() {
-        return Err(invalid_config("Seed is not supported"));
+        return Err(invalid_config("seed is not supported"));
     }
     if !safety_settings.is_empty() {
-        return Err(invalid_config("SafetySettings is not supported"));
+        return Err(invalid_config("safety_settings is not supported"));
     }
     if !cached_content.is_empty() {
         return Err(invalid_config(
-            "CachedContent is not supported; use ClientConfig.PromptCache instead",
+            "cached_content is not supported; use ClientConfig.prompt_cache instead",
         ));
     }
     if !labels.is_empty() {
-        return Err(invalid_config("Labels is not supported"));
+        return Err(invalid_config("labels is not supported"));
     }
     if media_resolution
         .as_ref()
         .is_some_and(|m| !m.as_str().is_empty())
     {
-        return Err(invalid_config("MediaResolution is not supported"));
+        return Err(invalid_config("media_resolution is not supported"));
     }
     if speech_config.is_some() {
-        return Err(invalid_config("SpeechConfig is not supported"));
+        return Err(invalid_config("speech_config is not supported"));
     }
     if *audio_timestamp {
-        return Err(invalid_config("AudioTimestamp is not supported"));
+        return Err(invalid_config("audio_timestamp is not supported"));
     }
     if image_config.is_some() {
-        return Err(invalid_config("ImageConfig is not supported"));
+        return Err(invalid_config("image_config is not supported"));
     }
     if routing_config.is_some() {
-        return Err(invalid_config("RoutingConfig is not supported"));
+        return Err(invalid_config("routing_config is not supported"));
     }
     if model_selection_config.is_some() {
-        return Err(invalid_config("ModelSelectionConfig is not supported"));
+        return Err(invalid_config("model_selection_config is not supported"));
     }
     if model_armor_config.is_some() {
-        return Err(invalid_config("ModelArmorConfig is not supported"));
+        return Err(invalid_config("model_armor_config is not supported"));
     }
     if enable_enhanced_civic_answers.is_some() {
         return Err(invalid_config(
-            "EnableEnhancedCivicAnswers is not supported",
+            "enable_enhanced_civic_answers is not supported",
         ));
     }
     if service_tier
         .as_ref()
         .is_some_and(|t| !t.as_str().is_empty())
     {
-        return Err(invalid_config("ServiceTier is not supported"));
+        return Err(invalid_config("service_tier is not supported"));
     }
     if audio_transcription_config.is_some() {
-        return Err(invalid_config("AudioTranscriptionConfig is not supported"));
+        return Err(invalid_config(
+            "audio_transcription_config is not supported",
+        ));
     }
     if continuation_token.as_ref().is_some_and(|t| !t.is_empty()) {
-        return Err(invalid_config("ContinuationToken is not supported"));
+        return Err(invalid_config("continuation_token is not supported"));
     }
     if generation_output_config.is_some() {
-        return Err(invalid_config("GenerationOutputConfig is not supported"));
+        return Err(invalid_config("generation_output_config is not supported"));
     }
     if store.is_some() {
-        return Err(invalid_config("Store is not supported"));
+        return Err(invalid_config("store is not supported"));
     }
     // AutomaticContinuation is ignored by design.
     Ok(())
@@ -315,7 +319,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "Temperature and TopP cannot both be set on Claude models",
+                "temperature and top_p cannot both be set on Claude models",
             ),
             (
                 "negative_top_k",
@@ -324,7 +328,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "TopK must be non-negative",
+                "top_k must be non-negative",
             ),
             (
                 "candidate_count_gt_1",
@@ -333,7 +337,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "CandidateCount 2 is not supported; Claude only supports 1 candidate",
+                "candidate_count 2 is not supported; Claude only supports 1 candidate",
             ),
             (
                 "candidate_count_negative",
@@ -342,7 +346,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "CandidateCount -1 is not supported; Claude only supports 1 candidate",
+                "candidate_count -1 is not supported; Claude only supports 1 candidate",
             ),
             (
                 "negative_max_output_tokens",
@@ -351,7 +355,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "MaxOutputTokens must be non-negative",
+                "max_output_tokens must be non-negative",
             ),
             (
                 "non_text_system_instruction",
@@ -364,7 +368,7 @@ mod tests {
                     ..Default::default()
                 }),
                 None,
-                "SystemInstruction only supports text parts",
+                "system_instruction only supports text parts",
             ),
             (
                 "non_text_response_modality",
@@ -373,7 +377,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "ResponseModalities only supports TEXT",
+                "response_modalities only supports TEXT",
             ),
             (
                 "http_options_base_url",
@@ -382,7 +386,7 @@ mod tests {
                     base_url: Some("https://other.example.com".into()),
                     ..Default::default()
                 }),
-                "HTTPOptions.BaseURL is not supported; set ClientConfig.BaseURL instead",
+                "http_options.base_url is not supported; set ClientConfig.base_url instead",
             ),
             (
                 "http_options_api_version",
@@ -391,7 +395,7 @@ mod tests {
                     api_version: Some("v1beta".into()),
                     ..Default::default()
                 }),
-                "HTTPOptions.APIVersion is not supported",
+                "http_options.api_version is not supported",
             ),
             (
                 "http_options_extras_request_provider",
@@ -400,7 +404,7 @@ mod tests {
                     extras_request_provider: Some(Arc::new(|b| b)),
                     ..Default::default()
                 }),
-                "HTTPOptions.ExtrasRequestProvider is not supported",
+                "http_options.extras_request_provider is not supported",
             ),
             (
                 "response_mime_type_without_schema",
@@ -409,7 +413,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "ResponseMIMEType \"application/json\" requires ResponseSchema or ResponseJsonSchema",
+                "response_mime_type \"application/json\" requires response_schema or response_json_schema",
             ),
             (
                 "response_mime_type_non_json_with_schema",
@@ -422,7 +426,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "ResponseMIMEType \"text/plain\" cannot be combined with ResponseSchema or ResponseJsonSchema",
+                "response_mime_type \"text/plain\" cannot be combined with response_schema or response_json_schema",
             ),
             (
                 "response_schema_and_response_json_schema_both_set",
@@ -435,7 +439,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "ResponseSchema and ResponseJsonSchema cannot both be set",
+                "response_schema and response_json_schema cannot both be set",
             ),
             (
                 "response_logprobs",
@@ -444,7 +448,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "ResponseLogprobs is not supported",
+                "response_logprobs is not supported",
             ),
             (
                 "logprobs",
@@ -453,7 +457,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "Logprobs is not supported",
+                "logprobs is not supported",
             ),
             (
                 "presence_penalty",
@@ -462,7 +466,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "PresencePenalty is not supported",
+                "presence_penalty is not supported",
             ),
             (
                 "frequency_penalty",
@@ -471,7 +475,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "FrequencyPenalty is not supported",
+                "frequency_penalty is not supported",
             ),
             (
                 "seed",
@@ -480,7 +484,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "Seed is not supported",
+                "seed is not supported",
             ),
             (
                 "safety_settings",
@@ -489,7 +493,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "SafetySettings is not supported",
+                "safety_settings is not supported",
             ),
             (
                 "cached_content",
@@ -498,7 +502,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "CachedContent is not supported; use ClientConfig.PromptCache instead",
+                "cached_content is not supported; use ClientConfig.prompt_cache instead",
             ),
             (
                 "labels",
@@ -507,7 +511,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "Labels is not supported",
+                "labels is not supported",
             ),
             (
                 "media_resolution",
@@ -516,7 +520,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "MediaResolution is not supported",
+                "media_resolution is not supported",
             ),
             (
                 "speech_config",
@@ -525,7 +529,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "SpeechConfig is not supported",
+                "speech_config is not supported",
             ),
             (
                 "audio_timestamp",
@@ -534,7 +538,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "AudioTimestamp is not supported",
+                "audio_timestamp is not supported",
             ),
             (
                 "image_config",
@@ -543,7 +547,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "ImageConfig is not supported",
+                "image_config is not supported",
             ),
             (
                 "routing_config",
@@ -552,7 +556,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "RoutingConfig is not supported",
+                "routing_config is not supported",
             ),
             (
                 "model_selection_config",
@@ -561,7 +565,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "ModelSelectionConfig is not supported",
+                "model_selection_config is not supported",
             ),
             (
                 "model_armor_config",
@@ -570,7 +574,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "ModelArmorConfig is not supported",
+                "model_armor_config is not supported",
             ),
             (
                 "enable_enhanced_civic_answers",
@@ -579,7 +583,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "EnableEnhancedCivicAnswers is not supported",
+                "enable_enhanced_civic_answers is not supported",
             ),
             (
                 "service_tier",
@@ -588,7 +592,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "ServiceTier is not supported",
+                "service_tier is not supported",
             ),
             (
                 "audio_transcription_config",
@@ -597,7 +601,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "AudioTranscriptionConfig is not supported",
+                "audio_transcription_config is not supported",
             ),
             (
                 "continuation_token",
@@ -606,7 +610,7 @@ mod tests {
                     ..Default::default()
                 },
                 None,
-                "ContinuationToken is not supported",
+                "continuation_token is not supported",
             ),
         ];
         for (name, cfg, opts, want) in cases {
@@ -663,7 +667,7 @@ mod tests {
             let err = validate(&system(part.clone())).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                "anthropicmodel: invalid configuration: SystemInstruction only supports text parts",
+                "anthropicmodel: invalid configuration: system_instruction only supports text parts",
                 "{part:?}"
             );
         }
@@ -720,7 +724,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "anthropicmodel: invalid configuration: HTTPOptions.BaseURL is not supported; set ClientConfig.BaseURL instead"
+            "anthropicmodel: invalid configuration: http_options.base_url is not supported; set ClientConfig.base_url instead"
         );
         assert!(validate_generate_content_config(None, &ReqTools::new(), None, None).is_ok());
         assert!(
@@ -796,7 +800,7 @@ mod tests {
             validate(&cfg)
                 .unwrap_err()
                 .to_string()
-                .contains("SystemInstruction")
+                .contains("system_instruction")
         );
 
         // ThinkingConfig before Tools.
@@ -809,7 +813,7 @@ mod tests {
             validate(&cfg)
                 .unwrap_err()
                 .to_string()
-                .contains("ThinkingBudget")
+                .contains("thinking_budget")
         );
 
         // Tools before ToolConfig.
@@ -825,7 +829,7 @@ mod tests {
             validate(&cfg)
                 .unwrap_err()
                 .to_string()
-                .contains("FunctionDeclarations")
+                .contains("function_declarations")
         );
 
         // ToolConfig before HTTPOptions, HTTPOptions before the output format, the output
@@ -848,18 +852,18 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         };
-        assert!(run(&cfg, Some(&opts)).contains("RetrievalConfig"));
+        assert!(run(&cfg, Some(&opts)).contains("retrieval_config"));
         let cfg = GenerateContentConfig {
             tool_config: None,
             ..cfg
         };
-        assert!(run(&cfg, Some(&opts)).contains("APIVersion"));
-        assert!(run(&cfg, None).contains("ResponseMIMEType"));
+        assert!(run(&cfg, Some(&opts)).contains("api_version"));
+        assert!(run(&cfg, None).contains("response_mime_type"));
         let cfg = GenerateContentConfig {
             response_mime_type: String::new(),
             ..cfg
         };
-        assert!(run(&cfg, None).contains("Seed"));
+        assert!(run(&cfg, None).contains("seed"));
     }
 
     #[test]
@@ -879,7 +883,7 @@ mod tests {
             validate(&cfg)
                 .unwrap_err()
                 .to_string()
-                .contains("Mode ANY requires at least one declared function tool")
+                .contains("mode ANY requires at least one declared function tool")
         );
         let mut req_tools = ReqTools::new();
         req_tools.insert("t".into(), Arc::new(()) as Arc<dyn Any + Send + Sync>);

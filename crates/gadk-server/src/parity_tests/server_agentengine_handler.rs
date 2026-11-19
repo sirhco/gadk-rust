@@ -65,7 +65,7 @@ fn test_new_handler_rejects_unusable_compaction() {
                 panic!("{name}: NewHandler() accepted a compaction config it cannot serve")
             }
             (Err(e), false) => assert!(
-                e.to_string().contains("Compaction"),
+                e.to_string().contains("compaction"),
                 "{name}: error {:?} does not name the field an operator has to change",
                 e.to_string()
             ),

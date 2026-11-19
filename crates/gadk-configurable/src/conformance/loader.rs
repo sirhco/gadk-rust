@@ -73,7 +73,7 @@ impl Loader for ConformanceAgentLoader {
         match self.agents_names.first() {
             Some(name) => self.agent_map[name].clone(),
             #[allow(clippy::panic)] // no root agent to return; see the doc comment
-            None => panic!("conformance agent loader has no agents (Go RootAgent returns nil)"),
+            None => panic!("conformance agent loader has no agents"),
         }
     }
 }
@@ -146,7 +146,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "conformance agent loader has no agents (Go RootAgent returns nil)")]
+    #[should_panic(expected = "conformance agent loader has no agents")]
     fn empty_loader_root_agent_panics() {
         let _ = loader(&[]).root_agent();
     }

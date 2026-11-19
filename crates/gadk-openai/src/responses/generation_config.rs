@@ -39,7 +39,7 @@ pub(crate) fn supported_config_fields() -> Vec<&'static str> {
     let mut fields = SUPPORTED_CONFIG_FIELDS.to_vec();
     // The empty list asks for no stop sequences, which needs no wire field, while
     // apply_generation_config refuses a non-empty one by name.
-    fields.push("StopSequences");
+    fields.push("stop_sequences");
     fields
 }
 
@@ -128,7 +128,7 @@ pub(crate) fn apply_generation_config(
             None => {
                 return Err(OpenAiError::new(
                     ErrorKind::UnsupportedConfigField,
-                    format!("ServiceTier {}", go_quote(tier.as_str())),
+                    format!("service_tier {}", go_quote(tier.as_str())),
                 ));
             }
         }

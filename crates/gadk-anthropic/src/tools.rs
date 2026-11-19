@@ -53,73 +53,73 @@ pub(crate) fn validate_tools(tools: &[Tool]) -> Result<bool, AnthropicError> {
     for t in tools {
         if t.google_search.is_some() {
             return Err(unsupported_tool(
-                "Tools.GoogleSearch is not supported by Claude",
+                "tools.google_search is not supported by Claude",
             ));
         }
         if t.google_search_retrieval.is_some() {
             return Err(unsupported_tool(
-                "Tools.GoogleSearchRetrieval is not supported by Claude",
+                "tools.google_search_retrieval is not supported by Claude",
             ));
         }
         if t.retrieval.is_some() {
             return Err(unsupported_tool(
-                "Tools.Retrieval is not supported by Claude",
+                "tools.retrieval is not supported by Claude",
             ));
         }
         if t.code_execution.is_some() {
             return Err(unsupported_tool(
-                "Tools.CodeExecution is not supported by Claude",
+                "tools.code_execution is not supported by Claude",
             ));
         }
         if t.enterprise_web_search.is_some() {
             return Err(unsupported_tool(
-                "Tools.EnterpriseWebSearch is not supported by Claude",
+                "tools.enterprise_web_search is not supported by Claude",
             ));
         }
         if t.google_maps.is_some() {
             return Err(unsupported_tool(
-                "Tools.GoogleMaps is not supported by Claude",
+                "tools.google_maps is not supported by Claude",
             ));
         }
         if t.computer_use.is_some() {
             return Err(unsupported_tool(
-                "Tools.ComputerUse is not supported by Claude",
+                "tools.computer_use is not supported by Claude",
             ));
         }
         if t.url_context.is_some() {
             return Err(unsupported_tool(
-                "Tools.URLContext is not supported by Claude",
+                "tools.url_context is not supported by Claude",
             ));
         }
         if t.file_search.is_some() {
             return Err(unsupported_tool(
-                "Tools.FileSearch is not supported by Claude",
+                "tools.file_search is not supported by Claude",
             ));
         }
         if t.parallel_ai_search.is_some() {
             return Err(unsupported_tool(
-                "Tools.ParallelAISearch is not supported by Claude",
+                "tools.parallel_ai_search is not supported by Claude",
             ));
         }
         if !t.mcp_servers.is_empty() {
             return Err(unsupported_tool(
-                "Tools.MCPServers is not supported by Claude",
+                "tools.mcp_servers is not supported by Claude",
             ));
         }
         if t.exa_ai_search.is_some() {
             return Err(unsupported_tool(
-                "Tools.ExaAISearch is not supported by Claude",
+                "tools.exa_ai_search is not supported by Claude",
             ));
         }
         if t.function_declarations.is_empty() {
             return Err(unsupported_tool(
-                "Tools entry contains no FunctionDeclarations",
+                "tools entry contains no function_declarations",
             ));
         }
         for decl in &t.function_declarations {
             if decl.name.trim().is_empty() {
                 return Err(invalid_config(
-                    "Tools.FunctionDeclarations entry has an empty Name",
+                    "tools.function_declarations entry has an empty name",
                 ));
             }
             has_decls = true;
@@ -140,12 +140,12 @@ pub(crate) fn validate_tool_config(
     };
     if tc.retrieval_config.is_some() {
         return Err(invalid_config(
-            "ToolConfig.RetrievalConfig is not supported",
+            "tool_config.retrieval_config is not supported",
         ));
     }
     if tc.include_server_side_tool_invocations == Some(true) {
         return Err(invalid_config(
-            "ToolConfig.IncludeServerSideToolInvocations is not supported",
+            "tool_config.include_server_side_tool_invocations is not supported",
         ));
     }
     let Some(fcc) = tc.function_calling_config.as_ref() else {
@@ -153,7 +153,7 @@ pub(crate) fn validate_tool_config(
     };
     if fcc.stream_function_call_arguments == Some(true) {
         return Err(invalid_config(
-            "ToolConfig.FunctionCallingConfig.StreamFunctionCallArguments is not supported",
+            "tool_config.function_calling_config.stream_function_call_arguments is not supported",
         ));
     }
 
@@ -163,42 +163,42 @@ pub(crate) fn validate_tool_config(
         "" | "AUTO" => {
             if !allowed.is_empty() {
                 return Err(invalid_config(
-                    "ToolConfig.FunctionCallingConfig.AllowedFunctionNames is not supported with mode AUTO",
+                    "tool_config.function_calling_config.allowed_function_names is not supported with mode AUTO",
                 ));
             }
         }
         "ANY" => {
             if !has_tools {
                 return Err(invalid_config(
-                    "ToolConfig.FunctionCallingConfig.Mode ANY requires at least one declared function tool",
+                    "tool_config.function_calling_config.mode ANY requires at least one declared function tool",
                 ));
             }
             if is_thinking_enabled(thinking) {
                 return Err(invalid_config(
-                    "ToolConfig.FunctionCallingConfig.Mode ANY cannot be combined with enabled ThinkingConfig on Claude",
+                    "tool_config.function_calling_config.mode ANY cannot be combined with an enabled thinking_config on Claude",
                 ));
             }
             if allowed.len() > 1 {
                 return Err(invalid_config(
-                    "ToolConfig.FunctionCallingConfig.AllowedFunctionNames with multiple names is not supported by Claude",
+                    "tool_config.function_calling_config.allowed_function_names with multiple names is not supported by Claude",
                 ));
             }
             if allowed.len() == 1 && allowed[0].trim().is_empty() {
                 return Err(invalid_config(
-                    "ToolConfig.FunctionCallingConfig.AllowedFunctionNames must not contain an empty name",
+                    "tool_config.function_calling_config.allowed_function_names must not contain an empty name",
                 ));
             }
         }
         "NONE" => {
             if !allowed.is_empty() {
                 return Err(invalid_config(
-                    "ToolConfig.FunctionCallingConfig.AllowedFunctionNames is not supported with mode NONE",
+                    "tool_config.function_calling_config.allowed_function_names is not supported with mode NONE",
                 ));
             }
         }
         _ => {
             return Err(invalid_config(format!(
-                "unsupported ToolConfig.FunctionCallingConfig.Mode {}",
+                "unsupported tool_config.function_calling_config.mode {}",
                 go_quote(raw_mode)
             )));
         }
@@ -460,7 +460,7 @@ mod tests {
                     google_search: Some(GoogleSearch::default()),
                     ..Default::default()
                 },
-                "GoogleSearch",
+                "google_search",
             ),
             (
                 "google_search_retrieval",
@@ -468,7 +468,7 @@ mod tests {
                     google_search_retrieval: Some(GoogleSearchRetrieval::default()),
                     ..Default::default()
                 },
-                "GoogleSearchRetrieval",
+                "google_search_retrieval",
             ),
             (
                 "retrieval",
@@ -476,7 +476,7 @@ mod tests {
                     retrieval: Some(Retrieval::default()),
                     ..Default::default()
                 },
-                "Retrieval",
+                "retrieval",
             ),
             (
                 "code_execution",
@@ -484,7 +484,7 @@ mod tests {
                     code_execution: Some(ToolCodeExecution::default()),
                     ..Default::default()
                 },
-                "CodeExecution",
+                "code_execution",
             ),
             (
                 "enterprise_web_search",
@@ -492,7 +492,7 @@ mod tests {
                     enterprise_web_search: Some(EnterpriseWebSearch::default()),
                     ..Default::default()
                 },
-                "EnterpriseWebSearch",
+                "enterprise_web_search",
             ),
             (
                 "google_maps",
@@ -500,7 +500,7 @@ mod tests {
                     google_maps: Some(GoogleMaps::default()),
                     ..Default::default()
                 },
-                "GoogleMaps",
+                "google_maps",
             ),
             (
                 "computer_use",
@@ -508,7 +508,7 @@ mod tests {
                     computer_use: Some(ComputerUse::default()),
                     ..Default::default()
                 },
-                "ComputerUse",
+                "computer_use",
             ),
             (
                 "url_context",
@@ -516,7 +516,7 @@ mod tests {
                     url_context: Some(URLContext::default()),
                     ..Default::default()
                 },
-                "URLContext",
+                "url_context",
             ),
             (
                 "file_search",
@@ -524,7 +524,7 @@ mod tests {
                     file_search: Some(FileSearch::default()),
                     ..Default::default()
                 },
-                "FileSearch",
+                "file_search",
             ),
             (
                 "parallel_ai_search_with_function_declarations",
@@ -532,7 +532,7 @@ mod tests {
                     parallel_ai_search: Some(ToolParallelAISearch::default()),
                     ..Default::default()
                 }),
-                "ParallelAISearch",
+                "parallel_ai_search",
             ),
             (
                 "mcp_servers_with_function_declarations",
@@ -543,7 +543,7 @@ mod tests {
                     }],
                     ..Default::default()
                 }),
-                "MCPServers",
+                "mcp_servers",
             ),
             (
                 "exa_ai_search_with_function_declarations",
@@ -551,7 +551,7 @@ mod tests {
                     exa_ai_search: Some(ToolExaAISearch::default()),
                     ..Default::default()
                 }),
-                "ExaAISearch",
+                "exa_ai_search",
             ),
         ];
         for (name, tool, field) in cases {
@@ -559,7 +559,7 @@ mod tests {
             assert_eq!(
                 err.to_string(),
                 format!(
-                    "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools.{field} is not supported by Claude"
+                    "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools.{field} is not supported by Claude"
                 ),
                 "{name}"
             );
@@ -577,7 +577,7 @@ mod tests {
         let err = validate_tools(&[Tool::default()]).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: Tools entry contains no FunctionDeclarations"
+            "anthropicmodel: invalid configuration: anthropicmodel: unsupported tool type: tools entry contains no function_declarations"
         );
         assert!(err.is(ErrorKind::InvalidConfig) && err.is(ErrorKind::UnsupportedToolType));
     }
@@ -587,7 +587,7 @@ mod tests {
         let err = validate_tools(&[fn_tool(&["ok", "  "])]).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "anthropicmodel: invalid configuration: Tools.FunctionDeclarations entry has an empty Name"
+            "anthropicmodel: invalid configuration: tools.function_declarations entry has an empty name"
         );
         assert_eq!(err.kinds(), &[ErrorKind::InvalidConfig]);
     }
@@ -617,7 +617,7 @@ mod tests {
                 },
                 true,
                 None,
-                "ToolConfig.IncludeServerSideToolInvocations is not supported",
+                "tool_config.include_server_side_tool_invocations is not supported",
             ),
             (
                 "retrieval_config",
@@ -627,21 +627,21 @@ mod tests {
                 },
                 true,
                 None,
-                "ToolConfig.RetrievalConfig is not supported",
+                "tool_config.retrieval_config is not supported",
             ),
             (
                 "validated_mode",
                 fcc(Some(FunctionCallingConfigMode::Validated), &[]),
                 true,
                 None,
-                "unsupported ToolConfig.FunctionCallingConfig.Mode \"VALIDATED\"",
+                "unsupported tool_config.function_calling_config.mode \"VALIDATED\"",
             ),
             (
                 "unspecified_mode",
                 fcc(Some(FunctionCallingConfigMode::Unspecified), &[]),
                 true,
                 None,
-                "unsupported ToolConfig.FunctionCallingConfig.Mode \"MODE_UNSPECIFIED\"",
+                "unsupported tool_config.function_calling_config.mode \"MODE_UNSPECIFIED\"",
             ),
             (
                 "any_with_multiple_allowed_names",
@@ -651,49 +651,49 @@ mod tests {
                 ),
                 true,
                 None,
-                "ToolConfig.FunctionCallingConfig.AllowedFunctionNames with multiple names is not supported by Claude",
+                "tool_config.function_calling_config.allowed_function_names with multiple names is not supported by Claude",
             ),
             (
                 "any_with_blank_allowed_name",
                 fcc(Some(FunctionCallingConfigMode::Any), &[" "]),
                 true,
                 None,
-                "ToolConfig.FunctionCallingConfig.AllowedFunctionNames must not contain an empty name",
+                "tool_config.function_calling_config.allowed_function_names must not contain an empty name",
             ),
             (
                 "any_without_tools",
                 fcc(Some(FunctionCallingConfigMode::Any), &[]),
                 false,
                 None,
-                "ToolConfig.FunctionCallingConfig.Mode ANY requires at least one declared function tool",
+                "tool_config.function_calling_config.mode ANY requires at least one declared function tool",
             ),
             (
                 "any_with_thinking_enabled",
                 fcc(Some(FunctionCallingConfigMode::Any), &[]),
                 true,
                 Some(&budget),
-                "ToolConfig.FunctionCallingConfig.Mode ANY cannot be combined with enabled ThinkingConfig on Claude",
+                "tool_config.function_calling_config.mode ANY cannot be combined with an enabled thinking_config on Claude",
             ),
             (
                 "auto_with_allowed_names",
                 fcc(Some(FunctionCallingConfigMode::Auto), &["get_weather"]),
                 true,
                 None,
-                "ToolConfig.FunctionCallingConfig.AllowedFunctionNames is not supported with mode AUTO",
+                "tool_config.function_calling_config.allowed_function_names is not supported with mode AUTO",
             ),
             (
                 "unset_mode_with_allowed_names",
                 fcc(None, &["get_weather"]),
                 true,
                 None,
-                "ToolConfig.FunctionCallingConfig.AllowedFunctionNames is not supported with mode AUTO",
+                "tool_config.function_calling_config.allowed_function_names is not supported with mode AUTO",
             ),
             (
                 "none_with_allowed_names",
                 fcc(Some(FunctionCallingConfigMode::None), &["get_weather"]),
                 true,
                 None,
-                "ToolConfig.FunctionCallingConfig.AllowedFunctionNames is not supported with mode NONE",
+                "tool_config.function_calling_config.allowed_function_names is not supported with mode NONE",
             ),
             (
                 "stream_function_call_arguments",
@@ -706,7 +706,7 @@ mod tests {
                 },
                 true,
                 None,
-                "ToolConfig.FunctionCallingConfig.StreamFunctionCallArguments is not supported",
+                "tool_config.function_calling_config.stream_function_call_arguments is not supported",
             ),
             (
                 "unknown_mode_quoted_as_given",
@@ -716,7 +716,7 @@ mod tests {
                 ),
                 true,
                 None,
-                "unsupported ToolConfig.FunctionCallingConfig.Mode \" bogus\"",
+                "unsupported tool_config.function_calling_config.mode \" bogus\"",
             ),
         ];
         for (name, tc, has_tools, thinking, want) in cases {

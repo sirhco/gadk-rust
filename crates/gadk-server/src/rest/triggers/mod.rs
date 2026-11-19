@@ -79,16 +79,16 @@ pub struct ControllerConfig {
     pub platform: Platform,
 }
 
-/// The warning text for a sliding window with `CompactionInterval` 1.
+/// The warning text for a sliding window with `compaction_interval` 1.
 const WARN_INTERVAL_ONE: &str = "adk: sliding-window compaction is configured on a trigger \
-     controller with CompactionInterval 1, so it fires on every delivery and writes a summary \
-     into a session that is discarded when the delivery ends. Use TokenThreshold and \
-     EventRetentionSize to compact within a single run.";
+     controller with compaction_interval 1, so it fires on every delivery and writes a summary \
+     into a session that is discarded when the delivery ends. Use token_threshold and \
+     event_retention_size to compact within a single run.";
 
-/// The warning text for a sliding window with `CompactionInterval` above 1.
+/// The warning text for a sliding window with `compaction_interval` above 1.
 const WARN_INTERVAL_ABOVE_ONE: &str = "adk: sliding-window compaction is configured on a \
      trigger controller, but a delivery handled in one attempt runs a single invocation, so the \
-     window will not reach its interval. Use TokenThreshold and EventRetentionSize to compact \
+     window will not reach its interval. Use token_threshold and event_retention_size to compact \
      within a single run.";
 
 /// Runs an agent with retry semantics, creating a new session per delivery.

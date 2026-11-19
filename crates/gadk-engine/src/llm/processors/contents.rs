@@ -571,9 +571,7 @@ pub(crate) fn merge_function_response_events(events: &[Event]) -> Result<Event, 
     };
     let mut merged = first.clone();
     let Some(merged_content) = merged.response.content.as_mut() else {
-        return Err(AgentError::other(
-            "content for the first event should not be nil",
-        ));
+        return Err(AgentError::other("content for the first event is missing"));
     };
     if merged_content.parts.is_empty() {
         return Err(AgentError::other(

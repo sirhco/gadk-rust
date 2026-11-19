@@ -53,7 +53,7 @@ async fn test_new_validation() {
         assert!(matches!(err, Error::Config), "{name}: error = {err:?}");
         assert_eq!(
             err.to_string(),
-            "agentregistry: ProjectID and Location must be set",
+            "agentregistry: project_id and location must be set",
             "{name}"
         );
     }

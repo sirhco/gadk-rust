@@ -931,7 +931,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "a2a subrouter setup failed: invalid Compaction: CompactionInterval must not be negative, got -1"
+            "a2a subrouter setup failed: invalid compaction config: compaction_interval must not be negative, got -1"
         );
 
         let (config, _) = test_config(assistant());

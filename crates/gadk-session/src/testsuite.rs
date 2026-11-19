@@ -618,7 +618,7 @@ async fn append_event_when_session_not_found_should_fail(
     };
     let mut event = simple_event("event1", "inv1");
     if s.append_event(&m, &mut event).await.is_ok() {
-        t.errorf("AppendEvent() expected error for non-existent session, got nil");
+        t.errorf("AppendEvent() expected error for non-existent session, got Ok");
     }
     Ok(())
 }
@@ -649,7 +649,7 @@ async fn append_event_when_session_deleted_returns_err_not_found(
     {
         Ok(()) => {
             return Err(
-                "AppendEvent(deleted session) error = nil, want SessionError::NotFound".into(),
+                "AppendEvent(deleted session) returned Ok, want SessionError::NotFound".into(),
             );
         }
         Err(SessionError::NotFound) => {}

@@ -141,7 +141,7 @@ fn test_convert_tools() {
 #[test]
 fn test_convert_function_declaration() {
     let tests: Vec<(&str, Option<FunctionDeclaration>, &str)> = vec![
-        ("nil declaration", None, "nil function declaration"),
+        ("nil declaration", None, "function declaration is missing"),
         (
             "missing name",
             Some(FunctionDeclaration::default()),

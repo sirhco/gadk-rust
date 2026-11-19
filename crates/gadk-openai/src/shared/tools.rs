@@ -22,9 +22,9 @@ use crate::shared::config::reject_unsupported_fields;
 
 /// The only [`Tool`] field this crate sends. Every
 /// other field is refused, so a field genai adds cannot be dropped silently.
-const SUPPORTED_FUNCTION_TOOL_FIELDS: &[&str] = &["FunctionDeclarations"];
+const SUPPORTED_FUNCTION_TOOL_FIELDS: &[&str] = &["function_declarations"];
 
-/// Rejects a missing tool (`None`: `openai: tool <idx> is nil`), one
+/// Rejects a missing tool (`None`: `openai: tool <idx> is missing`), one
 /// carrying any field besides `FunctionDeclarations` (`openai: non-function tools are not
 /// supported (tool <idx>): ` wrapping `UnsupportedConfigField: <Field>`, the first set field
 /// in declaration order), and one declaring no functions (`openai: tool <idx> does not
@@ -34,7 +34,7 @@ pub(crate) fn ensure_function_tool_only(
     tool: Option<&Tool>,
 ) -> Result<(), OpenAiError> {
     let Some(tool) = tool else {
-        return Err(OpenAiError::plain(format!("openai: tool {idx} is nil")));
+        return Err(OpenAiError::plain(format!("openai: tool {idx} is missing")));
     };
     reject_unsupported_fields("", &tool_fields(tool), SUPPORTED_FUNCTION_TOOL_FIELDS).map_err(
         |e| {
@@ -71,18 +71,18 @@ fn tool_fields(tool: &Tool) -> [(&'static str, bool); 13] {
         exa_ai_search,
     } = tool;
     [
-        ("Retrieval", retrieval.is_some()),
-        ("ComputerUse", computer_use.is_some()),
-        ("FileSearch", file_search.is_some()),
-        ("GoogleSearch", google_search.is_some()),
-        ("GoogleMaps", google_maps.is_some()),
-        ("CodeExecution", code_execution.is_some()),
-        ("EnterpriseWebSearch", enterprise_web_search.is_some()),
-        ("FunctionDeclarations", !function_declarations.is_empty()),
-        ("GoogleSearchRetrieval", google_search_retrieval.is_some()),
-        ("ParallelAISearch", parallel_ai_search.is_some()),
-        ("URLContext", url_context.is_some()),
-        ("MCPServers", !mcp_servers.is_empty()),
-        ("ExaAISearch", exa_ai_search.is_some()),
+        ("retrieval", retrieval.is_some()),
+        ("computer_use", computer_use.is_some()),
+        ("file_search", file_search.is_some()),
+        ("google_search", google_search.is_some()),
+        ("google_maps", google_maps.is_some()),
+        ("code_execution", code_execution.is_some()),
+        ("enterprise_web_search", enterprise_web_search.is_some()),
+        ("function_declarations", !function_declarations.is_empty()),
+        ("google_search_retrieval", google_search_retrieval.is_some()),
+        ("parallel_ai_search", parallel_ai_search.is_some()),
+        ("url_context", url_context.is_some()),
+        ("mcp_servers", !mcp_servers.is_empty()),
+        ("exa_ai_search", exa_ai_search.is_some()),
     ]
 }

@@ -352,7 +352,7 @@ fn test_build_params_media_refused() {
                 ..inline_part("image/png", &[1])
             }),
             None,
-            "system instruction part: InlineData",
+            "system instruction part: inline_data",
         ),
         (
             "text and file data on one system instruction part",
@@ -361,7 +361,7 @@ fn test_build_params_media_refused() {
                 ..file_part("application/pdf", SECRET_URL)
             }),
             None,
-            "system instruction part: FileData",
+            "system instruction part: file_data",
         ),
         (
             "media beside a function response",

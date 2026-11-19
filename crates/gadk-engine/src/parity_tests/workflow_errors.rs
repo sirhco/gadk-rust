@@ -91,5 +91,5 @@ fn test_node_run_error_error() {
     );
     // nil cause does not panic
     let s = nre("", "x/y@1", None).to_string();
-    assert_eq!(s, "workflow: dynamic child x/y@1: <nil cause>");
+    assert_eq!(s, "workflow: dynamic child x/y@1: <no cause>");
 }

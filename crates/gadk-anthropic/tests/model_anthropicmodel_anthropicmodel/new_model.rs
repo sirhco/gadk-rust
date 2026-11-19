@@ -113,7 +113,7 @@ async fn missing_credentials_fails() {
     );
     assert_eq!(
         err.to_string(),
-        "anthropicmodel: invalid configuration: anthropicmodel: authentication failed: no Anthropic credential found; set ClientConfig.APIKey, ClientConfig.AuthToken, ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN"
+        "anthropicmodel: invalid configuration: anthropicmodel: authentication failed: no Anthropic credential found; set ClientConfig.api_key, ClientConfig.auth_token, ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN"
     );
 }
 
@@ -158,7 +158,7 @@ async fn env_api_key_and_precedence() {
         ("ANTHROPIC_API_KEY", "env-api-key"),
         ("ANTHROPIC_AUTH_TOKEN", "env-auth-token"),
     ]);
-    let custom = "custom BaseURL on BackendAnthropic requires an explicit APIKey or AuthToken in ClientConfig; ambient environment credentials are not sent to custom endpoints";
+    let custom = "custom base_url on Backend::Anthropic requires an explicit api_key or auth_token in ClientConfig; ambient environment credentials are not sent to custom endpoints";
 
     // Custom BaseURL WITHOUT explicit credential must be rejected even when env vars are set.
     let err = new_err(
@@ -388,7 +388,7 @@ async fn invalid_client_configs() {
                 backend: Backend::Anthropic,
                 ..key()
             },
-            "Vertex resource model name requires BackendVertex",
+            "Vertex resource model name requires Backend::Vertex",
         ),
         (
             "invalid_base_url_scheme",
@@ -397,7 +397,7 @@ async fn invalid_client_configs() {
                 base_url: Some("ftp://example.com".to_string()),
                 ..key()
             },
-            "BaseURL must be a valid http or https URL with a host",
+            "base_url must be a valid http or https URL with a host",
         ),
         (
             "whitespace_base_url",
@@ -406,7 +406,7 @@ async fn invalid_client_configs() {
                 base_url: Some("   ".to_string()),
                 ..key()
             },
-            "BaseURL must not be whitespace-only",
+            "base_url must not be whitespace-only",
         ),
         // parity: adapted: invalid_request_option_base_url: `option.WithBaseURL("ftp://…")`
         // is `ClientConfig::base_url` in gadk; Go's "BaseURL in RequestOptions" source name
@@ -418,7 +418,7 @@ async fn invalid_client_configs() {
                 base_url: Some("ftp://example.com".to_string()),
                 ..key()
             },
-            "BaseURL must be a valid http or https URL with a host",
+            "base_url must be a valid http or https URL with a host",
         ),
     ];
     for (case, name, cfg, detail) in cases {
@@ -437,12 +437,12 @@ async fn invalid_client_configs() {
     assert_invalid_config(
         "invalid_effort",
         &"extreme".parse::<Effort>().unwrap_err(),
-        r#"unsupported Effort "extreme"; valid values are low, medium, high, xhigh, max"#,
+        r#"unsupported effort "extreme"; valid values are low, medium, high, xhigh, max"#,
     );
     assert_invalid_config(
         "invalid_prompt_cache_ttl",
         &"10m".parse::<PromptCacheTtl>().unwrap_err(),
-        r#"unsupported PromptCache.TTL "10m"; valid values are 5m, 1h"#,
+        r#"unsupported prompt_cache.ttl "10m"; valid values are 5m, 1h"#,
     );
     // parity: adapted: negative_max_tokens, negative_max_retries: `max_tokens`/`max_retries`
     // are `Option<u32>`, so a negative value does not compile; nothing is left to run.
@@ -497,7 +497,7 @@ async fn unparsable_request_option_base_url_does_not_retry_or_leak_userinfo() {
     assert_invalid_config(
         "unparsable_base_url",
         &err,
-        "BaseURL must be a valid http or https URL with a host",
+        "base_url must be a valid http or https URL with a host",
     );
     assert!(
         elapsed < Duration::from_millis(500),
@@ -680,27 +680,27 @@ async fn vertex_validation_and_base_url_guard() {
             "mismatched_project",
             resource_a,
             with(Some("proj-b"), Some("us-east5")),
-            r#"ClientConfig.Project "proj-b" does not match resource project "proj-a""#,
+            r#"ClientConfig.project "proj-b" does not match resource project "proj-a""#,
         ),
         // Mismatch between ClientConfig.Location and resource name in NewModel.
         (
             "mismatched_location",
             resource_a,
             with(Some("proj-a"), Some("global")),
-            r#"ClientConfig.Location "global" does not match resource location "us-east5""#,
+            r#"ClientConfig.location "global" does not match resource location "us-east5""#,
         ),
         // Missing project or location.
         (
             "missing_project",
             MODEL,
             with(None, Some("us-east5")),
-            "BackendVertex requires a project via ClientConfig.Project, a full resource model name, GOOGLE_CLOUD_PROJECT, or CLOUD_ML_PROJECT_ID",
+            "Backend::Vertex requires a project via ClientConfig.project, a full resource model name, GOOGLE_CLOUD_PROJECT, or CLOUD_ML_PROJECT_ID",
         ),
         (
             "missing_location",
             MODEL,
             with(Some("proj-a"), None),
-            "BackendVertex requires a location via ClientConfig.Location, a full resource model name, GOOGLE_CLOUD_LOCATION, or CLOUD_ML_REGION",
+            "Backend::Vertex requires a location via ClientConfig.location, a full resource model name, GOOGLE_CLOUD_LOCATION, or CLOUD_ML_REGION",
         ),
     ];
     for (case, name, cfg, detail) in cases {
@@ -711,7 +711,7 @@ async fn vertex_validation_and_base_url_guard() {
     // Custom BaseURL on BackendVertex without explicit Credentials must fail even when ambient
     // Application Default Credentials are present (a temp ADC file via cfg.env, ruling R-b).
     let adc = adc_authorized_user_file();
-    let custom = "custom BaseURL on BackendVertex requires explicit Credentials or TokenSource in ClientConfig; Application Default Credentials are not sent to custom endpoints";
+    let custom = "custom base_url on Backend::Vertex requires explicit ClientConfig.credentials; Application Default Credentials are not sent to custom endpoints";
     // parity: adapted: Go's RequestOptions rows (`WithBaseURL` custom-proxy and
     // api.anthropic.com, `WithConfig` api.anthropic.com) use ClientConfig::base_url.
     for (case, url) in [
