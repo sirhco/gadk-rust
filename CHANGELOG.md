@@ -27,7 +27,6 @@ the public API.
   the agent's spans (`CloudTraceTranscriptSource`, `source::trace_mapping::build_runs`); the agent
   must run with `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` or
   `SPAN_AND_EVENT`.
-```
 
 ### Changed
 
