@@ -177,7 +177,7 @@ mod tests {
         let (_, terr) = from_go_node_partial(&doc, doc.root()).unwrap();
         assert_eq!(
             terr.unwrap().to_string(),
-            "yaml: unmarshal errors:\n  line 9: cannot unmarshal !!binary `aGk=` into []uint8"
+            "yaml: unmarshal errors:\n  line 9: cannot unmarshal !!binary `aGk=` into Vec<u8>"
         );
     }
 

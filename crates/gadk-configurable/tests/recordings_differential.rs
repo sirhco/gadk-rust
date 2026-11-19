@@ -378,10 +378,10 @@ fn replay_type_errors_are_yaml_v3_s() {
     assert_eq!(
         terr.unwrap().errors,
         vec![
-            "line 8: cannot unmarshal !!str `abc` into []uint8",
-            "line 10: cannot unmarshal !!int `300` into uint8",
-            "line 10: cannot unmarshal !!str `x` into uint8",
-            "line 11: cannot unmarshal !!binary `AQI=` into []uint8",
+            "line 8: cannot unmarshal !!str `abc` into Vec<u8>",
+            "line 10: cannot unmarshal !!int `300` into u8",
+            "line 10: cannot unmarshal !!str `x` into u8",
+            "line 11: cannot unmarshal !!binary `AQI=` into Vec<u8>",
         ]
     );
     let parts = &recs.recordings[0]
