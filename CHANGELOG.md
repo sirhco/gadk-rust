@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-19
+
 ### Added
 
 - `gadk-cloudtrace`: `Debug` for `CloudTraceClient` (project and endpoint) and `Adc` (whether the
@@ -260,7 +262,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/sirhco/gadk-rust/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sirhco/gadk-rust/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sirhco/gadk-rust/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/sirhco/gadk-rust/compare/v0.2.1...v0.2.2
