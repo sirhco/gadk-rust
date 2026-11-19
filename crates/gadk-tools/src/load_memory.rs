@@ -118,7 +118,7 @@ impl RunnableTool for LoadMemoryTool {
         };
         let Value::String(query) = raw else {
             return Err(ToolError::InvalidArgument(format!(
-                "query must be a string, found {}",
+                "invalid query: expected a string, found {}",
                 json_kind_article(raw)
             )));
         };

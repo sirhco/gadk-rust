@@ -358,12 +358,14 @@ pub(crate) fn validate_map_on_schema(
                 ));
             }
             Ok(false) => {
+                let found = match value {
+                    Value::Null => "null".to_owned(),
+                    other => format!("{} ({other})", json_kind_article(other)),
+                };
                 return Err(format!(
-                    "{arg_type} arg: '{}' type mismatch, expected schema type {}, found {} ({})",
+                    "{arg_type} arg: '{}' type mismatch, expected schema type {}, found {found}",
                     go_quote(key),
                     type_str(prop_schema),
-                    json_kind_article(value),
-                    value
                 ));
             }
             Ok(true) => {}

@@ -189,18 +189,18 @@ fn user_scope(user_id: &str) -> Value {
 }
 
 /// The time a state value holds: an RFC 3339 string. Anything else fails with
-/// `expected an RFC 3339 timestamp, found <kind> (<value as JSON>)`.
+/// `expected an RFC 3339 timestamp, found <kind> (<value as JSON>)` (just `found null` for null).
 fn state_time(value: &Value) -> Result<DateTime<Utc>, BoxError> {
     if let Value::String(s) = value
         && let Some(t) = go_parse_rfc3339(s)
     {
         return Ok(t);
     }
-    Err(format!(
-        "expected an RFC 3339 timestamp, found {} ({value})",
-        json_kind_article(value)
-    )
-    .into())
+    let found = match value {
+        Value::Null => "null".to_owned(),
+        other => format!("{} ({other})", json_kind_article(other)),
+    };
+    Err(format!("expected an RFC 3339 timestamp, found {found}").into())
 }
 
 #[async_trait]

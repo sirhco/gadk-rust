@@ -236,7 +236,7 @@ async fn a_state_value_that_is_not_a_time_is_a_type_error() {
         (json!(1_000_000), "a number (1000000)"),
         (json!(true), "a boolean (true)"),
         (json!(false), "a boolean (false)"),
-        (Value::Null, "null (null)"),
+        (Value::Null, "null"),
         (json!({"b": 1, "a": "x"}), r#"an object ({"a":"x","b":1})"#),
         (json!({}), "an object ({})"),
         (json!([1, "a"]), r#"an array ([1,"a"])"#),

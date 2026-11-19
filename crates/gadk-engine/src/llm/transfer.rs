@@ -272,9 +272,10 @@ impl Tool for TransferToAgentTool {
 
 #[async_trait]
 impl RunnableTool for TransferToAgentTool {
-    /// A `Value::Null` argument counts as an empty args map, so it reports `empty agent_name:
-    /// {}` (the args as JSON text). A name outside the declared enum is a tool error the model sees and can recover
-    /// from; setting `transfer_to_agent` to it would make the flow fail the whole invocation.
+    /// A `Value::Null` argument counts as an empty args map, so it reports
+    /// `empty agent_name: {}` (the args as JSON text). A name outside the declared enum is a tool
+    /// error the model sees and can recover from; setting `transfer_to_agent` to it would make
+    /// the flow fail the whole invocation.
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let empty = Value::Object(Map::new());
         let args = if args.is_null() { empty } else { args };

@@ -74,8 +74,10 @@ enum Durations {
 ///    `a number`, `a duration string`, `a base64 string`, `an array` or `a JSON object`, and
 ///    `<kind>` is `a string`, `a boolean`, `a number`, `an array` or `an object`; at the top
 ///    level the text is `invalid <Struct>: expected a JSON object, found <kind>`; a number that
-///    does not fit an integer field is ``invalid `<path>`: number <text> is not a valid <i32>``
-///    (the field's Rust integer type), one that overflows a float (an `any` value included)
+///    does not fit an integer field is ``invalid `<path>`: number <text> is out of range for
+///    <i32>`` (the field's Rust integer type), ``… number <text> is not an integer (expected
+///    <i32>)`` for a fraction or exponent, or ``… number <text> has a minus sign (<u8> is
+///    unsigned)`` for a signed literal in an unsigned field; one that overflows a float (an `any` value included)
 ///    ``invalid `<path>`: number <text> is out of range for f64`` (`f32` for 32-bit fields); an
 ///    invalid base64 string for bytes is ``invalid `<path>`: invalid base64 data at byte <n>``;
 ///    the first error in input order wins;
@@ -235,8 +237,8 @@ fn expected_shape(kind: &GoKind, go_type: &str) -> &'static str {
     }
 }
 
-/// The Rust integer type matching an integer type name of `bits` (`int32` → `i32`, `uint8` →
-/// `u8`; a defined integer type is `i64`).
+/// The Rust integer type matching an integer type name and signedness (`int32` → `i32`,
+/// `uint8` → `u8`; any other width, a defined integer type included, is `i64` or `u64`).
 fn rust_int_name(go_type: &str, signed: bool) -> &'static str {
     match (int_bits(go_type), signed) {
         (8, true) => "i8",
@@ -450,6 +452,21 @@ fn int_bits(go_type: &str) -> u32 {
     }
 }
 
+/// Why an integer field rejected the number literal `text` (`ty` is its Rust type): a minus
+/// sign on an unsigned field, a fraction or exponent, or a value out of range.
+fn int_error(text: &str, ty: &str) -> String {
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+        if ty.starts_with('u') && text.starts_with('-') {
+            format!("number {text} has a minus sign ({ty} is unsigned)")
+        } else {
+            format!("number {text} is out of range for {ty}")
+        }
+    } else {
+        format!("number {text} is not an integer (expected {ty})")
+    }
+}
+
 /// A JSON number literal as an integer of `bits` (signed or not), or `None` when it has a
 /// fraction or exponent or is out of range (parsed from the text as `i64` / `u64` would be).
 fn parse_int(text: &str, bits: u32, signed: bool) -> Option<Number> {
@@ -658,10 +675,9 @@ impl Decoder {
                     match parse_int(text, int_bits(go_type), signed) {
                         Some(num) => *slot = Some(Value::Number(num)),
                         None => {
-                            return Err(self.invalid(&format!(
-                                "number {text} is not a valid {}",
-                                rust_int_name(go_type, signed)
-                            )));
+                            return Err(
+                                self.invalid(&int_error(text, rust_int_name(go_type, signed)))
+                            );
                         }
                     }
                 }
@@ -1140,12 +1156,12 @@ mod tests {
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":1.5}}]}}}"#,
-                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1.5 is not a valid i32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1.5 is not an integer (expected i32)"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":1e20}}]}}}"#,
-                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1e20 is not a valid i32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1e20 is not an integer (expected i32)"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
@@ -1155,7 +1171,7 @@ mod tests {
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":3.0}}]}}}"#,
-                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 3.0 is not a valid i32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 3.0 is not an integer (expected i32)"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
@@ -1226,7 +1242,7 @@ mod tests {
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"thoughtSignature":[256]}]}}}"#,
-                r#"invalid `StreamQueryRequest.input.message.parts.0.thoughtSignature.0`: number 256 is not a valid u8"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.thoughtSignature.0`: number 256 is out of range for u8"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
@@ -1236,22 +1252,22 @@ mod tests {
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"thoughtSignature":[1.5]}]}}}"#,
-                r#"invalid `StreamQueryRequest.input.message.parts.0.thoughtSignature.0`: number 1.5 is not a valid u8"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.thoughtSignature.0`: number 1.5 is not an integer (expected u8)"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":99999999999}}]}}}"#,
-                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 99999999999 is not a valid i32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 99999999999 is out of range for i32"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":1.50}}]}}}"#,
-                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1.50 is not a valid i32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1.50 is not an integer (expected i32)"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":1E2}}]}}}"#,
-                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1E2 is not a valid i32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1E2 is not an integer (expected i32)"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
@@ -1441,18 +1457,18 @@ mod tests {
         let probe = |payload: &str| go_unmarshal::<Value>(payload.as_bytes(), &PROBE_T);
         assert_eq!(
             probe(r#"{"u":-0}"#).unwrap_err(),
-            "invalid `T.u`: number -0 is not a valid u8"
+            "invalid `T.u`: number -0 has a minus sign (u8 is unsigned)"
         );
         assert_eq!(
             probe(r#"{"b":[-0]}"#).unwrap_err(),
-            "invalid `T.b.0`: number -0 is not a valid u8"
+            "invalid `T.b.0`: number -0 has a minus sign (u8 is unsigned)"
         );
         assert_eq!(
             decode(
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"thoughtSignature":[-0]}]}}}"#
             ),
-            Err("invalid `StreamQueryRequest.input.message.parts.0.thoughtSignature.0`: number -0 is not a valid u8".to_owned())
+            Err("invalid `StreamQueryRequest.input.message.parts.0.thoughtSignature.0`: number -0 has a minus sign (u8 is unsigned)".to_owned())
         );
         for ok in ["3.4028235e38", "-3.4028235e38", "3.4028235677973366e38"] {
             assert!(probe(&format!(r#"{{"f":{ok}}}"#)).is_ok(), "{ok}");
