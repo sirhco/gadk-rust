@@ -83,6 +83,15 @@ impl CloudTraceTranscriptSource {
     }
 }
 
+/// Shows the project, never the credentials or a token.
+impl std::fmt::Debug for CloudTraceTranscriptSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudTraceTranscriptSource")
+            .field("project", &self.client.project())
+            .finish_non_exhaustive()
+    }
+}
+
 fn check_project(project: &str) -> Result<(), MonitorError> {
     if is_project_id(project) {
         Ok(())
@@ -186,6 +195,39 @@ mod tests {
             agent: agent.map(str::to_owned),
             limit,
         }
+    }
+
+    /// Credentials whose token must never show in `Debug` output.
+    struct SecretAuth;
+
+    #[async_trait::async_trait]
+    impl gadk_cloudtrace::AuthHeaders for SecretAuth {
+        async fn headers(&self) -> Result<http::HeaderMap, String> {
+            let mut h = http::HeaderMap::new();
+            h.insert(
+                "authorization",
+                http::HeaderValue::from_static("Bearer s3cret-token"),
+            );
+            Ok(h)
+        }
+    }
+
+    #[test]
+    fn debug_shows_the_project_and_no_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(dir.path(), &[]);
+        let client = CloudTraceClient::with_parts(
+            "proj",
+            http,
+            Arc::new(SecretAuth),
+            gadk_cloudtrace::ENDPOINT,
+        );
+        let out = format!(
+            "{:?}",
+            CloudTraceTranscriptSource::with_client(client).unwrap()
+        );
+        assert_eq!(out, r#"CloudTraceTranscriptSource { project: "proj", .. }"#);
+        assert!(!out.contains("s3cret") && !out.contains("Bearer"), "{out}");
     }
 
     fn time(secs: i64) -> String {

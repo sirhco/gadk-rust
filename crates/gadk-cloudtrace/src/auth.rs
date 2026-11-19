@@ -60,6 +60,15 @@ impl Adc {
     }
 }
 
+/// Shows only whether the credentials have been built, never the credentials or a token.
+impl std::fmt::Debug for Adc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Adc")
+            .field("built", &self.credentials.initialized())
+            .finish_non_exhaustive()
+    }
+}
+
 #[async_trait::async_trait]
 impl AuthHeaders for Adc {
     async fn headers(&self) -> Result<HeaderMap, String> {
@@ -100,6 +109,12 @@ mod tests {
         // Outside a Tokio runtime: building credentials here would fail, so `lazy` must not.
         let adc = Adc::lazy();
         assert!(!adc.credentials.initialized());
+    }
+
+    #[test]
+    fn adc_debug_shows_no_credentials() {
+        let out = format!("{:?}", Adc::lazy());
+        assert_eq!(out, "Adc { built: false, .. }");
     }
 
     #[test]
