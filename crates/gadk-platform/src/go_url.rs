@@ -251,7 +251,7 @@ fn parse_host(scheme: &str, host: &str) -> Result<String, String> {
         }
         if addr.parse::<std::net::Ipv6Addr>().is_err() || unescaped.ends_with('%') {
             return Err(format!(
-                "invalid host: ParseAddr({}): unable to parse IP",
+                "invalid host: unable to parse IP {}",
                 go_quote(&unescaped)
             ));
         }

@@ -483,30 +483,30 @@ fn test_new_google_oidc_requires_audience_and_allow_list() {
     };
     assert_eq!(
         err(cfg("", &[TEST_SERVICE_ACCOUNT])),
-        "authn: NewGoogleOIDC requires an audience",
+        "authn: google_oidc requires an audience",
         "no audience"
     );
     // A missing and an empty allow-list are the same `Vec` in Rust.
     assert_eq!(
         err(cfg(TEST_AUDIENCE, &[])),
-        "authn: NewGoogleOIDC requires at least one allowed service account; the audience alone does not identify the caller",
+        "authn: google_oidc requires at least one allowed service account; the audience alone does not identify the caller",
         "empty allow-list"
     );
     assert_eq!(
         err(cfg(TEST_AUDIENCE, &[""])),
-        r#"authn: NewGoogleOIDC allowed service account "" is empty or has surrounding whitespace"#,
+        r#"authn: google_oidc allowed service account "" is empty or has surrounding whitespace"#,
         "blank entry"
     );
     assert_eq!(
         err(cfg(TEST_AUDIENCE, &[TEST_SERVICE_ACCOUNT, ""])),
-        r#"authn: NewGoogleOIDC allowed service account "" is empty or has surrounding whitespace"#,
+        r#"authn: google_oidc allowed service account "" is empty or has surrounding whitespace"#,
         "blank entry after a real one"
     );
     let padded = format!(" {TEST_SERVICE_ACCOUNT} ");
     assert_eq!(
         err(cfg(TEST_AUDIENCE, &[&padded])),
         format!(
-            r#"authn: NewGoogleOIDC allowed service account " {TEST_SERVICE_ACCOUNT} " is empty or has surrounding whitespace"#
+            r#"authn: google_oidc allowed service account " {TEST_SERVICE_ACCOUNT} " is empty or has surrounding whitespace"#
         ),
         "padded entry"
     );

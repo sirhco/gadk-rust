@@ -607,7 +607,7 @@ async fn run_live(
     {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!(target: "adk", "RunLive failed for app {app_name}: {e}");
+            tracing::warn!(target: "adk", "live run failed for app {app_name}: {e}");
             send_close(conn, &mut stream, CLOSE_INTERNAL_SERVER_ERR, &e.to_string()).await;
             return;
         }
@@ -656,7 +656,7 @@ async fn write_events(conn: &Conn, events: &mut EventStream, app_name: &str) {
         let event = match item {
             Ok(event) => event,
             Err(e) => {
-                tracing::warn!(target: "adk", "RunLive failed: {e}");
+                tracing::warn!(target: "adk", "live run failed: {e}");
                 let reason = e.to_string();
                 let _ = conn
                     .write(close_message(CLOSE_INTERNAL_SERVER_ERR, &reason), deadline)

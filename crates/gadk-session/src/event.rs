@@ -61,7 +61,7 @@ pub(crate) mod go_time {
         match format(t) {
             Some(v) => s.serialize_str(&v),
             None => Err(serde::ser::Error::custom(
-                "Time.MarshalJSON: year outside of range [0,9999]",
+                "timestamp year outside of range [0,9999]",
             )),
         }
     }

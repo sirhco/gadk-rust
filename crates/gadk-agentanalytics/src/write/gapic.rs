@@ -770,7 +770,9 @@ impl Drop for TonicAppendRows {
 impl AppendRowsClient for TonicAppendRows {
     async fn send(&mut self, req: AppendRowsRequest) -> Result<(), Error> {
         let Some(requests) = &self.requests else {
-            return Err(internal("SendMsg called after CloseSend".to_owned()));
+            return Err(internal(
+                "send called after the request stream was closed".to_owned(),
+            ));
         };
         if self.ended.is_cancelled() || self.ctx.err().is_some() {
             return Err(eof());

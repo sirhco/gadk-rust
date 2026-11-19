@@ -80,7 +80,7 @@ impl Controller {
     /// Answers one query:
     /// 1. the request's [`WriteDeadline`](crate::mux::WriteDeadline) is set to now +
     ///    `sse_timeout`, or cleared (`None`) when it is negative; without the extension
-    ///    `SetWriteDeadline failed: feature not supported` is logged;
+    ///    `failed to set write deadline: feature not supported` is logged;
     /// 2. a present body (one not already at end of stream) is read up
     ///    to `max_payload_size` bytes; a read error answers 400
     ///    with the body-read error text (see the literal in this function); the bytes are
@@ -102,7 +102,7 @@ impl Controller {
             Some(write_deadline) => write_deadline.set(deadline),
             None => self
                 .log
-                .print("SetWriteDeadline failed: feature not supported"),
+                .print("failed to set write deadline: feature not supported"),
         }
 
         let mut class_method = String::new();
@@ -507,7 +507,7 @@ mod tests {
         assert_eq!(parts(resp).await.0, 200);
         assert_eq!(
             *lines.lock().unwrap(),
-            vec!["SetWriteDeadline failed: feature not supported".to_owned()]
+            vec!["failed to set write deadline: feature not supported".to_owned()]
         );
     }
 }

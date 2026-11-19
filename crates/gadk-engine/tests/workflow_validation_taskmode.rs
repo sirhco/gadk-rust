@@ -59,7 +59,7 @@ fn build(name: &str, edges: Vec<Edge>) -> Result<(), String> {
 /// Go validateNoTaskModeGraphNodes's error text (validation.go:211).
 fn task_mode_error(agent: &str) -> String {
     format!(
-        "Agent \"{agent}\" has mode='task' and cannot be used as a workflow graph node. Use a chat coordinator with task sub-agents, or dispatch dynamically via RunNode from a function node"
+        "Agent \"{agent}\" has mode='task' and cannot be used as a workflow graph node. Use a chat coordinator with task sub-agents, or dispatch dynamically via run_node from a function node"
     )
 }
 
