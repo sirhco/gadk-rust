@@ -16,9 +16,9 @@
 //! An LLM agent with one function tool, run through `Runner::in_memory`.
 //!
 //! Gemini API: `GOOGLE_API_KEY=... cargo run -p gadk --example agent_tool`
-//! Vertex AI:  `GOOGLE_GENAI_USE_VERTEXAI=true GOOGLE_CLOUD_PROJECT=... GOOGLE_CLOUD_LOCATION=us-central1 cargo run -p gadk --example agent_tool`
+//! Vertex AI:  `GOOGLE_GENAI_USE_VERTEXAI=true GOOGLE_CLOUD_PROJECT=... GOOGLE_CLOUD_LOCATION=us cargo run -p gadk --example agent_tool`
 //!
-//! The model defaults to `gemini-2.5-flash`; override it with `GADK_MODEL`.
+//! The model defaults to `gemini-3.8-flash`; override it with `GADK_MODEL`.
 
 use futures::StreamExt;
 use gadk::agent::{Context, RunConfig, ToolError};
@@ -57,7 +57,7 @@ async fn get_weather(_ctx: Context, args: WeatherArgs) -> Result<WeatherReport, 
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let model_name = std::env::var("GADK_MODEL").unwrap_or_else(|_| "gemini-2.5-flash".to_string());
+    let model_name = std::env::var("GADK_MODEL").unwrap_or_else(|_| "gemini-3.8-flash".to_string());
     let model = GeminiModel::new(&model_name, ClientConfig::default()).await?;
 
     let weather = FunctionTool::new(

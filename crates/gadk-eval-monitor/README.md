@@ -30,9 +30,9 @@ agent: support_bot                # optional: only runs whose root agent is this
 limit: 100                        # 1-1000, default 100: the newest runs in the window
 min_pass_rate: 0.9                # optional, 0.0-1.0: below it the command exits 1
 judge:                            # required if and only if a scorer is llm_judge
-  model: gemini-2.5-flash         # Gemini on Vertex AI
+  model: gemini-3.8-flash         # Gemini on Vertex AI
   project: my-proj                # default: the source project
-  location: us-central1           # default us-central1
+  location: us                    # default us (the US multi-region)
   timeout: 120s                   # <n>s | <n>m, default 120s
 scorers:                          # gadk-eval scorer syntax
   - not_contains: "I cannot help"

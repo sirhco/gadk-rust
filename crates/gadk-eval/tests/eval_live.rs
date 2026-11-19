@@ -19,8 +19,8 @@
 //! GADK_EVAL_LIVE_PROJECT=<project> cargo test -p gadk-eval --test eval_live -- --ignored --nocapture
 //! ```
 //!
-//! Uses Application Default Credentials. Optional: `GADK_EVAL_LIVE_LOCATION` (default
-//! `us-central1`), `GADK_EVAL_LIVE_MODEL` (default `gemini-2.5-flash`).
+//! Uses Application Default Credentials. Optional: `GADK_EVAL_LIVE_LOCATION` (default `us`, the
+//! US multi-region), `GADK_EVAL_LIVE_MODEL` (default `gemini-3.8-flash`).
 
 use gadk_engine::llm::{LlmAgentConfig, agent as llm_agent};
 use gadk_eval::{EvalSet, Evaluator, Variant};
@@ -44,10 +44,9 @@ async fn gemini_agent_and_judge() {
     let Ok(project) = std::env::var("GADK_EVAL_LIVE_PROJECT") else {
         panic!("set GADK_EVAL_LIVE_PROJECT to run this test");
     };
-    let location =
-        std::env::var("GADK_EVAL_LIVE_LOCATION").unwrap_or_else(|_| "us-central1".into());
+    let location = std::env::var("GADK_EVAL_LIVE_LOCATION").unwrap_or_else(|_| "us".into());
     let model_name =
-        std::env::var("GADK_EVAL_LIVE_MODEL").unwrap_or_else(|_| "gemini-2.5-flash".into());
+        std::env::var("GADK_EVAL_LIVE_MODEL").unwrap_or_else(|_| "gemini-3.8-flash".into());
     let model = GeminiModel::new(
         &model_name,
         ClientConfig {

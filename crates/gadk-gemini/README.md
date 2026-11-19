@@ -36,19 +36,22 @@ use gadk_model::Backend;
 
 // Inside an async fn returning Result.
 // Gemini API, key from GOOGLE_API_KEY / GEMINI_API_KEY.
-let flash = GeminiModel::new("gemini-2.5-flash", ClientConfig::default()).await?;
+let flash = GeminiModel::new("gemini-3.8-flash", ClientConfig::default()).await?;
 
-// Vertex AI with Application Default Credentials.
-let pro = GeminiModel::new(
-    "gemini-2.5-pro",
+// Vertex AI with Application Default Credentials, in the US multi-region.
+let hydrogen = GeminiModel::new(
+    "gemini-4-hydrogen",
     ClientConfig {
         backend: Some(Backend::VertexAi),
         project: Some("my-project".into()),
-        location: Some("us-central1".into()),
+        location: Some("us".into()),
         ..Default::default()
     },
 )
 .await?;
 ```
 
-Either model goes into `LlmAgentConfig::model`.
+Either model goes into `LlmAgentConfig::model`. The examples use `gemini-3.8-flash`;
+`gemini-4-hydrogen` also works. On Vertex AI, newer Gemini models are served from the `us`
+multi-region and `global`, not from single regions such as `us-central1`; location `us` uses the
+`aiplatform.us.rep.googleapis.com` endpoint.

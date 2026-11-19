@@ -7,6 +7,17 @@ the public API.
 
 ## [Unreleased]
 
+### Changed
+
+- Examples and docs use `gemini-3.8-flash` (`gemini-2.5-flash` is being deprecated); the
+  `gadk-gemini` README also names `gemini-4-hydrogen`. Vertex AI setups in the examples, READMEs
+  and the `gadk-eval` live test use location `us` (the US multi-region), since newer Gemini models
+  are served from `us` and `global`, not single regions such as `us-central1`; the
+  `agentengine` and `vertexai_session` examples give the model location `us` apart from the
+  Agent Engine's region. Live and native-audio models are unchanged.
+- `gadk-eval-monitor`: `DEFAULT_JUDGE_LOCATION` (used when a monitor spec's `judge` sets no
+  `location`) is now `us` instead of `us-central1`, so current Gemini judge models are found.
+
 ## [0.4.1] - 2026-11-19
 
 ### Added

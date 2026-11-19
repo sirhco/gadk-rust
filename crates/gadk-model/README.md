@@ -36,7 +36,7 @@ let factory: Factory = Arc::new(|name: String| {
     })
 });
 Registry::global().register("^(?i)gemini-.*", factory)?;
-let model = Registry::global().new_llm("gemini-2.5-flash").await?;
+let model = Registry::global().new_llm("gemini-3.8-flash").await?;
 ```
 
 ## Features

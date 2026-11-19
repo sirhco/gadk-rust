@@ -29,8 +29,9 @@ use gadk::prelude::*;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Gemini API key from GOOGLE_API_KEY / GEMINI_API_KEY, or Vertex AI with
-    // GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION and ADC.
-    let model = GeminiModel::new("gemini-2.5-flash", ClientConfig::default()).await?;
+    // GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION (`us` or `global`
+    // for newer Gemini models) and ADC.
+    let model = GeminiModel::new("gemini-3.8-flash", ClientConfig::default()).await?;
     let agent = llm_agent::new(LlmAgentConfig {
         name: "helper".into(),
         description: "Answers questions.".into(),
