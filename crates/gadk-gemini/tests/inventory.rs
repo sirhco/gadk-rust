@@ -14,6 +14,8 @@
 // limitations under the License.
 
 // Every ported `gadk_genai` / `gadk_model` path of the `google.golang.org/genai` surface exists.
+//! Checks that every public `gadk_genai` / `gadk_model` path of the GenAI SDK surface exists.
+
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![allow(unused_imports, dead_code, clippy::no_effect)]
 

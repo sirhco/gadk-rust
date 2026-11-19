@@ -32,9 +32,14 @@ pub mod base64_bytes {
     use bytes::Bytes;
     use serde::{Deserialize, Deserializer, Serializer};
 
+    /// Encodes the bytes as a standard base64 string.
     pub fn serialize<S: Serializer>(b: &Bytes, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&STANDARD.encode(b))
     }
+    /// Decodes a standard base64 string; `null` decodes to empty bytes.
+    ///
+    /// # Errors
+    /// Fails when the string is not valid base64.
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Bytes, D::Error> {
         let s = Option::<String>::deserialize(d)?.unwrap_or_default();
         STANDARD
@@ -51,12 +56,17 @@ pub mod base64_bytes_opt {
     use bytes::Bytes;
     use serde::{Deserialize, Deserializer, Serializer};
 
+    /// Encodes `Some` as a standard base64 string and `None` as `null`.
     pub fn serialize<S: Serializer>(b: &Option<Bytes>, s: S) -> Result<S::Ok, S::Error> {
         match b {
             Some(b) => s.serialize_str(&STANDARD.encode(b)),
             None => s.serialize_none(),
         }
     }
+    /// Decodes a standard base64 string, or `null` as `None`.
+    ///
+    /// # Errors
+    /// Fails when the string is not valid base64.
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Bytes>, D::Error> {
         match Option::<String>::deserialize(d)? {
             Some(s) => STANDARD
@@ -99,9 +109,14 @@ pub mod go_duration {
     use chrono::TimeDelta;
     use serde::{Deserialize, Deserializer, Serializer};
 
+    /// Encodes the duration as whole seconds with [`format_go_seconds`](super::format_go_seconds).
     pub fn serialize<S: Serializer>(d: &TimeDelta, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&super::format_go_seconds(*d))
     }
+    /// Decodes a duration string; `null` and `""` are zero.
+    ///
+    /// # Errors
+    /// Fails when the string is not a valid duration.
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<TimeDelta, D::Error> {
         super::decode_duration(Option::<String>::deserialize(d)?)
     }
@@ -130,9 +145,14 @@ impl I64OrString {
 pub mod i64_string {
     use serde::{Deserialize, Deserializer, Serializer};
 
+    /// Encodes the integer as a quoted decimal string.
     pub fn serialize<S: Serializer>(v: &i64, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&v.to_string())
     }
+    /// Decodes a quoted decimal string or a bare number; `null` is `0`.
+    ///
+    /// # Errors
+    /// Fails when the string is not a valid `i64`.
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
         match Option::<super::I64OrString>::deserialize(d)? {
             Some(v) => v.into_i64(),
@@ -146,12 +166,17 @@ pub mod i64_string {
 pub mod i64_string_opt {
     use serde::{Deserialize, Deserializer, Serializer};
 
+    /// Encodes `Some` as a quoted decimal string and `None` as `null`.
     pub fn serialize<S: Serializer>(v: &Option<i64>, s: S) -> Result<S::Ok, S::Error> {
         match v {
             Some(v) => s.serialize_str(&v.to_string()),
             None => s.serialize_none(),
         }
     }
+    /// Decodes a quoted decimal string or a bare number; `null` is `None`.
+    ///
+    /// # Errors
+    /// Fails when the string is not a valid `i64`.
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
         Option::<super::I64OrString>::deserialize(d)?
             .map(super::I64OrString::into_i64)

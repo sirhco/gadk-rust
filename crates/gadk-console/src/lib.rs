@@ -55,12 +55,21 @@ pub struct ConsoleConfig {
 #[non_exhaustive]
 pub enum ConsoleError {
     #[error("prompt store: {0}")]
+    /// The prompt store could not be opened.
     Store(#[from] gadk_prompts::StoreError),
     #[error("report store: {0}")]
+    /// The report store could not be opened.
     Reports(String),
+    /// The loopback port could not be bound.
     #[error("bind 127.0.0.1:{port}: {detail}")]
-    Bind { port: u16, detail: String },
+    Bind {
+        /// The requested port.
+        port: u16,
+        /// The bind error text.
+        detail: String,
+    },
     #[error("serve: {0}")]
+    /// The server failed while serving or printing its URL.
     Serve(String),
 }
 

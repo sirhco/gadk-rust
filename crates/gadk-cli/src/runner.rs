@@ -84,8 +84,11 @@ fn signal_name(sig: i32) -> String {
 /// exit).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CmdOutput {
+    /// How the child exited.
     pub exit: Exit,
+    /// The captured standard output.
     pub stdout: Vec<u8>,
+    /// The captured standard error.
     pub stderr: Vec<u8>,
 }
 

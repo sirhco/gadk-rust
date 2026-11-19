@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Tests for model variants.
+
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use gadk_model::*;

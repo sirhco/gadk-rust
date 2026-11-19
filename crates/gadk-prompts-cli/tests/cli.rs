@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! End-to-end tests of the `gadk-prompts` command-line tool.
+
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 struct Out {

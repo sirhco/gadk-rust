@@ -36,7 +36,9 @@ pub const DEFAULT_ENV_HELP: &str = "Include GOOGLE_CLOUD_REGION, NUM_WORKERS=1, 
 /// name only: values may be secrets.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct EnvVar {
+    /// The variable name.
     pub name: String,
+    /// The variable value.
     pub value: String,
 }
 

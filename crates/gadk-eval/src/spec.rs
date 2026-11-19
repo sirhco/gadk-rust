@@ -46,34 +46,61 @@ pub struct EvalCase {
 pub enum ScorerSpec {
     /// The reply contains `text`.
     Contains {
+        /// The text to look for.
         text: String,
+        /// Whether the comparison ignores case.
         ignore_case: bool,
+        /// The 1-based turn to grade; `None` grades the last turn.
         turn: Option<usize>,
     },
     /// The reply does not contain `text`.
     NotContains {
+        /// The text to look for.
         text: String,
+        /// Whether the comparison ignores case.
         ignore_case: bool,
+        /// The 1-based turn to grade; `None` grades the last turn.
         turn: Option<usize>,
     },
     /// The reply matches `pattern` anywhere.
-    Regex { pattern: Regex, turn: Option<usize> },
+    Regex {
+        /// The pattern.
+        pattern: Regex,
+        /// The 1-based turn to grade; `None` grades the last turn.
+        turn: Option<usize>,
+    },
     /// The reply equals `text` after trimming whitespace on both.
-    Equals { text: String, turn: Option<usize> },
+    Equals {
+        /// The expected reply.
+        text: String,
+        /// The 1-based turn to grade; `None` grades the last turn.
+        turn: Option<usize>,
+    },
     /// The tool calls of all turns satisfy `calls`.
     Tools {
+        /// The expected calls; each must be made, and other calls are allowed unless `exact`.
         calls: Vec<ToolExpect>,
+        /// Whether the calls must be made in this order (other calls may sit between).
         ordered: bool,
+        /// Whether the calls made must be exactly this sequence.
         exact: bool,
     },
     /// The judge finds the reply consistent with the reference `answer`.
     Reference {
+        /// The reference answer.
         answer: String,
+        /// The lowest passing judge score (1-5).
         min_score: u8,
+        /// The 1-based turn to grade; `None` grades the last turn.
         turn: Option<usize>,
     },
     /// The judge grades the whole conversation against `rubric`.
-    LlmJudge { rubric: String, min_score: u8 },
+    LlmJudge {
+        /// The rubric the judge grades against.
+        rubric: String,
+        /// The lowest passing judge score (1-5).
+        min_score: u8,
+    },
 }
 
 impl ScorerSpec {

@@ -69,25 +69,38 @@ pub const LONG: &str = "Deploys the application to Agent Engine. It creates a so
 /// The gcloud flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GCloudFlags {
+    /// `--region` (`-r`): the GCP region.
     pub region: String,
+    /// `--project_name` (`-p`): the GCP project.
     pub project_name: String,
 }
 
 /// The memory bank flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemoryBankFlags {
+    /// `--mem_deploy`: whether to deploy a Memory Bank too.
     pub deploy: bool,
+    /// `--mem_model`: the Memory Bank model (`publishers/google/models/<model_id>`); empty uses
+    /// Memory Bank's default. [`AgentEngineFlags::compute_flags`] prefixes a non-empty value with
+    /// `projects/<project_name>/locations/<region>/`.
     pub model: String,
+    /// `--mem_ttl`: the time-to-live of memories (default `8760h0m0s`).
     pub ttl: GoDuration,
 }
 
 /// The Agent Engine service flags. `Debug` shows the `--env` names only: values may be secrets.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct AgentEngineServiceFlags {
+    /// `--name` (`-s`): the Agent Engine name.
     pub name: String,
+    /// The display name [`AgentEngineFlags::compute_flags`] derives: the name, or
+    /// `ADK Agent: <local time>` when the name is empty.
     pub display_name: String,
+    /// `--server_port`: the agent server's port (default 8080).
     pub server_port: i64,
+    /// `--agent_engine_id`: the Agent Engine instance to update; empty creates a new one.
     pub agent_engine_id: String,
+    /// The Memory Bank flags.
     pub memory_bank: MemoryBankFlags,
     /// `--env` entries, verbatim (unvalidated until
     /// [`AgentEngineFlags::environment_variables`]).
@@ -133,28 +146,43 @@ impl std::fmt::Debug for AgentEngineServiceFlags {
 /// The build flags: the temp dir and the paths derived from it by `compute_flags`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildFlags {
+    /// `--temp_dir` (`-t`); after [`AgentEngineFlags::compute_flags`], the `agentEngine_*`
+    /// directory it created there (in the system temp dir when the flag is empty).
     pub temp_dir: String,
+    /// The path of the built executable: `<temp_dir>/<exec_file>` unless already set.
     pub exec_path: String,
+    /// The executable name: the resolved Cargo binary target when `exec_path` is empty.
     pub exec_file: String,
+    /// The path of the generated Dockerfile: `<temp_dir>/Dockerfile`.
     pub dockerfile_build_path: String,
+    /// The path of the source archive: `<temp_dir>/archive.tgz`.
     pub archive_path: String,
 }
 
 /// The source flags: the entry point, its original form and the derived source paths.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceFlags {
+    /// The directory of the resolved Cargo package.
     pub src_base_path: String,
+    /// `--entry_point_path` (`-e`); made absolute by [`AgentEngineFlags::compute_flags`].
     pub entry_point_path: String,
+    /// `--entry_point_path` as given on the command line.
     pub orig_entry_point_path: String,
+    /// `--source_dir` (`-d`); after [`AgentEngineFlags::compute_flags`], the absolute archive
+    /// root (the Cargo workspace root when the flag is empty).
     pub source_dir: String,
 }
 
 /// The flags of `gadk deploy agentengine`, plus gadk's `--bin` and the resolved Cargo target.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentEngineFlags {
+    /// The gcloud flags.
     pub gcloud: GCloudFlags,
+    /// The Agent Engine service flags.
     pub agent_engine: AgentEngineServiceFlags,
+    /// The build paths.
     pub build: BuildFlags,
+    /// The source paths.
     pub source: SourceFlags,
     /// gadk's `--bin` (not printed).
     pub bin: String,

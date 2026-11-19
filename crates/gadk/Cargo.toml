@@ -8,7 +8,6 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories = ["development-tools"]
-readme = "../../README.md"
 # Examples are declared explicitly below: examples/toolsearch_catalog.rs is a module shared
 # with tests/examples_toolsearch_main.rs through #[path], not an example.
 autoexamples = false

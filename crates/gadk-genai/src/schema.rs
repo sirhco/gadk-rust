@@ -23,13 +23,21 @@ use std::collections::BTreeMap;
 crate::string_enum!(
     /// The JSON type of a [`Schema`] (OpenAPI data type).
     Type {
+        /// Not specified.
         Unspecified => "TYPE_UNSPECIFIED",
+        /// A string.
         String => "STRING",
+        /// A floating-point number.
         Number => "NUMBER",
+        /// An integer.
         Integer => "INTEGER",
+        /// A boolean.
         Boolean => "BOOLEAN",
+        /// An array; see [`Schema::items`].
         Array => "ARRAY",
+        /// An object; see [`Schema::properties`].
         Object => "OBJECT",
+        /// JSON `null`.
         Null => "NULL",
     }
 );
@@ -38,49 +46,70 @@ crate::string_enum!(
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Schema {
+    /// The value must match at least one of these schemas.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub any_of: Vec<Schema>,
     /// An arbitrary JSON value; a JSON `null` decodes to `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
+    /// Description of the value; the model reads it to understand the field.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub description: String,
+    /// Allowed values of a `STRING` schema.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub r#enum: Vec<String>,
+    /// An example value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub example: Option<Value>,
+    /// Format of the value, such as `"int32"`, `"double"`, `"date-time"` or `"enum"`.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub format: String,
+    /// Schema of the elements of an `ARRAY`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub items: Option<Box<Schema>>,
+    /// Maximum number of elements of an `ARRAY`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_items: Option<i64>,
+    /// Maximum length of a `STRING`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_length: Option<i64>,
+    /// Maximum number of properties of an `OBJECT`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_properties: Option<i64>,
+    /// Maximum value of a `NUMBER` or `INTEGER`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maximum: Option<f64>,
+    /// Minimum number of elements of an `ARRAY`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_items: Option<i64>,
+    /// Minimum length of a `STRING`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_length: Option<i64>,
+    /// Minimum number of properties of an `OBJECT`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_properties: Option<i64>,
+    /// Minimum value of a `NUMBER` or `INTEGER`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimum: Option<f64>,
+    /// Whether the value may be `null`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nullable: Option<bool>,
+    /// Regular expression a `STRING` must match.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub pattern: String,
+    /// Schemas of the properties of an `OBJECT`, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub properties: BTreeMap<String, Schema>,
+    /// The order in which the model should produce the properties of an `OBJECT`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub property_ordering: Vec<String>,
+    /// Names of the required properties of an `OBJECT`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required: Vec<String>,
+    /// Title of the schema.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub title: String,
+    /// The data type of the value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub r#type: Option<Type>,
 }

@@ -13,6 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Build script: records the compiling `rustc` version in the `GADK_RUSTC_VERSION` environment
+//! variable (`unknown` if it cannot be read), which `tracking_header` includes.
+
 use std::process::Command;
 
 fn main() {

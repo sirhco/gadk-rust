@@ -81,15 +81,20 @@ CMD [\"/app/{bin}\", \"web\", \"-host\", \"0.0.0.0\", \"-port\", \"{server_port}
 /// What a [`SourceTree`] entry is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
+    /// A directory.
     Dir,
+    /// A regular file.
     File,
+    /// A symbolic link (recorded, not followed).
     Symlink,
 }
 
 /// One staged path, relative to the tree's root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
+    /// The path relative to the tree's root.
     pub path: PathBuf,
+    /// What the path is.
     pub kind: EntryKind,
 }
 
@@ -97,7 +102,9 @@ pub struct Entry {
 /// and the excluded paths.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceTree {
+    /// The walked root directory.
     pub root: PathBuf,
+    /// The entries, sorted by path.
     pub entries: Vec<Entry>,
 }
 

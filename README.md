@@ -83,47 +83,53 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 | `agentregistry` | | Google Cloud Agent Registry client (`gadk::agentregistry`) |
 | `agentanalytics` | | BigQuery Agent Analytics plugin (`gadk::agentanalytics`) |
 | `eval` | | Offline agent evaluation: eval sets, scorers, LLM judge (`gadk::eval`) |
+| `prompts` | | Versioned prompt registry with labels (`gadk::prompts`) |
+| `prompts-firestore` | | The prompt registry's Firestore store (`gadk::prompts_firestore`) |
 
 ## Crates
 
 | Crate | What it is |
 |---|---|
-| `gadk` | Façade: re-exports, features, `prelude` |
-| `gadk-genai` | Gemini-compatible content and config types |
-| `gadk-platform` | Time, UUID, task and environment seams; shared helpers |
-| `gadk-model` | `Llm` trait, model registry, HTTP seam, REST transport, SSE parser |
-| `gadk-gemini` | Gemini API / Vertex AI models, live (WebSocket) connections |
-| `gadk-anthropic` | Claude models |
-| `gadk-openai` | OpenAI models |
-| `gadk-session` | Sessions, events, in-memory session service, compaction config |
-| `gadk-session-database` | sqlite / PostgreSQL session service |
-| `gadk-artifact` | Artifact service API and in-memory service |
-| `gadk-artifact-gcs` | GCS artifact service |
-| `gadk-memory` | Long-term memory service |
-| `gadk-vertexai` | Vertex AI Agent Engine sessions and memory |
-| `gadk-agent` | Agent API: agents, contexts, tools, callbacks, plugins, fibers, cancel causes |
-| `gadk-engine` | LLM agent and flow, workflows, workflow agents, runner, built-in tools |
-| `gadk-tools` | Built-in tools that need no auth (Gemini tools, artifacts, memory, tool search, skills) |
-| `gadk-auth` | Credentials, providers, credential store, refresh-and-retry transport |
-| `gadk-mcp` | MCP toolset (on `rmcp`) |
-| `gadk-server` | ADK REST API server, authn, authz, Agent Engine server |
-| `gadk-a2a` | Agent2Agent server and remote agent (on the A2A Rust SDK) |
-| `gadk-launcher` | Console and web launchers, web UI, triggers |
-| `gadk-cli` | `gadk` deploy CLI (Cloud Run, Agent Engine) |
-| `gadk-agentregistry` | Agent Registry client |
+| [`gadk`](crates/gadk/README.md) | Façade: re-exports, features, `prelude` |
+| [`gadk-genai`](crates/gadk-genai/README.md) | Gemini-compatible content and config types |
+| [`gadk-platform`](crates/gadk-platform/README.md) | Time, UUID, task and environment seams; shared helpers |
+| [`gadk-model`](crates/gadk-model/README.md) | `Llm` trait, model registry, HTTP seam, REST transport, SSE parser |
+| [`gadk-gemini`](crates/gadk-gemini/README.md) | Gemini API / Vertex AI models, live (WebSocket) connections |
+| [`gadk-anthropic`](crates/gadk-anthropic/README.md) | Claude models |
+| [`gadk-openai`](crates/gadk-openai/README.md) | OpenAI models |
+| [`gadk-session`](crates/gadk-session/README.md) | Sessions, events, in-memory session service, compaction config |
+| [`gadk-session-database`](crates/gadk-session-database/README.md) | sqlite / PostgreSQL session service |
+| [`gadk-artifact`](crates/gadk-artifact/README.md) | Artifact service API and in-memory service |
+| [`gadk-artifact-gcs`](crates/gadk-artifact-gcs/README.md) | GCS artifact service |
+| [`gadk-memory`](crates/gadk-memory/README.md) | Long-term memory service |
+| [`gadk-vertexai`](crates/gadk-vertexai/README.md) | Vertex AI Agent Engine sessions and memory |
+| [`gadk-agent`](crates/gadk-agent/README.md) | Agent API: agents, contexts, tools, callbacks, plugins, fibers, cancel causes |
+| [`gadk-engine`](crates/gadk-engine/README.md) | LLM agent and flow, workflows, workflow agents, runner, built-in tools |
+| [`gadk-tools`](crates/gadk-tools/README.md) | Built-in tools that need no auth (Gemini tools, artifacts, memory, tool search, skills) |
+| [`gadk-auth`](crates/gadk-auth/README.md) | Credentials, providers, credential store, refresh-and-retry transport |
+| [`gadk-mcp`](crates/gadk-mcp/README.md) | MCP toolset (on `rmcp`) |
+| [`gadk-server`](crates/gadk-server/README.md) | ADK REST API server, authn, authz, Agent Engine server |
+| [`gadk-a2a`](crates/gadk-a2a/README.md) | Agent2Agent server and remote agent (on the A2A Rust SDK) |
+| [`gadk-launcher`](crates/gadk-launcher/README.md) | Console and web launchers, web UI, triggers |
+| [`gadk-cli`](crates/gadk-cli/README.md) | `gadk` deploy CLI (Cloud Run, Agent Engine) |
+| [`gadk-agentregistry`](crates/gadk-agentregistry/README.md) | Agent Registry client |
 | [`gadk-telemetry`](crates/gadk-telemetry/README.md) | OpenTelemetry providers, OTLP and GCP export (Cloud Trace, Cloud Monitoring, Cloud Logging) |
-| `gadk-agentanalytics` | BigQuery Agent Analytics plugin ([README](crates/gadk-agentanalytics/README.md)) |
-| `gadk-goyaml` | YAML library that reads and writes YAML exactly as ADK does (internal) ([README](crates/gadk-goyaml/README.md)) |
-| `gadk-configurable` | YAML agent configs, conformance record/replay, `adkcli` (internal) ([README](crates/gadk-configurable/README.md)) |
-| `gadk-httprr` | HTTP record/replay for deterministic tests |
+| [`gadk-agentanalytics`](crates/gadk-agentanalytics/README.md) | BigQuery Agent Analytics plugin |
+| [`gadk-goyaml`](crates/gadk-goyaml/README.md) | YAML library that reads and writes YAML exactly as ADK does (internal) |
+| [`gadk-configurable`](crates/gadk-configurable/README.md) | YAML agent configs, conformance record/replay, `adkcli` (internal) |
+| [`gadk-httprr`](crates/gadk-httprr/README.md) | HTTP record/replay for deterministic tests |
 | [`gadk-cloudtrace`](crates/gadk-cloudtrace/README.md) | Cloud Trace v1 read client (list and get traces), used by the console and the eval monitors |
-| [`gadk-console`](crates/gadk-console/README.md) | Local web console: Cloud Trace traces with their Cloud Logging entries, and the prompt registry |
+| [`gadk-prompts`](crates/gadk-prompts/README.md) | Versioned, labelled prompt registry: prompt stores, the file store, and prompts as instruction providers |
+| [`gadk-prompts-firestore`](crates/gadk-prompts-firestore/README.md) | Firestore store for `gadk-prompts` |
+| [`gadk-prompts-cli`](crates/gadk-prompts-cli/README.md) | `gadk-prompts` CLI: manage prompt versions and labels in a file or Firestore store |
+| [`gadk-console`](crates/gadk-console/README.md) | Local web console: Cloud Trace traces with their Cloud Logging entries, the prompt registry, and Evals pages for `gadk-eval-monitor` reports |
 | [`gadk-eval`](crates/gadk-eval/README.md) | Offline agent evaluation: YAML eval sets, deterministic, tool-trajectory and LLM-judge scorers, per-variant reports |
 | [`gadk-eval-monitor`](crates/gadk-eval-monitor/README.md) | Production eval monitors: grade logged runs from the BigQuery analytics table or Cloud Trace with gadk-eval scorers; the `gadk-eval` CLI |
 
 Binaries: `gadk` (the deploy CLI, [README](crates/gadk-cli/README.md)), `gadk-console` (the
 local web console, [README](crates/gadk-console/README.md)), `gadk-eval` (production eval
-monitors, [README](crates/gadk-eval-monitor/README.md)) and `adkcli` (the conformance CLI in
+monitors, [README](crates/gadk-eval-monitor/README.md)), `gadk-prompts` (the prompt registry
+CLI, [README](crates/gadk-prompts-cli/README.md)) and `adkcli` (the conformance CLI in
 `gadk-configurable`).
 
 Not included: ADK's experimental (`exp`) packages, the deprecated A2A v1 packages and the symbols

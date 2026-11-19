@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Checks the `gadk` facade exposes the prompt registry under the `prompts-firestore` feature.
+
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![cfg(feature = "prompts-firestore")]
 

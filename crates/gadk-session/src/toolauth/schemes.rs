@@ -33,9 +33,13 @@ use super::model_json::{
 /// An OAuth grant type; `as_str` is the RFC 6749 wire name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OAuthGrantType {
+    /// `client_credentials`.
     ClientCredentials,
+    /// `authorization_code`.
     AuthorizationCode,
+    /// `implicit`.
     Implicit,
+    /// `password`.
     Password,
 }
 
@@ -55,11 +59,15 @@ impl OAuthGrantType {
 /// scopes.
 #[derive(Clone, Default)]
 pub struct OAuthFlow {
+    /// `"authorizationUrl"`: the authorization endpoint; omitted when empty.
     pub authorization_url: String,
+    /// `"tokenUrl"`: the token endpoint; omitted when empty.
     pub token_url: String,
+    /// `"refreshUrl"`: the refresh endpoint; omitted when empty.
     pub refresh_url: String,
     /// Always written, `{}` when empty.
     pub scopes: BTreeMap<String, String>,
+    /// Unknown keys, written back after the fields.
     pub extra: Extra,
 }
 
@@ -121,13 +129,20 @@ impl<'de> Deserialize<'de> for OAuthFlow {
     }
 }
 
-/// The OAuth flows of a scheme.
+/// The OAuth flows of a scheme. Decoding rejects a flow without the URLs it needs (an empty URL
+/// counts as missing): implicit needs `authorizationUrl`, password and client credentials need
+/// `tokenUrl`, authorization code needs both.
 #[derive(Clone, Default)]
 pub struct OAuthFlows {
+    /// `"implicit"`: the implicit flow.
     pub implicit: Option<OAuthFlow>,
+    /// `"password"`: the resource-owner password flow.
     pub password: Option<OAuthFlow>,
+    /// `"clientCredentials"`: the client-credentials flow.
     pub client_credentials: Option<OAuthFlow>,
+    /// `"authorizationCode"`: the authorization-code flow.
     pub authorization_code: Option<OAuthFlow>,
+    /// Unknown keys, written back after the fields.
     pub extra: Extra,
 }
 
@@ -237,15 +252,21 @@ impl<'de> Deserialize<'de> for OAuthFlows {
 pub struct SchemeType(Cow<'static, str>);
 
 impl SchemeType {
+    /// `"apiKey"`: an API key sent in a header, query parameter or cookie.
     pub const API_KEY: SchemeType = SchemeType(Cow::Borrowed("apiKey"));
+    /// `"http"`: HTTP authentication such as basic or bearer.
     pub const HTTP: SchemeType = SchemeType(Cow::Borrowed("http"));
+    /// `"oauth2"`: OAuth 2.0 with [`OAuthFlows`].
     pub const OAUTH2: SchemeType = SchemeType(Cow::Borrowed("oauth2"));
+    /// `"openIdConnect"`: OpenID Connect.
     pub const OPEN_ID_CONNECT: SchemeType = SchemeType(Cow::Borrowed("openIdConnect"));
 
+    /// Wraps any string; custom types are kept as they are.
     pub fn new(s: impl Into<Cow<'static, str>>) -> Self {
         SchemeType(s.into())
     }
 
+    /// The wire string, e.g. `"oauth2"`.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -283,26 +304,49 @@ impl<'de> Deserialize<'de> for SchemeType {
     }
 }
 
-/// An authentication scheme. Fields are written in the declaration order below (wire names in
-/// comments).
+/// An authentication scheme: an OpenAPI security scheme plus adk-python's OpenID Connect
+/// fields. Fields are written in declaration order (wire names below); empty strings are
+/// omitted, and a `None` list is omitted while `Some(vec![])` writes `[]`.
+///
+/// Decoding does not check that the fields fit the type. A missing `type` is inferred: `in` and
+/// `name` give API key, `flows` gives OAuth 2.0, `openIdConnectUrl` (or both the authorization and
+/// token endpoints) gives OpenID Connect, `scheme` gives HTTP; with none of these, decoding fails.
 #[derive(Clone, Default)]
 pub struct Scheme {
-    pub r#type: SchemeType,                                         // "type"
-    pub description: String,                                        // "description"
-    pub r#in: String,                                               // "in"
-    pub name: String,                                               // "name"
-    pub scheme: String,                                             // "scheme"
-    pub bearer_format: String,                                      // "bearerFormat"
-    pub flows: Option<OAuthFlows>,                                  // "flows"
-    pub issuer_url: String,                                         // "issuer_url"
-    pub open_id_connect_url: String,                                // "openIdConnectUrl"
-    pub authorization_endpoint: String,                             // "authorization_endpoint"
-    pub token_endpoint: String,                                     // "token_endpoint"
-    pub userinfo_endpoint: String,                                  // "userinfo_endpoint"
-    pub revocation_endpoint: String,                                // "revocation_endpoint"
-    pub token_endpoint_auth_methods_supported: Option<Vec<String>>, // omitzero: None omitted, Some(vec![]) writes []
+    /// `"type"`: the scheme type.
+    pub r#type: SchemeType,
+    /// `"description"`: a human-readable description.
+    pub description: String,
+    /// `"in"`: where an API key goes (`header`, `query` or `cookie`).
+    pub r#in: String,
+    /// `"name"`: the API key's header, query parameter or cookie name.
+    pub name: String,
+    /// `"scheme"`: the HTTP authentication scheme, e.g. `basic` or `bearer`.
+    pub scheme: String,
+    /// `"bearerFormat"`: a hint for the bearer token's format, e.g. `JWT`.
+    pub bearer_format: String,
+    /// `"flows"`: the OAuth 2.0 flows.
+    pub flows: Option<OAuthFlows>,
+    /// `"issuer_url"`: the OpenID Connect issuer.
+    pub issuer_url: String,
+    /// `"openIdConnectUrl"`: the OpenID Connect discovery URL.
+    pub open_id_connect_url: String,
+    /// `"authorization_endpoint"`: the OpenID Connect authorization endpoint.
+    pub authorization_endpoint: String,
+    /// `"token_endpoint"`: the OpenID Connect token endpoint.
+    pub token_endpoint: String,
+    /// `"userinfo_endpoint"`: the OpenID Connect userinfo endpoint.
+    pub userinfo_endpoint: String,
+    /// `"revocation_endpoint"`: the token revocation endpoint.
+    pub revocation_endpoint: String,
+    /// `"token_endpoint_auth_methods_supported"`: the client authentication methods the token
+    /// endpoint accepts.
+    pub token_endpoint_auth_methods_supported: Option<Vec<String>>,
+    /// `"grant_types_supported"`: the supported OAuth grant types.
     pub grant_types_supported: Option<Vec<String>>,
+    /// `"scopes"`: the scopes to request.
     pub scopes: Option<Vec<String>>,
+    /// Unknown keys, written back after the fields.
     pub extra: Extra,
 }
 

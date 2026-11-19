@@ -24,14 +24,23 @@ use std::io::{self, Write};
 use crate::SharedWriter;
 use crate::runner::{Cmd, CommandRunner};
 
+/// ANSI escape: resets all attributes.
 pub const RESET: &str = "\x1b[0m";
+/// ANSI escape: red foreground.
 pub const RED: &str = "\x1b[31m";
+/// ANSI escape: green foreground.
 pub const GREEN: &str = "\x1b[32m";
+/// ANSI escape: yellow foreground.
 pub const YELLOW: &str = "\x1b[33m";
+/// ANSI escape: blue foreground.
 pub const BLUE: &str = "\x1b[34m";
+/// ANSI escape: magenta foreground.
 pub const MAGENTA: &str = "\x1b[35m";
+/// ANSI escape: cyan foreground.
 pub const CYAN: &str = "\x1b[36m";
+/// ANSI escape: gray foreground (SGR 37).
 pub const GRAY: &str = "\x1b[37m";
+/// ANSI escape: bright white foreground.
 pub const WHITE: &str = "\x1b[97m";
 
 /// The step printer `log_start_stop` builds. The arguments of one call arrive as one list, so a

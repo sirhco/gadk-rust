@@ -56,6 +56,8 @@ use crate::remoteagent::{A2AClient, A2AServerConfig, ClientContext};
 #[cfg(feature = "client")]
 pub(crate) const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How the executor turns a run's ADK events into A2A artifacts
+/// ([`ExecutorConfig::output_mode`]). Defaults to [`OutputMode::ArtifactPerRun`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputMode {
     /// `"artifact-per-run"`: one artifact per runner run.

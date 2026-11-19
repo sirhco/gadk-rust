@@ -26,32 +26,46 @@ use crate::store::StoreError;
 /// One immutable version of a prompt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PromptVersion {
+    /// The prompt name.
     pub name: String,
+    /// The version number, starting at 1.
     pub version: u32,
+    /// The template text.
     pub template: String,
+    /// Optional JSON configuration stored with the template.
     #[serde(default)]
     pub config: Option<Value>,
+    /// When and by whom the version was created, and its content hash.
     pub meta: VersionMeta,
 }
 
 /// Metadata recorded when a version is created.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VersionMeta {
+    /// When the version was created.
     pub created_at: DateTime<Utc>,
+    /// Who created the version (empty when not given).
     #[serde(default)]
     pub author: String,
+    /// The change message (empty when not given).
     #[serde(default)]
     pub message: String,
+    /// The [`content_hash`] of the template and config.
     pub hash: String,
 }
 
 /// Input to [`PromptStore::create_version`](crate::PromptStore::create_version).
 #[derive(Debug, Clone)]
 pub struct NewVersion {
+    /// The prompt name.
     pub name: String,
+    /// The template text.
     pub template: String,
+    /// Optional JSON configuration stored with the template.
     pub config: Option<Value>,
+    /// Who creates the version.
     pub author: String,
+    /// The change message.
     pub message: String,
 }
 
@@ -63,8 +77,11 @@ pub struct Label(String);
 /// Which version of a prompt to use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selector {
+    /// The version a label points at.
     Label(Label),
+    /// This exact version number.
     Version(u32),
+    /// The highest version number.
     Latest,
 }
 
@@ -158,12 +175,15 @@ impl Label {
         }
         Ok(Self(s.to_owned()))
     }
+    /// The `production` label.
     pub fn production() -> Self {
         Self("production".into())
     }
+    /// The `staging` label.
     pub fn staging() -> Self {
         Self("staging".into())
     }
+    /// The label text.
     pub fn as_str(&self) -> &str {
         &self.0
     }

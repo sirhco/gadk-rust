@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Wire tests of the Firestore prompt store's REST requests against a fake Firestore.
+
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod fake_firestore;

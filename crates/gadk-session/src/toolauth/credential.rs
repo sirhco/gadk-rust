@@ -39,16 +39,23 @@ use super::model_json::{
 pub struct CredentialType(Cow<'static, str>);
 
 impl CredentialType {
+    /// `"apiKey"`: an API key in [`Credential::api_key`].
     pub const API_KEY: CredentialType = CredentialType(Cow::Borrowed("apiKey"));
+    /// `"http"`: HTTP authentication in [`Credential::http`].
     pub const HTTP: CredentialType = CredentialType(Cow::Borrowed("http"));
+    /// `"oauth2"`: OAuth 2.0 in [`Credential::oauth2`].
     pub const OAUTH2: CredentialType = CredentialType(Cow::Borrowed("oauth2"));
+    /// `"openIdConnect"`: OpenID Connect, carried in [`Credential::oauth2`].
     pub const OPEN_ID_CONNECT: CredentialType = CredentialType(Cow::Borrowed("openIdConnect"));
+    /// `"serviceAccount"`: a Google service account in [`Credential::service_account`].
     pub const SERVICE_ACCOUNT: CredentialType = CredentialType(Cow::Borrowed("serviceAccount"));
 
+    /// Wraps any string. Only the five constants decode inside a [`Credential`].
     pub fn new(s: impl Into<Cow<'static, str>>) -> Self {
         CredentialType(s.into())
     }
 
+    /// The wire string, e.g. `"oauth2"`.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -123,11 +130,17 @@ fn non_empty(w: &mut ObjectWriter, fields: &[(&str, &String)]) {
     }
 }
 
+/// The secrets of an HTTP credential: a username and password for basic auth, or a token for
+/// bearer auth. Empty fields are omitted when written.
 #[derive(Clone, Default)]
 pub struct HttpCredentials {
+    /// `"username"`: the basic-auth user name.
     pub username: String,
+    /// `"password"`: the basic-auth password.
     pub password: String,
+    /// `"token"`: the bearer (or other scheme) token.
     pub token: String,
+    /// Unknown keys, written back after the fields.
     pub extra: Extra,
 }
 
@@ -170,6 +183,8 @@ impl PartialEq for HttpCredentials {
     }
 }
 
+/// An HTTP credential: the scheme (e.g. `basic`, `bearer`), its secrets and optional extra
+/// request headers.
 #[derive(Clone, Default)]
 pub struct HttpAuth {
     /// Required on decode.
@@ -178,6 +193,7 @@ pub struct HttpAuth {
     pub credentials: HttpCredentials,
     /// "additionalHeaders", omitzero.
     pub additional_headers: Option<BTreeMap<String, String>>,
+    /// Unknown keys, written back after the fields.
     pub extra: Extra,
 }
 
@@ -221,27 +237,49 @@ impl PartialEq for HttpAuth {
     }
 }
 
+/// An OAuth 2.0 (or OpenID Connect) credential: the client registration, the state of an
+/// authorization-code exchange, and the tokens it produced. Empty strings and zero integers are
+/// omitted when written.
 #[derive(Clone, Default)]
 pub struct OAuth2Auth {
+    /// `"clientId"`: the OAuth client ID.
     pub client_id: String,
+    /// `"clientSecret"`: the OAuth client secret.
     pub client_secret: String,
+    /// `"authUri"`: the authorization URL the end user is sent to.
     pub auth_uri: String,
+    /// `"nonce"`: the OpenID Connect nonce.
     pub nonce: String,
+    /// `"state"`: the OAuth `state` parameter of the authorization request.
     pub state: String,
+    /// `"redirectUri"`: the redirect URI registered for the client.
     pub redirect_uri: String,
+    /// `"authResponseUri"`: the full redirect URL the client returned after consent.
     pub auth_response_uri: String,
+    /// `"authCode"`: the authorization code.
     pub auth_code: String,
+    /// `"accessToken"`: the access token.
     pub access_token: String,
+    /// `"refreshToken"`: the refresh token.
     pub refresh_token: String,
+    /// `"idToken"`: the OpenID Connect ID token.
     pub id_token: String,
+    /// `"expiresAt"`: when the access token expires; omitted when 0.
     pub expires_at: i64,
+    /// `"expiresIn"`: the access token lifetime as reported by the token endpoint; omitted when
+    /// 0.
     pub expires_in: i64,
+    /// `"audience"`: the requested token audience.
     pub audience: String,
+    /// `"prompt"`: the OAuth `prompt` parameter.
     pub prompt: String,
+    /// `"codeVerifier"`: the PKCE code verifier.
     pub code_verifier: String,
+    /// `"codeChallengeMethod"`: the PKCE code challenge method.
     pub code_challenge_method: String,
     /// Written as "client_secret_basic" when empty.
     pub token_endpoint_auth_method: String,
+    /// Unknown keys, written back after the fields.
     pub extra: Extra,
 }
 
@@ -398,19 +436,33 @@ impl PartialEq for OAuth2Auth {
     }
 }
 
+/// A Google service-account key, as in a downloaded JSON key file. Decoding requires every field
+/// but `type`; every field is written, even when empty.
 #[derive(Clone, Default)]
 pub struct ServiceAccountCredential {
+    /// `"type"`: the key type, normally `service_account`.
     pub r#type: String,
+    /// `"projectId"`: the Google Cloud project ID.
     pub project_id: String,
+    /// `"privateKeyId"`: the ID of the private key.
     pub private_key_id: String,
+    /// `"privateKey"`: the PEM-encoded private key.
     pub private_key: String,
+    /// `"clientEmail"`: the service account's email address.
     pub client_email: String,
+    /// `"clientId"`: the service account's client ID.
     pub client_id: String,
+    /// `"authUri"`: the OAuth authorization endpoint.
     pub auth_uri: String,
+    /// `"tokenUri"`: the OAuth token endpoint.
     pub token_uri: String,
+    /// `"authProviderX509CertUrl"`: the URL of the auth provider's X.509 certificates.
     pub auth_provider_x509_cert_url: String,
+    /// `"clientX509CertUrl"`: the URL of the service account's X.509 certificate.
     pub client_x509_cert_url: String,
+    /// `"universeDomain"`: the Google Cloud universe domain.
     pub universe_domain: String,
+    /// Unknown keys, written back after the fields.
     pub extra: Extra,
 }
 
@@ -501,8 +553,13 @@ impl PartialEq for ServiceAccountCredential {
     }
 }
 
+/// A service-account credential: either an explicit key or Application Default Credentials, with
+/// the scopes to request or, for an ID token, its audience. Decoding rejects a value with neither
+/// a key nor `useDefaultCredential`, and `useIdToken` without an audience.
 #[derive(Clone, Default)]
 pub struct ServiceAccount {
+    /// `"serviceAccountCredential"`: the key; required unless
+    /// [`use_default_credential`](Self::use_default_credential) is set.
     pub service_account_credential: Option<ServiceAccountCredential>,
     /// omitzero.
     pub scopes: Option<Vec<String>>,
@@ -510,7 +567,10 @@ pub struct ServiceAccount {
     pub use_default_credential: bool,
     /// Always written.
     pub use_id_token: bool,
+    /// `"audience"`: the ID token audience; required with
+    /// [`use_id_token`](Self::use_id_token).
     pub audience: String,
+    /// Unknown keys, written back after the fields.
     pub extra: Extra,
 }
 
@@ -585,15 +645,25 @@ impl PartialEq for ServiceAccount {
     }
 }
 
+/// A credential: its [`CredentialType`] and the matching payload. Decoding rejects a missing or
+/// unknown auth type and an invalid payload in any field; it does not check that the payload
+/// matches the type.
 #[derive(Clone, Default)]
 pub struct Credential {
-    /// Required on decode.
+    /// `"authType"`: the credential kind. Required on decode.
     pub auth_type: CredentialType,
+    /// `"resourceRef"`: a reference to the resource the credential is for; omitted when empty.
     pub resource_ref: String,
+    /// `"apiKey"`: the API key, for [`CredentialType::API_KEY`]; omitted when empty.
     pub api_key: String,
+    /// `"http"`: the HTTP credential, for [`CredentialType::HTTP`].
     pub http: Option<HttpAuth>,
+    /// `"serviceAccount"`: the service account, for [`CredentialType::SERVICE_ACCOUNT`].
     pub service_account: Option<ServiceAccount>,
+    /// `"oauth2"`: the OAuth 2.0 credential, for [`CredentialType::OAUTH2`] and
+    /// [`CredentialType::OPEN_ID_CONNECT`].
     pub oauth2: Option<OAuth2Auth>,
+    /// Unknown keys, written back after the fields.
     pub extra: Extra,
 }
 

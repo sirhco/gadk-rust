@@ -23,13 +23,16 @@ use crate::store::StoreError;
 /// One prompt's versions and labels.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PromptEntry {
+    /// The versions, by version number.
     pub versions: BTreeMap<u32, Arc<PromptVersion>>,
+    /// The labels and the version each points at.
     pub labels: BTreeMap<Label, u32>,
 }
 
 /// Every prompt, by name.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PromptSnapshot {
+    /// The prompts, by name.
     pub prompts: BTreeMap<String, PromptEntry>,
 }
 

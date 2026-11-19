@@ -26,11 +26,18 @@ pub enum StoreError {
     /// No prompt `name`, or no version or label `selector` in it (`selector` is empty when the
     /// name itself is unknown).
     #[error("not found: {name}{}", if selector.is_empty() { String::new() } else { format!("@{selector}") })]
-    NotFound { name: String, selector: String },
+    NotFound {
+        /// The prompt name.
+        name: String,
+        /// The version or label looked up; empty when the prompt itself is unknown.
+        selector: String,
+    },
     /// A compare-and-set or concurrent write lost: `expected` was required, `actual` was found.
     #[error("{}", conflict_message(*expected, *actual))]
     Conflict {
+        /// The version that was required; `None` means unset (both `None`: a concurrent write lost).
         expected: Option<u32>,
+        /// The version found; `None` means unset.
         actual: Option<u32>,
     },
     /// Invalid input (name, label, store URL, root path).
@@ -41,7 +48,12 @@ pub enum StoreError {
     Io(String),
     /// A non-success HTTP reply from a remote store.
     #[error("http {status}: {body}")]
-    Http { status: u16, body: String },
+    Http {
+        /// The HTTP status code.
+        status: u16,
+        /// The reply body.
+        body: String,
+    },
     /// Stored data that cannot be decoded.
     #[error("decode: {0}")]
     Decode(String),

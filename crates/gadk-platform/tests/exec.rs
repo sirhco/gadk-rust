@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Tests for the platform task runner.
+
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use gadk_platform::{BoxFuture, Platform, TaskRunner};

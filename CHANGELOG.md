@@ -29,6 +29,9 @@ the public API.
   the agent's spans (`CloudTraceTranscriptSource`, `source::trace_mapping::build_runs`); the agent
   must run with `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` or
   `SPAN_AND_EVENT`. `SourceSpec::cloud_trace(project)` builds the source in code.
+- Documentation: every crate has a README (its crates.io page), every public item has rustdoc,
+  and the workspace now warns on `missing_docs` (an error under the clippy gate). The `gadk`
+  crate's crates.io page is now `crates/gadk/README.md`.
 
 ### Changed
 

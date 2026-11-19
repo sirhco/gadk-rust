@@ -25,10 +25,14 @@ use chrono::{DateTime, Utc};
 /// The trace-list time window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimeRange {
+    /// The last hour (the default).
     #[default]
     Hour1,
+    /// The last 6 hours.
     Hours6,
+    /// The last 24 hours.
     Hours24,
+    /// The last 7 days.
     Days7,
 }
 
@@ -87,6 +91,7 @@ impl TraceId {
 /// A trace-list request.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TraceQuery {
+    /// The time window to list.
     pub range: TimeRange,
     /// Root span name prefix.
     pub name: Option<String>,
@@ -94,45 +99,61 @@ pub struct TraceQuery {
     pub agent: Option<String>,
     /// Exact `gen_ai.conversation.id`.
     pub session: Option<String>,
+    /// The opaque token of the page to fetch; `None` fetches the first page.
     pub page_token: Option<String>,
 }
 
 /// One trace-list row.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraceSummary {
+    /// The trace id.
     pub trace_id: TraceId,
+    /// The root span's name (empty when the trace has no spans).
     pub root_name: String,
+    /// The root span's start (the Unix epoch when the trace has no spans).
     pub start: DateTime<Utc>,
+    /// The root span's duration in milliseconds.
     pub duration_ms: f64,
+    /// The root span's `gen_ai.agent.name` label.
     pub agent: Option<String>,
+    /// The root span's `gen_ai.conversation.id` label.
     pub session: Option<String>,
 }
 
 /// One page of the trace list.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TracePage {
+    /// The rows of this page.
     pub traces: Vec<TraceSummary>,
+    /// The token of the next page, if any.
     pub next: Option<String>,
 }
 
 /// One span. Ids are 16 lowercase hex characters.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawSpan {
+    /// The span id.
     pub span_id: String,
     /// None when absent or zero.
     pub parent_id: Option<String>,
+    /// The span name.
     pub name: String,
+    /// When the span started.
     pub start: DateTime<Utc>,
+    /// When the span ended.
     pub end: DateTime<Utc>,
+    /// The span's labels.
     pub labels: BTreeMap<String, String>,
 }
 
 /// One Cloud Logging entry of the trace.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogEntry {
+    /// When the entry was written.
     pub timestamp: DateTime<Utc>,
     /// 16 lowercase hex, as written by gadk-telemetry.
     pub span_id: Option<String>,
+    /// The entry's severity, as Cloud Logging reports it.
     pub severity: Option<String>,
     /// The entry's `jsonPayload` (Null when absent).
     pub payload: serde_json::Value,
@@ -141,22 +162,29 @@ pub struct LogEntry {
 /// A trace's log entries; `truncated` when more than the collected 1,000 exist.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LogSet {
+    /// The entries read.
     pub entries: Vec<LogEntry>,
+    /// Whether entries were left unread.
     pub truncated: bool,
 }
 
 /// A trace with its spans and (separately fallible) log entries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraceDetail {
+    /// The trace id.
     pub trace_id: TraceId,
+    /// The trace's spans.
     pub spans: Vec<RawSpan>,
+    /// The trace's log entries, or the error reading them.
     pub logs: Result<LogSet, SourceError>,
 }
 
 /// The upstream API a [`SourceError`] came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Service {
+    /// Cloud Trace.
     Trace,
+    /// Cloud Logging.
     Logging,
 }
 
@@ -176,16 +204,34 @@ pub enum SourceError {
     /// Non-2xx reply. `excerpt` is at most 1,024 bytes of the body, cut on a char boundary.
     #[error("{service}: HTTP {status}: {excerpt}")]
     Upstream {
+        /// The API that replied.
         service: Service,
+        /// The HTTP status code.
         status: u16,
+        /// At most 1,024 bytes of the reply body.
         excerpt: String,
+        /// The `reason` of the reply's `google.rpc.ErrorInfo` detail, if any (for example
+        /// `SERVICE_DISABLED`).
         reason: Option<String>,
     },
+    /// The request failed before a reply arrived.
     #[error("{service}: {detail}")]
-    Transport { service: Service, detail: String },
+    Transport {
+        /// The API that was called.
+        service: Service,
+        /// The failure text.
+        detail: String,
+    },
+    /// The reply could not be decoded.
     #[error("{service}: unexpected response: {detail}")]
-    Decode { service: Service, detail: String },
+    Decode {
+        /// The API that replied.
+        service: Service,
+        /// What was wrong with the reply.
+        detail: String,
+    },
     #[error("credentials: {0}")]
+    /// Credentials could not be obtained.
     Credentials(String),
     /// The trace id is unknown to Cloud Trace (HTTP 404 on get).
     #[error("trace not found")]

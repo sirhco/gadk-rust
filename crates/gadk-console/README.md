@@ -41,6 +41,10 @@ a one-line `gadk-console: …` message.
   - for a `gs://` report store, `roles/storage.objectViewer` on the bucket.
 - The Cloud Trace and Cloud Logging APIs enabled on the project.
 
+Traces are read through the Cloud Trace v1 client in
+[`gadk-cloudtrace`](../gadk-cloudtrace/README.md) (the same client `gadk-eval-monitor`'s
+`cloud_trace` source uses); log entries come from the Cloud Logging API.
+
 Credentials are built on the first GCP call, so the console starts without them. A `gs://` report
 store is the exception: its credentials are looked up at startup. A missing role or disabled API
 shows as an error banner with a hint ("needs roles/cloudtrace.user",

@@ -65,70 +65,107 @@ pub const TRIGGER_OIDC_FLAG_NAMES: [&str; 4] = [
 /// The gcloud flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GCloudFlags {
+    /// `--region` (`-r`): the GCP region.
     pub region: String,
+    /// `--project_name` (`-p`): the GCP project.
     pub project_name: String,
 }
 
 /// The trigger configuration flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TriggerConfigFlags {
+    /// `--<trigger>_max_retries`: the retries for HTTP 429 errors (default 3).
     pub max_retries: i64,
+    /// `--<trigger>_base_delay`: the base delay of the retry backoff (default 1s).
     pub base_delay: GoDuration,
+    /// `--<trigger>_max_delay`: the maximum delay of the retry backoff (default 10s).
     pub max_delay: GoDuration,
+    /// `--<trigger>_max_concurrent_runs`: the most trigger runs at once (default 100).
     pub max_runs: i64,
+    /// `--<trigger>_oidc_audience`: the audience of the OIDC token the trigger attaches.
     pub oidc_audience: String,
+    /// `--<trigger>_oidc_service_accounts`: the comma-separated service account emails allowed
+    /// to call the trigger endpoint.
     pub oidc_service_accounts: String,
     /// Whether each OIDC flag was on the command line, which an empty value
     /// alone cannot tell from it being omitted.
     pub oidc_audience_passed: bool,
+    /// Whether `--<trigger>_oidc_service_accounts` was on the command line.
     pub oidc_service_accounts_passed: bool,
 }
 
 /// The Cloud Run service flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CloudRunServiceFlags {
+    /// `--service_name` (`-s`): the Cloud Run service name.
     pub service_name: String,
+    /// `--server_port`: the server port (default 8080).
     pub server_port: i64,
+    /// `--a2a_agent_url` (`-a`): the A2A agent card URL advertised in the public agent card
+    /// (default `http://127.0.0.1:8081`).
     pub a2a_agent_card_url: String,
+    /// `--a2a`: enable A2A (default true).
     pub a2a: bool,
+    /// `--api`: enable the API (default true).
     pub api: bool,
+    /// `--debug_api`: enable the Debug API (default false; requires `--api`).
     pub debug_api: bool,
+    /// `--webui`: enable the web UI (default true).
     pub webui: bool,
+    /// `--pubsub`: enable the Pub/Sub subrouter (default false).
     pub pubsub: bool,
+    /// The `--pubsub_*` trigger flags.
     pub pubsub_trigger: TriggerConfigFlags,
+    /// `--eventarc`: enable the Eventarc subrouter (default false).
     pub eventarc: bool,
+    /// The `--eventarc_*` trigger flags.
     pub eventarc_trigger: TriggerConfigFlags,
 }
 
 /// The local proxy flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LocalProxyFlags {
+    /// `--proxy_port`: the local proxy's port (default 8081).
     pub port: i64,
 }
 
 /// The build flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildFlags {
+    /// `--temp_dir` (`-t`); after [`CloudRunFlags::compute_flags`], the `cloudrun_*` directory
+    /// it created there (in the system temp dir when the flag is empty).
     pub temp_dir: String,
+    /// The path of the built executable: `<temp_dir>/<exec_file>` unless already set.
     pub exec_path: String,
+    /// The executable name: the resolved Cargo binary target.
     pub exec_file: String,
+    /// The path of the generated Dockerfile: `<temp_dir>/Dockerfile`.
     pub dockerfile_build_path: String,
 }
 
 /// The source flags.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceFlags {
+    /// The Cargo workspace root of the resolved package, set by
+    /// [`CloudRunFlags::compute_flags`].
     pub src_base_path: String,
+    /// `--entry_point_path` (`-e`); after [`CloudRunFlags::compute_flags`], the resolved
+    /// package's directory.
     pub entry_point_path: String,
 }
 
 /// The flags of `gadk deploy cloudrun`, plus gadk's `--bin` and the resolved Cargo target.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CloudRunFlags {
+    /// The gcloud flags.
     pub gcloud: GCloudFlags,
+    /// The Cloud Run service flags.
     pub cloud_run: CloudRunServiceFlags,
+    /// The local proxy flags.
     pub proxy: LocalProxyFlags,
+    /// The build paths.
     pub build: BuildFlags,
+    /// The source paths.
     pub source: SourceFlags,
     /// gadk's `--bin` (not printed).
     pub bin: String,

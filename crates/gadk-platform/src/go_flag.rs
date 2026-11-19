@@ -66,6 +66,7 @@ impl<T> Flag<T> {
 /// A parse failure; `Display` is the message that [`FlagSet::parse`] reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlagError {
+    /// The error text, e.g. `flag: help requested` or `invalid value "v" for flag -name: ...`.
     pub message: String,
 }
 

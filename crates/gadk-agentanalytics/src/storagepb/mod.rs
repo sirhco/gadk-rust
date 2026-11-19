@@ -26,7 +26,9 @@
 // Generated code is not held to the workspace lints: prost/tonic output trips clippy style lints
 // (`doc_lazy_continuation`, `large_enum_variant`) and googleapis comments contain bare URLs; the
 // workspace's restriction lints are allowed too so a regeneration never needs an edit here.
+// prost leaves fields without proto comments undocumented, so `missing_docs` is allowed as well.
 #![allow(
+    missing_docs,
     clippy::all,
     clippy::unwrap_used,
     clippy::expect_used,

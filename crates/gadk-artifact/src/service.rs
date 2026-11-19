@@ -134,9 +134,13 @@ fn file_fields<'a>(
 /// A request to save an artifact version.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SaveRequest {
+    /// The application name.
     pub app_name: String,
+    /// The user ID.
     pub user_id: String,
+    /// The session ID.
     pub session_id: String,
+    /// The artifact's file name; it must not contain a path separator (`/` or `\`).
     pub file_name: String,
     /// The artifact to store.
     pub part: Option<Part>,
@@ -187,16 +191,22 @@ impl SaveRequest {
 /// The result of a save: the version that was created.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SaveResponse {
+    /// The number of the version the save created.
     pub version: i64,
 }
 
 /// A request to load an artifact. `version` is optional (0 means the latest).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LoadRequest {
+    /// The application name.
     pub app_name: String,
+    /// The user ID.
     pub user_id: String,
+    /// The session ID.
     pub session_id: String,
+    /// The artifact's file name; it must not contain a path separator (`/` or `\`).
     pub file_name: String,
+    /// The version to load; 0 loads the latest.
     pub version: i64,
 }
 
@@ -225,10 +235,15 @@ pub struct LoadResponse {
 /// A request to delete an artifact. `version` is optional (0 means every version).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DeleteRequest {
+    /// The application name.
     pub app_name: String,
+    /// The user ID.
     pub user_id: String,
+    /// The session ID.
     pub session_id: String,
+    /// The artifact's file name; it must not contain a path separator (`/` or `\`).
     pub file_name: String,
+    /// The version to delete; 0 deletes every version.
     pub version: i64,
 }
 
@@ -250,8 +265,11 @@ impl DeleteRequest {
 /// A request to list the artifact file names of a session.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ListRequest {
+    /// The application name.
     pub app_name: String,
+    /// The user ID.
     pub user_id: String,
+    /// The session ID.
     pub session_id: String,
 }
 
@@ -279,15 +297,20 @@ impl ListRequest {
 /// The artifact file names of a session.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ListResponse {
+    /// The artifact file names.
     pub file_names: Vec<String>,
 }
 
 /// A request to list the versions of an artifact.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VersionsRequest {
+    /// The application name.
     pub app_name: String,
+    /// The user ID.
     pub user_id: String,
+    /// The session ID.
     pub session_id: String,
+    /// The artifact's file name; it must not contain a path separator (`/` or `\`).
     pub file_name: String,
 }
 
@@ -309,12 +332,14 @@ impl VersionsRequest {
 /// The versions of an artifact.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VersionsResponse {
+    /// The version numbers of the artifact.
     pub versions: Vec<i64>,
 }
 
 /// Metadata of one stored artifact version.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ArtifactVersion {
+    /// The version number.
     pub version: i64,
     /// A stable identity for the stored payload. Implementations with a native scheme should
     /// use it, such as `gs://` for Google Cloud Storage; other implementations should define a
@@ -333,10 +358,15 @@ pub struct ArtifactVersion {
 /// A request for the metadata of one artifact version. `version` is optional (0 means the latest).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GetArtifactVersionRequest {
+    /// The application name.
     pub app_name: String,
+    /// The user ID.
     pub user_id: String,
+    /// The session ID.
     pub session_id: String,
+    /// The artifact's file name; it must not contain a path separator (`/` or `\`).
     pub file_name: String,
+    /// The version to describe; 0 means the latest.
     pub version: i64,
 }
 
@@ -358,5 +388,6 @@ impl GetArtifactVersionRequest {
 /// The metadata of one artifact version.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GetArtifactVersionResponse {
+    /// The version's metadata.
     pub artifact_version: Option<ArtifactVersion>,
 }
