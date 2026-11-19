@@ -24,9 +24,9 @@
 //! limit: 100                        # 1-1000, default 100: the newest runs in the window
 //! min_pass_rate: 0.9                # optional, 0.0-1.0
 //! judge:                            # required if and only if a scorer is llm_judge
-//!   model: gemini-2.5-flash
+//!   model: gemini-3.8-flash
 //!   project: my-proj                # default: the source project
-//!   location: us-central1           # default us-central1
+//!   location: us                    # default us-central1; newer models need us or global
 //!   timeout: 120s                   # <n>s | <n>m, default 120s
 //! scorers:                          # gadk-eval scorer syntax; no reference or equals
 //!   - not_contains: "I cannot help"
@@ -129,7 +129,7 @@ impl SourceSpec {
 /// The Gemini model on Vertex AI that grades `llm_judge` scorers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JudgeSpec {
-    /// The model name, for example `gemini-2.5-flash`.
+    /// The model name, for example `gemini-3.8-flash`.
     pub model: String,
     /// The Vertex AI project.
     pub project: String,

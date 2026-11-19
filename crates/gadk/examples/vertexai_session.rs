@@ -23,7 +23,8 @@
 //!
 //! The engine is reached with Application Default Credentials
 //! (`gcloud auth application-default login`); the Gemini model reads its own configuration from
-//! the environment (`GOOGLE_API_KEY`, or `GOOGLE_GENAI_USE_VERTEXAI=true` for Vertex AI).
+//! the environment (`GOOGLE_API_KEY`, or `GOOGLE_GENAI_USE_VERTEXAI=true` for Vertex AI, where
+//! it runs in the `us` multi-region rather than the engine's region).
 
 use std::io::{BufRead, Write};
 use std::sync::Arc;
@@ -71,7 +72,19 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     })?);
 
-    let model = GeminiModel::new("gemini-2.5-flash", ClientConfig::default()).await?;
+    // Newer Gemini models are served from the `us` multi-region (or `global`), not from the
+    // engine's single region, so on Vertex AI the model gets its own location.
+    let vertex = std::env::var("GOOGLE_GENAI_USE_VERTEXAI")
+        .is_ok_and(|v| matches!(v.to_ascii_lowercase().as_str(), "true" | "1"));
+    let model_config = if vertex {
+        ClientConfig {
+            location: Some("us".to_string()),
+            ..Default::default()
+        }
+    } else {
+        ClientConfig::default()
+    };
+    let model = GeminiModel::new("gemini-3.8-flash", model_config).await?;
     let agent = gadk::engine::llm::agent::new(LlmAgentConfig {
         name: "remembering_assistant".to_string(),
         model: Some(model),

@@ -113,5 +113,5 @@ GADK_EVAL_LIVE_PROJECT=<project> cargo test -p gadk-eval --test eval_live -- --i
 ```
 
 Gemini on Vertex AI (Application Default Credentials) is both agent and judge;
-`GADK_EVAL_LIVE_LOCATION` (default `us-central1`) and `GADK_EVAL_LIVE_MODEL` (default
-`gemini-2.5-flash`) override the defaults.
+`GADK_EVAL_LIVE_LOCATION` (default `us`, the US multi-region) and `GADK_EVAL_LIVE_MODEL` (default
+`gemini-3.8-flash`) override the defaults.

@@ -23,7 +23,7 @@
 //!
 //! Gemini API: `GOOGLE_API_KEY=... cargo run -p gadk --features launcher --example compaction console`
 //! (or `… --example compaction web webui api`)
-//! Vertex AI:  `GOOGLE_GENAI_USE_VERTEXAI=true GOOGLE_CLOUD_PROJECT=... GOOGLE_CLOUD_LOCATION=us-central1 cargo run -p gadk --features launcher --example compaction console`
+//! Vertex AI:  `GOOGLE_GENAI_USE_VERTEXAI=true GOOGLE_CLOUD_PROJECT=... GOOGLE_CLOUD_LOCATION=us cargo run -p gadk --features launcher --example compaction console`
 //!
 //! The web command needs at least one sub-launcher named after it, as above. Running it bare
 //! exits with "no active sublaunchers found".
@@ -44,7 +44,7 @@ use gadk::launcher::{CancellationToken, Config, Launcher, full};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let model = GeminiModel::new("gemini-2.5-flash", ClientConfig::default()).await?;
+    let model = GeminiModel::new("gemini-3.8-flash", ClientConfig::default()).await?;
     let agent = gadk::engine::llm::agent::new(LlmAgentConfig {
         name: "assistant".to_string(),
         model: Some(model),

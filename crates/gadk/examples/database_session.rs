@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
     sessions.auto_migrate().await?;
 
     let model = GeminiModel::new(
-        "gemini-2.5-flash",
+        "gemini-3.8-flash",
         ClientConfig {
             api_key: std::env::var("GOOGLE_API_KEY").ok(),
             ..Default::default()

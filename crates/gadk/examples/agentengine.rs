@@ -157,11 +157,13 @@ async fn main() -> anyhow::Result<()> {
     let agent_engine_id = env("GOOGLE_CLOUD_AGENT_ENGINE_ID");
 
     let model = GeminiModel::new(
-        "gemini-3.5-flash",
+        "gemini-3.8-flash",
         ClientConfig {
             backend: Some(Backend::VertexAi),
             project: Some(project_id.clone()),
-            location: Some(location.clone()),
+            // Newer Gemini models are served from the `us` multi-region (or `global`), not from
+            // the Agent Engine's single region.
+            location: Some("us".to_string()),
             ..Default::default()
         },
     )
