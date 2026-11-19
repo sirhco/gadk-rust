@@ -128,7 +128,7 @@ async fn test_load_memory_tool_run() {
             "invalid query type",
             json!({"query": 123}),
             vec![],
-            Err("query must be a string, got: float64"),
+            Err("query must be a string, found a number"),
         ),
     ];
     for (name, args, memories, want) in cases {

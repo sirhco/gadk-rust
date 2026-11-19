@@ -29,7 +29,7 @@ use gadk_agent::tool_util::append_instructions;
 use gadk_agent::{Artifacts, Context, RunnableTool, Tool, ToolError};
 use gadk_genai::{Content, FunctionDeclaration, Part, ROLE_USER, Schema, Type};
 use gadk_model::LlmRequest;
-use gadk_platform::go_type_name;
+use gadk_platform::{json_expected_found, json_kind_article};
 use serde_json::{Map, Value};
 
 use crate::go_fmt::wrap_err;
@@ -107,8 +107,8 @@ impl RunnableTool for ArtifactsTool {
     async fn run(&self, _ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let Value::Object(m) = &args else {
             return Err(ToolError::InvalidArgument(format!(
-                "unexpected args type, got: {}",
-                go_type_name(&args)
+                "unexpected args type: expected a JSON object, found {}",
+                json_kind_article(&args)
             )));
         };
         let names = match m.get("artifact_names") {
@@ -147,7 +147,7 @@ fn has_null_element(v: &Value) -> bool {
 }
 
 /// Decodes a JSON list of strings. `null` decodes to an empty list and a `null` element to `""`. A
-/// type mismatch returns the "cannot unmarshal" error text for the first offending value.
+/// type mismatch returns the type-mismatch error text for the first offending value.
 fn decode_string_slice(raw: &Value) -> Result<Vec<String>, String> {
     match raw {
         Value::Null => Ok(Vec::new()),
@@ -156,25 +156,17 @@ fn decode_string_slice(raw: &Value) -> Result<Vec<String>, String> {
             .map(|item| match item {
                 Value::String(s) => Ok(s.clone()),
                 Value::Null => Ok(String::new()),
-                other => Err(unmarshal_type_error(other, "string")),
+                other => Err(unmarshal_type_error(other, "a string")),
             })
             .collect(),
-        other => Err(unmarshal_type_error(other, "[]string")),
+        other => Err(unmarshal_type_error(other, "an array of strings")),
     }
 }
 
-/// The "cannot unmarshal" error text for a JSON value of the wrong kind; `go_type` is the expected
-/// type (`string` or `[]string`).
-fn unmarshal_type_error(v: &Value, go_type: &str) -> String {
-    let kind = match v {
-        Value::Null => "null",
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    };
-    format!("json: cannot unmarshal {kind} into Go value of type {go_type}")
+/// The type-mismatch error text for a JSON value of the wrong kind; `expected` names the
+/// expected shape (`a string` or `an array of strings`).
+fn unmarshal_type_error(v: &Value, expected: &str) -> String {
+    json_expected_found(expected, v)
 }
 
 /// Appends the instruction listing the session's artifacts, when there are any.
@@ -256,8 +248,8 @@ async fn process_load_artifacts_function_call(
 fn artifact_names_from_response(raw: &Value) -> Result<Vec<String>, ToolError> {
     let Value::Array(items) = raw else {
         return Err(go_error(format!(
-            "invalid artifact names type: {}, expected []string or []any",
-            go_type_name(raw)
+            "invalid artifact names: expected an array, found {}",
+            json_kind_article(raw)
         )));
     };
     items
@@ -266,8 +258,8 @@ fn artifact_names_from_response(raw: &Value) -> Result<Vec<String>, ToolError> {
         .map(|(i, v)| match v {
             Value::String(s) => Ok(s.clone()),
             other => Err(go_error(format!(
-                "invalid artifact name type at index {i}: {}, expected string",
-                go_type_name(other)
+                "invalid artifact name at index {i}: expected a string, found {}",
+                json_kind_article(other)
             ))),
         })
         .collect()
@@ -322,18 +314,18 @@ mod tests {
     }
 
     #[test]
-    fn response_name_type_errors_use_go_type_names() {
+    fn response_name_type_errors_name_json_kinds() {
         assert_eq!(
             artifact_names_from_response(&json!("x"))
                 .unwrap_err()
                 .to_string(),
-            "invalid artifact names type: string, expected []string or []any"
+            "invalid artifact names: expected an array, found a string"
         );
         assert_eq!(
             artifact_names_from_response(&json!(["a", 1]))
                 .unwrap_err()
                 .to_string(),
-            "invalid artifact name type at index 1: float64, expected string"
+            "invalid artifact name at index 1: expected a string, found a number"
         );
     }
 }

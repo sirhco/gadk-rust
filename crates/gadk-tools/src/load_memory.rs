@@ -26,7 +26,7 @@ use gadk_agent::{Context, RunnableTool, Tool, ToolError, ToolOriginKind};
 use gadk_genai::{FunctionDeclaration, Schema, Type};
 use gadk_memory::MemoryEntry;
 use gadk_model::LlmRequest;
-use gadk_platform::go_type_name;
+use gadk_platform::json_kind_article;
 use serde_json::{Map, Value};
 
 use crate::go_fmt::wrap_err;
@@ -107,8 +107,8 @@ impl RunnableTool for LoadMemoryTool {
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let Value::Object(m) = &args else {
             return Err(ToolError::InvalidArgument(format!(
-                "unexpected args type, got: {}",
-                go_type_name(&args)
+                "unexpected args type: expected a JSON object, found {}",
+                json_kind_article(&args)
             )));
         };
         let Some(raw) = m.get("query") else {
@@ -118,8 +118,8 @@ impl RunnableTool for LoadMemoryTool {
         };
         let Value::String(query) = raw else {
             return Err(ToolError::InvalidArgument(format!(
-                "query must be a string, got: {}",
-                go_type_name(raw)
+                "query must be a string, found {}",
+                json_kind_article(raw)
             )));
         };
         let resp = ctx
