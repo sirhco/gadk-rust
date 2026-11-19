@@ -2,7 +2,7 @@
   "shape": "scalars",
   "case": "scalar-root",
   "input_b64": "aGVsbG8K",
-  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `hello` into main.Scalars",
+  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `hello` into Scalars",
   "marshal_b64": "YjogZmFsc2UKaTg6IDAKaTE2OiAwCmkzMjogMAppNjQ6IDAKdTg6IDAKdTE2OiAwCnUzMjogMAp1NjQ6IDAKZjMyOiAwCmY2NDogMApzOiAiIgo=",
   "marshal_error": null,
   "node": {

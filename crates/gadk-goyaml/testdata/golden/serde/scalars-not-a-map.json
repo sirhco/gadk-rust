@@ -2,7 +2,7 @@
   "shape": "scalars",
   "case": "not-a-map",
   "input_b64": "WzEsIDJdCg==",
-  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into main.Scalars",
+  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into Scalars",
   "marshal_b64": "YjogZmFsc2UKaTg6IDAKaTE2OiAwCmkzMjogMAppNjQ6IDAKdTg6IDAKdTE2OiAwCnUzMjogMAp1NjQ6IDAKZjMyOiAwCmY2NDogMApzOiAiIgo=",
   "marshal_error": null,
   "node": {

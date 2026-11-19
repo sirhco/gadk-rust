@@ -89,7 +89,7 @@ impl serde::de::Error for Error {
 /// decoded into the requested types.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TypeError {
-    /// The individual messages, in document order (`line 3: cannot unmarshal !!str `x` into int`).
+    /// The individual messages, in document order (`line 3: cannot unmarshal !!str `x` into isize`).
     pub errors: Vec<String>,
 }
 
@@ -139,13 +139,13 @@ mod tests {
     fn type_error_text_matches_go() {
         let e = TypeError {
             errors: vec![
-                "line 1: cannot unmarshal !!str `a` into int".to_string(),
-                "line 2: cannot unmarshal !!seq into string".to_string(),
+                "line 1: cannot unmarshal !!str `a` into isize".to_string(),
+                "line 2: cannot unmarshal !!seq into String".to_string(),
             ],
         };
         assert_eq!(
             e.to_string(),
-            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `a` into int\n  line 2: cannot unmarshal !!seq into string"
+            "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `a` into isize\n  line 2: cannot unmarshal !!seq into String"
         );
         assert_eq!(Error::from(e.clone()).to_string(), e.to_string());
     }

@@ -2,7 +2,7 @@
   "shape": "optionals",
   "case": "mismatch",
   "input_b64": "aTogeApmOiBbMV0K",
-  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into int64\n  line 2: cannot unmarshal !!seq into float64",
+  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `x` into i64\n  line 2: cannot unmarshal !!seq into f64",
   "marshal_b64": "czogbnVsbAppOiAwCmY6IDAKaW5uZXI6IG51bGwK",
   "marshal_error": null,
   "node": {

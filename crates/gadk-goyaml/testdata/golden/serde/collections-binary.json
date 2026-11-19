@@ -2,7 +2,7 @@
   "shape": "collections",
   "case": "binary",
   "input_b64": "Ynl0ZXM6ICEhYmluYXJ5IGFHVnNiRzg9Cg==",
-  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!binary `aGVsbG8=` into []uint8",
+  "decode_error": "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!binary `aGVsbG8=` into Vec<u8>",
   "marshal_b64": "Ynl0ZXM6IFtdCmludHM6IFtdCmNvdW50czoge30KYW55OiB7fQppdGVtczogW10K",
   "marshal_error": null,
   "node": {

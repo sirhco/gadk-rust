@@ -242,5 +242,5 @@
     "marshal_b64": "YTogYgo/ICAgLSBjCiAgICAtIGQKOiBlCg=="
   },
   "value": null,
-  "value_error": "yaml: invalid map key: []interface {}{\"c\", \"d\"}"
+  "value_error": "yaml: invalid map key: [\"c\", \"d\"]"
 }

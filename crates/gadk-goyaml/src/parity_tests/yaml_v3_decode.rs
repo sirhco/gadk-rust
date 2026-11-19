@@ -1162,9 +1162,8 @@ fn test_unmarshal_na_n() {
 }
 
 /// Go's `unmarshalErrorTests`: (input, error). Go's `ErrorMatches` patterns are written as the
-/// exact texts they match (rows 8, 9, 12 and 13 are regular expressions in Go:
-/// `yaml: invalid map key: \[\]interface \{\}\{"\."\}`, `…map\[string]interface \{\}…`,
-/// `.*could not find expected ':'`, `^yaml: line 3: could not find expected ':'$`).
+/// exact texts they match (rows 8, 9, 12 and 13 are regular expressions in Go); the
+/// `invalid map key` rows show the key as gadk-goyaml prints it (`["."]`, `{".": null}`).
 fn unmarshal_error_tests() -> Vec<(Vec<u8>, &'static str)> {
     vec![
         (
@@ -1196,14 +1195,8 @@ fn unmarshal_error_tests() -> Vec<(Vec<u8>, &'static str)> {
             b"a: !!binary ==".to_vec(),
             "yaml: !!binary value contains invalid base64 data",
         ),
-        (
-            b"{[.]}".to_vec(),
-            "yaml: invalid map key: []interface {}{\".\"}",
-        ),
-        (
-            b"{{.}}".to_vec(),
-            "yaml: invalid map key: map[string]interface {}{\".\":interface {}(nil)}",
-        ),
+        (b"{[.]}".to_vec(), "yaml: invalid map key: [\".\"]"),
+        (b"{{.}}".to_vec(), "yaml: invalid map key: {\".\": null}"),
         (
             b"b: *a\na: &a {c: 1}".to_vec(),
             "yaml: unknown anchor 'a' referenced",

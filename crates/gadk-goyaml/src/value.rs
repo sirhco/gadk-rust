@@ -21,7 +21,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 
-use chrono::{DateTime, Datelike, FixedOffset, Timelike};
+use chrono::{DateTime, FixedOffset};
 use serde::de::value::StringDeserializer;
 use serde::de::{
     self, Deserialize, DeserializeSeed, Deserializer, IntoDeserializer, MapAccess, SeqAccess,
@@ -253,7 +253,7 @@ fn mapping_loop(
             mf.push(k.clone());
         }
         if matches!(k, GoValue::Seq(_) | GoValue::Map(_) | GoValue::MapAny(_)) {
-            return Err(failf(format_args!("invalid map key: {}", go_sharp_v(&k))));
+            return Err(failf(format_args!("invalid map key: {}", key_text(&k))));
         }
         match unmarshal_value(d, doc, value)? {
             Some(e) => out.insert(k, e),
@@ -355,68 +355,63 @@ fn unmarshal_into_map(
     result
 }
 
-/// The debug-syntax text of a decoded value, as yaml.v3 embeds it in `invalid map key: …`
-/// errors (`<nil>` for null; see [`write_sharp_v`] for the nested form).
-pub(crate) fn go_sharp_v(v: &GoValue) -> String {
+/// The text of a decoded value as `invalid map key: …` errors show it: `null`, `true`, numbers,
+/// quoted strings, an RFC 3339 timestamp, `[a, b]` for a sequence and `{"k": v}` for a mapping
+/// (entries sorted by key).
+pub(crate) fn key_text(v: &GoValue) -> String {
     let mut out = String::new();
-    write_sharp_v(&mut out, v, true);
+    write_key_text(&mut out, v);
     out
 }
 
-/// Writes the debug-syntax text of `v` (`true`, `42`, `"text"`, `map[string]interface {}{…}`,
-/// `[]interface {}{…}`); `top` is false for an element held in a collection (null prints
-/// `interface {}(nil)` there instead of `<nil>`).
-fn write_sharp_v(out: &mut String, v: &GoValue, top: bool) {
+/// Writes the [`key_text`] of `v`.
+fn write_key_text(out: &mut String, v: &GoValue) {
     match v {
-        GoValue::Null if top => out.push_str("<nil>"),
-        GoValue::Null => out.push_str("interface {}(nil)"),
+        GoValue::Null => out.push_str("null"),
         GoValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         GoValue::Int(i) => out.push_str(&i.to_string()),
-        GoValue::Uint(u) => out.push_str(&format!("0x{u:x}")),
+        GoValue::Uint(u) => out.push_str(&u.to_string()),
         GoValue::Float(f) => out.push_str(&gadk_platform::go_format_float_g(*f, 64)),
         GoValue::String(s) => out.push_str(&gadk_platform::go_quote(s)),
         GoValue::Bytes(b) => out.push_str(&gadk_platform::go_quote_bytes(b)),
-        GoValue::Timestamp(t) => out.push_str(&go_time_string(t)),
+        GoValue::Timestamp(t) => out.push_str(&gadk_platform::go_format_rfc3339_nano(t)),
         GoValue::Seq(items) => {
-            out.push_str("[]interface {}{");
+            out.push('[');
             for (i, item) in items.iter().enumerate() {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                write_sharp_v(out, item, false);
+                write_key_text(out, item);
             }
-            out.push('}');
+            out.push(']');
         }
         GoValue::Map(entries) => {
             // Maps print sorted by key.
             let mut sorted: Vec<&(String, GoValue)> = entries.iter().collect();
             sorted.sort_by(|a, b| a.0.cmp(&b.0));
-            out.push_str("map[string]interface {}{");
+            out.push('{');
             for (i, (k, v)) in sorted.into_iter().enumerate() {
                 if i > 0 {
                     out.push_str(", ");
                 }
                 out.push_str(&gadk_platform::go_quote(k));
-                out.push(':');
-                write_sharp_v(out, v, false);
+                out.push_str(": ");
+                write_key_text(out, v);
             }
             out.push('}');
         }
         GoValue::MapAny(entries) => {
-            // yaml.v3's order of mixed-type keys depends on type descriptor addresses, which
-            // cannot be reproduced; keys are ordered by kind, then by text.
+            // Mixed-type keys are ordered by kind, then by text.
             let mut sorted: Vec<(String, String)> = entries
                 .iter()
                 .map(|(k, v)| {
-                    let mut ks = String::new();
-                    write_sharp_v(&mut ks, k, false);
-                    let mut vs = String::new();
-                    write_sharp_v(&mut vs, v, false);
-                    (format!("{}{ks}", kind_rank(k)), format!("{ks}:{vs}"))
+                    let ks = key_text(k);
+                    let vs = key_text(v);
+                    (format!("{}{ks}", kind_rank(k)), format!("{ks}: {vs}"))
                 })
                 .collect();
             sorted.sort();
-            out.push_str("map[interface {}]interface {}{");
+            out.push('{');
             for (i, (_, entry)) in sorted.into_iter().enumerate() {
                 if i > 0 {
                     out.push_str(", ");
@@ -428,7 +423,7 @@ fn write_sharp_v(out: &mut String, v: &GoValue, top: bool) {
     }
 }
 
-/// A sort rank of a key's kind for [`write_sharp_v`].
+/// A sort rank of a key's kind for [`write_key_text`].
 fn kind_rank(v: &GoValue) -> char {
     match v {
         GoValue::Null => '0',
@@ -441,42 +436,6 @@ fn kind_rank(v: &GoValue) -> char {
         GoValue::Seq(_) => '7',
         GoValue::Map(_) | GoValue::MapAny(_) => '8',
     }
-}
-
-/// The debug-syntax text of a timestamp
-/// (a constructor call listing year, month name, day, time of day, nanoseconds and zone). A `Z`
-/// offset prints as the UTC zone and any other as a fixed zone named `""` (a zone equal to the
-/// machine's local one prints as the local zone in yaml.v3; not reproduced).
-fn go_time_string(t: &DateTime<FixedOffset>) -> String {
-    const MONTHS: [&str; 12] = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
-    let loc = if t.offset().local_minus_utc() == 0 {
-        "time.UTC"
-    } else {
-        "time.Location(\"\")"
-    };
-    format!(
-        "time.Date({}, time.{}, {}, {}, {}, {}, {}, {loc})",
-        t.year(),
-        MONTHS[t.month0() as usize],
-        t.day(),
-        t.hour(),
-        t.minute(),
-        t.second(),
-        t.nanosecond()
-    )
 }
 
 /// Hands a [`GoValue`] to a visitor: through [`GO_VALUE_MARKER`] exactly, otherwise by its
@@ -774,7 +733,7 @@ mod tests {
         );
         assert_eq!(
             decode("? [a, b]\n: c\n").unwrap_err().to_string(),
-            "yaml: invalid map key: []interface {}{\"a\", \"b\"}"
+            "yaml: invalid map key: [\"a\", \"b\"]"
         );
     }
 
@@ -806,7 +765,7 @@ mod tests {
     }
 
     #[test]
-    fn sharp_v_formats_like_go() {
+    fn key_text_formats() {
         let v = GoValue::Map(vec![
             ("b".into(), GoValue::Null),
             (
@@ -814,15 +773,14 @@ mod tests {
                 GoValue::Seq(vec![GoValue::Uint(255), GoValue::Float(1.5)]),
             ),
         ]);
-        assert_eq!(
-            go_sharp_v(&v),
-            "map[string]interface {}{\"a\":[]interface {}{0xff, 1.5}, \"b\":interface {}(nil)}"
-        );
+        assert_eq!(key_text(&v), "{\"a\": [255, 1.5], \"b\": null}");
         let t = DateTime::parse_from_rfc3339("2001-12-14T21:59:43.1Z").unwrap();
-        assert_eq!(
-            go_sharp_v(&GoValue::Timestamp(t)),
-            "time.Date(2001, time.December, 14, 21, 59, 43, 100000000, time.UTC)"
-        );
+        assert_eq!(key_text(&GoValue::Timestamp(t)), "2001-12-14T21:59:43.1Z");
+        let any = GoValue::MapAny(vec![
+            (GoValue::String("x".into()), GoValue::Int(2)),
+            (GoValue::Int(1), GoValue::Bool(true)),
+        ]);
+        assert_eq!(key_text(&any), "{1: true, \"x\": 2}");
     }
 
     #[test]

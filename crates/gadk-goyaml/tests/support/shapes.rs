@@ -25,7 +25,7 @@
 //! `interface{}` is [`GoValue`]; `yaml.Node` / `[]yaml.Node` are [`Document`] /
 //! `Vec<Document>`; the `,inline` `map[string]interface{}` is an [`InlineMap`] under
 //! [`INLINE_FIELD`]. Every struct carries `#[serde(default)]` (Go zero-fills absent keys) and
-//! Go's type name (Go prints `main.<Name>` in type errors).
+//! the bare type name that type errors print.
 
 use std::collections::BTreeMap;
 use std::fmt;
