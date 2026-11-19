@@ -61,12 +61,12 @@ fn test_original_call_from() {
                 "call_789",
                 json!({"originalFunctionCall": "{\"Name\": \"bad_json\"}"}),
             ),
-            Some("got string"),
+            Some("found a string"),
         ),
         (
             "Failure - Invalid Type (Nil value)",
             call("call_nil", json!({"originalFunctionCall": null})),
-            Some("got <nil>"),
+            Some("found null"),
         ),
         (
             "Failure - Converter Error (Bad Internal Structure id with wrong type)",
