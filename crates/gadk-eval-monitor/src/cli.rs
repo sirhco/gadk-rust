@@ -35,6 +35,7 @@ use crate::judge::vertex_judge;
 use crate::monitor::Monitor;
 use crate::source::TranscriptSource;
 use crate::source::bigquery::BigQueryTranscriptSource;
+use crate::source::cloud_trace::CloudTraceTranscriptSource;
 use crate::spec::{JudgeSpec, MAX_LIMIT, MonitorSpec, SourceSpec};
 use crate::store::ReportStore;
 
@@ -51,7 +52,8 @@ pub trait Backends: Send + Sync {
     async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError>;
 }
 
-/// The real backends: BigQuery and Gemini on Vertex AI, with Application Default Credentials.
+/// The real backends: the BigQuery or Cloud Trace transcript source and Gemini on Vertex AI,
+/// with Application Default Credentials.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CloudBackends;
 
@@ -66,6 +68,9 @@ impl Backends for CloudBackends {
             } => Ok(Arc::new(BigQueryTranscriptSource::new(
                 project, dataset, table,
             )?)),
+            SourceSpec::CloudTrace { project } => {
+                Ok(Arc::new(CloudTraceTranscriptSource::new(project)?))
+            }
         }
     }
 
@@ -540,5 +545,17 @@ mod tests {
         assert!(stdout.contains("monitor"), "{stdout}");
         assert_eq!(cli_run(&[], &fake).await.0, 2);
         assert_eq!(cli_run(&["bogus"], &fake).await.0, 2);
+    }
+
+    #[test]
+    fn cloud_backends_reject_an_invalid_cloud_trace_project() {
+        let spec = SourceSpec::CloudTrace {
+            project: "bad project".into(),
+        };
+        let err = CloudBackends.source(&spec).err().unwrap();
+        assert!(
+            matches!(&err, MonitorError::Source(m) if m.contains("\"bad project\"")),
+            "{err}"
+        );
     }
 }

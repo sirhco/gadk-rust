@@ -15,6 +15,7 @@
 //! Transcript sources: where production runs come from.
 
 pub mod bigquery;
+pub mod cloud_trace;
 pub mod mapping;
 pub mod trace_mapping;
 

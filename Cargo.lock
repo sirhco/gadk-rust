@@ -1619,7 +1619,6 @@ dependencies = [
  "gadk-prompts",
  "gadk-prompts-cli",
  "gadk-telemetry",
- "google-cloud-auth",
  "http",
  "maud",
  "opentelemetry",

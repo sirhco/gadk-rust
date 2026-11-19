@@ -16,11 +16,25 @@ the public API.
   judge rationales and transcript, linking to the run's trace. Read-only.
 - `gadk-eval-monitor`: `ReportStore::names` (the newest report names without reading them),
   `ReportStore::is_report_name` and `ReportStore::find` (`Ok(None)` for a missing report).
+- New crate `gadk-cloudtrace`: a Cloud Trace v1 read client. `CloudTraceClient::list` (a time
+  window, `ROOTSPAN` or `COMPLETE` view, `root:` / `span:` / exact-label filters, newest-first
+  order, page size and token) and `get` return traces with 16-hex span ids; `TraceError` tells
+  HTTP errors (with the `google.rpc.ErrorInfo` reason), not-found, transport, decode and
+  credential failures apart; `Adc::lazy()` and `Adc::resolve()` supply Application Default
+  Credentials.
+- `gadk-eval-monitor`: the Cloud Trace transcript source. A monitor spec's
+  `source: { cloud_trace: { project: <p> } }` (`SourceSpec::CloudTrace`) grades runs rebuilt from
+  the agent's spans (`CloudTraceTranscriptSource`, `source::trace_mapping::build_runs`); the agent
+  must run with `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` or
+  `SPAN_AND_EVENT`.
+```
 
 ### Changed
 
 - `gadk-console`: `ConsoleConfig::reports` is a new field; code that builds `ConsoleConfig` with a
   struct literal must set it.
+- `gadk-console`: Cloud Trace list and get calls go through `gadk-cloudtrace`. The URLs sent,
+  the results, the errors and the public API are unchanged.
 
 ## [0.3.0] - 2026-11-18
 
