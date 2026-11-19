@@ -404,7 +404,7 @@ fn test_to_mcp_tool() {
                 "",
                 json_decl("string_or_null", json!({"type": ["null", "string"]})),
             ),
-            r#"mcptoolset: input schema for tool "string_or_null": schema types [null string] do not include "object""#,
+            r#"mcptoolset: input schema for tool "string_or_null": schema types ["null","string"] do not include "object""#,
         ),
         (
             "tool with ParametersJsonSchema that is not a JSON object returns error",
@@ -413,7 +413,7 @@ fn test_to_mcp_tool() {
                 "",
                 json_decl("not_object", json!("not a schema")),
             ),
-            r#"mcptoolset: input schema for tool "not_object": schema is not a JSON object: json: cannot unmarshal string into Go value of type map[string]interface {}"#,
+            r#"mcptoolset: input schema for tool "not_object": schema is not a JSON object: expected a JSON object, found a string"#,
         ),
         (
             "tool with non-object Parameters type returns error",
