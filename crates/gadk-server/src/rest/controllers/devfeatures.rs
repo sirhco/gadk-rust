@@ -37,7 +37,7 @@ const TESTS_DETAIL: &str =
 /// The `detail` of the eval endpoints' 501 body.
 fn eval_detail() -> String {
     format!(
-        "agent evaluation is {NOT_INSTALLED_DETAIL} in the gadk server. Use adk-python for eval workflows."
+        "agent evaluation is {NOT_INSTALLED_DETAIL} in the gadk server. Use the gadk-eval crate or the gadk-eval CLI to run evals, and the gadk-console Evals pages to view results."
     )
 }
 
@@ -55,7 +55,7 @@ pub struct ErrorResponse {
 /// `detail` is `detail`.
 pub fn new_not_implemented_handler(feature: &str, detail: &str) -> Handler {
     let body = ErrorResponse {
-        error: format!("{feature} is not implemented in gadk"),
+        error: format!("{feature} is not implemented in the gadk server"),
         detail: detail.to_owned(),
     };
     handler(move |_req| {
@@ -241,7 +241,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             body.as_ref(),
-            &b"{\"error\":\"eval is not implemented in gadk\",\"detail\":\"agent evaluation is not installed in the gadk server. Use adk-python for eval workflows.\"}\n"[..]
+            &b"{\"error\":\"eval is not implemented in the gadk server\",\"detail\":\"agent evaluation is not installed in the gadk server. Use the gadk-eval crate or the gadk-eval CLI to run evals, and the gadk-console Evals pages to view results.\"}\n"[..]
         );
     }
 

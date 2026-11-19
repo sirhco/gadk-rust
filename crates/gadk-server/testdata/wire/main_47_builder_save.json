@@ -15,7 +15,7 @@
         "application/json; charset=UTF-8"
       ]
     ],
-    "body": "{\"error\":\"the agent builder is not implemented in gadk\",\"detail\":\"gadk agents are defined in Rust code, so there is no server-side agent configuration to edit.\"}\n"
+    "body": "{\"error\":\"the agent builder is not implemented in the gadk server\",\"detail\":\"gadk agents are defined in Rust code, so there is no server-side agent configuration to edit.\"}\n"
   },
   "compare": "exact"
 }
