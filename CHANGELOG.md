@@ -35,7 +35,9 @@ the public API.
     integer: invalid syntax` / `parsing "x" as a boolean: …` (were `strconv.ParseInt: parsing
     "x": …`); safe-subpath says `failed to compute relative path` (was `filepath.Rel failed`);
     an invalid IPv6 host is `invalid host: unable to parse IP "…"`; the deploy `--temp_dir`
-    help says `the system temp directory` (was `os.TempDir()`).
+    help says `the system temp directory` (was `os.TempDir()`); duration errors (CLI
+    `--mem_ttl`, launcher duration flags, Agent Engine duration fields) drop Go's `time: `
+    prefix (`invalid duration "x"`, `unknown unit "d" in duration "1d"`).
   - `gadk-auth`: `gcp: new_provider requires a scheme name` and `gcp: new_provider: …` (were
     `gcp: NewProvider …`).
   - `gadk-a2a`: `the runner config has no agent` (was `runner.Config.Agent is not provided`);
