@@ -193,9 +193,9 @@ async fn add_events_newer_than_sends_the_state_time_as_start_time() {
     }
 }
 
-/// Go `fmt.Errorf("state.Get(%s) failed: %w", key, err)`; nothing is sent.
+/// A missing state key is `reading state key <key> failed: …`; nothing is sent.
 #[tokio::test]
-async fn a_missing_state_key_is_gos_state_get_error() {
+async fn a_missing_state_key_is_a_state_read_error() {
     let server = generate_server(json!({"name": OP_NAME}), json!({}));
     let svc = service(VertexAiMemoryServiceConfig {
         state_key_session_last_update_time: Some("last".into()),
@@ -207,7 +207,7 @@ async fn a_missing_state_key_is_gos_state_get_error() {
         .unwrap_err();
     assert_eq!(
         backend_text(&err),
-        "state.Get(last) failed: state key does not exist"
+        "reading state key last failed: state key does not exist"
     );
     let MemoryError::Backend(e) = &err else {
         unreachable!()
@@ -257,9 +257,9 @@ async fn a_state_value_that_is_not_a_time_is_a_type_error() {
     assert!(server.requests().is_empty());
 }
 
-/// Go's wrapper chains around a failed `GenerateMemories` call, by path.
+/// The wrapper chains around a failed `GenerateMemories` call, by path.
 #[tokio::test]
-async fn generate_errors_carry_gos_wrappers() {
+async fn generate_errors_carry_path_wrappers() {
     let server = FakeServer::always(FakeResponse::json_status(
         403,
         r#"{"error":{"code":403,"message":"denied","status":"PERMISSION_DENIED"}}"#,
@@ -271,7 +271,7 @@ async fn generate_errors_carry_gos_wrappers() {
         .unwrap_err();
     assert_eq!(
         backend_text(&err),
-        "v.client.addWholeSession failed: v.client.GenerateMemories failed: \
+        "adding the whole session to memory failed: generate memories failed: \
          rpc error: code = PermissionDenied desc = denied"
     );
     let MemoryError::Backend(e) = &err else {
@@ -289,7 +289,7 @@ async fn generate_errors_carry_gos_wrappers() {
         .unwrap_err();
     assert_eq!(
         backend_text(&err),
-        "v.client.addEventsNewerThan failed: v.client.GenerateMemories failed: \
+        "adding new session events to memory failed: generate memories failed: \
          rpc error: code = PermissionDenied desc = denied"
     );
 }
@@ -339,10 +339,10 @@ async fn wait_for_completion_of_a_done_operation_sends_no_poll() {
     assert_eq!(server.requests().len(), 1);
 }
 
-/// An operation that fails is `op.Wait for GenerateMemories (whole session) failed: …` on both
-/// paths (Go uses the whole-session text for `addEventsNewerThan` too).
+/// An operation that fails is `waiting for the generate-memories operation failed: …` on both
+/// paths, under each path's own wrapper.
 #[tokio::test]
-async fn an_operation_error_carries_gos_wait_wrapper_on_both_paths() {
+async fn an_operation_error_carries_the_wait_wrapper_on_both_paths() {
     let failed = json!({
         "name": OP_NAME,
         "done": true,
@@ -359,7 +359,8 @@ async fn an_operation_error_carries_gos_wait_wrapper_on_both_paths() {
         .unwrap_err();
     assert_eq!(
         backend_text(&err),
-        "v.client.addWholeSession failed: op.Wait for GenerateMemories (whole session) failed: \
+        "adding the whole session to memory failed: \
+         waiting for the generate-memories operation failed: \
          rpc error: code = FailedPrecondition desc = session has no events"
     );
 
@@ -374,8 +375,9 @@ async fn an_operation_error_carries_gos_wait_wrapper_on_both_paths() {
         .unwrap_err();
     assert_eq!(
         backend_text(&err),
-        "v.client.addEventsNewerThan failed: op.Wait for GenerateMemories (whole session) \
-         failed: rpc error: code = FailedPrecondition desc = session has no events"
+        "adding new session events to memory failed: \
+         waiting for the generate-memories operation failed: \
+         rpc error: code = FailedPrecondition desc = session has no events"
     );
 }
 
@@ -448,9 +450,9 @@ async fn search_with_no_results_is_empty() {
     );
 }
 
-/// Go `fmt.Errorf("v.client.RetrieveMemories failed: %w", err)`, with no service-level wrapper.
+/// A failed retrieve is `retrieve memories failed: …`, with no service-level wrapper.
 #[tokio::test]
-async fn search_errors_carry_gos_wrapper() {
+async fn search_errors_carry_the_retrieve_wrapper() {
     let server = FakeServer::always(FakeResponse::json_status(
         404,
         r#"{"error":{"code":404,"message":"engine not found","status":"NOT_FOUND"}}"#,
@@ -466,7 +468,7 @@ async fn search_errors_carry_gos_wrapper() {
         .unwrap_err();
     assert_eq!(
         backend_text(&err),
-        "v.client.RetrieveMemories failed: rpc error: code = NotFound desc = engine not found"
+        "retrieve memories failed: rpc error: code = NotFound desc = engine not found"
     );
 }
 
@@ -504,11 +506,10 @@ async fn new_defaults_to_the_regional_endpoint() {
     }
 }
 
-/// An Application Default Credentials failure is Go's `newVertexAIClient failed:
-/// aiplatform.NewMemoryBankClient failed: …`; outside a Tokio runtime `new` refuses instead of
-/// panicking.
+/// An Application Default Credentials failure is `failed to create the Memory Bank client: …`;
+/// outside a Tokio runtime `new` refuses instead of panicking.
 #[test]
-fn new_wraps_adc_errors_like_go() {
+fn new_wraps_adc_errors() {
     assert!(tokio::runtime::Handle::try_current().is_err());
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("creds.json");
@@ -526,15 +527,14 @@ fn new_wraps_adc_errors_like_go() {
     let err = VertexAiMemoryService::new(adc_config()).err().unwrap();
     assert_eq!(
         backend_text(&err),
-        "newVertexAIClient failed: aiplatform.NewMemoryBankClient failed: \
-         unknown credential type: bogus"
+        "failed to create the Memory Bank client: unknown credential type: bogus"
     );
 
     std::fs::write(&file, r#"{"type":"authorized_user"}"#).unwrap();
     let err = VertexAiMemoryService::new(adc_config()).err().unwrap();
     assert_eq!(
         backend_text(&err),
-        format!("newVertexAIClient failed: aiplatform.NewMemoryBankClient failed: {NO_RUNTIME}")
+        format!("failed to create the Memory Bank client: {NO_RUNTIME}")
     );
 
     // `without_authentication` builds without a runtime.

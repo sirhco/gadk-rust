@@ -27,7 +27,7 @@
     ],
     "body": "unrecognized class method: async_list_sessions\n"
   },
-  "log": "handleQuery failed: unrecognized class method: async_list_sessions\n",
+  "log": "failed to handle query: unrecognized class method: async_list_sessions\n",
   "methods": null,
   "compare": "exact"
 }

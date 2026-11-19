@@ -104,7 +104,7 @@ impl MethodHandler for DeleteSessionHandler {
             .await
             .map_err(|e| {
                 format!(
-                    "g.sessionservice.Delete() failed: {}",
+                    "failed to delete session: {}",
                     session_error_text(&e, &session_id)
                 )
             })?;
@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(
             err.as_deref(),
             Some(
-                "g.sessionservice.Delete() failed: app_name, user_id, session_id are required, got app_name: \"test-engine\", user_id: \"\", session_id: \"s\""
+                "failed to delete session: app_name, user_id, session_id are required, got app_name: \"test-engine\", user_id: \"\", session_id: \"s\""
             )
         );
     }

@@ -36,7 +36,7 @@ pub(crate) trait MethodHandler: Send + Sync {
 
     /// Handles one query: `payload` is the whole (size-limited) request body.
     /// `Ok` is the response to send (a streaming body for the stream methods); `Err(text)` is a
-    /// handler error, answered 500 `text` and logged `handleQuery failed: text` by the
+    /// handler error, answered 500 `text` and logged `failed to handle query: text` by the
     /// controller (only before anything is written).
     async fn handle(&self, payload: Bytes) -> Result<Response, String>;
 
@@ -481,7 +481,7 @@ pub(crate) mod replay {
                 *scenario.log.lock().unwrap(),
                 "invalid streaming_agent_run_with_events request: \
                  failed to decode input.request_json: exceeded max depth\n\
-                 handleQuery failed: streaming JSONL failed: \
+                 failed to handle query: streaming JSONL failed: \
                  invalid streaming_agent_run_with_events request: \
                  failed to decode input.request_json: exceeded max depth\n"
             );

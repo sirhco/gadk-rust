@@ -89,7 +89,7 @@ impl Controller {
     ///    an absent body leaves `class_method` empty and the payload empty;
     /// 3. the payload goes to the handler named `class_method`: unknown → 500
     ///    `unrecognized class method: <name>`; a handler `Err(text)` → 500 `text`; each 500 is
-    ///    also logged `handleQuery failed: <text>`. Error answers are written by
+    ///    also logged `failed to handle query: <text>`. Error answers are written by
     ///    [`crate::mux::http_error`].
     pub(crate) async fn query(&self, req: Request) -> Response {
         // Now plus `sse_timeout` when positive, else no deadline. A
@@ -130,7 +130,7 @@ impl Controller {
         match result {
             Ok(resp) => resp,
             Err(e) => {
-                self.log.print(&format!("handleQuery failed: {e}"));
+                self.log.print(&format!("failed to handle query: {e}"));
                 http_error(StatusCode::INTERNAL_SERVER_ERROR, &e)
             }
         }
@@ -293,7 +293,7 @@ mod tests {
         );
         assert_eq!(
             *lines.lock().unwrap(),
-            vec!["handleQuery failed: unrecognized class method: nope".to_owned()]
+            vec!["failed to handle query: unrecognized class method: nope".to_owned()]
         );
     }
 
@@ -307,7 +307,7 @@ mod tests {
         );
         assert_eq!(
             *lines.lock().unwrap(),
-            vec!["handleQuery failed: boom".to_owned()]
+            vec!["failed to handle query: boom".to_owned()]
         );
     }
 

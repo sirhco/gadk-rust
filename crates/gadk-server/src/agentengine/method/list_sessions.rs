@@ -98,12 +98,7 @@ impl MethodHandler for ListSessionsHandler {
                 user_id: req.input.user_id,
             })
             .await
-            .map_err(|e| {
-                format!(
-                    "c.sessionservice.List() failed: {}",
-                    session_error_text(&e, "")
-                )
-            })?;
+            .map_err(|e| format!("failed to list sessions: {}", session_error_text(&e, "")))?;
         encode_plain(&ListSessionResponse {
             output: Sessions {
                 sessions: sessions.iter().map(|s| from_session(&**s)).collect(),
@@ -176,7 +171,7 @@ mod tests {
         .err();
         assert_eq!(
             err.as_deref(),
-            Some("c.sessionservice.List() failed: app_name is required, got app_name: \"\"")
+            Some("failed to list sessions: app_name is required, got app_name: \"\"")
         );
     }
 }

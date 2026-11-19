@@ -27,7 +27,7 @@
     ],
     "body": "unrecognized class method: nope\n"
   },
-  "log": "handleQuery failed: unrecognized class method: nope\n",
+  "log": "failed to handle query: unrecognized class method: nope\n",
   "methods": null,
   "compare": "exact"
 }

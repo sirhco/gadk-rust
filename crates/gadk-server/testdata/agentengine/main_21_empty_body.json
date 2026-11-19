@@ -22,7 +22,7 @@
     ],
     "body": "unrecognized class method: \n"
   },
-  "log": "handleQuery failed: unrecognized class method: \n",
+  "log": "failed to handle query: unrecognized class method: \n",
   "methods": null,
   "compare": "exact"
 }

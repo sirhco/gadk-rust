@@ -128,12 +128,7 @@ impl VertexAiMemoryService {
             config.http_client,
             config.env.as_ref(),
         )
-        .map_err(|e| {
-            memory_error(wrap(
-                "newVertexAIClient failed",
-                wrap("aiplatform.NewMemoryBankClient failed", e),
-            ))
-        })?;
+        .map_err(|e| memory_error(wrap("failed to create the Memory Bank client", e)))?;
         Ok(Self {
             client: VertexClient::new(resolved),
             engine: config.engine,
@@ -170,14 +165,14 @@ impl VertexAiMemoryService {
                 Some(&body),
             )
             .await
-            .map_err(|e| wrap("v.client.GenerateMemories failed", e))?;
+            .map_err(|e| wrap("generate memories failed", e))?;
         if self.wait_for_completion {
             // A done operation without a result is success: the
             // `operation finished without a response` error is accepted, on both paths.
             self.client
                 .wait_operation(op)
                 .await
-                .map_err(|e| wrap("op.Wait for GenerateMemories (whole session) failed", e))?;
+                .map_err(|e| wrap("waiting for the generate-memories operation failed", e))?;
         }
         Ok(())
     }
@@ -223,16 +218,16 @@ impl MemoryService for VertexAiMemoryService {
             return self
                 .add_session(session, None)
                 .await
-                .map_err(|e| memory_error(wrap("v.client.addWholeSession failed", e)));
+                .map_err(|e| memory_error(wrap("adding the whole session to memory failed", e)));
         };
         let value = session
             .state()
             .get(key)
-            .map_err(|e| memory_error(wrap(&format!("state.Get({key}) failed"), e)))?;
+            .map_err(|e| memory_error(wrap(&format!("reading state key {key} failed"), e)))?;
         let start = state_time(&value).map_err(memory_error)?;
         self.add_session(session, Some(start))
             .await
-            .map_err(|e| memory_error(wrap("v.client.addEventsNewerThan failed", e)))
+            .map_err(|e| memory_error(wrap("adding new session events to memory failed", e)))
     }
 
     /// Searches memory: `RetrieveMemories` by similarity to `req.query` within the user's
@@ -240,7 +235,7 @@ impl MemoryService for VertexAiMemoryService {
     ///
     /// # Errors
     ///
-    /// [`MemoryError::Backend`]: `v.client.RetrieveMemories failed: …`.
+    /// [`MemoryError::Backend`]: `retrieve memories failed: …`.
     async fn search_memory(&self, req: SearchRequest) -> Result<SearchResponse, MemoryError> {
         let parent = self.engine.engine_resource();
         // protojson omits an empty `searchQuery`; the set oneof stays as `{}`.
@@ -263,7 +258,7 @@ impl MemoryService for VertexAiMemoryService {
                 Some(&body),
             )
             .await
-            .map_err(|e| memory_error(wrap("v.client.RetrieveMemories failed", e)))?;
+            .map_err(|e| memory_error(wrap("retrieve memories failed", e)))?;
         let memories = resp
             .get("retrievedMemories")
             .and_then(Value::as_array)
