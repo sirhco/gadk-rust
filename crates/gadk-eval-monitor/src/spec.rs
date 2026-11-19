@@ -96,6 +96,15 @@ pub enum SourceSpec {
 }
 
 impl SourceSpec {
+    /// A Cloud Trace source reading the traces in `project`: the same value a spec's
+    /// `source: { cloud_trace: { project: <p> } }` parses to. The project is checked when a
+    /// source is built from the spec, as for a parsed spec.
+    pub fn cloud_trace(project: impl Into<String>) -> Self {
+        SourceSpec::CloudTrace {
+            project: project.into(),
+        }
+    }
+
     /// A short description for reports: `bigquery:<project>.<dataset>.<table>` or
     /// `cloud_trace:<project>`.
     pub fn describe(&self) -> String {
@@ -684,6 +693,7 @@ scorers: [contains: "x"]
                 project: "my-proj".into()
             }
         );
+        assert_eq!(s.source, SourceSpec::cloud_trace("my-proj"));
         assert_eq!(s.source.describe(), "cloud_trace:my-proj");
         assert_eq!(s.source.project(), "my-proj");
         assert_eq!(s.judge.unwrap().project, "my-proj");

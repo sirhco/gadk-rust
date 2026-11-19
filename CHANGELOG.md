@@ -26,7 +26,7 @@ the public API.
   `source: { cloud_trace: { project: <p> } }` (`SourceSpec::CloudTrace`) grades runs rebuilt from
   the agent's spans (`CloudTraceTranscriptSource`, `source::trace_mapping::build_runs`); the agent
   must run with `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY` or
-  `SPAN_AND_EVENT`.
+  `SPAN_AND_EVENT`. `SourceSpec::cloud_trace(project)` builds the source in code.
 
 ### Changed
 
