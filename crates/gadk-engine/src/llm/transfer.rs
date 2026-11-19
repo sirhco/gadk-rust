@@ -34,10 +34,9 @@ use crate::{
     llm::{
         flow::Flow,
         mode::{is_untransferable_mode, mode_for},
-        processors::{as_go_floats, go_sprint},
         state::reveal,
     },
-    tool::utils::go_type_name,
+    tool::utils::json_kind_article,
     workflow::route::go_quote,
 };
 
@@ -273,9 +272,10 @@ impl Tool for TransferToAgentTool {
 
 #[async_trait]
 impl RunnableTool for TransferToAgentTool {
-    /// A `Value::Null` argument counts as an empty args map, so it reports `empty agent_name:
-    /// map[]`. A name outside the declared enum is a tool error the model sees and can recover
-    /// from; setting `transfer_to_agent` to it would make the flow fail the whole invocation.
+    /// A `Value::Null` argument counts as an empty args map, so it reports
+    /// `empty agent_name: {}` (the args as JSON text). A name outside the declared enum is a tool
+    /// error the model sees and can recover from; setting `transfer_to_agent` to it would make
+    /// the flow fail the whole invocation.
     async fn run(&self, ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let empty = Value::Object(Map::new());
         let args = if args.is_null() { empty } else { args };
@@ -283,8 +283,8 @@ impl RunnableTool for TransferToAgentTool {
             Value::Object(m) => m,
             other => {
                 return Err(ToolError::InvalidArgument(format!(
-                    "unexpected args type: {}",
-                    go_type_name(other)
+                    "unexpected args type: expected a JSON object, found {}",
+                    json_kind_article(other)
                 )));
             }
         };
@@ -292,12 +292,7 @@ impl RunnableTool for TransferToAgentTool {
             .get("agent_name")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| {
-                ToolError::InvalidArgument(format!(
-                    "empty agent_name: {}",
-                    go_sprint(&as_go_floats(&args))
-                ))
-            })?;
+            .ok_or_else(|| ToolError::InvalidArgument(format!("empty agent_name: {args}")))?;
         // Unlike adk-python, whose tool accepts any name and whose
         // flow then raises ValueError, a name outside the enum is rejected.
         let targets: Vec<&str> = self.supported_agents.iter().map(|a| a.name()).collect();
@@ -522,8 +517,8 @@ mod tests {
             .run(ctx.clone(), json!({"agent_name": ""}))
             .await
             .unwrap_err();
-        assert_eq!(err.to_string(), "empty agent_name: map[agent_name:]");
-        // Go agent_transfer.go:180 `%v` of the JSON-decoded args: numbers are float64.
+        assert_eq!(err.to_string(), r#"empty agent_name: {"agent_name":""}"#);
+        // The args are shown as JSON text.
         let err = runnable
             .run(
                 ctx.clone(),
@@ -533,16 +528,16 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "empty agent_name: map[agent_name: n:1e+06 x:[1 a]]"
+            r#"empty agent_name: {"agent_name":"","n":1000000,"x":[1,"a"]}"#
         );
         let err = runnable
             .run(ctx.clone(), json!({"agent_name": 5}))
             .await
             .unwrap_err();
-        assert_eq!(err.to_string(), "empty agent_name: map[agent_name:5]");
+        assert_eq!(err.to_string(), r#"empty agent_name: {"agent_name":5}"#);
         // Go's nil args map (`map[string]any(nil)`).
         let err = runnable.run(ctx.clone(), Value::Null).await.unwrap_err();
-        assert_eq!(err.to_string(), "empty agent_name: map[]");
+        assert_eq!(err.to_string(), "empty agent_name: {}");
         // Go c8fff670: a name outside the declared enum is a tool error naming the targets,
         // and leaves the action unset.
         let ctx = Context::builder()

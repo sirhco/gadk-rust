@@ -409,16 +409,16 @@ async fn decode_request_body(body: Body) -> Result<RunAgentRequest, StatusError>
     let mut values = serde_json::Deserializer::from_slice(&bytes).into_iter::<RunAgentRequest>();
     match values.next() {
         Some(Ok(req)) => Ok(req),
-        Some(Err(err)) => Err(bad_request(go_decode_error(&err))),
+        Some(Err(err)) => Err(bad_request(decode_error_text(&err))),
         // An empty (or all-whitespace) body.
         None => Err(bad_request("EOF".to_owned())),
     }
 }
 
-/// The error text for a request-body decode failure, worded as an ADK server's request decoder
-/// words the errors clients can tell apart: an unknown field is `json: unknown field "<name>"`
-/// and a truncated value `unexpected EOF`. Other syntax and type errors keep serde_json's text.
-fn go_decode_error(err: &serde_json::Error) -> String {
+/// The error text for a request-body decode failure: an unknown field is
+/// `unknown field "<name>"` and a truncated value `unexpected EOF`. Other syntax and type errors
+/// keep serde_json's text.
+fn decode_error_text(err: &serde_json::Error) -> String {
     if err.is_eof() {
         return "unexpected EOF".to_owned();
     }
@@ -426,7 +426,7 @@ fn go_decode_error(err: &serde_json::Error) -> String {
     if let Some(rest) = msg.strip_prefix("unknown field `")
         && let Some(end) = rest.find("`, ")
     {
-        return format!("json: unknown field {}", go_quote(&rest[..end]));
+        return format!("unknown field {}", go_quote(&rest[..end]));
     }
     msg
 }
@@ -583,18 +583,18 @@ mod tests {
     /// Go 1.27 `json.Decoder` (with `DisallowUnknownFields`) texts for the errors a client can
     /// provoke without a type mismatch, and the decoder's first-value-only read.
     #[tokio::test]
-    async fn decode_request_body_follows_go_decoder() {
+    async fn decode_request_body_error_texts() {
         for (body, want) in [
             ("", "failed to decode request: EOF"),
             ("  \n", "failed to decode request: EOF"),
             (r#"{"appName":"#, "failed to decode request: unexpected EOF"),
             (
                 r#"{"appName":"a","bogus":1}"#,
-                r#"failed to decode request: json: unknown field "bogus""#,
+                r#"failed to decode request: unknown field "bogus""#,
             ),
             (
                 r#"{"we\"ird":1}"#,
-                r#"failed to decode request: json: unknown field "we\"ird""#,
+                r#"failed to decode request: unknown field "we\"ird""#,
             ),
         ] {
             assert_eq!(decode(body).await.unwrap_err(), want, "{body:?}");

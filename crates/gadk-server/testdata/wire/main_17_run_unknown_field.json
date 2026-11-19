@@ -24,7 +24,7 @@
         "nosniff"
       ]
     ],
-    "body": "failed to decode request: json: unknown field \"bogus\"\n"
+    "body": "failed to decode request: unknown field \"bogus\"\n"
   },
   "compare": "exact"
 }

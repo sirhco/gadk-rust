@@ -178,7 +178,7 @@ impl ReasoningEngineClient {
     ///
     /// The operation's error as a [`VertexError`](crate::VertexError)
     /// (`rpc error: code = … desc = …`), a failed poll's error, or
-    /// `unsupported result type <nil>: <nil>` when the operation is done without a response.
+    /// `operation finished without a response` when the operation is done without a response.
     /// Callers add the `operation failed: ` prefix.
     pub async fn wait(&self, op: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         let mut done = self.client.wait_operation(op).await?;
@@ -187,7 +187,7 @@ impl ReasoningEngineClient {
                 response.remove("@type");
                 Ok(Value::Object(response))
             }
-            _ => Err("unsupported result type <nil>: <nil>".into()),
+            _ => Err("operation finished without a response".into()),
         }
     }
 }

@@ -86,8 +86,8 @@ fn object_input_schema(schema: Value) -> Result<Map<String, Value>, String> {
         Value::Null => Map::new(),
         other => {
             return Err(format!(
-                "schema is not a JSON object: json: cannot unmarshal {} into Go value of type map[string]interface {{}}",
-                json_kind(&other)
+                "schema is not a JSON object: {}",
+                gadk_platform::json_expected_found("a JSON object", &other)
             ));
         }
     };
@@ -102,15 +102,12 @@ fn object_input_schema(schema: Value) -> Result<Map<String, Value>, String> {
             if !types.iter().any(|t| t.as_str() == Some("object")) {
                 return Err(format!(
                     "schema types {} do not include \"object\"",
-                    go_sprint(&Value::Array(types.clone()))
+                    Value::Array(types.clone())
                 ));
             }
         }
         Some(other) => {
-            return Err(format!(
-                "schema type {} is not \"object\"",
-                go_sprint(other)
-            ));
+            return Err(format!("schema type {} is not \"object\"", other));
         }
     }
     m.insert("type".to_string(), Value::String("object".to_string()));
@@ -213,52 +210,6 @@ fn normalize_gemini_schema_map(raw: &mut Map<String, Value>) {
             if let Value::Object(sub) = sub {
                 normalize_gemini_schema_map(sub);
             }
-        }
-    }
-}
-
-/// The JSON kind named in the "schema is not a JSON object" error text for a non-object value.
-fn json_kind(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "null",
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
-}
-
-/// Renders a decoded JSON value for error text: strings bare, `null` as `<nil>`, arrays as
-/// `[a b]`, objects as `map[k:v]` with sorted keys, numbers as `f64` (a whole number below 1e21
-/// without a fractional part).
-fn go_sprint(v: &Value) -> String {
-    match v {
-        Value::Null => "<nil>".to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => match n.as_f64() {
-            Some(f) if f.fract() == 0.0 && f.abs() < 1e21 => format!("{f:.0}"),
-            Some(f) => f.to_string(),
-            None => n.to_string(),
-        },
-        Value::String(s) => s.clone(),
-        Value::Array(items) => format!(
-            "[{}]",
-            items.iter().map(go_sprint).collect::<Vec<_>>().join(" ")
-        ),
-        Value::Object(m) => {
-            let mut keys: Vec<&String> = m.keys().collect();
-            keys.sort();
-            format!(
-                "map[{}]",
-                keys.iter()
-                    .map(|k| {
-                        let value = m.get(k.as_str()).map(go_sprint).unwrap_or_default();
-                        format!("{k}:{value}")
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
         }
     }
 }

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use gadk_agent::fiber::{self, AttemptSite, PARALLEL_WORKER_CREATOR};
 use gadk_agent::{AgentError, CancelCause, Context, ContextDelta, EventStream};
-use gadk_platform::go_type_name;
+use gadk_platform::json_kind_article;
 use gadk_session::Event;
 use parking_lot::Mutex;
 use serde_json::Value;
@@ -114,8 +114,8 @@ impl Node for ParallelWorker {
                 Value::Array(items) => items,
                 other => {
                     yield Err(AgentError::other(format!(
-                        "parallel worker {name} expects a slice input, got {}",
-                        go_type_name(&other)
+                        "parallel worker {name} expects an array input, found {}",
+                        json_kind_article(&other)
                     )));
                     return;
                 }

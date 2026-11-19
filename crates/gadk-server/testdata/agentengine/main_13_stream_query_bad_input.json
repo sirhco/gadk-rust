@@ -25,9 +25,9 @@
         "nosniff"
       ]
     ],
-    "body": "streaming JSONL failed: json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\n"
+    "body": "streaming JSONL failed: could not decode the request as StreamQueryRequest (invalid `StreamQueryRequest.input.message`: expected a JSON object, found a number) or StreamQueryTextRequest (invalid `StreamQueryTextRequest.input.message`: expected a string, found a number)\n"
   },
-  "log": "json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\nhandleQuery failed: streaming JSONL failed: json.Unmarshal() failed both for models.StreamQueryRequest (json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content) and models.StreamQueryTextRequest (json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string)\n",
+  "log": "could not decode the request as StreamQueryRequest (invalid `StreamQueryRequest.input.message`: expected a JSON object, found a number) or StreamQueryTextRequest (invalid `StreamQueryTextRequest.input.message`: expected a string, found a number)\nhandleQuery failed: streaming JSONL failed: could not decode the request as StreamQueryRequest (invalid `StreamQueryRequest.input.message`: expected a JSON object, found a number) or StreamQueryTextRequest (invalid `StreamQueryTextRequest.input.message`: expected a string, found a number)\n",
   "methods": null,
   "compare": "exact"
 }

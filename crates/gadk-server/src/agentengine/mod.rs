@@ -115,7 +115,7 @@ pub enum Error {
         name: String,
     },
     /// Encoding the method metadata for the startup log failed.
-    #[error("json.NewEncoder failed: {0}")]
+    #[error("failed to encode JSON: {0}")]
     Encode(String),
 }
 
@@ -378,7 +378,7 @@ mod tests {
         );
         assert_eq!(
             Error::Encode("x".into()).to_string(),
-            "json.NewEncoder failed: x"
+            "failed to encode JSON: x"
         );
     }
 }

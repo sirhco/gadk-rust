@@ -113,7 +113,7 @@ impl Controller {
                 Err(e) => {
                     return http_error(
                         StatusCode::BAD_REQUEST,
-                        &format!("io.ReadAll with LimitReader failed: {e}"),
+                        &format!("failed to read request body: {e}"),
                     );
                 }
             };
@@ -394,8 +394,7 @@ mod tests {
             (
                 400,
                 http_error_headers(),
-                "json: cannot unmarshal number into Go struct field Query.class_method of type string\n"
-                    .to_owned()
+                "invalid `Query.class_method`: expected a string, found a number\n".to_owned()
             )
         );
         assert!(lines.lock().unwrap().is_empty());
@@ -450,7 +449,7 @@ mod tests {
             (
                 400,
                 http_error_headers(),
-                "io.ReadAll with LimitReader failed: http: request body too large\n".to_owned()
+                "failed to read request body: http: request body too large\n".to_owned()
             )
         );
     }

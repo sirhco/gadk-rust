@@ -65,7 +65,7 @@ impl StreamingAgentRunWithEventsHandler {
     /// Decodes the request (a decode error naming
     /// `StreamingAgentRunWithEventsRequest`), its `request_json`
     /// ([`decode_streaming_agent_run_with_events_request`];
-    /// `decodeStreamingAgentRunWithEventsRequest() failed: <err>`), runs
+    /// `invalid streaming_agent_run_with_events request: <err>`), runs
     /// [`Self::ensure_backend_session`] (`s.ensureBackendSession() failed: <err>`), builds the
     /// runner (`s.run() failed: …`) — each error also logged — then streams as `stream_query`
     /// does, each event as one `emit_json(&StreamingAgentRunWithEventsResponse { events:
@@ -81,14 +81,14 @@ impl StreamingAgentRunWithEventsHandler {
         )
         .map_err(|err| {
             fail(format!(
-                "json.Unmarshal() failed for models.StreamingAgentRunWithEventsRequest: {err}"
+                "failed to decode StreamingAgentRunWithEventsRequest: {err}"
             ))
         })?;
 
         let (mut run_req, requested_session_id) =
             decode_streaming_agent_run_with_events_request(&req).map_err(|err| {
                 fail(format!(
-                    "decodeStreamingAgentRunWithEventsRequest() failed: {err}"
+                    "invalid streaming_agent_run_with_events request: {err}"
                 ))
             })?;
         self.ensure_backend_session(&mut run_req, &requested_session_id)
@@ -201,7 +201,7 @@ pub(crate) fn decode_streaming_agent_run_with_events_request(
         req.input.request_json.as_bytes(),
         &encode_shapes::MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RUN_REQUEST,
     )
-    .map_err(|err| format!("json.Unmarshal(input.request_json) failed: {err}"))?;
+    .map_err(|err| format!("failed to decode input.request_json: {err}"))?;
     let requested_session_id = run_req.session_id.clone();
     Ok((run_req, requested_session_id))
 }

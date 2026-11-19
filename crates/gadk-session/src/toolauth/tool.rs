@@ -188,16 +188,16 @@ impl Config {
     pub(crate) fn decode(raw: &RawValue) -> Result<Config, String> {
         let mut d = decode_object(raw, "Config", CONFIG_ALIASES, true, &["authScheme"])?;
         let auth_scheme = d
-            .take::<Scheme>("authScheme", "Config", "toolauth.Scheme")?
+            .take::<Scheme>("authScheme", "Config", "Scheme")?
             .unwrap_or_default();
         let raw_auth_credential = d
-            .take::<Option<Credential>>("rawAuthCredential", "Config", "toolauth.Credential")?
+            .take::<Option<Credential>>("rawAuthCredential", "Config", "Credential")?
             .flatten();
         let exchanged_auth_credential = d
-            .take::<Option<Credential>>("exchangedAuthCredential", "Config", "toolauth.Credential")?
+            .take::<Option<Credential>>("exchangedAuthCredential", "Config", "Credential")?
             .flatten();
         let credential_key = d
-            .take::<Option<String>>("credentialKey", "Config", "string")?
+            .take::<Option<String>>("credentialKey", "Config", "String")?
             .flatten()
             .unwrap_or_default();
         Ok(Config {
@@ -277,10 +277,10 @@ impl ToolArguments {
             &["functionCallId", "authConfig"],
         )?;
         let function_call_id = d
-            .take::<String>("functionCallId", "ToolArguments", "string")?
+            .take::<String>("functionCallId", "ToolArguments", "String")?
             .unwrap_or_default();
         let auth_config = d
-            .take::<Config>("authConfig", "ToolArguments", "toolauth.Config")?
+            .take::<Config>("authConfig", "ToolArguments", "Config")?
             .unwrap_or_default();
         Ok(ToolArguments {
             function_call_id,

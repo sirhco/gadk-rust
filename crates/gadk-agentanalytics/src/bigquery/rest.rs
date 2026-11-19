@@ -731,8 +731,9 @@ fn table_metadata_from_reply(body: &[u8]) -> Result<TableMetadata, Error> {
                 Some(Value::Number(n)) => n.as_u64().unwrap_or(0),
                 Some(other) => {
                     return Err(Error::msg(format!(
-                        "json: invalid use of ,string struct tag, trying to unmarshal {other} \
-                         into int64"
+                        "invalid `timePartitioning.expirationMs`: expected an integer or an \
+                         integer string, found {} ({other})",
+                        gadk_platform::json_kind_article(other)
                     )));
                 }
             };

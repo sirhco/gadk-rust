@@ -300,7 +300,7 @@ async fn an_operation_done_without_a_response_is_unsupported() {
         .wait(json!({"name": OP, "done": true}))
         .await
         .unwrap_err();
-    assert_eq!(err.to_string(), "unsupported result type <nil>: <nil>");
+    assert_eq!(err.to_string(), "operation finished without a response");
     assert!(
         scripted.requests().is_empty(),
         "a done operation is not polled"

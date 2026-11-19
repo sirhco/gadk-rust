@@ -22,7 +22,7 @@ use gadk_genai::{
     Content, FunctionCall, GenerateContentConfig, Part, ROLE_USER, Tool as GenaiTool,
 };
 use gadk_model::LlmRequest;
-use gadk_platform::go_type_name;
+use gadk_platform::json_kind_article;
 use serde_json::{Map, Value};
 
 use crate::error::ToolError;
@@ -105,8 +105,8 @@ pub fn append_instructions(req: &mut LlmRequest, instructions: &[&str]) {
 /// The function call name of a tool confirmation request.
 pub const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME: &str = "adk_request_confirmation";
 
-/// Recovers the original function call from a confirmation request's args (error texts are
-/// byte-identical to an ADK server's; see the literals in this function). An empty `args` map
+/// Recovers the original function call from a confirmation request's args (see the error
+/// literals in this function). An empty `args` map
 /// is reported as a missing function call or arguments (one check, one message).
 ///
 /// A function call stored directly in `args` is not accepted: JSON args can only hold an
@@ -127,9 +127,9 @@ pub fn original_call_from(fc: &FunctionCall) -> Result<FunctionCall, ToolError> 
     };
     let Value::Object(raw) = val else {
         return Err(ToolError::InvalidArgument(format!(
-            "argument {} has invalid type: expected JSON object (map[string]any) or *genai.FunctionCall, got {}",
+            "argument {} has invalid type: expected a JSON object holding a function call, found {}",
             go_quote(KEY),
-            go_type_name(val)
+            json_kind_article(val)
         )));
     };
     // Field names are matched case-insensitively ("ID" → id).

@@ -27,10 +27,9 @@ use gadk_model::LlmRequest;
 use serde_json::{Map, Value};
 
 use crate::llm::state::reveal;
-/// The type name of a JSON-decoded value as it appears in validation error texts (`<nil>`,
-/// `bool`, `float64`, `string`, `[]interface {}`, `map[string]interface {}`); shared with the
-/// schema utilities.
-pub(crate) use crate::tool::utils::go_type_name;
+/// The kind of a JSON value as validation error texts name it (`null`, `a boolean`, `a number`,
+/// `a string`, `an array`, `an object`); shared with the schema utilities.
+pub(crate) use crate::tool::utils::json_kind_article;
 use crate::tool::utils::validate_map_on_schema;
 use crate::workflow::route::go_quote;
 
@@ -181,8 +180,8 @@ impl RunnableTool for FinishTaskTool {
             Value::Object(m) => m,
             other => {
                 return Err(ToolError::InvalidArgument(format!(
-                    "unexpected args type: {}, expected map[string]any",
-                    go_type_name(&other)
+                    "unexpected args type: expected a JSON object, found {}",
+                    json_kind_article(&other)
                 )));
             }
         };
@@ -334,7 +333,7 @@ mod tests {
                 .await
                 .unwrap_err()
                 .to_string(),
-            "unexpected args type: string, expected map[string]any"
+            "unexpected args type: expected a JSON object, found a string"
         );
     }
 

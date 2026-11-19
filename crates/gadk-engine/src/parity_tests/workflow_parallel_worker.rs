@@ -96,7 +96,7 @@ fn err_yield_node(name: &str, cancelled: bool) -> Arc<dyn Node> {
 #[rstest::rstest]
 #[case::success(json!(["a", "b", "c"]), false, Some(json!(["A", "B", "C"])), None)]
 #[case::empty_list(json!([]), false, Some(json!([])), None)]
-#[case::invalid_input_not_slice(json!("not a slice"), false, None, Some("expects a slice input"))]
+#[case::invalid_input_not_slice(json!("not a slice"), false, None, Some("expects an array input"))]
 #[case::worker_error(json!(["a", "b", "c"]), true, None, Some("failed on b"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_parallel_worker_run(

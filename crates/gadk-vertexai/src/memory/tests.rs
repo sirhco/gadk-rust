@@ -220,32 +220,29 @@ async fn a_missing_state_key_is_gos_state_get_error() {
     assert!(server.requests().is_empty());
 }
 
-/// Go `fmt.Errorf("want type time.Time, got : %T (%v)", t, t)` for each JSON value kind (Go's
-/// `%T`/`%v` of the value decoded into `any`), and for a string that is not RFC 3339.
+/// A state value that is not an RFC 3339 string names its JSON kind and shows the value as JSON,
+/// for each JSON value kind and for a string that is not RFC 3339.
 #[tokio::test]
-async fn a_state_value_that_is_not_a_time_is_gos_type_error() {
+async fn a_state_value_that_is_not_a_time_is_a_type_error() {
     let server = generate_server(json!({"name": OP_NAME}), json!({}));
     let svc = service(VertexAiMemoryServiceConfig {
         state_key_session_last_update_time: Some("last".into()),
         ..config(&server.url())
     });
     for (value, want) in [
-        (json!(1), "float64 (1)"),
-        (json!(1.5), "float64 (1.5)"),
-        (json!(1e21), "float64 (1e+21)"),
-        (json!(1_000_000), "float64 (1e+06)"),
-        (json!(true), "bool (true)"),
-        (json!(false), "bool (false)"),
-        (Value::Null, "<nil> (<nil>)"),
-        (
-            json!({"b": 1, "a": "x"}),
-            "map[string]interface {} (map[a:x b:1])",
-        ),
-        (json!({}), "map[string]interface {} (map[])"),
-        (json!([1, "a"]), "[]interface {} ([1 a])"),
-        (json!("yesterday"), "string (yesterday)"),
-        (json!(""), "string ()"),
-        (json!("2026-01-02"), "string (2026-01-02)"),
+        (json!(1), "a number (1)"),
+        (json!(1.5), "a number (1.5)"),
+        (json!(1e21), "a number (1e+21)"),
+        (json!(1_000_000), "a number (1000000)"),
+        (json!(true), "a boolean (true)"),
+        (json!(false), "a boolean (false)"),
+        (Value::Null, "null"),
+        (json!({"b": 1, "a": "x"}), r#"an object ({"a":"x","b":1})"#),
+        (json!({}), "an object ({})"),
+        (json!([1, "a"]), r#"an array ([1,"a"])"#),
+        (json!("yesterday"), r#"a string ("yesterday")"#),
+        (json!(""), r#"a string ("")"#),
+        (json!("2026-01-02"), r#"a string ("2026-01-02")"#),
     ] {
         let err = svc
             .add_session_to_memory(&session(json!({"last": value.clone()})))
@@ -253,7 +250,7 @@ async fn a_state_value_that_is_not_a_time_is_gos_type_error() {
             .unwrap_err();
         assert_eq!(
             backend_text(&err),
-            format!("want type time.Time, got : {want}"),
+            format!("expected an RFC 3339 timestamp, found {want}"),
             "{value}"
         );
     }
@@ -299,7 +296,7 @@ async fn generate_errors_carry_gos_wrappers() {
 
 /// `WaitForCompletion`: a pending operation is polled at `GET /ui/{name}` (no query, routing
 /// `name=…`) until done; done without a result is success (Go accepts `op.Wait`'s
-/// `unsupported result type <nil>: <nil>`).
+/// `operation finished without a response`).
 #[tokio::test]
 async fn wait_for_completion_polls_until_done() {
     let server = generate_server(

@@ -144,9 +144,9 @@ impl Serialize for GoValue {
             GoValue::Bool(b) => serializer.serialize_bool(*b),
             GoValue::Int(i) => serializer.serialize_i64(*i),
             GoValue::Float(f) if f.is_finite() => serializer.serialize_f64(*f),
-            // Encoding error text: `json: unsupported value: NaN` (`+Inf`, `-Inf`).
+            // Encoding error text: `cannot encode NaN as JSON` (`+Inf`, `-Inf`).
             GoValue::Float(f) => Err(S::Error::custom(format!(
-                "json: unsupported value: {}",
+                "cannot encode {} as JSON",
                 if f.is_nan() {
                     "NaN"
                 } else if *f > 0.0 {
@@ -1056,12 +1056,12 @@ mod tests {
         let nan = GoValue::Object(BTreeMap::from([("f".to_owned(), GoValue::Float(f64::NAN))]));
         assert_eq!(
             gadk_model::to_go_json(&nan).unwrap_err().to_string(),
-            "json: unsupported value: NaN"
+            "cannot encode NaN as JSON"
         );
         let inf = GoValue::Float(f64::NEG_INFINITY);
         assert_eq!(
             gadk_model::to_go_json(&inf).unwrap_err().to_string(),
-            "json: unsupported value: -Inf"
+            "cannot encode -Inf as JSON"
         );
     }
 

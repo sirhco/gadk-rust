@@ -104,29 +104,22 @@ fn marshal(prefix: &str, map: &Map<String, Value>) -> Result<String, OpenAiError
 
 /// Decodes `raw` into a JSON object: `Ok(None)` for JSON
 /// `null`, `Ok(Some(map))` for an object, else `Err` with the text
-/// `unexpected end of JSON input` for truncated input, a `json: cannot unmarshal <kind> into …`
-/// text for a value of another kind (see the literal in [`go_map`]), and serde_json's text
-/// otherwise.
+/// `unexpected end of JSON input` for truncated input, `expected a JSON object, found <kind>`
+/// for a value of another kind (see [`go_map`]), and serde_json's text otherwise.
 pub(crate) fn unmarshal_function_args(raw: &str) -> Result<Option<Map<String, Value>>, String> {
     let value: Value = serde_json::from_str(raw).map_err(|e| go_json_error(&e))?;
     go_map(value)
 }
 
 /// Stores a decoded value as a JSON object: an object is the map,
-/// `null` is `None`, anything else is an `Err` naming the value's kind (see the literal
-/// in the body).
+/// `null` is `None`, anything else is an `Err` naming the value's kind
+/// (`expected a JSON object, found an array`).
 pub(crate) fn go_map(value: Value) -> Result<Option<Map<String, Value>>, String> {
-    let kind = match value {
-        Value::Object(map) => return Ok(Some(map)),
-        Value::Null => return Ok(None),
-        Value::Array(_) => "array",
-        Value::String(_) => "string",
-        Value::Number(_) => "number",
-        Value::Bool(_) => "bool",
-    };
-    Err(format!(
-        "json: cannot unmarshal {kind} into Go value of type map[string]interface {{}}"
-    ))
+    match value {
+        Value::Object(map) => Ok(Some(map)),
+        Value::Null => Ok(None),
+        other => Err(gadk_platform::json_expected_found("a JSON object", &other)),
+    }
 }
 
 /// Decodes the raw argument payload (both APIs): `""` and JSON
@@ -226,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn unmarshalling_matches_encoding_json() {
+    fn unmarshalling_names_the_kind_found() {
         assert_eq!(unmarshal_function_args("null").unwrap(), None);
         assert_eq!(
             unmarshal_function_args(r#"{"a":1}"#).unwrap(),
@@ -234,22 +227,10 @@ mod tests {
         );
         for (raw, want) in [
             ("{", "unexpected end of JSON input"),
-            (
-                "[1]",
-                "json: cannot unmarshal array into Go value of type map[string]interface {}",
-            ),
-            (
-                r#""s""#,
-                "json: cannot unmarshal string into Go value of type map[string]interface {}",
-            ),
-            (
-                "1",
-                "json: cannot unmarshal number into Go value of type map[string]interface {}",
-            ),
-            (
-                "true",
-                "json: cannot unmarshal bool into Go value of type map[string]interface {}",
-            ),
+            ("[1]", "expected a JSON object, found an array"),
+            (r#""s""#, "expected a JSON object, found a string"),
+            ("1", "expected a JSON object, found a number"),
+            ("true", "expected a JSON object, found a boolean"),
         ] {
             assert_eq!(unmarshal_function_args(raw).unwrap_err(), want, "{raw}");
         }

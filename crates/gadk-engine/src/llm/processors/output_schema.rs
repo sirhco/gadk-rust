@@ -35,7 +35,7 @@ use crate::{
         processors::{go_json_marshal, wrap_err},
         state::{LlmAgentState, reveal},
     },
-    tool::utils::{go_type_name, validate_map_on_schema},
+    tool::utils::{json_kind_article, validate_map_on_schema},
 };
 
 pub(crate) const SET_MODEL_RESPONSE_TOOL_NAME: &str = "set_model_response";
@@ -156,8 +156,8 @@ impl RunnableTool for SetModelResponseTool {
     async fn run(&self, _ctx: Context, args: Value) -> Result<Map<String, Value>, ToolError> {
         let Value::Object(m) = args else {
             return Err(ToolError::InvalidArgument(format!(
-                "unexpected args type for set_model_response: {}",
-                go_type_name(&args)
+                "unexpected args type for set_model_response: expected a JSON object, found {}",
+                json_kind_article(&args)
             )));
         };
         validate_map_on_schema(&m, &self.schema, false)

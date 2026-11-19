@@ -39,8 +39,8 @@ pub const STOP_REASON_METADATA_KEY: &str = "anthropic_stop_reason";
 pub const CACHE_CREATION_INPUT_TOKENS_METADATA_KEY: &str = "anthropic_cache_creation_input_tokens";
 
 /// Decodes a 2xx non-streaming body: a non-JSON
-/// `content_type` fails with `expected destination type of 'string' or '[]byte' for
-/// responses with content-type '<ct>' that is not 'application/json'`, a JSON decode error with
+/// `content_type` fails with `unexpected response content-type '<ct>': expected
+/// 'application/json'`, a JSON decode error with
 /// `error parsing response json: <err>`, both wrapped by
 /// [`AnthropicError::request_failed`](crate::error::AnthropicError).
 ///
@@ -52,7 +52,7 @@ pub(crate) fn decode_message(content_type: &str, body: &[u8]) -> Result<Message,
     let is_json = media.contains("application/json") || media.ends_with("+json");
     if !is_json {
         return Err(AnthropicError::request_failed(format!(
-            "expected destination type of 'string' or '[]byte' for responses with content-type '{content_type}' that is not 'application/json'"
+            "unexpected response content-type '{content_type}': expected 'application/json'"
         )));
     }
     let mut values = serde_json::Deserializer::from_slice(body).into_iter::<Message>();
@@ -760,7 +760,7 @@ mod tests {
             assert_eq!(
                 err.to_string(),
                 format!(
-                    "anthropicmodel: request failed: expected destination type of 'string' or '[]byte' for responses with content-type '{ct}' that is not 'application/json'"
+                    "anthropicmodel: request failed: unexpected response content-type '{ct}': expected 'application/json'"
                 ),
                 "{ct}"
             );
@@ -792,7 +792,7 @@ mod tests {
             assert_eq!(
                 err.to_string(),
                 format!(
-                    "anthropicmodel: request failed: expected destination type of 'string' or '[]byte' for responses with content-type '{ct}' that is not 'application/json'"
+                    "anthropicmodel: request failed: unexpected response content-type '{ct}': expected 'application/json'"
                 ),
                 "{ct}"
             );

@@ -361,7 +361,9 @@ impl SessionClient {
             .map_err(session_error)?;
         // longrunning `Poll`: a done operation holding neither `error` nor `response`.
         if op.get("response").is_none_or(Value::is_null) {
-            return Err(session_error("unsupported result type <nil>: <nil>".into()));
+            return Err(session_error(
+                "operation finished without a response".into(),
+            ));
         }
         Ok(())
     }

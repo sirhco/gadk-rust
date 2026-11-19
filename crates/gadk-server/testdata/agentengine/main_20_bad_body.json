@@ -25,7 +25,7 @@
         "nosniff"
       ]
     ],
-    "body": "json: cannot unmarshal number into Go struct field Query.class_method of type string\n"
+    "body": "invalid `Query.class_method`: expected a string, found a number\n"
   },
   "log": "",
   "methods": null,

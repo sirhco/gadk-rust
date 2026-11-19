@@ -24,8 +24,6 @@ use schemars::generate::SchemaSettings;
 use schemars::transform::RecursiveTransform;
 use serde_json::{Map, Value};
 
-use crate::llm::processors::{as_go_floats, go_sprint};
-
 /// The prefix of client-generated function call ids.
 pub(crate) const AF_FUNCTION_CALL_ID_PREFIX: &str = "adk-";
 
@@ -286,7 +284,7 @@ fn encode_number(n: &serde_json::Number) -> String {
 // Schema-based argument validation
 // ---------------------------------------------------------------------------------------------
 
-pub(crate) use gadk_platform::go_type_name;
+pub(crate) use gadk_platform::json_kind_article;
 
 fn type_str(schema: &Schema) -> &str {
     schema.r#type.as_ref().map(|t| t.as_str()).unwrap_or("")
@@ -360,12 +358,14 @@ pub(crate) fn validate_map_on_schema(
                 ));
             }
             Ok(false) => {
+                let found = match value {
+                    Value::Null => "null".to_owned(),
+                    other => format!("{} ({other})", json_kind_article(other)),
+                };
                 return Err(format!(
-                    "{arg_type} arg: '{}' type mismatch, expected schema type {}, got value {} of type {}",
+                    "{arg_type} arg: '{}' type mismatch, expected schema type {}, found {found}",
                     go_quote(key),
                     type_str(prop_schema),
-                    go_sprint(&as_go_floats(value)),
-                    go_type_name(value)
                 ));
             }
             Ok(true) => {}
@@ -396,14 +396,9 @@ pub(crate) fn validate_output_schema(
         // `null` becomes an empty map.
         Value::Null => Map::new(),
         other => {
-            let kind = match other {
-                Value::Array(_) => "array",
-                Value::String(_) => "string",
-                Value::Number(_) => "number",
-                _ => "bool",
-            };
             return Err(format!(
-                "failed to parse output JSON: json: cannot unmarshal {kind} into Go value of type map[string]interface {{}}"
+                "failed to parse output JSON: {}",
+                gadk_platform::json_expected_found("a JSON object", &other)
             ));
         }
     };
@@ -575,10 +570,9 @@ mod tests {
 
     use super::*;
 
-    /// Go schema_utils.go:111 formats the value with `%v` of the JSON-decoded value: strings
-    /// unquoted, objects as `map[...]`, numbers as float64.
+    /// A type mismatch names the JSON kind found and shows the value as JSON text.
     #[test]
-    fn type_mismatch_formats_value_like_go_percent_v() {
+    fn type_mismatch_names_the_kind_and_json_value() {
         let schema = Schema {
             r#type: Some(Type::Object),
             properties: BTreeMap::from([(
@@ -598,11 +592,11 @@ mod tests {
         };
         assert_eq!(
             check(json!({"answer": "42"})),
-            "output arg: '\"answer\"' type mismatch, expected schema type INTEGER, got value 42 of type string"
+            "output arg: '\"answer\"' type mismatch, expected schema type INTEGER, found a string (\"42\")"
         );
         assert_eq!(
             check(json!({"answer": {"a": 1, "b": 1_000_000}})),
-            "output arg: '\"answer\"' type mismatch, expected schema type INTEGER, got value map[a:1 b:1e+06] of type map[string]interface {}"
+            r#"output arg: '"answer"' type mismatch, expected schema type INTEGER, found an object ({"a":1,"b":1000000})"#
         );
     }
 }

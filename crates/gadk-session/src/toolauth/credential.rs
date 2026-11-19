@@ -148,12 +148,12 @@ const HTTP_CREDENTIALS_FIELDS: &[&str] = &["username", "password", "token"];
 
 impl GoUnmarshal for HttpCredentials {
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
-        const T: &str = "HTTPCredentials";
+        const T: &str = "HttpCredentials";
         let mut d = decode_object(raw, T, HTTP_CREDENTIALS_FIELDS, true, &[])?;
         Ok(HttpCredentials {
-            username: d.take("username", T, "string")?.unwrap_or_default(),
-            password: d.take("password", T, "string")?.unwrap_or_default(),
-            token: d.take("token", T, "string")?.unwrap_or_default(),
+            username: d.take("username", T, "String")?.unwrap_or_default(),
+            password: d.take("password", T, "String")?.unwrap_or_default(),
+            token: d.take("token", T, "String")?.unwrap_or_default(),
             extra: d.extra,
         })
     }
@@ -202,12 +202,12 @@ const HTTP_AUTH_FIELDS: &[&str] = &["scheme", "credentials", "additionalHeaders"
 impl GoUnmarshal for HttpAuth {
     /// Decodes an [`HttpAuth`]: scheme and credentials are required.
     fn go_unmarshal(raw: &RawValue) -> Result<Self, String> {
-        const T: &str = "HTTPAuth";
+        const T: &str = "HttpAuth";
         let mut d = decode_object(raw, T, HTTP_AUTH_FIELDS, true, &["scheme", "credentials"])?;
         Ok(HttpAuth {
-            scheme: d.take("scheme", T, "string")?.unwrap_or_default(),
+            scheme: d.take("scheme", T, "String")?.unwrap_or_default(),
             credentials: d
-                .take("credentials", T, "toolauth.HTTPCredentials")?
+                .take("credentials", T, "HttpCredentials")?
                 .unwrap_or_default(),
             additional_headers: d.take_string_map("additionalHeaders", T)?,
             extra: d.extra,
@@ -311,7 +311,7 @@ impl GoUnmarshal for OAuth2Auth {
         const T: &str = "OAuth2Auth";
         let mut d = decode_object(raw, T, OAUTH2_AUTH_FIELDS, true, &[])?;
         let mut s = |alias: &str| -> Result<String, String> {
-            Ok(d.take(alias, T, "string")?.unwrap_or_default())
+            Ok(d.take(alias, T, "String")?.unwrap_or_default())
         };
         let client_id = s("clientId")?;
         let client_secret = s("clientSecret")?;
@@ -327,7 +327,7 @@ impl GoUnmarshal for OAuth2Auth {
         let expires_at = d.take_i64("expiresAt", T)?.unwrap_or_default();
         let expires_in = d.take_i64("expiresIn", T)?.unwrap_or_default();
         let mut s = |alias: &str| -> Result<String, String> {
-            Ok(d.take(alias, T, "string")?.unwrap_or_default())
+            Ok(d.take(alias, T, "String")?.unwrap_or_default())
         };
         let audience = s("audience")?;
         let prompt = s("prompt")?;
@@ -493,7 +493,7 @@ impl GoUnmarshal for ServiceAccountCredential {
             &SERVICE_ACCOUNT_CREDENTIAL_FIELDS[1..],
         )?;
         let mut s = |alias: &str| -> Result<String, String> {
-            Ok(d.take(alias, T, "string")?.unwrap_or_default())
+            Ok(d.take(alias, T, "String")?.unwrap_or_default())
         };
         Ok(ServiceAccountCredential {
             r#type: s("type")?,
@@ -592,14 +592,14 @@ impl GoUnmarshal for ServiceAccount {
             service_account_credential: d.take(
                 "serviceAccountCredential",
                 T,
-                "*toolauth.ServiceAccountCredential",
+                "ServiceAccountCredential",
             )?,
             scopes: d.take_string_list("scopes", T)?,
             use_default_credential: d
                 .take("useDefaultCredential", T, "bool")?
                 .unwrap_or_default(),
             use_id_token: d.take("useIdToken", T, "bool")?.unwrap_or_default(),
-            audience: d.take("audience", T, "string")?.unwrap_or_default(),
+            audience: d.take("audience", T, "String")?.unwrap_or_default(),
             extra: d.extra,
         };
         if !sa.use_default_credential && sa.service_account_credential.is_none() {
@@ -683,14 +683,12 @@ impl GoUnmarshal for Credential {
         const T: &str = "Credential";
         let mut d = decode_object(raw, T, CREDENTIAL_FIELDS, true, &["authType"])?;
         let c = Credential {
-            auth_type: d
-                .take("authType", T, "toolauth.CredentialType")?
-                .unwrap_or_default(),
-            resource_ref: d.take("resourceRef", T, "string")?.unwrap_or_default(),
-            api_key: d.take("apiKey", T, "string")?.unwrap_or_default(),
-            http: d.take("http", T, "*toolauth.HTTPAuth")?,
-            service_account: d.take("serviceAccount", T, "*toolauth.ServiceAccount")?,
-            oauth2: d.take("oauth2", T, "*toolauth.OAuth2Auth")?,
+            auth_type: d.take("authType", T, "CredentialType")?.unwrap_or_default(),
+            resource_ref: d.take("resourceRef", T, "String")?.unwrap_or_default(),
+            api_key: d.take("apiKey", T, "String")?.unwrap_or_default(),
+            http: d.take("http", T, "HttpAuth")?,
+            service_account: d.take("serviceAccount", T, "ServiceAccount")?,
+            oauth2: d.take("oauth2", T, "OAuth2Auth")?,
             extra: d.extra,
         };
         let known = [

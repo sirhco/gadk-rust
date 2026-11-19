@@ -505,7 +505,7 @@ fn test_credential_unmarshal_rejects() {
         (
             "credential that is not an object",
             r#"{"authType":"oauth2","oauth2":"secret-string"}"#,
-            "want a JSON object",
+            "expected a JSON object",
             "secret-string",
         ),
     ];

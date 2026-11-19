@@ -66,7 +66,7 @@ pub(crate) fn method_metadata(
 /// `\n`, `Content-Type: text/plain; charset=utf-8` (the type a sniffing server would pick; no
 /// other headers). An encoding failure is the `Err` of the encoder's error text.
 pub(crate) fn encode_plain<T: serde::Serialize>(v: &T) -> Result<Response, String> {
-    let mut body = gadk_model::to_go_json(v).map_err(|e| format!("json.NewEncoder failed: {e}"))?;
+    let mut body = gadk_model::to_go_json(v).map_err(|e| format!("failed to encode JSON: {e}"))?;
     body.push(b'\n');
     let mut resp = Response::new(axum::body::Body::from(body));
     resp.headers_mut().insert(
@@ -473,17 +473,17 @@ pub(crate) mod replay {
                 (status, body.as_str()),
                 (
                     500,
-                    "streaming JSONL failed: decodeStreamingAgentRunWithEventsRequest() failed: \
-                     json.Unmarshal(input.request_json) failed: exceeded max depth\n"
+                    "streaming JSONL failed: invalid streaming_agent_run_with_events request: \
+                     failed to decode input.request_json: exceeded max depth\n"
                 )
             );
             assert_eq!(
                 *scenario.log.lock().unwrap(),
-                "decodeStreamingAgentRunWithEventsRequest() failed: \
-                 json.Unmarshal(input.request_json) failed: exceeded max depth\n\
+                "invalid streaming_agent_run_with_events request: \
+                 failed to decode input.request_json: exceeded max depth\n\
                  handleQuery failed: streaming JSONL failed: \
-                 decodeStreamingAgentRunWithEventsRequest() failed: \
-                 json.Unmarshal(input.request_json) failed: exceeded max depth\n"
+                 invalid streaming_agent_run_with_events request: \
+                 failed to decode input.request_json: exceeded max depth\n"
             );
 
             let (status, body) = scenario.post("/stream_reasoning_engine", run(levels)).await;
@@ -531,7 +531,7 @@ mod tests {
         bad.insert(vec![1u8], 1);
         assert_eq!(
             encode_plain(&bad).err().as_deref(),
-            Some("json.NewEncoder failed: key must be a string")
+            Some("failed to encode JSON: key must be a string")
         );
     }
 

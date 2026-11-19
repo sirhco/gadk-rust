@@ -684,7 +684,7 @@ impl StreamWriter {
 
         Err(match last_err {
             Some(err) => Error::wrap("max retries exceeded", err),
-            None => Error::msg("max retries exceeded: %!w(<nil>)"),
+            None => Error::msg("max retries exceeded"),
         })
     }
 
