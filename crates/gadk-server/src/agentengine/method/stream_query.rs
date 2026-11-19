@@ -102,7 +102,7 @@ impl StreamQueryHandler {
                     },
                     Err(err_text) => {
                         let err = format!(
-                            "json.Unmarshal() failed both for models.StreamQueryRequest ({err}) and models.StreamQueryTextRequest ({err_text})"
+                            "could not decode the request as StreamQueryRequest ({err}) or StreamQueryTextRequest ({err_text})"
                         );
                         self.log.print(&err);
                         return Err(err);

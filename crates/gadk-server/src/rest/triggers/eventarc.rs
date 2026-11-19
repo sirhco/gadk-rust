@@ -235,9 +235,8 @@ fn marshal_event(event: &EventarcTriggerRequest, data: &[u8]) -> Result<String, 
     let mut out = gadk_model::to_go_json(event).map_err(|e| e.to_string())?;
     if !data.is_empty() {
         // `data` is only checked for validity (skipped over), so any nesting depth passes.
-        serde_json::from_slice::<IgnoredAny>(data).map_err(|e| {
-            format!("json: error calling MarshalJSON for type json.RawMessage: {e}")
-        })?;
+        serde_json::from_slice::<IgnoredAny>(data)
+            .map_err(|e| format!("event data is not valid JSON: {e}"))?;
         out.pop(); // the closing brace; `data` is the last member
         out.extend_from_slice(b",\"data\":");
         go_compact(data, &mut out);
@@ -326,7 +325,7 @@ mod tests {
         assert!(
             marshal_event(&event, b"not json")
                 .unwrap_err()
-                .starts_with("json: error calling MarshalJSON for type json.RawMessage: ")
+                .starts_with("event data is not valid JSON: ")
         );
     }
 }

@@ -93,7 +93,7 @@ impl MethodHandler for DeleteSessionHandler {
     async fn handle(&self, payload: Bytes) -> Result<Response, String> {
         let req: DeleteSessionRequest =
             go_unmarshal(&payload, &encode_shapes::MODELS_DELETE_SESSION_REQUEST)
-                .map_err(|e| format!("json.Unmarshal() failed: {e}"))?;
+                .map_err(|e| format!("failed to decode request: {e}"))?;
         let session_id = req.input.session_id;
         self.session_service
             .delete(DeleteRequest {
@@ -157,7 +157,7 @@ mod tests {
         assert_eq!(
             err.as_deref(),
             Some(
-                "json.Unmarshal() failed: json: cannot unmarshal number into Go struct field DeleteSessionRequest.input.session_id of type string"
+                "failed to decode request: invalid `DeleteSessionRequest.input.session_id`: expected a string, found a number"
             )
         );
     }

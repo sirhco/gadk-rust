@@ -339,7 +339,7 @@ async fn test_decode_request_body_rejects_unknown_fields() {
         (status, got.as_str()),
         (
             400,
-            "failed to decode request: json: unknown field \"totallyMadeUpField\"\n"
+            "failed to decode request: unknown field \"totallyMadeUpField\"\n"
         )
     );
 }

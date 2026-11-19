@@ -90,7 +90,7 @@ impl MethodHandler for ListSessionsHandler {
     async fn handle(&self, payload: Bytes) -> Result<Response, String> {
         let req: ListSessionRequest =
             go_unmarshal(&payload, &encode_shapes::MODELS_LIST_SESSION_REQUEST)
-                .map_err(|e| format!("json.Unmarshal() failed: {e}"))?;
+                .map_err(|e| format!("failed to decode request: {e}"))?;
         let sessions = self
             .session_service
             .list(ListRequest {
@@ -158,7 +158,7 @@ mod tests {
         assert_eq!(
             err.as_deref(),
             Some(
-                "json.Unmarshal() failed: json: cannot unmarshal bool into Go struct field ListSessionRequest.input.user_id of type string"
+                "failed to decode request: invalid `ListSessionRequest.input.user_id`: expected a string, found a boolean"
             )
         );
     }

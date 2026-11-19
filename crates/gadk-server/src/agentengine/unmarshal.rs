@@ -13,8 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! JSON decoding of the Agent Engine request models (`go_unmarshal`): key matching and error
-//! texts that are byte-identical to an ADK server's JSON-decoding errors, then serde.
+//! JSON decoding of the Agent Engine request models (`go_unmarshal`): an ADK server's key
+//! matching, type-mismatch errors that name the JSON path, the expected shape and what was
+//! found, then serde.
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -27,24 +28,13 @@ use serde_json::{Map, Number, Value};
 
 use super::encode::{self, GoKind, GoStruct};
 
-/// The genai types reachable from the request models that have their own `UnmarshalJSON`
-/// (`Content` → `Part.VideoMetadata`, `Part.AudioTranscription`): the type name, the type
-/// text of the anonymous aux struct they decode into, and whether that struct declares the
-/// duration fields as `string` (`VideoMetadata`; `Transcription` uses genai's
-/// `*durationJSON`, taken verbatim here and parsed by gadk-genai's serde). Errors inside them
-/// are reported relative to the aux struct: a field error names the path `.fps` with no struct
-/// name, and a top-level kind mismatch names the type `struct { … }`.
-const CUSTOM_UNMARSHALERS: &[(&str, &str, bool)] = &[
-    (
-        "genai.Transcription",
-        "struct { StartOffset *genai.durationJSON \"json:\\\"startOffset,omitempty\\\"\"; EndOffset *genai.durationJSON \"json:\\\"endOffset,omitempty\\\"\"; *genai.Alias }",
-        false,
-    ),
-    (
-        "genai.VideoMetadata",
-        "struct { EndOffset string \"json:\\\"endOffset,omitempty\\\"\"; StartOffset string \"json:\\\"startOffset,omitempty\\\"\"; *genai.Alias }",
-        true,
-    ),
+/// The genai types reachable from the request models whose duration fields decode differently
+/// (`Content` → `Part.VideoMetadata`, `Part.AudioTranscription`): the type name and whether the
+/// durations are duration strings (`VideoMetadata`; `Transcription`'s are taken verbatim here and
+/// parsed by gadk-genai's serde). Errors inside them name the full path from the top level.
+const CUSTOM_UNMARSHALERS: &[(&str, bool)] = &[
+    ("genai.Transcription", false),
+    ("genai.VideoMetadata", true),
 ];
 
 /// How a custom unmarshaler's aux struct declares the duration fields.
@@ -60,7 +50,7 @@ enum Durations {
 
 /// Decodes `payload` into the struct described by `shape` (a request model from
 /// [`encode_shapes`](super::encode_shapes), e.g. `MODELS_QUERY`), producing the Rust model `T`,
-/// with an ADK server's key matching and error texts (see the literals in `type_error`):
+/// with an ADK server's key matching and these error texts:
 ///
 /// 1. syntax: the whole input must be one JSON value; an empty or truncated
 ///    input is `unexpected end of JSON input`; nesting deeper than [`MAX_DEPTH`] (127 arrays and
@@ -76,15 +66,19 @@ enum Durations {
 ///    `state`, `FunctionCall.args`) are taken verbatim; a JSON `null` leaves a non-interface
 ///    field at its zero value (a pointer, slice, map or interface becomes nil);
 /// 3. types: a value whose JSON kind does not fit the field's `GoKind` is
-///    `json: cannot unmarshal <JSON kind> into <field> <Struct>.<path> of type <go_type>`
-///    (byte-identical to an ADK server's error; the fixed wording is in `type_error`), where
-///    `<Struct>` is the top-level type name without package, and `<path>` is the object keys as
-///    written in the input and the array indexes from the top level, joined by `.`; when the
-///    value is an array element the text is `… into <Struct>.<path> of type <elem type>` (no
-///    field wording), and at the top level `… into <value> of type <qualified type name>`; a
-///    number that does not fit an integer or float field is `number <its text>`; an invalid
-///    base64 string for `[]byte` appends `: illegal base64 data at input byte <n>`; the first
-///    error in input order wins;
+///    ``invalid `<Struct>.<path>`: expected <shape>, found <kind>`` (e.g. ``invalid
+///    `Query.class_method`: expected a string, found a number``), where `<Struct>` is the
+///    top-level type name without package, `<path>` is the object keys as written in the input
+///    and the array indexes from the top level, joined by `.` (also inside the genai types with
+///    their own duration handling), `<shape>` is `a string`, `a boolean`, `an integer`,
+///    `a number`, `a duration string`, `a base64 string`, `an array` or `a JSON object`, and
+///    `<kind>` is `a string`, `a boolean`, `a number`, `an array` or `an object`; at the top
+///    level the text is `invalid <Struct>: expected a JSON object, found <kind>`; a number that
+///    does not fit an integer field is ``invalid `<path>`: number <text> is not a valid <i32>``
+///    (the field's Rust integer type), one that overflows a float (an `any` value included)
+///    ``invalid `<path>`: number <text> is out of range for f64`` (`f32` for 32-bit fields); an
+///    invalid base64 string for bytes is ``invalid `<path>`: invalid base64 data at byte <n>``;
+///    the first error in input order wins;
 /// 4. the canonicalized value is deserialized into `T` (its serde names are the json names).
 ///
 /// Everything runs on the caller's stack: [`MAX_DEPTH`] keeps the decoded value shallow enough
@@ -172,7 +166,6 @@ fn decode<T: DeserializeOwned>(payload: &[u8], shape: &'static GoStruct) -> Resu
         .map_or(shape.go_type, |(_, name)| name);
     let mut decoder = Decoder {
         top_name: top_name.to_owned(),
-        top_type: shape.go_type.to_owned(),
         path: Vec::new(),
         durations: Durations::Int,
     };
@@ -191,12 +184,9 @@ enum Seg {
 
 /// The decode state of one [`go_unmarshal`] call (its error context).
 struct Decoder {
-    /// The top-level struct name in a field error's `<name>.<path>` (empty inside a custom
-    /// unmarshaler, which reports paths such as `.fps`).
+    /// The top-level struct name: the whole path in a top-level error, the first segment of
+    /// `<name>.<path>` in a field error.
     top_name: String,
-    /// The type named in a top-level kind mismatch
-    /// (`… into <value> of type <type>`).
-    top_type: String,
     /// The path from the top-level value to the value being decoded.
     path: Vec<Seg>,
     /// How duration fields decode here.
@@ -214,16 +204,49 @@ enum Node<'a> {
 }
 
 impl Node<'_> {
-    /// The JSON kind word in `cannot unmarshal <kind>`.
+    /// The JSON kind with its article, as a type error names what it found (`an array`).
     fn kind(&self) -> &'static str {
         match self {
             Node::Null => "null",
-            Node::Bool(_) => "bool",
-            Node::Number(_) => "number",
-            Node::String(_) => "string",
-            Node::Array(_) => "array",
-            Node::Object(_) => "object",
+            Node::Bool(_) => "a boolean",
+            Node::Number(_) => "a number",
+            Node::String(_) => "a string",
+            Node::Array(_) => "an array",
+            Node::Object(_) => "an object",
         }
+    }
+}
+
+/// The JSON shape a value of `kind` / `go_type` must have, as a type error names it.
+fn expected_shape(kind: &GoKind, go_type: &str) -> &'static str {
+    match kind {
+        GoKind::Bool => "a boolean",
+        GoKind::Int | GoKind::Uint => "an integer",
+        GoKind::Float32 | GoKind::Float64 => "a number",
+        GoKind::String if go_type == "time.Duration" => "a duration string",
+        GoKind::String | GoKind::NamedString | GoKind::Time => "a string",
+        GoKind::Bytes => "a base64 string",
+        GoKind::Struct(_) | GoKind::Map(_) => "a JSON object",
+        GoKind::Slice(_) => "an array",
+        GoKind::Pointer(inner) => {
+            expected_shape(inner, go_type.strip_prefix('*').unwrap_or(go_type))
+        }
+        GoKind::RawMessage | GoKind::Interface => "a JSON value",
+    }
+}
+
+/// The Rust integer type matching an integer type name of `bits` (`int32` → `i32`, `uint8` →
+/// `u8`; a defined integer type is `i64`).
+fn rust_int_name(go_type: &str, signed: bool) -> &'static str {
+    match (int_bits(go_type), signed) {
+        (8, true) => "i8",
+        (16, true) => "i16",
+        (32, true) => "i32",
+        (_, true) => "i64",
+        (8, false) => "u8",
+        (16, false) => "u16",
+        (32, false) => "u32",
+        (_, false) => "u64",
     }
 }
 
@@ -529,14 +552,12 @@ impl<'a> Cursor<'a> {
 }
 
 impl Decoder {
-    /// The type-mismatch error text for a `json` kind decoded into `go_type`.
-    fn type_error(&self, json: &str, go_type: &str) -> String {
-        let Some(last) = self.path.last() else {
-            return format!(
-                "json: cannot unmarshal {json} into Go value of type {}",
-                self.top_type
-            );
-        };
+    /// `invalid <where>: <detail>`, where `<where>` is the top-level type name at the top level
+    /// and the backquoted path (`` `Query.class_method` ``) below it.
+    fn invalid(&self, detail: &str) -> String {
+        if self.path.is_empty() {
+            return format!("invalid {}: {detail}", self.top_name);
+        }
         let mut path = self.top_name.clone();
         for seg in &self.path {
             path.push('.');
@@ -545,12 +566,16 @@ impl Decoder {
                 Seg::Index(i) => path.push_str(&i.to_string()),
             }
         }
-        match last {
-            Seg::Key(_) => format!(
-                "json: cannot unmarshal {json} into Go struct field {path} of type {go_type}"
-            ),
-            Seg::Index(_) => format!("json: cannot unmarshal {json} into {path} of type {go_type}"),
-        }
+        format!("invalid `{path}`: {detail}")
+    }
+
+    /// The type-mismatch error text for a value of kind `found` (`a number`) decoded into
+    /// `kind` / `go_type`.
+    fn type_error(&self, found: &str, kind: &GoKind, go_type: &str) -> String {
+        self.invalid(&format!(
+            "expected {}, found {found}",
+            expected_shape(kind, go_type)
+        ))
     }
 
     /// Decodes `raw` into the struct `shape` (type name `go_type`), merging into `into`.
@@ -564,7 +589,7 @@ impl Decoder {
         let pairs = match node(raw)? {
             Node::Null => return Ok(()),
             Node::Object(pairs) => pairs,
-            other => return Err(self.type_error(other.kind(), go_type)),
+            other => return Err(self.type_error(other.kind(), &GoKind::Struct(""), go_type)),
         };
         let fields = fields_of(shape);
         for (key, value) in pairs {
@@ -579,7 +604,7 @@ impl Decoder {
             self.path.push(Seg::Key(key));
             let result = match self.durations {
                 Durations::String if field.go_type == "time.Duration" => {
-                    self.decode_value(value, &GoKind::String, "string", &mut slot)
+                    self.decode_value(value, &GoKind::String, field.go_type, &mut slot)
                 }
                 Durations::Verbatim if field.go_type == "time.Duration" => {
                     serde_json::from_str::<Value>(value.get())
@@ -625,28 +650,41 @@ impl Decoder {
         match kind {
             GoKind::Bool => match n {
                 Node::Bool(b) => *slot = Some(Value::Bool(b)),
-                other => return Err(self.type_error(other.kind(), go_type)),
+                other => return Err(self.type_error(other.kind(), kind, go_type)),
             },
             GoKind::Int | GoKind::Uint => match n {
                 Node::Number(text) => {
                     let signed = matches!(kind, GoKind::Int);
                     match parse_int(text, int_bits(go_type), signed) {
                         Some(num) => *slot = Some(Value::Number(num)),
-                        None => return Err(self.type_error(&format!("number {text}"), go_type)),
+                        None => {
+                            return Err(self.invalid(&format!(
+                                "number {text} is not a valid {}",
+                                rust_int_name(go_type, signed)
+                            )));
+                        }
                     }
                 }
-                other => return Err(self.type_error(other.kind(), go_type)),
+                other => return Err(self.type_error(other.kind(), kind, go_type)),
             },
             GoKind::Float32 | GoKind::Float64 => match n {
-                Node::Number(text) => match parse_float(text, matches!(kind, GoKind::Float32)) {
-                    Some(num) => *slot = Some(Value::Number(num)),
-                    None => return Err(self.type_error(&format!("number {text}"), go_type)),
-                },
-                other => return Err(self.type_error(other.kind(), go_type)),
+                Node::Number(text) => {
+                    let float32 = matches!(kind, GoKind::Float32);
+                    match parse_float(text, float32) {
+                        Some(num) => *slot = Some(Value::Number(num)),
+                        None => {
+                            let bits = if float32 { "f32" } else { "f64" };
+                            return Err(
+                                self.invalid(&format!("number {text} is out of range for {bits}"))
+                            );
+                        }
+                    }
+                }
+                other => return Err(self.type_error(other.kind(), kind, go_type)),
             },
             GoKind::String | GoKind::NamedString | GoKind::Time => match n {
                 Node::String(s) => *slot = Some(Value::String(s)),
-                other => return Err(self.type_error(other.kind(), go_type)),
+                other => return Err(self.type_error(other.kind(), kind, go_type)),
             },
             GoKind::Bytes => match n {
                 Node::String(s) => match go_base64_decode(&s) {
@@ -656,10 +694,7 @@ impl Decoder {
                         ));
                     }
                     Err(at) => {
-                        return Err(format!(
-                            "{}: illegal base64 data at input byte {at}",
-                            self.type_error("string", go_type)
-                        ));
+                        return Err(self.invalid(&format!("invalid base64 data at byte {at}")));
                     }
                 },
                 Node::Array(items) => {
@@ -681,7 +716,7 @@ impl Decoder {
                         base64::engine::general_purpose::STANDARD.encode(bytes),
                     ));
                 }
-                other => return Err(self.type_error(other.kind(), go_type)),
+                other => return Err(self.type_error(other.kind(), kind, go_type)),
             },
             GoKind::RawMessage => {
                 // serde_json's recursion limit (127 levels) cannot fail here: `nesting()` has
@@ -692,25 +727,24 @@ impl Decoder {
             GoKind::Interface => *slot = self.interface_value(raw)?,
             GoKind::Struct(name) => {
                 let Some(shape) = encode::shape(name) else {
-                    return Err(format!("json: no shape for Go type {name}"));
+                    return Err(format!("internal error: no decoding shape for {name}"));
                 };
                 let mut obj = match slot.take() {
                     Some(Value::Object(m)) => m,
                     _ => Map::new(),
                 };
-                match CUSTOM_UNMARSHALERS.iter().find(|(t, _, _)| t == name) {
-                    Some((_, aux_type, as_string)) => {
-                        let mut inner = Decoder {
-                            top_name: String::new(),
-                            top_type: (*aux_type).to_owned(),
-                            path: Vec::new(),
-                            durations: if *as_string {
-                                Durations::String
-                            } else {
-                                Durations::Verbatim
-                            },
+                match CUSTOM_UNMARSHALERS.iter().find(|(t, _)| t == name) {
+                    Some((_, as_string)) => {
+                        // The same path, with this type's duration handling.
+                        let outer = self.durations;
+                        self.durations = if *as_string {
+                            Durations::String
+                        } else {
+                            Durations::Verbatim
                         };
-                        inner.decode_struct(raw, shape, aux_type, &mut obj)?;
+                        let result = self.decode_struct(raw, shape, go_type, &mut obj);
+                        self.durations = outer;
+                        result?;
                     }
                     None => self.decode_struct(raw, shape, go_type, &mut obj)?,
                 }
@@ -739,7 +773,7 @@ impl Decoder {
                     }
                     *slot = Some(Value::Array(out));
                 }
-                other => return Err(self.type_error(other.kind(), go_type)),
+                other => return Err(self.type_error(other.kind(), kind, go_type)),
             },
             GoKind::Map(inner) => match n {
                 Node::Object(pairs) => {
@@ -759,14 +793,14 @@ impl Decoder {
                     }
                     *slot = Some(Value::Object(obj));
                 }
-                other => return Err(self.type_error(other.kind(), go_type)),
+                other => return Err(self.type_error(other.kind(), kind, go_type)),
             },
         }
         Ok(())
     }
 
     /// An `any` value: objects, arrays, strings, bools and numbers as JSON has them (`None`
-    /// for null); a number outside the `float64` range is `number <text>` of type `float64`.
+    /// for null); a number outside the `f64` range is an error naming its path.
     ///
     /// One pass over the (already validated) text with an explicit stack: an `any` value may be
     /// nested [`MAX_DEPTH`] deep, so neither native recursion nor re-splitting each
@@ -830,7 +864,11 @@ impl Decoder {
                     let text = cur.number();
                     match parse_float(text, false) {
                         Some(n) => Value::Number(n),
-                        None => return Err(self.type_error(&format!("number {text}"), "float64")),
+                        None => {
+                            return Err(
+                                self.invalid(&format!("number {text} is out of range for f64"))
+                            );
+                        }
                     }
                 }
             };
@@ -926,9 +964,11 @@ mod tests {
         }
     }
 
-    /// Go 1.27 `json.Unmarshal` error texts, recorded from ADK-Go's own models.
+    /// Decode error texts for the request models: syntax, kind mismatches (named by path,
+    /// expected shape and found kind), number range, base64 and the genai duration types. The
+    /// inputs and the success/failure of each were recorded from an ADK server's own models.
     #[test]
-    fn go_error_texts() {
+    fn decode_error_texts() {
         let cases: &[(&GoStruct, &str, &str)] = &[
             (&MODELS_QUERY, r#""#, r#"unexpected end of JSON input"#),
             (&MODELS_QUERY, r#"{"#, r#"unexpected end of JSON input"#),
@@ -940,197 +980,197 @@ mod tests {
             (
                 &MODELS_QUERY,
                 r#"{"class_method":5}"#,
-                r#"json: cannot unmarshal number into Go struct field Query.class_method of type string"#,
+                r#"invalid `Query.class_method`: expected a string, found a number"#,
             ),
             (
                 &MODELS_QUERY,
                 r#"{"class_method":true}"#,
-                r#"json: cannot unmarshal bool into Go struct field Query.class_method of type string"#,
+                r#"invalid `Query.class_method`: expected a string, found a boolean"#,
             ),
             (
                 &MODELS_QUERY,
                 r#"{"class_method":[1]}"#,
-                r#"json: cannot unmarshal array into Go struct field Query.class_method of type string"#,
+                r#"invalid `Query.class_method`: expected a string, found an array"#,
             ),
             (
                 &MODELS_QUERY,
                 r#"{"class_method":{}}"#,
-                r#"json: cannot unmarshal object into Go struct field Query.class_method of type string"#,
+                r#"invalid `Query.class_method`: expected a string, found an object"#,
             ),
             (
                 &MODELS_QUERY,
                 r#"[]"#,
-                r#"json: cannot unmarshal array into Go value of type models.Query"#,
+                r#"invalid Query: expected a JSON object, found an array"#,
             ),
             (
                 &MODELS_QUERY,
                 r#""x""#,
-                r#"json: cannot unmarshal string into Go value of type models.Query"#,
+                r#"invalid Query: expected a JSON object, found a string"#,
             ),
             (
                 &MODELS_QUERY,
                 r#"5"#,
-                r#"json: cannot unmarshal number into Go value of type models.Query"#,
+                r#"invalid Query: expected a JSON object, found a number"#,
             ),
             (
                 &MODELS_QUERY,
                 r#"{"class_method":5,"input":[1,2]}"#,
-                r#"json: cannot unmarshal number into Go struct field Query.class_method of type string"#,
+                r#"invalid `Query.class_method`: expected a string, found a number"#,
             ),
             (
                 &MODELS_QUERY,
                 r#"{"class_method":"x","class_method":7}"#,
-                r#"json: cannot unmarshal number into Go struct field Query.class_method of type string"#,
+                r#"invalid `Query.class_method`: expected a string, found a number"#,
             ),
             (
                 &MODELS_CREATE_SESSION_REQUEST,
                 r#"{"input":{"user_id":"u","state":[1]}}"#,
-                r#"json: cannot unmarshal array into Go struct field CreateSessionRequest.input.state of type map[string]interface {}"#,
+                r#"invalid `CreateSessionRequest.input.state`: expected a JSON object, found an array"#,
             ),
             (
                 &MODELS_CREATE_SESSION_REQUEST,
                 r#"{"input":5}"#,
-                r#"json: cannot unmarshal number into Go struct field CreateSessionRequest.input of type models.CreateSessionInput"#,
+                r#"invalid `CreateSessionRequest.input`: expected a JSON object, found a number"#,
             ),
             (
                 &MODELS_CREATE_SESSION_REQUEST,
                 r#"{"input":{"user_id":1,"state":5}}"#,
-                r#"json: cannot unmarshal number into Go struct field CreateSessionRequest.input.user_id of type string"#,
+                r#"invalid `CreateSessionRequest.input.user_id`: expected a string, found a number"#,
             ),
             (
                 &MODELS_GET_SESSION_REQUEST,
                 r#"{"input":{"user_id":"u","session_id":false}}"#,
-                r#"json: cannot unmarshal bool into Go struct field GetSessionRequest.input.session_id of type string"#,
+                r#"invalid `GetSessionRequest.input.session_id`: expected a string, found a boolean"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"class_method":"async_stream_query","input":{"user_id":"u2","message":5}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message of type genai.Content"#,
+                r#"invalid `StreamQueryRequest.input.message`: expected a JSON object, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_TEXT_REQUEST,
                 r#"{"class_method":"async_stream_query","input":{"user_id":"u2","message":5}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryTextRequest.input.message of type string"#,
+                r#"invalid `StreamQueryTextRequest.input.message`: expected a string, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":"hello"}}"#,
-                r#"json: cannot unmarshal string into Go struct field StreamQueryRequest.input.message of type genai.Content"#,
+                r#"invalid `StreamQueryRequest.input.message`: expected a JSON object, found a string"#,
             ),
             (
                 &MODELS_STREAM_QUERY_TEXT_REQUEST,
                 r#"{"input":{"message":{"role":"user"}}}"#,
-                r#"json: cannot unmarshal object into Go struct field StreamQueryTextRequest.input.message of type string"#,
+                r#"invalid `StreamQueryTextRequest.input.message`: expected a string, found an object"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":5}}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message.parts of type []*genai.Part"#,
+                r#"invalid `StreamQueryRequest.input.message.parts`: expected an array, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[5]}}}"#,
-                r#"json: cannot unmarshal number into StreamQueryRequest.input.message.parts.0 of type genai.Part"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0`: expected a JSON object, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"text":5}]}}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message.parts.0.text of type string"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.text`: expected a string, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"functionCall":{"args":5}}]}}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message.parts.0.functionCall.args of type map[string]interface {}"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.functionCall.args`: expected a JSON object, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"inlineData":{"data":5}}]}}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message.parts.0.inlineData.data of type []uint8"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.inlineData.data`: expected a base64 string, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"thought":"yes"}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field StreamQueryRequest.input.message.parts.0.thought of type bool"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.thought`: expected a boolean, found a string"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"role":5,"parts":[{"text":5}]}}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message.role of type string"#,
+                r#"invalid `StreamQueryRequest.input.message.role`: expected a string, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"videoMetadata":{"fps":"x"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field .fps of type float64"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.videoMetadata.fps`: expected a number, found a string"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"executableCode":{"code":"x","language":7}}]}}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message.parts.0.executableCode.language of type genai.Language"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.executableCode.language`: expected a string, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"functionResponse":{"name":"f","response":{"a":1},"parts":[{"inlineData":{"data":1}}]}}]}}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message.parts.0.functionResponse.parts.0.inlineData.data of type []uint8"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.functionResponse.parts.0.inlineData.data`: expected a base64 string, found a number"#,
             ),
             (
                 &MODELS_STREAMING_AGENT_RUN_WITH_EVENTS_RUN_REQUEST,
                 r#"{"user_id":"u3","session_id":5}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamingAgentRunWithEventsRunRequest.session_id of type string"#,
+                r#"invalid `StreamingAgentRunWithEventsRunRequest.session_id`: expected a string, found a number"#,
             ),
             (
                 &MODELS_CREATE_SESSION_REQUEST,
                 r#"{"Input":{"USER_ID":5}}"#,
-                r#"json: cannot unmarshal number into Go struct field CreateSessionRequest.Input.USER_ID of type string"#,
+                r#"invalid `CreateSessionRequest.Input.USER_ID`: expected a string, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"INPUT":{"Message":{"PARTS":[{},{"Text":5}]}}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.INPUT.Message.PARTS.1.Text of type string"#,
+                r#"invalid `StreamQueryRequest.INPUT.Message.PARTS.1.Text`: expected a string, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"inlineData":{"data":"!!"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field StreamQueryRequest.input.message.parts.0.inlineData.data of type []uint8: illegal base64 data at input byte 0"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.inlineData.data`: invalid base64 data at byte 0"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"inlineData":{"data":"aGk"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field StreamQueryRequest.input.message.parts.0.inlineData.data of type []uint8: illegal base64 data at input byte 0"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.inlineData.data`: invalid base64 data at byte 0"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":1.5}}]}}}"#,
-                r#"json: cannot unmarshal number 1.5 into Go struct field StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens of type int32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1.5 is not a valid i32"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":1e20}}]}}}"#,
-                r#"json: cannot unmarshal number 1e20 into Go struct field StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens of type int32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1e20 is not a valid i32"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":"3"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens of type int32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: expected an integer, found a string"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":3.0}}]}}}"#,
-                r#"json: cannot unmarshal number 3.0 into Go struct field StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens of type int32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 3.0 is not a valid i32"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"functionCall":{"partialArgs":[{"numberValue":true}]}}]}}}"#,
-                r#"json: cannot unmarshal bool into Go struct field StreamQueryRequest.input.message.parts.0.functionCall.partialArgs.0.numberValue of type float64"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.functionCall.partialArgs.0.numberValue`: expected a number, found a boolean"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"audioTranscription":{"finished":"x"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field .finished of type bool"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.audioTranscription.finished`: expected a boolean, found a string"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"videoMetadata":{"startOffset":5}}]}}}"#,
-                r#"json: cannot unmarshal number into Go struct field .startOffset of type string"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.videoMetadata.startOffset`: expected a duration string, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
@@ -1140,17 +1180,17 @@ mod tests {
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":{}}}}"#,
-                r#"json: cannot unmarshal object into Go struct field StreamQueryRequest.input.message.parts of type []*genai.Part"#,
+                r#"invalid `StreamQueryRequest.input.message.parts`: expected an array, found an object"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[[1]]}}}"#,
-                r#"json: cannot unmarshal array into StreamQueryRequest.input.message.parts.0 of type genai.Part"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0`: expected a JSON object, found an array"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"text":5}]}},"class_method":7}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message.parts.0.text of type string"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.text`: expected a string, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
@@ -1161,77 +1201,77 @@ mod tests {
             (
                 &MODELS_QUERY,
                 r#"{"input":1e400}"#,
-                r#"json: cannot unmarshal number 1e400 into Go struct field Query.input of type float64"#,
+                r#"invalid `Query.input`: number 1e400 is out of range for f64"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"inlineData":{"data":"aGVsbG8gd29ybGQ!"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field StreamQueryRequest.input.message.parts.0.inlineData.data of type []uint8: illegal base64 data at input byte 15"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.inlineData.data`: invalid base64 data at byte 15"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"inlineData":{"data":"aGVs bG8="}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field StreamQueryRequest.input.message.parts.0.inlineData.data of type []uint8: illegal base64 data at input byte 4"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.inlineData.data`: invalid base64 data at byte 4"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"inlineData":{"data":"aGVsbG8"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field StreamQueryRequest.input.message.parts.0.inlineData.data of type []uint8: illegal base64 data at input byte 4"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.inlineData.data`: invalid base64 data at byte 4"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"inlineData":{"data":"aGVsbA"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field StreamQueryRequest.input.message.parts.0.inlineData.data of type []uint8: illegal base64 data at input byte 4"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.inlineData.data`: invalid base64 data at byte 4"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"thoughtSignature":[256]}]}}}"#,
-                r#"json: cannot unmarshal number 256 into StreamQueryRequest.input.message.parts.0.thoughtSignature.0 of type uint8"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.thoughtSignature.0`: number 256 is not a valid u8"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"thoughtSignature":["a"]}]}}}"#,
-                r#"json: cannot unmarshal string into StreamQueryRequest.input.message.parts.0.thoughtSignature.0 of type uint8"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.thoughtSignature.0`: expected an integer, found a string"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"thoughtSignature":[1.5]}]}}}"#,
-                r#"json: cannot unmarshal number 1.5 into StreamQueryRequest.input.message.parts.0.thoughtSignature.0 of type uint8"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.thoughtSignature.0`: number 1.5 is not a valid u8"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":99999999999}}]}}}"#,
-                r#"json: cannot unmarshal number 99999999999 into Go struct field StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens of type int32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 99999999999 is not a valid i32"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":1.50}}]}}}"#,
-                r#"json: cannot unmarshal number 1.50 into Go struct field StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens of type int32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1.50 is not a valid i32"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"mediaResolution":{"numTokens":1E2}}]}}}"#,
-                r#"json: cannot unmarshal number 1E2 into Go struct field StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens of type int32"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.mediaResolution.numTokens`: number 1E2 is not a valid i32"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"audioTranscription":{"words":[{"word":5}]}}]}}}"#,
-                r#"json: cannot unmarshal number into Go struct field .words.0.word of type string"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.audioTranscription.words.0.word`: expected a string, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"audioTranscription":{"words":[5]}}]}}}"#,
-                r#"json: cannot unmarshal number into .words.0 of type genai.WordInfo"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.audioTranscription.words.0`: expected a JSON object, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"videoMetadata":5}]}}}"#,
-                r#"json: cannot unmarshal number into Go value of type struct { EndOffset string "json:\"endOffset,omitempty\""; StartOffset string "json:\"startOffset,omitempty\""; *genai.Alias }"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.videoMetadata`: expected a JSON object, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"videoMetadata":{"FPS":"x"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field .FPS of type float64"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.videoMetadata.FPS`: expected a number, found a string"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
@@ -1241,27 +1281,27 @@ mod tests {
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"functionResponse":{"parts":[{"inlineData":5}]}}]}}}"#,
-                r#"json: cannot unmarshal number into Go struct field StreamQueryRequest.input.message.parts.0.functionResponse.parts.0.inlineData of type genai.FunctionResponseBlob"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.functionResponse.parts.0.inlineData`: expected a JSON object, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[null, 5]}}}"#,
-                r#"json: cannot unmarshal number into StreamQueryRequest.input.message.parts.1 of type genai.Part"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.1`: expected a JSON object, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"audioTranscription":5}]}}}"#,
-                r#"json: cannot unmarshal number into Go value of type struct { StartOffset *genai.durationJSON "json:\"startOffset,omitempty\""; EndOffset *genai.durationJSON "json:\"endOffset,omitempty\""; *genai.Alias }"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.audioTranscription`: expected a JSON object, found a number"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"videoMetadata":{"startOffset":"1s","fps":"x"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field .fps of type float64"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.videoMetadata.fps`: expected a number, found a string"#,
             ),
             (
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"videoMetadata":{"startOffset":"zz","fps":"x"}}]}}}"#,
-                r#"json: cannot unmarshal string into Go struct field .fps of type float64"#,
+                r#"invalid `StreamQueryRequest.input.message.parts.0.videoMetadata.fps`: expected a number, found a string"#,
             ),
         ];
         for (shape, payload, want) in cases {
@@ -1349,7 +1389,7 @@ mod tests {
             }
             assert_eq!(
                 err(&arrays(MAX_DEPTH)).unwrap_err(),
-                "json: cannot unmarshal array into Go value of type models.Query"
+                "invalid Query: expected a JSON object, found an array"
             );
             // An earlier syntax error keeps serde's text, as for a shallow input.
             assert_eq!(
@@ -1401,18 +1441,18 @@ mod tests {
         let probe = |payload: &str| go_unmarshal::<Value>(payload.as_bytes(), &PROBE_T);
         assert_eq!(
             probe(r#"{"u":-0}"#).unwrap_err(),
-            "json: cannot unmarshal number -0 into Go struct field T.u of type uint8"
+            "invalid `T.u`: number -0 is not a valid u8"
         );
         assert_eq!(
             probe(r#"{"b":[-0]}"#).unwrap_err(),
-            "json: cannot unmarshal number -0 into T.b.0 of type uint8"
+            "invalid `T.b.0`: number -0 is not a valid u8"
         );
         assert_eq!(
             decode(
                 &MODELS_STREAM_QUERY_REQUEST,
                 r#"{"input":{"message":{"parts":[{"thoughtSignature":[-0]}]}}}"#
             ),
-            Err("json: cannot unmarshal number -0 into StreamQueryRequest.input.message.parts.0.thoughtSignature.0 of type uint8".to_owned())
+            Err("invalid `StreamQueryRequest.input.message.parts.0.thoughtSignature.0`: number -0 is not a valid u8".to_owned())
         );
         for ok in ["3.4028235e38", "-3.4028235e38", "3.4028235677973366e38"] {
             assert!(probe(&format!(r#"{{"f":{ok}}}"#)).is_ok(), "{ok}");
@@ -1420,9 +1460,7 @@ mod tests {
         for overflow in ["3.40282357e38", "3.4028235677973367e38"] {
             assert_eq!(
                 probe(&format!(r#"{{"f":{overflow}}}"#)).unwrap_err(),
-                format!(
-                    "json: cannot unmarshal number {overflow} into Go struct field T.f of type float32"
-                )
+                format!("invalid `T.f`: number {overflow} is out of range for f32")
             );
         }
     }

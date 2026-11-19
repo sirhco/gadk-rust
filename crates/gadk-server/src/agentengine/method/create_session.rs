@@ -94,7 +94,7 @@ impl MethodHandler for CreateSessionHandler {
     async fn handle(&self, payload: Bytes) -> Result<Response, String> {
         let req: CreateSessionRequest =
             go_unmarshal(&payload, &encode_shapes::MODELS_CREATE_SESSION_REQUEST)
-                .map_err(|e| format!("json.Unmarshal() failed: {e}"))?;
+                .map_err(|e| format!("failed to decode request: {e}"))?;
         let sess = self
             .session_service
             .create(CreateRequest {
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(
             err.as_deref(),
             Some(
-                "json.Unmarshal() failed: json: cannot unmarshal number into Go struct field CreateSessionRequest.input.user_id of type string"
+                "failed to decode request: invalid `CreateSessionRequest.input.user_id`: expected a string, found a number"
             )
         );
     }

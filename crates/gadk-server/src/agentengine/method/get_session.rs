@@ -93,7 +93,7 @@ impl MethodHandler for GetSessionHandler {
     async fn handle(&self, payload: Bytes) -> Result<Response, String> {
         let req: GetSessionRequest =
             go_unmarshal(&payload, &encode_shapes::MODELS_GET_SESSION_REQUEST)
-                .map_err(|e| format!("json.Unmarshal() failed: {e}"))?;
+                .map_err(|e| format!("failed to decode request: {e}"))?;
         let session_id = req.input.session_id;
         let sess = self
             .session_service
@@ -162,7 +162,7 @@ mod tests {
         assert_eq!(
             err.as_deref(),
             Some(
-                "json.Unmarshal() failed: json: cannot unmarshal array into Go struct field GetSessionRequest.input.session_id of type string"
+                "failed to decode request: invalid `GetSessionRequest.input.session_id`: expected a string, found an array"
             )
         );
     }

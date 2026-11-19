@@ -246,8 +246,8 @@ async fn eventarc_trigger_handler_error_responses() {
             vec![("ce-type", "t")],
             b"not json",
             500,
-            "failed to marshal agent message: json: error calling MarshalJSON for type \
-             json.RawMessage: expected ident at line 1 column 2",
+            "failed to marshal agent message: event data is not valid JSON: \
+             expected ident at line 1 column 2",
         ),
         (
             "content type with parameters is binary mode",
