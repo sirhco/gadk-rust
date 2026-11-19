@@ -27,8 +27,8 @@ use gadk_genai::FunctionDeclaration;
 use serde_json::{Map, Value};
 
 use crate::tool::utils::{
-    CompiledSchema, convert_args_with_schema, convert_with_schema, go_type_name,
-    infer_output_schema, infer_schema, panic_message, schema_expects_object, validate_with_schema,
+    CompiledSchema, convert_args_with_schema, convert_with_schema, infer_output_schema,
+    infer_schema, json_kind_article, panic_message, schema_expects_object, validate_with_schema,
 };
 
 /// The note added to a long-running tool's declaration.
@@ -192,8 +192,8 @@ pub(crate) fn check_args_value(args: &Value) -> Result<(), ToolError> {
     match args {
         Value::Object(_) | Value::Null => Ok(()),
         other => Err(ToolError::InvalidArgument(format!(
-            "unexpected args type, got: {}",
-            go_type_name(other)
+            "unexpected args type: expected a JSON object, found {}",
+            json_kind_article(other)
         ))),
     }
 }

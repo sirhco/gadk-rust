@@ -240,7 +240,7 @@ async fn test_single_turn_tool_run_failures() {
             "args is not a map",
             None,
             json!("not a map"),
-            vec!["map[string]any"],
+            vec!["expects a JSON object of arguments"],
         ),
         (
             "schema: extra field rejected",

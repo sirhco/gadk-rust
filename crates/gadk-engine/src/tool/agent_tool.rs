@@ -34,7 +34,7 @@ use crate::llm::processors::{as_go_floats, go_json_marshal, go_sprint};
 use crate::llm::state::reveal;
 use crate::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
 use crate::tool::single_turn::{input_schema_of, make_function_declaration};
-use crate::tool::utils::{go_type_name, validate_map_on_schema, validate_output_schema};
+use crate::tool::utils::{json_kind_article, validate_map_on_schema, validate_output_schema};
 use crate::workflow::route::go_quote;
 
 /// Configuration of an [`AgentTool`].
@@ -173,8 +173,8 @@ impl RunnableTool for AgentTool {
             Value::Object(m) => m,
             other => {
                 return Err(ToolError::InvalidArgument(format!(
-                    "agentTool expects map[string]any arguments, got {}",
-                    go_type_name(&other)
+                    "agent tool expects a JSON object of arguments, found {}",
+                    json_kind_article(&other)
                 )));
             }
         };

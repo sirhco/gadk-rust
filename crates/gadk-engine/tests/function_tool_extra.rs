@@ -103,7 +103,10 @@ async fn function_tool_non_object_args_rejected() {
         .await
         .unwrap_err();
     match err {
-        ToolError::InvalidArgument(msg) => assert_eq!(msg, "unexpected args type, got: float64"),
+        ToolError::InvalidArgument(msg) => assert_eq!(
+            msg,
+            "unexpected args type: expected a JSON object, found a number"
+        ),
         other => panic!("want InvalidArgument, got {other:?}"),
     }
     // Args that do not infer to an object schema are rejected at construction (Go: "input must be a struct or a map").

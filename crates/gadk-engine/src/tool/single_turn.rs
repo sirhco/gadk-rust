@@ -25,7 +25,7 @@ use gadk_genai::{FunctionDeclaration, Schema, Type};
 use serde_json::{Map, Value};
 
 use crate::llm::state::reveal;
-use crate::tool::finish_task::go_type_name;
+use crate::tool::finish_task::json_kind_article;
 use crate::tool::utils::validate_map_on_schema;
 use crate::workflow::{AgentNode, Node, NodeConfig, RunNodeOptions, run_node};
 
@@ -154,8 +154,8 @@ impl RunnableTool for SingleTurnTool {
             Value::Object(m) => m,
             other => {
                 return Err(ToolError::InvalidArgument(format!(
-                    "single turn tool expects map[string]any arguments, got {}",
-                    go_type_name(&other)
+                    "single turn tool expects a JSON object of arguments, found {}",
+                    json_kind_article(&other)
                 )));
             }
         };
@@ -290,7 +290,7 @@ mod tests {
             .to_string();
         assert_eq!(
             e,
-            "single turn tool expects map[string]any arguments, got string"
+            "single turn tool expects a JSON object of arguments, found a string"
         );
         let e = r.run(ctx, json!({})).await.unwrap_err().to_string();
         assert!(

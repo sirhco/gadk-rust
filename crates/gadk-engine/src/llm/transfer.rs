@@ -37,7 +37,7 @@ use crate::{
         processors::{as_go_floats, go_sprint},
         state::reveal,
     },
-    tool::utils::go_type_name,
+    tool::utils::json_kind_article,
     workflow::route::go_quote,
 };
 
@@ -283,8 +283,8 @@ impl RunnableTool for TransferToAgentTool {
             Value::Object(m) => m,
             other => {
                 return Err(ToolError::InvalidArgument(format!(
-                    "unexpected args type: {}",
-                    go_type_name(other)
+                    "unexpected args type: expected a JSON object, found {}",
+                    json_kind_article(other)
                 )));
             }
         };
