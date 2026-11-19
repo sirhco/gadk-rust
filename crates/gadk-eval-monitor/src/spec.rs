@@ -18,6 +18,7 @@
 //! name: support-bot-prod            # [A-Za-z0-9_-]{1,64}; names the reports
 //! source:
 //!   bigquery: { project: my-proj, dataset: agent_analytics, table: agent_events }
+//!   # or, from spans in Cloud Trace: cloud_trace: { project: my-proj }
 //! window: 24h                       # <n>m | <n>h | <n>d: runs started in [now - window, now)
 //! agent: support_bot                # optional: only runs of this root agent
 //! limit: 100                        # 1-1000, default 100: the newest runs in the window
@@ -86,10 +87,16 @@ pub enum SourceSpec {
         /// The table (`[A-Za-z0-9_]+`).
         table: String,
     },
+    /// The spans an agent exports to Cloud Trace (with message content on spans).
+    CloudTrace {
+        /// The Google Cloud project the traces are in (`[A-Za-z0-9_-]+`).
+        project: String,
+    },
 }
 
 impl SourceSpec {
-    /// A short description for reports: `bigquery:<project>.<dataset>.<table>`.
+    /// A short description for reports: `bigquery:<project>.<dataset>.<table>` or
+    /// `cloud_trace:<project>`.
     pub fn describe(&self) -> String {
         match self {
             SourceSpec::BigQuery {
@@ -97,13 +104,14 @@ impl SourceSpec {
                 dataset,
                 table,
             } => format!("bigquery:{project}.{dataset}.{table}"),
+            SourceSpec::CloudTrace { project } => format!("cloud_trace:{project}"),
         }
     }
 
     /// The Google Cloud project of the source.
     pub fn project(&self) -> &str {
         match self {
-            SourceSpec::BigQuery { project, .. } => project,
+            SourceSpec::BigQuery { project, .. } | SourceSpec::CloudTrace { project } => project,
         }
     }
 }
@@ -290,15 +298,24 @@ fn parse(doc: &Value) -> Result<MonitorSpec, String> {
     })
 }
 
+/// The message for a `source` that names no known source.
+const SOURCE_KINDS: &str = "`source` must be a mapping with `bigquery` or `cloud_trace`";
+
 fn parse_source(v: Option<&Value>) -> Result<SourceSpec, String> {
-    let m = v
-        .and_then(Value::as_object)
-        .ok_or("`source` must be a mapping with `bigquery`")?;
-    check_keys(m, "`source`: ", &["bigquery"])?;
-    let bq = m
-        .get("bigquery")
-        .and_then(Value::as_object)
-        .ok_or("`source` must be a mapping with `bigquery`")?;
+    let m = v.and_then(Value::as_object).ok_or(SOURCE_KINDS)?;
+    check_keys(m, "`source`: ", &["bigquery", "cloud_trace"])?;
+    match (m.get("bigquery"), m.get("cloud_trace")) {
+        (Some(bq), None) => parse_bigquery(bq),
+        (None, Some(ct)) => parse_cloud_trace(ct),
+        (Some(_), Some(_)) => {
+            Err("`source` must set exactly one of `bigquery` and `cloud_trace`".into())
+        }
+        (None, None) => Err(SOURCE_KINDS.into()),
+    }
+}
+
+fn parse_bigquery(v: &Value) -> Result<SourceSpec, String> {
+    let bq = v.as_object().ok_or("`source.bigquery` must be a mapping")?;
     check_keys(bq, "`source.bigquery`: ", &["project", "dataset", "table"])?;
     let project = required(
         bq,
@@ -323,6 +340,20 @@ fn parse_source(v: Option<&Value>) -> Result<SourceSpec, String> {
         dataset,
         table,
     })
+}
+
+fn parse_cloud_trace(v: &Value) -> Result<SourceSpec, String> {
+    let ct = v
+        .as_object()
+        .ok_or("`source.cloud_trace` must be a mapping")?;
+    check_keys(ct, "`source.cloud_trace`: ", &["project"])?;
+    let project = required(
+        ct,
+        "project",
+        is_project_id,
+        "`source.cloud_trace.project` must match [A-Za-z0-9_-]+",
+    )?;
+    Ok(SourceSpec::CloudTrace { project })
 }
 
 fn parse_judge(v: &Value, source_project: &str) -> Result<JudgeSpec, String> {
@@ -637,6 +668,63 @@ scorers: [contains: "x"]
         }
         let s = MonitorSpec::from_yaml(&judge("{ model: m, timeout: 45s }")).unwrap();
         assert_eq!(s.judge.unwrap().timeout, Duration::from_secs(45));
+    }
+
+    #[test]
+    fn parses_a_cloud_trace_source() {
+        let s = MonitorSpec::from_yaml(
+            "name: m\nsource: { cloud_trace: { project: my-proj } }\nwindow: 1h\n\
+             judge: { model: gemini-2.5-flash }\nscorers: [llm_judge: be nice]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            s.source,
+            SourceSpec::CloudTrace {
+                project: "my-proj".into()
+            }
+        );
+        assert_eq!(s.source.describe(), "cloud_trace:my-proj");
+        assert_eq!(s.source.project(), "my-proj");
+        assert_eq!(s.judge.unwrap().project, "my-proj");
+    }
+
+    #[test]
+    fn invalid_cloud_trace_sources_are_named() {
+        for (source, needle) in [
+            (
+                "{ cloud_trace: { project: \"a b\" } }",
+                "`source.cloud_trace.project` must match [A-Za-z0-9_-]+",
+            ),
+            (
+                "{ cloud_trace: {} }",
+                "`source.cloud_trace.project` must match [A-Za-z0-9_-]+",
+            ),
+            (
+                "{ cloud_trace: { project: p, dataset: d } }",
+                "`source.cloud_trace`: unknown key `dataset`",
+            ),
+            (
+                "{ cloud_trace: p }",
+                "`source.cloud_trace` must be a mapping",
+            ),
+            (
+                "{ cloud_trace: { project: p }, bigquery: { project: p, dataset: d, table: t } }",
+                "`source` must set exactly one of `bigquery` and `cloud_trace`",
+            ),
+            (
+                "{}",
+                "`source` must be a mapping with `bigquery` or `cloud_trace`",
+            ),
+            (
+                "{ trace: {} }",
+                "`source`: unknown key `trace` (expected one of: bigquery, cloud_trace)",
+            ),
+        ] {
+            let msg = spec_err(&format!(
+                "name: m\nsource: {source}\nwindow: 1h\nscorers: [contains: x]\n"
+            ));
+            assert!(msg.contains(needle), "{source}\n=> {msg}");
+        }
     }
 
     #[test]
