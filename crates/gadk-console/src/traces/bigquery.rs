@@ -492,8 +492,11 @@ fn spans(rows: &[Row]) -> Vec<RawSpan> {
             let by_latency = group
                 .iter()
                 .filter_map(|r| r.latency.as_ref()?.get("total_ms")?.as_f64())
-                .filter(|ms| *ms >= 0.0)
-                .map(|ms| start + chrono::TimeDelta::microseconds((ms * 1000.0) as i64))
+                .filter(|ms| ms.is_finite() && *ms >= 0.0)
+                .filter_map(|ms| {
+                    let micros = chrono::TimeDelta::microseconds((ms * 1000.0) as i64);
+                    start.checked_add_signed(micros)
+                })
                 .max();
             let end = by_latency.map_or(latest, |t| t.max(latest));
             let mut labels = BTreeMap::new();
@@ -1181,6 +1184,31 @@ mod tests {
                 matches!(err, SourceError::BigQuery { status: None, .. }),
                 "{err:?}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn get_ignores_an_overflowing_latency() {
+        for total_ms in [1e300, 1e18] {
+            let rows = vec![ev(
+                7,
+                "LLM_RESPONSE",
+                Some(LLM),
+                None,
+                None,
+                None,
+                Some(json!({ "total_ms": total_ms })),
+                "OK",
+                None,
+            )];
+            let fake = FakeHttp::new(vec![reply(&GET_FIELDS, rows, false)]);
+            let detail = source(&fake)
+                .get(&TraceId::parse(ID).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(detail.spans.len(), 1);
+            let llm = &detail.spans[0];
+            assert_eq!((llm.start, llm.end), (at(7), at(7)), "total_ms {total_ms}");
         }
     }
 
