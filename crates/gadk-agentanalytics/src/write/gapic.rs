@@ -56,12 +56,12 @@ use crate::write::{AppendRowsClient, eof, status_error};
 /// The default gRPC endpoint (TLS).
 pub(crate) const DEFAULT_ENDPOINT: &str = "https://bigquerystorage.googleapis.com:443";
 
-/// The OAuth scopes requested for Application Default Credentials.
-pub(crate) const DEFAULT_AUTH_SCOPES: [&str; 3] = [
-    "https://www.googleapis.com/auth/bigquery",
-    "https://www.googleapis.com/auth/bigquery.insertdata",
-    "https://www.googleapis.com/auth/cloud-platform",
-];
+/// The OAuth scopes requested for Application Default Credentials: `cloud-platform` alone, which
+/// covers BigQuery and the Storage Write API. User credentials from
+/// `gcloud auth application-default login` are granted only this scope, and a refresh that asks
+/// for the narrower BigQuery scopes fails.
+pub(crate) const DEFAULT_AUTH_SCOPES: [&str; 1] =
+    ["https://www.googleapis.com/auth/cloud-platform"];
 
 /// The `x-goog-api-client` key (merged into one value, the client's replacing a caller's).
 const API_CLIENT_KEY: &str = "x-goog-api-client";
@@ -265,7 +265,7 @@ impl WriteClient {
     /// plaintext, `https://` or a bare `host:port` = TLS) or `bigquerystorage.googleapis.com:443`
     /// (TLS, native roots), with [`ClientOptions::credentials`], none when
     /// [`ClientOptions::without_authentication`], else Application Default Credentials with the
-    /// BigQuery scopes. Must run inside a Tokio runtime.
+    /// `cloud-platform` scope. Must run inside a Tokio runtime.
     ///
     /// # Errors
     ///
@@ -815,6 +815,17 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    // User credentials from `gcloud auth application-default login` are granted only the
+    // `cloud-platform` scope, and a refresh asking for narrower BigQuery scopes fails, so the
+    // default asks for `cloud-platform` alone (it covers BigQuery and the Storage Write API).
+    #[test]
+    fn default_scopes_are_cloud_platform_only() {
+        assert_eq!(
+            DEFAULT_AUTH_SCOPES,
+            ["https://www.googleapis.com/auth/cloud-platform"]
+        );
+    }
 
     /// gax retries an AppendRows open that fails with `Unavailable` (here refused by a stream
     /// interceptor, as Go tests' `grpc.WithStreamInterceptor` can), pausing within the

@@ -28,8 +28,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use gadk::agent::{Context, RunConfig, Tool, ToolError};
 use gadk::agentanalytics::{
-    ClientOptions, Config, as_bigquery_agent_analytics_plugin,
-    new_bigquery_agent_analytics_plugin_with_config,
+    Config, as_bigquery_agent_analytics_plugin, new_bigquery_agent_analytics_plugin_with_config,
 };
 use gadk::engine::llm::LlmAgentConfig;
 use gadk::engine::runner::{PluginConfig, RunOptions, Runner, RunnerConfig};
@@ -112,25 +111,12 @@ async fn main() -> anyhow::Result<()> {
         ..Default::default()
     })?;
 
-    // Application Default Credentials with the `cloud-platform` scope, which also covers
-    // BigQuery: user credentials from `gcloud auth application-default login` are granted only
-    // that scope and fail a refresh that asks for the narrower BigQuery scopes.
-    let credentials = gadk::model::gcp_auth::adc_credentials(
-        std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
-            .ok()
-            .as_deref(),
-        &["https://www.googleapis.com/auth/cloud-platform"],
-    )?;
     let plugin = new_bigquery_agent_analytics_plugin_with_config(
         &gadk::agentanalytics::Context::background(),
         Config {
             project_id: project,
             dataset_id: dataset,
             table_name: table,
-            client_options: ClientOptions {
-                credentials: Some(credentials),
-                ..ClientOptions::default()
-            },
             ..Config::default()
         },
     )

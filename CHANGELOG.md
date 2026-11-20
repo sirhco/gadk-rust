@@ -7,6 +7,13 @@ the public API.
 
 ## [Unreleased]
 
+### Fixed
+
+- `gadk-agentanalytics`: Application Default Credentials are requested with the `cloud-platform`
+  scope alone (for both the Storage Write API and the REST table client), so user credentials from
+  `gcloud auth application-default login` work; asking for the narrower BigQuery scopes made
+  their refresh fail. The `agentanalytics` example no longer builds its own credentials.
+
 ## [0.4.5] - 2026-11-19
 
 ### Added
