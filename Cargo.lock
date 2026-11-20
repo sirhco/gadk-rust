@@ -1274,6 +1274,7 @@ dependencies = [
  "gadk-artifact",
  "gadk-artifact-gcs",
  "gadk-auth",
+ "gadk-bigquery",
  "gadk-engine",
  "gadk-eval",
  "gadk-gemini",

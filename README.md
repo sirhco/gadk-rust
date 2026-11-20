@@ -82,6 +82,7 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 | `agentengine` | | Agent Engine server and launcher (`gadk::agentengine`) |
 | `telemetry` | | OpenTelemetry export (`gadk::telemetry`) |
 | `agentregistry` | | Google Cloud Agent Registry client (`gadk::agentregistry`) |
+| `bigquery` | | BigQuery toolset: list datasets and tables, read their metadata and run SQL (`gadk::bigquery`) |
 | `agentanalytics` | | BigQuery Agent Analytics plugin (`gadk::agentanalytics`) |
 | `eval` | | Offline agent evaluation: eval sets, scorers, LLM judge (`gadk::eval`) |
 | `prompts` | | Versioned prompt registry with labels (`gadk::prompts`) |
@@ -120,6 +121,7 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 | [`gadk-configurable`](crates/gadk-configurable/README.md) | YAML agent configs, conformance record/replay, `adkcli` (internal) |
 | [`gadk-httprr`](crates/gadk-httprr/README.md) | HTTP record/replay for deterministic tests |
 | [`gadk-cloudtrace`](crates/gadk-cloudtrace/README.md) | Cloud Trace v1 read client (list and get traces), used by the console and the eval monitors |
+| [`gadk-bigquery`](crates/gadk-bigquery/README.md) | BigQuery toolset for agents (read-only by default) and its REST client |
 | [`gadk-prompts`](crates/gadk-prompts/README.md) | Versioned, labelled prompt registry: prompt stores, the file store, and prompts as instruction providers |
 | [`gadk-prompts-firestore`](crates/gadk-prompts-firestore/README.md) | Firestore store for `gadk-prompts` |
 | [`gadk-prompts-cli`](crates/gadk-prompts-cli/README.md) | `gadk-prompts` CLI: manage prompt versions and labels in a file or Firestore store |

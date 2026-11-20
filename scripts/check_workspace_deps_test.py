@@ -523,6 +523,19 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-bigquery -> gadk-session is missing" in e for e in errs), errs)
 
+    def test_facade_bigquery_edge_is_optional(self):
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-bigquery" in deps], ["gadk"])
+        self.assertIn(("gadk", "gadk-bigquery"), cwd.OPTIONAL)
+        self.edit("gadk", "gadk-bigquery = { workspace = true, optional = true }",
+                  "gadk-bigquery = { workspace = true }")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-bigquery must be optional = true" in e for e in errs), errs)
+
+    def test_facade_missing_bigquery_edge_is_rejected(self):
+        self.edit("gadk", "gadk-bigquery = { workspace = true, optional = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-bigquery is missing" in e for e in errs), errs)
+
     def test_eval_monitor_missing_cloudtrace_edge_is_rejected(self):
         self.edit("gadk-eval-monitor", "gadk-cloudtrace = { workspace = true }\n", "")
         errs = cwd.check(self.repo)

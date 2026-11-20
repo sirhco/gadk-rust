@@ -7,6 +7,16 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-bigquery`: a BigQuery toolset for agents (`gadk::bigquery`, feature `bigquery`). Tools
+  `list_dataset_ids`, `get_dataset_info`, `list_table_ids`, `get_table_info` and `execute_sql`;
+  `execute_sql` is read-only by default (`WriteMode::Blocked`, checked with a dry run), with
+  `WriteMode::Protected` (writes only to temporary tables of a BigQuery session tied to the agent
+  session) and `WriteMode::Allowed`. Results are capped at `max_query_result_rows` (default 50)
+  with a truncation flag; `compute_project`, `location`, `maximum_bytes_billed` and `job_labels`
+  are configurable. Includes the `bigquery_agent` example.
+
 ## [0.4.4] - 2026-11-19
 
 ### Changed

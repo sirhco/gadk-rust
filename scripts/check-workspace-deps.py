@@ -155,7 +155,7 @@ ALLOWED = {
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
              "gadk-artifact-gcs", "gadk-vertexai", "gadk-server", "gadk-a2a", "gadk-launcher",
              "gadk-agentregistry", "gadk-telemetry", "gadk-agentanalytics", "gadk-prompts",
-             "gadk-prompts-firestore", "gadk-eval"},
+             "gadk-prompts-firestore", "gadk-eval", "gadk-bigquery"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("gadk-a2a", "gadk-server"),
@@ -163,7 +163,8 @@ OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("ga
             ("gadk-agentregistry", "gadk-a2a"), ("gadk-agentregistry", "gadk-mcp"),
             ("gadk", "gadk-telemetry"), ("gadk", "gadk-agentanalytics"),
             ("gadk-prompts-cli", "gadk-prompts-firestore"), ("gadk", "gadk-prompts"),
-            ("gadk", "gadk-prompts-firestore"), ("gadk", "gadk-eval")}
+            ("gadk", "gadk-prompts-firestore"), ("gadk", "gadk-eval"),
+            ("gadk", "gadk-bigquery")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
                      "gadk-agentregistry", "gadk-telemetry", "gadk-configurable",
