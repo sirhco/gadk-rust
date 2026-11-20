@@ -50,8 +50,10 @@ use crate::schema_upgrade::{
     TimePartitioning,
 };
 
-/// The OAuth scope the client requests.
-pub(crate) const SCOPE: &str = "https://www.googleapis.com/auth/bigquery";
+/// The OAuth scope the client requests: `cloud-platform`, which covers BigQuery. User credentials
+/// from `gcloud auth application-default login` are granted only this scope, and a refresh that
+/// asks for the narrower `bigquery` scope fails.
+pub(crate) const SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 
 /// The REST base path without its trailing `/`.
 pub(crate) const DEFAULT_BASE_URL: &str = "https://bigquery.googleapis.com/bigquery/v2";
@@ -1042,6 +1044,11 @@ mod tests {
     use gadk_model::rest::googleapi::api_error_from_response;
     use gadk_model::rest::test_util::{FakeResponse, ScriptedClient, bearer_credentials};
     use gadk_platform::env::MapEnv;
+
+    #[test]
+    fn scope_is_cloud_platform() {
+        assert_eq!(SCOPE, "https://www.googleapis.com/auth/cloud-platform");
+    }
     use pretty_assertions::assert_eq;
 
     use super::*;
