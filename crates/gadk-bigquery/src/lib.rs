@@ -24,6 +24,8 @@ mod auth;
 mod error;
 #[allow(dead_code)]
 mod ident;
+#[allow(dead_code)] // used by the client (Task 3)
+mod rows;
 
 pub use auth::{Adc, AuthHeaders, NoAuth};
 pub use error::BigQueryError;
