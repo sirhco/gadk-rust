@@ -165,6 +165,8 @@ pub(crate) struct VertexClient {
     origin: String,
     credentials: Option<Credentials>,
     transport: RestTransport,
+    /// The deadline of each `call` and upload; `None` waits as long as it takes.
+    timeout: Option<Duration>,
 }
 
 impl VertexClient {
@@ -184,7 +186,26 @@ impl VertexClient {
                 policy: NO_RETRIES,
                 response_header_timeout: None,
             },
+            timeout: None,
         }
+    }
+
+    /// Gives every [`call`](Self::call) (so every [`list_all`](Self::list_all) page) and
+    /// [`upload_multipart`](Self::upload_multipart) a deadline of `timeout`
+    /// (`CallTimeout::PerAttempt`; this client never retries, so it bounds the request): a
+    /// slower request fails with `context deadline exceeded`. Operation polls keep their own
+    /// 10 s deadline.
+    // Used by the RAG memory service (next task).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// The timeout of a `call` or upload: `PerAttempt(timeout)`, or none.
+    fn call_timeout(&self) -> CallTimeout {
+        self.timeout
+            .map_or(CallTimeout::None, CallTimeout::PerAttempt)
     }
 
     /// One call: URL `{base_url}{go_escaped_path(path)}?{query}` where the query is `query`
@@ -193,7 +214,8 @@ impl VertexClient {
     /// is empty: the list methods send none), gadk's tracking `User-Agent`, credential headers, and
     /// `Content-Type: application/json` (on every call). `path` is unescaped and
     /// starts with `/` (`/v1beta1/projects/…:appendEvent`). A 2xx reply is its body as JSON
-    /// (`{}` when empty); any other status is `VertexError::from_response`. No retries.
+    /// (`{}` when empty); any other status is `VertexError::from_response`. No retries; no timeout
+    /// unless [`with_timeout`](Self::with_timeout) set one.
     ///
     /// # Errors
     ///
@@ -216,7 +238,7 @@ impl VertexClient {
             go_values_encode(&pairs)
         );
         let routing = (!routing.0.is_empty()).then_some(routing);
-        self.send(method, &url, routing, body, CallTimeout::None)
+        self.send(method, &url, routing, body, self.call_timeout())
             .await
     }
 
@@ -422,7 +444,7 @@ impl VertexClient {
             content_type: &content_type,
             extra: &extra,
         };
-        self.send_bytes(Method::POST, &url, routing, payload, CallTimeout::None)
+        self.send_bytes(Method::POST, &url, routing, payload, self.call_timeout())
             .await
     }
 }
