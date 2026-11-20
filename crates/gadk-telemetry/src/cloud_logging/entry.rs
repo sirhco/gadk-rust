@@ -159,7 +159,36 @@ pub(crate) fn api_entry(record: &SdkLogRecord, target: &CloudLogTarget, now: Sys
     Value::Object(e)
 }
 
-/// One stdout line: Cloud Run's special keys plus the payload fields at top level.
+/// Longest `message` summary on a stdout line, in chars (an ellipsis marks a cut).
+pub(crate) const MESSAGE_LIMIT: usize = 200;
+
+/// The one-line summary Cloud Logging shows for a stdout line: `<event.name>: <body>`, or
+/// whichever of the two the record has (only a string body counts), at most
+/// [`MESSAGE_LIMIT`] chars. `None` when the record has neither.
+pub(crate) fn summary(record: &SdkLogRecord) -> Option<String> {
+    let body = match record.body() {
+        Some(AnyValue::String(s)) => Some(s.as_str()).filter(|s| !s.is_empty()),
+        _ => None,
+    };
+    let text = match (record.event_name(), body) {
+        (Some(event), Some(body)) => format!("{event}: {body}"),
+        (Some(event), None) => event.to_owned(),
+        (None, Some(body)) => body.to_owned(),
+        (None, None) => return None,
+    };
+    Some(match text.char_indices().nth(MESSAGE_LIMIT) {
+        None => text,
+        Some((cut, _)) => {
+            let mut short = text[..cut].to_owned();
+            short.pop();
+            short.push('…');
+            short
+        }
+    })
+}
+
+/// One stdout line: Cloud Run's special keys (with a `message` summary when [`summary`] has
+/// one) plus the payload fields at top level.
 pub(crate) fn stdout_line(
     record: &SdkLogRecord,
     target: &CloudLogTarget,
@@ -181,6 +210,9 @@ pub(crate) fn stdout_line(
             "logging.googleapis.com/trace_sampled".to_owned(),
             Value::Bool(t.sampled),
         );
+    }
+    if let Some(message) = summary(record) {
+        special.insert("message".to_owned(), Value::from(message));
     }
     let mut line = payload(record);
     let overhead = serde_json::to_vec(&special).map_or(0, |b| b.len()) + 1;
@@ -383,12 +415,61 @@ mod tests {
                 "logging.googleapis.com/trace": "projects/p/traces/0af7651916cd43dd8448eb211c80319c",
                 "logging.googleapis.com/spanId": "b7ad6b7169203331",
                 "logging.googleapis.com/trace_sampled": false,
+                "message": "b",
                 "body": "b"
             })
         );
         let (plain, _) = record(|r| r.set_timestamp(at(1_700_000_000, 0)));
         let line = stdout_line(&plain, &target, at(0, 0));
         assert!(line.get("logging.googleapis.com/trace").is_none());
+        assert!(
+            line.get("message").is_none(),
+            "nothing to summarize: {line}"
+        );
+    }
+
+    #[test]
+    fn summary_joins_event_name_and_string_body() {
+        let (both, _) = record(|r| {
+            r.set_event_name("gen_ai.user.message");
+            r.set_body(AnyValue::String("hello".into()));
+        });
+        assert_eq!(
+            summary(&both).as_deref(),
+            Some("gen_ai.user.message: hello")
+        );
+        let (event, _) = record(|r| {
+            r.set_event_name("gen_ai.choice");
+            r.set_body(AnyValue::Int(3));
+        });
+        assert_eq!(
+            summary(&event).as_deref(),
+            Some("gen_ai.choice"),
+            "non-string body ignored"
+        );
+        let (body, _) = record(|r| r.set_body(AnyValue::String("only body".into())));
+        assert_eq!(summary(&body).as_deref(), Some("only body"));
+        let (empty_body, _) = record(|r| r.set_body(AnyValue::String("".into())));
+        assert_eq!(summary(&empty_body), None);
+        let (none, _) = record(|r| r.add_attribute("k", 1));
+        assert_eq!(summary(&none), None);
+        let api = api_entry(&both, &CloudLogTarget::new("p", "", None), at(0, 0));
+        assert!(
+            api["jsonPayload"].get("message").is_none(),
+            "stdout lines only: {api}"
+        );
+    }
+
+    #[test]
+    fn summary_is_capped_in_chars() {
+        let exact = "é".repeat(MESSAGE_LIMIT);
+        let (r, _) = record(|r| r.set_body(AnyValue::String(exact.clone().into())));
+        assert_eq!(summary(&r).as_deref(), Some(exact.as_str()));
+        let long = "é".repeat(MESSAGE_LIMIT + 1);
+        let (r, _) = record(|r| r.set_body(AnyValue::String(long.into())));
+        let s = summary(&r).unwrap();
+        assert_eq!(s.chars().count(), MESSAGE_LIMIT);
+        assert!(s.ends_with("é…"), "{s}");
     }
 
     #[test]
