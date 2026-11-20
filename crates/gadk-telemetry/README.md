@@ -44,6 +44,9 @@ Cloud Logging and is billed as Cloud Logging ingestion.
 
 - `jsonPayload`: `event.name`, `body` and `attributes` of the record (on stdout these are
   top-level fields).
+- On stdout only: `message`, the summary line Cloud Logging shows for the entry:
+  `<event.name>: <body>`, or whichever of the two the record has (only a string body counts),
+  cut to 200 characters. Records with neither have no `message`.
 - `severity` from the OTel severity number; `timestamp` from the record (RFC 3339, nanoseconds).
 - `trace` (`projects/{project}/traces/{trace id}`), `spanId` and `traceSampled` when the record
   has a span context, so Cloud Logging shows the entry under its Cloud Trace span. On stdout:
@@ -56,3 +59,17 @@ Cloud Logging and is billed as Cloud Logging ingestion.
 An entry larger than 256,000 bytes has its longest strings shortened (each ending in
 `…[truncated]`) until it fits, and gains `gadk.truncated: true` and `gadk.original_bytes`.
 Requests are split to stay under Cloud Logging's request size limit.
+
+### Flushing at exit
+
+Log records are queued and exported in the background, at most 512 per export, at least once a
+second. Call `Providers::shutdown().await` before the process exits: it exports what is still
+queued, but waits at most 5 seconds (the OpenTelemetry SDK's shutdown timeout), and each
+`entries:write` request may take up to 10 seconds. Records still queued when that time runs out
+are dropped, and a full queue (2,048 records) drops new ones. If a process logs heavily just
+before it exits:
+
+- on Cloud Run, GKE or Cloud Functions, prefer `with_cloud_logging_stdout()`, which writes
+  locally and does not wait on the network;
+- otherwise, export more often with `OTEL_BLRP_SCHEDULE_DELAY` (milliseconds) so less is left
+  for the final flush, and raise `OTEL_BLRP_MAX_QUEUE_SIZE` if bursts overflow the queue.

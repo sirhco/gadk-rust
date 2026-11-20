@@ -7,6 +7,18 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-telemetry`: structured stdout log lines carry a `message` summary
+  (`<event.name>: <body>`, at most 200 characters) when the record has an event name or a string
+  body; the README explains flushing at exit (5 s shutdown wait, `OTEL_BLRP_*` tuning).
+
+### Fixed
+
+- `gadk-console`: the trace page carries each log payload once instead of three times (the span
+  pane copies the server-rendered entries); the README lists `X-Content-Type-Options: nosniff`
+  and `Cache-Control: no-store` with the CSP.
+
 ## [0.4.7] - 2026-11-20
 
 ### Changed

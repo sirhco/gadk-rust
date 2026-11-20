@@ -80,7 +80,8 @@ The console is for one developer on their own machine:
   (`http://127.0.0.1`, `http://localhost`) that browsers send for the default port are accepted too.
 - Every response carries
   `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; frame-ancestors 'none'; form-action 'self'`,
-  and all trace and log text is HTML-escaped.
+  `X-Content-Type-Options: nosniff` and `Cache-Control: no-store` (so pages holding trace
+  payloads are not kept in the browser cache), and all trace and log text is HTML-escaped.
 - There is no login. Anyone who can reach the port on your machine (other local users, or
   processes you run) can read your traces, logs and monitor reports, which may include prompts, completions and
   production user messages, and change prompt labels with your credentials. Don't run it on a shared host.
