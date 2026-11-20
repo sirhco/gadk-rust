@@ -40,7 +40,7 @@ the user before a call runs, wrap it with `gadk_agent::toolset::with_confirmatio
 | `WriteMode` | `execute_sql` runs |
 |---|---|
 | `Blocked` (default) | Only `SELECT` statements. A dry run checks the statement type first; anything else is refused without running. |
-| `Protected` | `SELECT` statements, and writes to the temporary tables of a BigQuery session that belongs to the agent session (`CREATE TEMP TABLE …`). The session id is kept in session state under `gadk_bigquery_session`; an expired session is replaced and the call retried once. |
+| `Protected` | `SELECT` statements, and writes to the temporary tables of a BigQuery session that belongs to the agent session (`CREATE TEMP TABLE …`). The session id is kept in session state under `gadk_bigquery_session`; an expired session is replaced and the call retried once. A BigQuery session is bound to one location, so set `location` when the data is outside the `US` multi-region. |
 | `Allowed` | Any statement the credentials allow, without a dry run. |
 
 ## Configuration
@@ -50,7 +50,7 @@ the user before a call runs, wrap it with `gadk_agent::toolset::with_confirmatio
 | `write_mode` | `Blocked` | See above |
 | `max_query_result_rows` | 50 | Rows returned to the model per query |
 | `compute_project` | none | The project that runs and pays for query jobs; none uses the `project_id` argument |
-| `location` | none | Job location, such as `US` |
+| `location` | none | Job location, such as `US`; needed in `Protected` mode when the data is outside the `US` multi-region |
 | `maximum_bytes_billed` | none | Cost cap per query in bytes |
 | `job_labels` | empty | Labels on every job; the toolset adds `gadk-bigquery-tool: execute_sql` |
 
@@ -76,7 +76,9 @@ compute project; **BigQuery Data Editor** too when writes are allowed.
 GADK_BIGQUERY_LIVE_PROJECT=<project> cargo test -p gadk-bigquery --test live -- --ignored --nocapture
 ```
 
-It reads the `gadk_examples` dataset and creates no datasets or tables.
+It reads the `gadk_examples` dataset and creates no datasets or tables apart from one temporary
+table in a BigQuery session's anonymous dataset (the `Protected` check), which BigQuery drops with
+the session.
 
 ## License
 

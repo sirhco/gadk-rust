@@ -24,7 +24,8 @@ pub enum WriteMode {
     #[default]
     Blocked,
     /// `SELECT` statements, and writes to the temporary tables of a BigQuery session that
-    /// belongs to the agent session.
+    /// belongs to the agent session. A BigQuery session is bound to one location, so set
+    /// [`BigQueryToolConfig::location`] when the data is outside the `US` multi-region.
     Protected,
     /// Any statement the credentials allow.
     Allowed,

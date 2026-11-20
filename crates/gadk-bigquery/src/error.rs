@@ -53,6 +53,10 @@ pub enum BigQueryError {
 impl BigQueryError {
     /// Whether the error says the BigQuery session no longer exists (expired or not found), so a
     /// new session should be created.
+    ///
+    /// True only for [`Api`](Self::Api) and [`Job`](Self::Job) errors whose message (ignoring
+    /// case) contains `not found` or `expired` and the word `session` on its own, not as part
+    /// of an identifier: `user_sessions` or `_SESSION.tmp` do not count.
     pub fn is_session_gone(&self) -> bool {
         let text = match self {
             Self::Api { message, .. } => message,
@@ -60,8 +64,21 @@ impl BigQueryError {
             _ => return false,
         }
         .to_ascii_lowercase();
-        text.contains("session") && (text.contains("not found") || text.contains("expired"))
+        has_word(&text, "session") && (text.contains("not found") || text.contains("expired"))
     }
+}
+
+/// Whether `text` contains `word` with no identifier character (`[A-Za-z0-9_]`) right before or
+/// after it.
+fn has_word(text: &str, word: &str) -> bool {
+    let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let bytes = text.as_bytes();
+    text.match_indices(word).any(|(start, _)| {
+        let end = start + word.len();
+        let before_ok = start == 0 || !is_ident(bytes[start - 1]);
+        let after_ok = end == bytes.len() || !is_ident(bytes[end]);
+        before_ok && after_ok
+    })
 }
 
 /// The error for a non-2xx reply with `body`.
@@ -129,5 +146,32 @@ mod tests {
         assert!(BigQueryError::Job("session not found".into()).is_session_gone());
         assert!(!gone("Table not found").is_session_gone());
         assert!(!BigQueryError::Credentials("session expired".into()).is_session_gone());
+    }
+
+    #[test]
+    fn session_gone_ignores_session_inside_identifiers() {
+        let api404 = |m: &str| {
+            api_error(
+                404,
+                format!(r#"{{"error":{{"message":"{m}","errors":[{{"reason":"notFound"}}]}}}}"#)
+                    .as_bytes(),
+            )
+        };
+        let table = "Not found: Table p:d.user_sessions was not found in location US";
+        assert!(!api404(table).is_session_gone());
+        assert!(!BigQueryError::Job(table.into()).is_session_gone());
+        let temp = "Not found: Table p:_SESSION.tmp was not found";
+        assert!(!api404(temp).is_session_gone());
+        assert!(!BigQueryError::Job(temp.into()).is_session_gone());
+        assert!(!BigQueryError::Job("Table sessions_2 has expired".into()).is_session_gone());
+        assert!(!BigQueryError::Job("Column session1 not found".into()).is_session_gone());
+    }
+
+    #[test]
+    fn session_gone_matches_session_as_a_whole_word() {
+        assert!(BigQueryError::Job("SESSION not found".into()).is_session_gone());
+        assert!(BigQueryError::Job("The session: abc has expired.".into()).is_session_gone());
+        assert!(BigQueryError::Job("(session) expired".into()).is_session_gone());
+        assert!(BigQueryError::Job("Not found: session".into()).is_session_gone());
     }
 }
