@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-11-19
+
 ### Fixed
 
 - `gadk-agentanalytics`: Application Default Credentials are requested with the `cloud-platform`
@@ -479,7 +481,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/sirhco/gadk-rust/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/sirhco/gadk-rust/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/sirhco/gadk-rust/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/sirhco/gadk-rust/compare/v0.4.2...v0.4.3
