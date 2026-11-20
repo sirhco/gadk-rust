@@ -225,6 +225,22 @@ mod tests {
     }
 
     #[test]
+    fn repeated_records_are_arrays_of_objects() {
+        let field = json!({ "name": "c", "type": "RECORD", "mode": "REPEATED", "fields": [
+            { "name": "n", "type": "INT64" },
+            { "name": "s", "type": "STRING" },
+        ]});
+        let cell = json!([
+            { "v": { "f": [ { "v": "1" }, { "v": "a" } ] } },
+            { "v": { "f": [ { "v": "2" }, { "v": null } ] } },
+        ]);
+        assert_eq!(
+            one(field, cell),
+            json!([ { "n": 1, "s": "a" }, { "n": 2, "s": null } ])
+        );
+    }
+
+    #[test]
     fn missing_schema_or_rows_is_empty() {
         assert!(decode_rows(None, None).unwrap().is_empty());
         let schema = json!({ "fields": [ { "name": "c", "type": "INT64" } ] });

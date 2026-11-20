@@ -42,6 +42,10 @@ const MAX_POLLS: usize = 30;
 /// The most items a list call returns.
 const MAX_LIST: usize = 1000;
 
+/// The most pages a list call reads (a guard against a server that keeps sending a
+/// `nextPageToken` with empty pages).
+const MAX_LIST_PAGES: usize = 100;
+
 /// A BigQuery v2 REST client.
 #[non_exhaustive]
 pub struct BigQueryClient {
@@ -99,15 +103,16 @@ impl BigQueryClient {
         }
     }
 
-    /// The dataset ids of `project` (`datasets.list`, every page, at most 1,000).
+    /// The dataset ids of `project` (`datasets.list`: up to 100 pages and 1,000 ids).
     ///
     /// # Errors
     ///
     /// Any [`BigQueryError`] of the calls.
     pub async fn list_datasets(&self, project: &str) -> Result<Vec<String>, BigQueryError> {
         let url = format!(
-            "{}/projects/{project}/datasets?all=false&maxResults=1000",
-            self.base
+            "{}/projects/{}/datasets?all=false&maxResults=1000",
+            self.base,
+            seg(project)
         );
         self.list(&url, "datasets", "/datasetReference/datasetId")
             .await
@@ -119,11 +124,16 @@ impl BigQueryClient {
     ///
     /// Any [`BigQueryError`] of the call.
     pub async fn get_dataset(&self, project: &str, dataset: &str) -> Result<Value, BigQueryError> {
-        let url = format!("{}/projects/{project}/datasets/{dataset}", self.base);
+        let url = format!(
+            "{}/projects/{}/datasets/{}",
+            self.base,
+            seg(project),
+            seg(dataset)
+        );
         self.call(Method::GET, &url, None).await
     }
 
-    /// The table ids of `project.dataset` (`tables.list`, every page, at most 1,000).
+    /// The table ids of `project.dataset` (`tables.list`: up to 100 pages and 1,000 ids).
     ///
     /// # Errors
     ///
@@ -134,8 +144,10 @@ impl BigQueryClient {
         dataset: &str,
     ) -> Result<Vec<String>, BigQueryError> {
         let url = format!(
-            "{}/projects/{project}/datasets/{dataset}/tables?maxResults=1000",
-            self.base
+            "{}/projects/{}/datasets/{}/tables?maxResults=1000",
+            self.base,
+            seg(project),
+            seg(dataset)
         );
         self.list(&url, "tables", "/tableReference/tableId").await
     }
@@ -152,8 +164,11 @@ impl BigQueryClient {
         table: &str,
     ) -> Result<Value, BigQueryError> {
         let url = format!(
-            "{}/projects/{project}/datasets/{dataset}/tables/{table}",
-            self.base
+            "{}/projects/{}/datasets/{}/tables/{}",
+            self.base,
+            seg(project),
+            seg(dataset),
+            seg(table)
         );
         self.call(Method::GET, &url, None).await
     }
@@ -186,7 +201,7 @@ impl BigQueryClient {
             "jobReference": job_ref,
             "configuration": { "dryRun": true, "labels": opts.labels, "query": query },
         });
-        let url = format!("{}/projects/{compute_project}/jobs", self.base);
+        let url = format!("{}/projects/{}/jobs", self.base, seg(compute_project));
         let job = job_ok(self.call(Method::POST, &url, Some(body)).await?)?;
         let statement_type = job
             .pointer("/statistics/query/statementType")
@@ -237,7 +252,7 @@ impl BigQueryClient {
         if opts.create_session {
             body["createSession"] = json!(true);
         }
-        let url = format!("{}/projects/{compute_project}/queries", self.base);
+        let url = format!("{}/projects/{}/queries", self.base, seg(compute_project));
         let first = job_ok(self.call(Method::POST, &url, Some(body)).await?)?;
         let job_ref = first.get("jobReference").cloned().unwrap_or(Value::Null);
         let session_id = first
@@ -290,7 +305,12 @@ impl BigQueryClient {
                 "the query reply has no job reference".into(),
             ));
         };
-        let mut url = format!("{}/projects/{project}/queries/{}?", self.base, encode(job));
+        let mut url = format!(
+            "{}/projects/{}/queries/{}?",
+            self.base,
+            seg(project),
+            seg(job)
+        );
         if let Some(loc) = job_ref.get("location").and_then(Value::as_str) {
             url.push_str(&format!("location={}&", encode(loc)));
         }
@@ -317,9 +337,10 @@ impl BigQueryClient {
             .and_then(Value::as_str)
             .ok_or_else(|| BigQueryError::Decode("the query reply has no job reference".into()))?;
         let mut url = format!(
-            "{}/projects/{compute_project}/jobs/{}?",
+            "{}/projects/{}/jobs/{}?",
             self.base,
-            encode(job)
+            seg(compute_project),
+            seg(job)
         );
         if let Some(loc) = job_ref.get("location").and_then(Value::as_str) {
             url.push_str(&format!("location={}&", encode(loc)));
@@ -335,7 +356,8 @@ impl BigQueryClient {
         Ok(SessionInfo::new(compute_project, session_id, dataset))
     }
 
-    /// Every page of a list call: the strings at `id_pointer` of each `items_key` entry.
+    /// Every page of a list call (at most [`MAX_LIST_PAGES`] pages and [`MAX_LIST`] items): the
+    /// strings at `id_pointer` of each `items_key` entry.
     async fn list(
         &self,
         first_url: &str,
@@ -344,7 +366,7 @@ impl BigQueryClient {
     ) -> Result<Vec<String>, BigQueryError> {
         let mut out = Vec::new();
         let mut url = first_url.to_owned();
-        loop {
+        for _ in 0..MAX_LIST_PAGES {
             let page = self.call(Method::GET, &url, None).await?;
             for item in page
                 .get(items_key)
@@ -365,6 +387,7 @@ impl BigQueryClient {
                 None => return Ok(out),
             }
         }
+        Ok(out)
     }
 
     /// Sends one request with an optional JSON body; the 2xx JSON reply, or the mapped error.
@@ -435,11 +458,23 @@ fn transport(err: ModelError) -> BigQueryError {
     })
 }
 
-/// Percent-encodes every byte except the RFC 3986 unreserved characters (`A-Z a-z 0-9 - . _ ~`).
+/// Percent-encodes a query-parameter value: every byte except the RFC 3986 unreserved characters
+/// (`A-Z a-z 0-9 - . _ ~`).
 fn encode(s: &str) -> String {
+    escape(s, |b| matches!(b, b'-' | b'.' | b'_' | b'~'))
+}
+
+/// Percent-encodes a URL path segment: every byte except the RFC 3986 unreserved characters and
+/// `:`, so a domain-scoped project id such as `example.com:proj` stays readable.
+fn seg(s: &str) -> String {
+    escape(s, |b| matches!(b, b'-' | b'.' | b'_' | b'~' | b':'))
+}
+
+/// Percent-encodes every byte of `s` that is neither ASCII alphanumeric nor `keep`.
+fn escape(s: &str, keep: impl Fn(u8) -> bool) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+        if b.is_ascii_alphanumeric() || keep(b) {
             out.push(char::from(b));
         } else {
             out.push_str(&format!("%{b:02X}"));
@@ -618,6 +653,97 @@ pub(crate) mod tests {
                 format!("{B}/projects/p/datasets/d/tables/t")
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn path_segments_are_percent_encoded() {
+        let ok = || (200, json!({}));
+        let done = |project: &str| {
+            (
+                200,
+                json!({ "jobComplete": true, "jobReference": { "projectId": project, "jobId": "j/1" } }),
+            )
+        };
+        let fake = FakeHttp::new(vec![
+            ok(),
+            ok(),
+            ok(),
+            ok(),
+            (
+                200,
+                json!({ "statistics": { "query": { "statementType": "SELECT" } } }),
+            ),
+            done("example.com:proj"),
+        ]);
+        let c = client(&fake);
+        c.list_datasets("example.com:proj").await.unwrap();
+        c.get_dataset("example.com:proj", "a/b").await.unwrap();
+        c.list_tables("p q", "a/b").await.unwrap();
+        c.get_table("example.com:proj", "a/b", "x?y").await.unwrap();
+        c.dry_run("c#p", "SELECT 1", &QueryOptions::new())
+            .await
+            .unwrap();
+        c.query("example.com:proj", "SELECT 1", &QueryOptions::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            fake.uris(),
+            [
+                format!("{B}/projects/example.com:proj/datasets?all=false&maxResults=1000"),
+                format!("{B}/projects/example.com:proj/datasets/a%2Fb"),
+                format!("{B}/projects/p%20q/datasets/a%2Fb/tables?maxResults=1000"),
+                format!("{B}/projects/example.com:proj/datasets/a%2Fb/tables/x%3Fy"),
+                format!("{B}/projects/c%23p/jobs"),
+                format!("{B}/projects/example.com:proj/queries"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_and_session_urls_encode_the_project() {
+        let fake = FakeHttp::new(vec![
+            (
+                200,
+                json!({ "jobComplete": false, "sessionInfo": { "sessionId": "S" },
+                "jobReference": { "projectId": "a%b", "jobId": "j/1", "location": "US" } }),
+            ),
+            (200, json!({ "jobComplete": true })),
+            (
+                200,
+                json!({ "configuration": { "query": { "destinationTable": { "projectId": "a%b", "datasetId": "_anon", "tableId": "x" } } } }),
+            ),
+        ]);
+        client(&fake)
+            .query(
+                "é/p",
+                "SELECT 1",
+                &QueryOptions::new().with_create_session(true),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            fake.uris(),
+            [
+                format!("{B}/projects/%C3%A9%2Fp/queries"),
+                format!(
+                    "{B}/projects/a%25b/queries/j%2F1?location=US&timeoutMs=10000&formatOptions.useInt64Timestamp=true"
+                ),
+                format!(
+                    "{B}/projects/%C3%A9%2Fp/jobs/j%2F1?location=US&fields=configuration.query.destinationTable"
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_stops_after_100_pages() {
+        let replies = (0..MAX_LIST_PAGES + 5)
+            .map(|_| (200, json!({ "datasets": [], "nextPageToken": "again" })))
+            .collect();
+        let fake = FakeHttp::new(replies);
+        let ids = client(&fake).list_datasets("p").await.unwrap();
+        assert!(ids.is_empty());
+        assert_eq!(fake.uris().len(), MAX_LIST_PAGES);
     }
 
     #[tokio::test]

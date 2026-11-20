@@ -37,10 +37,11 @@ pub enum WriteMode {
 pub struct BigQueryToolConfig {
     /// What `execute_sql` may run (default [`WriteMode::Blocked`]).
     pub write_mode: WriteMode,
-    /// The most rows `execute_sql` returns to the model (default 50).
+    /// The most rows `execute_sql` returns to the model (default 50; at least 1).
     pub max_query_result_rows: usize,
-    /// The project that runs (and is billed for) query jobs; `None` uses the `project_id` the
-    /// model passes to `execute_sql`.
+    /// The project that runs (and is billed for) query jobs, a project id such as `my-project`
+    /// or `example.com:my-project`; `None` uses the `project_id` the model passes to
+    /// `execute_sql`.
     pub compute_project: Option<String>,
     /// The job location, such as `US`; `None` lets BigQuery choose.
     pub location: Option<String>,

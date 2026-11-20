@@ -364,6 +364,86 @@ mod tests {
         assert_eq!(state.get(STATE_KEY).unwrap()["session_id"], json!("S2"));
     }
 
+    /// A state whose reads find nothing and whose writes fail.
+    struct FailingState;
+
+    impl State for FailingState {
+        fn get(&self, _key: &str) -> Result<Value, SessionError> {
+            Err(SessionError::StateKeyNotExist)
+        }
+        fn set(&self, _key: &str, _value: Value) -> Result<(), SessionError> {
+            Err(SessionError::Backend("disk full".into()))
+        }
+        fn all(&self) -> Vec<(String, Value)> {
+            Vec::new()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_start_reply_without_session_info_is_returned_and_nothing_stored() {
+        let fake = FakeHttp::new(vec![(
+            200,
+            json!({ "jobComplete": true, "jobReference": { "projectId": "cp", "jobId": "s" }, "totalRows": "1" }),
+        )]);
+        let state = MemState::default();
+        let err = run(
+            &state,
+            &client(&fake),
+            "cp",
+            "SELECT 1",
+            &QueryOptions::new(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, BigQueryError::Decode(_)), "{err:?}");
+        assert!(state.all().is_empty());
+        assert_eq!(fake.uris().len(), 1, "nothing ran after the failed start");
+    }
+
+    #[tokio::test]
+    async fn a_failing_state_write_is_a_state_error() {
+        let fake = FakeHttp::new(start("S1", "_anon1"));
+        let err = run(
+            &FailingState,
+            &client(&fake),
+            "cp",
+            "SELECT 1",
+            &QueryOptions::new(),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&err, BigQueryError::State(m) if m.contains("disk full")),
+            "{err:?}"
+        );
+        assert_eq!(fake.uris().len(), 2, "the statement did not run");
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_stored_session_is_replaced() {
+        let mut replies = start("S2", "_anon2");
+        replies.extend([dry("SELECT", None), done()]);
+        let fake = FakeHttp::new(replies);
+        let state = MemState::default();
+        state
+            .set(STATE_KEY, json!({ "project": "cp", "session": 7 }))
+            .unwrap();
+        assert!(ran(run(
+            &state,
+            &client(&fake),
+            "cp",
+            "SELECT 1",
+            &QueryOptions::new()
+        )
+        .await
+        .unwrap()));
+        assert_eq!(
+            state.get(STATE_KEY).unwrap(),
+            json!({ "project": "cp", "session_id": "S2", "dataset": "_anon2" })
+        );
+        assert_eq!(fake.body(0)["createSession"], json!(true));
+    }
+
     #[tokio::test]
     async fn a_second_expiry_is_returned() {
         let gone = (400, json!({ "error": { "message": "Session not found" } }));

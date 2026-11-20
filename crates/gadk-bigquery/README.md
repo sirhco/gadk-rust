@@ -12,7 +12,7 @@ A BigQuery toolset for [gadk](../../README.md) agents. It gives an agent five to
 
 A BigQuery error (bad SQL, a missing table, a permission problem) comes back as
 `{"status":"ERROR","error_details":"…"}` so the model can correct itself. A credentials failure
-fails the tool call. Lists stop at 1,000 items.
+fails the tool call. Lists stop at 1,000 items or 100 pages.
 
 ## Usage
 
@@ -35,6 +35,9 @@ Enable it in the `gadk` crate with the `bigquery` feature (`gadk::bigquery`), or
 To expose only some tools, wrap the toolset with `gadk_agent::toolset::filter_toolset`; to ask
 the user before a call runs, wrap it with `gadk_agent::toolset::with_confirmation`.
 
+`BigQueryToolset::new` and `with_client` return `ToolError::InvalidArgument` for an invalid
+`compute_project` or a `max_query_result_rows` of 0.
+
 ## Write modes
 
 | `WriteMode` | `execute_sql` runs |
@@ -48,8 +51,8 @@ the user before a call runs, wrap it with `gadk_agent::toolset::with_confirmatio
 | `BigQueryToolConfig` field | Default | Meaning |
 |---|---|---|
 | `write_mode` | `Blocked` | See above |
-| `max_query_result_rows` | 50 | Rows returned to the model per query |
-| `compute_project` | none | The project that runs and pays for query jobs; none uses the `project_id` argument |
+| `max_query_result_rows` | 50 | Rows returned to the model per query; at least 1 |
+| `compute_project` | none | The project that runs and pays for query jobs (a project id, `[A-Za-z0-9.:_-]+`); none uses the `project_id` argument |
 | `location` | none | Job location, such as `US`; needed in `Protected` mode when the data is outside the `US` multi-region |
 | `maximum_bytes_billed` | none | Cost cap per query in bytes |
 | `job_labels` | empty | Labels on every job; the toolset adds `gadk-bigquery-tool: execute_sql` |

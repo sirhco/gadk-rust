@@ -13,6 +13,11 @@ the public API.
   scope alone (for both the Storage Write API and the REST table client), so user credentials from
   `gcloud auth application-default login` work; asking for the narrower BigQuery scopes made
   their refresh fail. The `agentanalytics` example no longer builds its own credentials.
+- `gadk-bigquery`: project, dataset, table and job ids are percent-encoded in request URL paths
+  (`:` is kept, so domain-scoped projects such as `example.com:my-project` work); list calls stop
+  after 100 pages, so a server that keeps sending a `nextPageToken` with empty pages cannot loop
+  forever; `BigQueryToolset::new` / `with_client` reject a `compute_project` that is not a valid
+  project id and a `max_query_result_rows` of 0 with `ToolError::InvalidArgument`.
 
 ## [0.4.5] - 2026-11-19
 
