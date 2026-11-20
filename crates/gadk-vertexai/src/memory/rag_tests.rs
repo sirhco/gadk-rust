@@ -449,10 +449,10 @@ async fn add_session_treats_a_missing_file_as_deleted() {
 // ---- R5: id validation ----
 
 #[tokio::test]
-async fn add_session_rejects_dotted_or_empty_app_and_user_ids() {
+async fn add_session_rejects_empty_app_and_user_ids() {
     let server = rag_server(json!([]), json!({}));
     let svc = service(config(&server.url()));
-    for (app, user) in [("a.b", "u1"), ("app", "u.v"), ("", "u1"), ("app", "")] {
+    for (app, user) in [("", "u1"), ("app", "")] {
         let err = svc
             .add_session_to_memory(&session(app, user, "s1", vec![]))
             .await
@@ -462,7 +462,7 @@ async fn add_session_rejects_dotted_or_empty_app_and_user_ids() {
                 text,
                 format!(
                     "invalid RAG memory scope: app name {app:?} and user id {user:?} must be \
-                     non-empty and contain no '.'"
+                     non-empty"
                 )
             ),
             other => panic!("{app}/{user}: want InvalidRequest, got {other:?}"),
@@ -471,13 +471,12 @@ async fn add_session_rejects_dotted_or_empty_app_and_user_ids() {
     assert_eq!(server.hits(), 0);
 }
 
-/// A search is scoped the same way: a dotted user id could otherwise match another user's
-/// dotted session id (`a.b` + session `c.x` vs user `b.c`).
+/// A search is scoped the same way.
 #[tokio::test]
-async fn search_rejects_dotted_or_empty_app_and_user_ids() {
+async fn search_rejects_empty_app_and_user_ids() {
     let server = FakeServer::json("{}");
     let svc = service(config(&server.url()));
-    for (app, user) in [("a.b", "u1"), ("app", "u.v"), ("", "u1"), ("app", "")] {
+    for (app, user) in [("", "u1"), ("app", "")] {
         let err = svc
             .search_memory(SearchRequest {
                 query: "coffee".into(),
@@ -491,13 +490,94 @@ async fn search_rejects_dotted_or_empty_app_and_user_ids() {
                 text,
                 format!(
                     "invalid RAG memory scope: app name {app:?} and user id {user:?} must be \
-                     non-empty and contain no '.'"
+                     non-empty"
                 )
             ),
             other => panic!("{app}/{user}: want InvalidRequest, got {other:?}"),
         }
     }
     assert_eq!(server.hits(), 0);
+}
+
+/// `.` in the app name and user id is encoded as `%2E` (the session id is kept): the upload
+/// and the earlier-file match use the encoded display name; a file with the raw name is left.
+#[tokio::test]
+async fn add_session_encodes_dots_in_app_and_user_ids() {
+    let encoded = "my%2Eapp.alice@example%2Ecom.s.1";
+    let server = rag_server(
+        json!([
+            file("1", encoded),
+            file("2", "my.app.alice@example.com.s.1")
+        ]),
+        json!({"ragFile": {}}),
+    );
+    let svc = service(config(&server.url()));
+    let s = session(
+        "my.app",
+        "alice@example.com",
+        "s.1",
+        vec![event(
+            "user",
+            at(1_700_000_000, 500_000_000),
+            vec![Part::from_text("hello")],
+        )],
+    );
+    svc.add_session_to_memory(&s).await.unwrap();
+    assert_eq!(
+        lines(&server),
+        vec![
+            format!("GET /v1/{CORPUS}/ragFiles?{ALT_QUERY}"),
+            format!("DELETE /v1/{CORPUS}/ragFiles/1?{ALT_QUERY}"),
+            format!("GET /ui/{CORPUS}/ragFiles/1/operations/op"),
+            format!("POST /upload/v1/{CORPUS}/ragFiles:upload"),
+        ]
+    );
+    let reqs = server.requests();
+    assert!(
+        reqs[3]
+            .body_text()
+            .contains("filename=\"my%2Eapp.alice@example%2Ecom.s.1.txt\"")
+    );
+    assert_upload(&reqs[3], encoded, TEXT_FILE);
+}
+
+/// `%` is encoded first (`%25`), so a literal `%2E` in an id cannot collide with an encoded `.`.
+#[tokio::test]
+async fn add_session_encodes_percent_signs_first() {
+    let server = rag_server(json!([file("1", "a%2Eb.x.s1")]), json!({"ragFile": {}}));
+    let svc = service(config(&server.url()));
+    let s = session(
+        "a%b",
+        "x%2Ey",
+        "s1",
+        vec![event(
+            "user",
+            at(1_700_000_000, 500_000_000),
+            vec![Part::from_text("hello")],
+        )],
+    );
+    svc.add_session_to_memory(&s).await.unwrap();
+    let reqs = server.requests();
+    assert_eq!(reqs.len(), 2, "{:?}", lines(&server));
+    assert_upload(&reqs[1], "a%25b.x%252Ey.s1", TEXT_FILE);
+}
+
+/// A matching listed file without a name is skipped, not deleted as `DELETE /v1/`.
+#[tokio::test]
+async fn add_session_skips_listed_files_without_a_name() {
+    let server = rag_server(
+        json!([{"displayName": "app.u1.s1"}, {"name": "", "displayName": "app.u1.s1"}]),
+        json!({"ragFile": {}}),
+    );
+    let svc = service(config(&server.url()));
+    svc.add_session_to_memory(&text_session()).await.unwrap();
+    assert_eq!(
+        lines(&server),
+        vec![
+            format!("GET /v1/{CORPUS}/ragFiles?{ALT_QUERY}"),
+            format!("POST /upload/v1/{CORPUS}/ragFiles:upload"),
+        ]
+    );
 }
 
 // ---- R6: search request ----
@@ -621,6 +701,36 @@ fn contexts_are_filtered_parsed_and_deduplicated_in_order() {
     assert!(memories_from_contexts(&json!({}), "app.u1.").is_empty());
 }
 
+/// User `b.c` (encoded `b%2Ec`) and user `b`'s session `c.x` do not see each other's files.
+#[tokio::test]
+async fn search_keeps_dotted_user_ids_apart() {
+    let mine = r#"{"author":"user","timestamp":0.0,"text":"mine"}"#;
+    let theirs = r#"{"author":"user","timestamp":0.0,"text":"theirs"}"#;
+    let server = FakeServer::json(
+        json!({"contexts": {"contexts": [
+            {"sourceDisplayName": "a.b%2Ec.s1", "text": mine},
+            {"sourceDisplayName": "a.b.c.x", "text": theirs},
+        ]}})
+        .to_string(),
+    );
+    let svc = service(config(&server.url()));
+    let search = |user: &str| {
+        svc.search_memory(SearchRequest {
+            query: "q".into(),
+            user_id: user.into(),
+            app_name: "a".into(),
+        })
+    };
+    assert_eq!(
+        search("b.c").await.unwrap().memories,
+        vec![entry("a.b%2Ec.s1", "user", None, "mine")]
+    );
+    assert_eq!(
+        search("b").await.unwrap().memories,
+        vec![entry("a.b.c.x", "user", None, "theirs")]
+    );
+}
+
 #[tokio::test]
 async fn search_returns_the_users_memories() {
     let line = r#"{"author":"user","timestamp":0.0,"text":"I like coffee"}"#;
@@ -738,6 +848,14 @@ async fn failures_carry_their_step_in_the_error_chain() {
         .await
         .unwrap_err();
     assert_eq!(backend_text(&err), "upload rag file failed: bad file");
+
+    // Upload answered 200 with an `error` object without a message: the object is the cause.
+    let server = rag_server(json!([]), json!({"error": {"code": 3}}));
+    let err = service(config(&server.url()))
+        .add_session_to_memory(&text_session())
+        .await
+        .unwrap_err();
+    assert_eq!(backend_text(&err), r#"upload rag file failed: {"code":3}"#);
 
     // Retrieval fails.
     let server = FakeServer::always(google_error(500, "INTERNAL", "boom"));

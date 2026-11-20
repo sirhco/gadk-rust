@@ -15,10 +15,11 @@
 
 //! [`VertexAiRagMemoryService`]: a [`MemoryService`] backed by a Vertex AI RAG Engine corpus.
 //!
-//! Each session is stored as one RAG file named `{app_name}.{user_id}.{session_id}`: one JSON
-//! line `{"author", "timestamp", "text"}` per event with text. Adding a session again replaces
-//! its file. A search runs RAG retrieval over the corpus and keeps the lines of the requesting
-//! app and user's files.
+//! Each session is stored as one RAG file named `{app_name}.{user_id}.{session_id}`, with `%`
+//! and `.` percent-encoded in the app name and user id (`%25`, `%2E`): one JSON line
+//! `{"author", "timestamp", "text"}` per event with text. Adding a session again replaces its
+//! file. A search runs RAG retrieval over the corpus and keeps the lines of the requesting app
+//! and user's files.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -147,8 +148,9 @@ impl std::fmt::Debug for VertexAiRagMemoryConfig {
 /// A [`MemoryService`] that stores sessions as files of a Vertex AI RAG Engine corpus and
 /// searches them with RAG retrieval.
 ///
-/// Each session becomes one RAG file, `{app_name}.{user_id}.{session_id}`, holding one JSON
-/// line per event with text; adding the session again replaces the file. Search retrieves
+/// Each session becomes one RAG file, `{app_name}.{user_id}.{session_id}` (with `%` and `.`
+/// in the app name and user id percent-encoded as `%25` and `%2E`, so any non-empty id works),
+/// holding one JSON line per event with text; adding the session again replaces the file. Search retrieves
 /// contexts from the whole corpus, then keeps those of the requesting app and user. Indexing is
 /// asynchronous, so a session may not be searchable right after it is added. Incremental event
 /// adds are not supported.
@@ -235,8 +237,7 @@ impl MemoryService for VertexAiRagMemoryService {
     ///
     /// # Errors
     ///
-    /// [`MemoryError::InvalidRequest`] when the app name or user id is empty or contains `.`
-    /// (nothing is sent); [`MemoryError::Backend`] with `list rag files failed: …`,
+    /// [`MemoryError::InvalidRequest`] when the app name or user id is empty (nothing is sent); [`MemoryError::Backend`] with `list rag files failed: …`,
     /// `delete rag file <name> failed: …` or `upload rag file failed: …`.
     async fn add_session_to_memory(&self, session: &dyn Session) -> Result<(), MemoryError> {
         let display = display_name(session.app_name(), session.user_id(), session.id())?;
@@ -255,10 +256,14 @@ impl MemoryService for VertexAiRagMemoryService {
             if found.get("displayName").and_then(Value::as_str) != Some(display.as_str()) {
                 continue;
             }
-            let name = found
+            // A listed file without a name cannot be deleted.
+            let Some(name) = found
                 .get("name")
                 .and_then(Value::as_str)
-                .unwrap_or_default();
+                .filter(|n| !n.is_empty())
+            else {
+                continue;
+            };
             self.delete_file(name)
                 .await
                 .map_err(|e| memory_error(wrap(&format!("delete rag file {name} failed"), e)))?;
@@ -282,11 +287,12 @@ impl MemoryService for VertexAiRagMemoryService {
             .await
             .map_err(|e| memory_error(wrap("upload rag file failed", e)))?;
         if let Some(error) = reply.get("error").filter(|e| e.is_object()) {
+            // Without a message, the error object itself is the cause.
             let message = error
                 .get("message")
                 .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
+                .filter(|m| !m.is_empty())
+                .map_or_else(|| error.to_string(), str::to_owned);
             return Err(memory_error(wrap("upload rag file failed", message)));
         }
         Ok(())
@@ -298,8 +304,7 @@ impl MemoryService for VertexAiRagMemoryService {
     ///
     /// # Errors
     ///
-    /// [`MemoryError::InvalidRequest`] when the app name or user id is empty or contains `.`
-    /// (nothing is sent); [`MemoryError::Backend`]: `retrieve contexts failed: …`.
+    /// [`MemoryError::InvalidRequest`] when the app name or user id is empty (nothing is sent); [`MemoryError::Backend`]: `retrieve contexts failed: …`.
     async fn search_memory(&self, req: SearchRequest) -> Result<SearchResponse, MemoryError> {
         if req.query.is_empty() {
             return Ok(SearchResponse::default());
@@ -354,21 +359,30 @@ fn corpus_parts(name: &str) -> Option<(&str, &str)> {
     }
 }
 
-/// The display-name prefix `{app}.{user}.` of an app and user's RAG files; an empty app or
-/// user, or one holding `.`, is rejected so the prefix stays unambiguous (a dotted user id
-/// could otherwise match another user's dotted session id).
+/// The display-name prefix `{app}.{user}.` of an app and user's RAG files, with both parts
+/// [`encode_scope_part`]-encoded so neither holds a `.` and the prefix stays unambiguous (a
+/// dotted user id cannot match another user's dotted session id). An empty app or user is
+/// rejected.
 fn scope_prefix(app: &str, user: &str) -> Result<String, MemoryError> {
-    if app.is_empty() || user.is_empty() || app.contains('.') || user.contains('.') {
+    if app.is_empty() || user.is_empty() {
         return Err(MemoryError::InvalidRequest(format!(
-            "invalid RAG memory scope: app name {app:?} and user id {user:?} must be non-empty \
-             and contain no '.'"
+            "invalid RAG memory scope: app name {app:?} and user id {user:?} must be non-empty"
         )));
     }
-    Ok(format!("{app}.{user}."))
+    Ok(format!(
+        "{}.{}.",
+        encode_scope_part(app),
+        encode_scope_part(user)
+    ))
 }
 
-/// The RAG file display name `{app}.{user}.{session}`, with the scope checked as
-/// [`scope_prefix`] does.
+/// `id` with `%` percent-encoded as `%25`, then `.` as `%2E`; nothing else changes.
+fn encode_scope_part(id: &str) -> String {
+    id.replace('%', "%25").replace('.', "%2E")
+}
+
+/// The RAG file display name `{app}.{user}.{session}` with the app and user encoded and the
+/// scope checked as [`scope_prefix`] does; the session id is kept as is.
 fn display_name(app: &str, user: &str, session: &str) -> Result<String, MemoryError> {
     Ok(format!("{}{session}", scope_prefix(app, user)?))
 }

@@ -79,12 +79,14 @@ let memory = Arc::new(VertexAiRagMemoryService::new(
 
 How it behaves:
 
-- Each session is one RAG file named `{app_name}.{user_id}.{session_id}`, holding one JSON line
+- Each session is one RAG file named `{app_name}.{user_id}.{session_id}`, with the app name and
+  user id percent-encoded (see below), holding one JSON line
   `{"author", "timestamp", "text"}` per event with text (thoughts, images and tool calls are
   left out). Adding a session again deletes its earlier file and uploads a new one; the two
   steps are not atomic, so a failure between them leaves the session out of memory until the
-  next add. App names and user ids must be non-empty and contain no `.` (adds and searches
-  reject them).
+  next add. App names and user ids must be non-empty; `%` and `.` in them are
+  percent-encoded in the file name (`alice@example.com` → `alice@example%2Ecom`), so any id
+  works.
 - Each add lists every file in the corpus to find the session's file, so adds slow down as the
   corpus grows.
 - Indexing is asynchronous: a session may not be searchable for a while after it is added.

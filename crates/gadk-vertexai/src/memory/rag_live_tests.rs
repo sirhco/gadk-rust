@@ -42,6 +42,7 @@ use tokio::time::Instant;
 use super::rag::{VertexAiRagMemoryConfig, VertexAiRagMemoryService};
 use crate::client::VertexClient;
 use crate::config::{host_url, resolve};
+use crate::error::BoxError;
 use crate::session::VertexSession;
 
 const APP: &str = "gadk-live";
@@ -62,20 +63,56 @@ fn admin_client(corpus: &str) -> VertexClient {
 }
 
 /// The resource names of the corpus's files with display name `display`.
-async fn files_named(client: &VertexClient, corpus: &str, display: &str) -> Vec<String> {
-    client
+async fn files_named(
+    client: &VertexClient,
+    corpus: &str,
+    display: &str,
+) -> Result<Vec<String>, BoxError> {
+    Ok(client
         .list_all(
             &format!("/v1/{corpus}/ragFiles"),
             &[],
             ("parent", corpus),
             "ragFiles",
         )
-        .await
-        .unwrap()
+        .await?
         .iter()
         .filter(|f| f.get("displayName").and_then(Value::as_str) == Some(display))
         .filter_map(|f| f.get("name").and_then(Value::as_str).map(str::to_owned))
-        .collect()
+        .collect())
+}
+
+/// Deletes this test's files with display name `display`, waiting for each delete. Returns
+/// whether every step succeeded; each failure is logged with what was left behind.
+async fn cleanup(client: &VertexClient, corpus: &str, display: &str) -> bool {
+    let names = match files_named(client, corpus, display).await {
+        Ok(names) => names,
+        Err(e) => {
+            eprintln!("cleanup: listing files failed ({e}); files named {display} may be left");
+            return false;
+        }
+    };
+    let mut ok = true;
+    for name in names {
+        let deleted = match client
+            .call(
+                Method::DELETE,
+                &format!("/v1/{name}"),
+                &[],
+                ("name", &name),
+                None,
+            )
+            .await
+        {
+            Ok(op) => client.wait_operation(op).await.map(|_| ()),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = deleted {
+            eprintln!("cleanup: deleting {name} failed ({e}); the file may be left");
+            ok = false;
+        }
+    }
+    ok
 }
 
 #[tokio::test]
@@ -99,23 +136,15 @@ async fn rag_memory_round_trip() {
     ))
     .catch_unwind()
     .await;
-    // Delete this test's file whatever happened.
-    for name in files_named(&client, &corpus, &display).await {
-        let op = client
-            .call(
-                Method::DELETE,
-                &format!("/v1/{name}"),
-                &[],
-                ("name", &name),
-                None,
-            )
-            .await
-            .unwrap();
-        client.wait_operation(op).await.unwrap();
-    }
+    // Delete this test's file whatever happened; the round trip's own panic wins.
+    let cleaned = cleanup(&client, &corpus, &display).await;
     if let Err(panic) = outcome {
         std::panic::resume_unwind(panic);
     }
+    assert!(
+        cleaned,
+        "cleanup failed: see the logged files left in {corpus}"
+    );
 }
 
 /// Adds the session twice (the second add replaces the file), checks one file exists, then
@@ -143,7 +172,7 @@ async fn round_trip(
     }]);
     svc.add_session_to_memory(&session).await.unwrap();
     svc.add_session_to_memory(&session).await.unwrap();
-    assert_eq!(files_named(client, corpus, display).await.len(), 1);
+    assert_eq!(files_named(client, corpus, display).await.unwrap().len(), 1);
 
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
