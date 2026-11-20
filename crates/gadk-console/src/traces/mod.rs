@@ -18,7 +18,7 @@ mod bigquery;
 mod cloud;
 #[cfg(test)]
 pub(crate) mod test_http;
-pub use bigquery::BigQueryTable;
+pub use bigquery::{BigQueryTable, BigQueryTraceSource};
 pub use cloud::CloudTraceSource;
 
 use std::collections::BTreeMap;
