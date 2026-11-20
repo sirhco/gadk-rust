@@ -31,7 +31,9 @@ pub(crate) const PAYLOAD_LIMIT: usize = 4096;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct LogView {
     pub attached: AttachedLogs,
-    /// The source stopped at 1,000 entries with more available.
+    /// How many log entries the source returned (and the page shows).
+    pub shown: usize,
+    /// The source stopped before the trace's last entry.
     pub truncated: bool,
 }
 
@@ -57,7 +59,10 @@ pub(crate) fn render(
             Ok(view) => {
                 @if view.truncated {
                     div class="banner warn" {
-                        p { "Showing the first 1,000 log entries; the trace has more." }
+                        p {
+                            "Showing the first " (thousands(view.shown))
+                            " log entries; the trace has more."
+                        }
                     }
                 }
             }
@@ -105,6 +110,19 @@ fn span_row(row: &SpanRow, has_children: bool) -> Markup {
 }
 
 /// Log entries grouped under their span (tree order), then the unattached ones.
+/// `n` with a comma between each group of three digits ("1,000").
+fn thousands(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 fn log_sections(rows: &[SpanRow], view: &LogView) -> Markup {
     let a = &view.attached;
     html! {

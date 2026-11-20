@@ -35,6 +35,10 @@ pub struct QueryOptions {
     pub session_id: Option<String>,
     /// Starts a new BigQuery session with this job (see [`QueryResult::session`]).
     pub create_session: bool,
+    /// Named query parameters: BigQuery `QueryParameter` objects such as
+    /// `{"name": "id", "parameterType": {"type": "STRING"}, "parameterValue": {"value": "x"}}`,
+    /// sent with `parameterMode: "NAMED"` when not empty.
+    pub query_parameters: Vec<Value>,
 }
 
 impl QueryOptions {
@@ -76,6 +80,12 @@ impl QueryOptions {
     /// Sets [`create_session`](Self::create_session).
     pub fn with_create_session(mut self, create: bool) -> Self {
         self.create_session = create;
+        self
+    }
+
+    /// Sets [`query_parameters`](Self::query_parameters).
+    pub fn with_query_parameters(mut self, params: Vec<Value>) -> Self {
+        self.query_parameters = params;
         self
     }
 }

@@ -14,7 +14,11 @@
 
 //! The trace source seam and the trace types the pages render.
 
+mod bigquery;
 mod cloud;
+#[cfg(test)]
+pub(crate) mod test_http;
+pub use bigquery::{BigQueryTable, BigQueryTraceSource};
 pub use cloud::CloudTraceSource;
 
 use std::collections::BTreeMap;
@@ -236,6 +240,17 @@ pub enum SourceError {
     /// The trace id is unknown to Cloud Trace (HTTP 404 on get).
     #[error("trace not found")]
     NotFound,
+    /// A BigQuery call failed (the BigQuery trace source).
+    #[error("BigQuery: {}{detail}", .status.map(|s| format!("HTTP {s}: ")).unwrap_or_default())]
+    #[non_exhaustive]
+    BigQuery {
+        /// The HTTP status, when BigQuery replied.
+        status: Option<u16>,
+        /// BigQuery's error reason (for example `bytesBilledLimitExceeded`), when given.
+        reason: Option<String>,
+        /// The error text.
+        detail: String,
+    },
 }
 
 impl SourceError {
@@ -261,6 +276,19 @@ impl SourceError {
                 ..
             } => Some("needs roles/logging.viewer"),
             SourceError::Credentials(_) => Some("run `gcloud auth application-default login`"),
+            SourceError::BigQuery {
+                status: Some(403),
+                reason,
+                ..
+            } if matches!(reason.as_deref(), None | Some("accessDenied")) => Some(BQ_ROLES_HINT),
+            SourceError::BigQuery { reason, detail, .. }
+                if reason.as_deref() == Some("bytesBilledLimitExceeded")
+                    || detail
+                        .to_ascii_lowercase()
+                        .contains("exceeded limit for bytes billed") =>
+            {
+                Some(BQ_BYTES_HINT)
+            }
             _ => None,
         }
     }
@@ -275,6 +303,11 @@ pub fn span_id_hex(decimal: &str) -> Option<String> {
     }
     decimal.parse::<u64>().ok().map(|n| format!("{n:016x}"))
 }
+
+/// The error-banner hint for a BigQuery permission failure.
+pub(crate) const BQ_ROLES_HINT: &str = "needs roles/bigquery.dataViewer and roles/bigquery.jobUser";
+/// The error-banner hint for a query stopped by the byte cap.
+pub(crate) const BQ_BYTES_HINT: &str = "raise --bigquery-max-bytes";
 
 /// The most bytes of an upstream body an error carries.
 pub(crate) const EXCERPT_LIMIT: usize = 1024;
@@ -523,5 +556,57 @@ mod tests {
             "credentials: no ADC"
         );
         assert_eq!(SourceError::NotFound.to_string(), "trace not found");
+    }
+
+    #[test]
+    fn bigquery_errors_display_and_hint() {
+        let denied = SourceError::BigQuery {
+            status: Some(403),
+            reason: Some("accessDenied".into()),
+            detail: "Access Denied".into(),
+        };
+        assert_eq!(denied.to_string(), "BigQuery: HTTP 403: Access Denied");
+        assert_eq!(denied.hint(), Some(BQ_ROLES_HINT));
+
+        let cap_reason = SourceError::BigQuery {
+            status: Some(400),
+            reason: Some("bytesBilledLimitExceeded".into()),
+            detail: "Query exceeded limit for bytes billed: 10. 20 or higher required.".into(),
+        };
+        assert_eq!(cap_reason.hint(), Some(BQ_BYTES_HINT));
+
+        let cap_job = SourceError::BigQuery {
+            status: None,
+            reason: None,
+            detail: "Query exceeded limit for bytes billed: 10. 20 or higher required.".into(),
+        };
+        assert_eq!(
+            cap_job.to_string(),
+            "BigQuery: Query exceeded limit for bytes billed: 10. 20 or higher required."
+        );
+        assert_eq!(cap_job.hint(), Some(BQ_BYTES_HINT));
+
+        let other = SourceError::BigQuery {
+            status: Some(400),
+            reason: None,
+            detail: "bad".into(),
+        };
+        assert_eq!(other.hint(), None);
+
+        let no_reason = SourceError::BigQuery {
+            status: Some(403),
+            reason: None,
+            detail: "Access Denied".into(),
+        };
+        assert_eq!(no_reason.hint(), Some(BQ_ROLES_HINT));
+
+        for reason in ["quotaExceeded", "rateLimitExceeded", "billingNotEnabled"] {
+            let not_roles = SourceError::BigQuery {
+                status: Some(403),
+                reason: Some(reason.into()),
+                detail: "Quota exceeded".into(),
+            };
+            assert_eq!(not_roles.hint(), None, "{reason}");
+        }
     }
 }

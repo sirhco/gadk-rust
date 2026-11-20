@@ -92,6 +92,7 @@ async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Respon
     let still_arriving =
         trace_end(&detail.spans).is_some_and(|end| (state.now)() - end < STILL_ARRIVING);
     let logs = detail.logs.map(|set| LogView {
+        shown: set.entries.len(),
         attached: attach_logs(&detail.spans, set.entries),
         truncated: set.truncated,
     });
@@ -450,9 +451,10 @@ mod tests {
 
     #[tokio::test]
     async fn truncation_note_follows_the_flag() {
-        let (_, body) = trace_page(detail(600, logs(vec![entry(Some(ROOT), "x")], true))).await;
+        let full = vec![entry(Some(ROOT), "x"); 1000];
+        let (_, body) = trace_page(detail(600, logs(full, true))).await;
         assert!(
-            body.contains("Showing the first 1,000 log entries"),
+            body.contains("Showing the first 1,000 log entries; the trace has more."),
             "{body}"
         );
         let (_, body) = trace_page(detail(600, logs(vec![entry(Some(ROOT), "x")], false))).await;
@@ -460,6 +462,17 @@ mod tests {
             !body.contains("Showing the first 1,000 log entries"),
             "{body}"
         );
+    }
+
+    #[tokio::test]
+    async fn truncation_note_counts_the_entries_shown() {
+        let some = vec![entry(Some(ROOT), "x"); 300];
+        let (_, body) = trace_page(detail(600, logs(some, true))).await;
+        assert!(
+            body.contains("Showing the first 300 log entries; the trace has more."),
+            "{body}"
+        );
+        assert!(!body.contains("1,000"), "{body}");
     }
 
     #[tokio::test]

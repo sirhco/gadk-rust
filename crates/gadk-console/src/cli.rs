@@ -14,18 +14,19 @@
 
 //! The `gadk-console` command line.
 
-use clap::{Arg, Command, value_parser};
+use clap::{Arg, ArgMatches, Command, value_parser};
 
-use crate::ConsoleConfig;
+use crate::traces::BigQueryTable;
+use crate::{Cli, ConsoleConfig, DEFAULT_MAX_BYTES, TracesFrom};
 
-fn cli() -> Command {
+fn base_cli() -> Command {
     Command::new("gadk-console")
         .about("A local web console for gadk traces, prompts and eval reports")
         .arg(
             Arg::new("project")
                 .long("project")
                 .required(true)
-                .help("GCP project whose Cloud Trace traces and Cloud Logging logs are read"),
+                .help("GCP project: Cloud Trace + Cloud Logging source, or the billing project for BigQuery queries (--traces bigquery://…)"),
         )
         .arg(
             Arg::new("store")
@@ -61,23 +62,70 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    let m = cli().try_get_matches_from(args)?;
+    let m = base_cli().try_get_matches_from(args)?;
+    Ok(config_from(&m))
+}
+
+/// The [`ConsoleConfig`] from matches of `base_cli` (or a command extending it).
+fn config_from(m: &ArgMatches) -> ConsoleConfig {
     let string = |id: &str| m.get_one::<String>(id).cloned();
-    Ok(ConsoleConfig {
+    ConsoleConfig {
         project: string("project").unwrap_or_default(),
         store: string("store"),
         reports: string("reports"),
         port: m.get_one::<u16>("port").copied().unwrap_or(8765),
         log_id: string("log-id").unwrap_or_else(|| "gadk".into()),
-    })
+    }
+}
+
+/// `base_cli` plus the trace-source flags (`parse_cli` only).
+fn full_cli() -> Command {
+    base_cli()
+        .arg(
+            Arg::new("traces")
+                .long("traces")
+                .value_parser(|s: &str| BigQueryTable::parse_url(s))
+                .help("Trace source: bigquery://<project>.<dataset>.<table> (default: Cloud Trace + Cloud Logging)"),
+        )
+        .arg(
+            Arg::new("bigquery-max-bytes")
+                .long("bigquery-max-bytes")
+                .value_parser(value_parser!(i64).range(1..))
+                .default_value("1073741824")
+                .help("Most bytes one BigQuery query may bill (with --traces bigquery://…)"),
+        )
+}
+
+/// Parses the full command line: [`ConsoleConfig`] plus the trace source.
+///
+/// # Errors
+///
+/// A clap usage error (exit code 2), or the help/version display.
+pub fn parse_cli<I, T>(args: I) -> Result<Cli, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    let m = full_cli().try_get_matches_from(args)?;
+    let config = config_from(&m);
+    let max_bytes = m
+        .get_one::<i64>("bigquery-max-bytes")
+        .copied()
+        .unwrap_or(DEFAULT_MAX_BYTES);
+    let mut cli = Cli::new(config);
+    if let Some(table) = m.get_one::<BigQueryTable>("traces") {
+        cli = cli.with_traces(TracesFrom::bigquery(table.clone(), max_bytes));
+    }
+    Ok(cli)
 }
 
 #[cfg(test)]
 mod tests {
     use clap::error::ErrorKind;
 
-    use super::parse_args;
-    use crate::ConsoleConfig;
+    use super::{parse_args, parse_cli};
+    use crate::traces::BigQueryTable;
+    use crate::{Cli, ConsoleConfig, TracesFrom};
 
     #[test]
     fn defaults() {
@@ -137,5 +185,95 @@ mod tests {
             assert_eq!(err.kind(), ErrorKind::ValueValidation, "{port}");
             assert_eq!(err.exit_code(), 2, "{port}");
         }
+    }
+
+    #[test]
+    fn parse_cli_defaults_to_cloud_trace() {
+        let cli = parse_cli(["gadk-console", "--project", "p"]).unwrap();
+        assert_eq!(
+            cli.config,
+            parse_args(["gadk-console", "--project", "p"]).unwrap()
+        );
+        assert_eq!(cli.traces, None);
+    }
+
+    #[test]
+    fn parse_cli_reads_bigquery_traces_and_byte_cap() {
+        let cli = parse_cli([
+            "gadk-console",
+            "--project",
+            "billing",
+            "--traces",
+            "bigquery://example.com:proj-1.agent_analytics.agent_events",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.traces,
+            Some(TracesFrom::bigquery(
+                BigQueryTable::new("example.com:proj-1", "agent_analytics", "agent_events"),
+                1_073_741_824
+            ))
+        );
+        let cli = parse_cli([
+            "gadk-console",
+            "--project",
+            "p",
+            "--traces",
+            "bigquery://sirhco-apps.ds.tbl",
+            "--bigquery-max-bytes",
+            "5000",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli,
+            Cli::new(parse_args(["gadk-console", "--project", "p"]).unwrap()).with_traces(
+                TracesFrom::bigquery(BigQueryTable::new("sirhco-apps", "ds", "tbl"), 5000)
+            )
+        );
+    }
+
+    #[test]
+    fn parse_cli_rejects_bad_traces_and_byte_caps() {
+        for url in [
+            "sirhco-apps.ds.tbl",
+            "bigquery://sirhco-apps.ds",
+            "bigquery://x.ds.tbl",
+        ] {
+            let err = parse_cli(["gadk-console", "--project", "p", "--traces", url]).unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::ValueValidation, "{url}");
+            assert_eq!(err.exit_code(), 2);
+            assert!(err.render().to_string().contains("--traces"), "{err}");
+        }
+        // `=` form: clap would read a bare `-1` as a flag rather than a value.
+        for bytes in ["0", "-1", "9223372036854775808", "x"] {
+            let arg = format!("--bigquery-max-bytes={bytes}");
+            let err = parse_cli(["gadk-console", "--project", "p", arg.as_str()]).unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::ValueValidation, "{bytes}");
+            assert!(
+                err.render().to_string().contains("--bigquery-max-bytes"),
+                "{err}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_args_does_not_know_the_new_flags() {
+        for flag in [
+            ["--traces", "bigquery://sirhco-apps.ds.tbl"],
+            ["--bigquery-max-bytes", "5"],
+        ] {
+            let err = parse_args(["gadk-console", "--project", "p", flag[0], flag[1]]).unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::UnknownArgument, "{flag:?}");
+        }
+    }
+
+    #[test]
+    fn help_lists_the_new_flags() {
+        let err = parse_cli(["gadk-console", "--help"]).unwrap_err();
+        let help = err.render().to_string();
+        assert!(
+            help.contains("--traces") && help.contains("--bigquery-max-bytes"),
+            "{help}"
+        );
     }
 }

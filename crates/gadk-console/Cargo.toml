@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 gadk-model = { workspace = true }
+gadk-bigquery = { workspace = true }
 gadk-cloudtrace = { workspace = true }
 gadk-eval = { workspace = true }
 gadk-eval-monitor = { workspace = true }
@@ -38,10 +39,11 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-# Builds the fake HTTP client's `BodyStream` in the cloud.rs tests.
+# Builds the fake HTTP client's `BodyStream` in the traces/test_http.rs tests.
 futures = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tempfile = { workspace = true }
 gadk-telemetry = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+pretty_assertions = { workspace = true }
