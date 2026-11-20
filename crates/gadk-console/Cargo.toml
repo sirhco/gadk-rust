@@ -39,7 +39,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-# Builds the fake HTTP client's `BodyStream` in the cloud.rs tests.
+# Builds the fake HTTP client's `BodyStream` in the traces/test_http.rs tests.
 futures = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tempfile = { workspace = true }

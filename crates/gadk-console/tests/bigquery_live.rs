@@ -24,8 +24,10 @@ use gadk_console::traces::{
 #[tokio::test]
 #[ignore = "needs GCP credentials and GADK_CONSOLE_PROJECT / GADK_CONSOLE_BQ_TABLE"]
 async fn lists_and_opens_the_newest_trace() {
-    let project = std::env::var("GADK_CONSOLE_PROJECT").expect("GADK_CONSOLE_PROJECT");
-    let table = std::env::var("GADK_CONSOLE_BQ_TABLE").expect("GADK_CONSOLE_BQ_TABLE");
+    let project =
+        std::env::var("GADK_CONSOLE_PROJECT").expect("set GADK_CONSOLE_PROJECT to run this test");
+    let table =
+        std::env::var("GADK_CONSOLE_BQ_TABLE").expect("set GADK_CONSOLE_BQ_TABLE to run this test");
     let table = BigQueryTable::parse_url(&format!("bigquery://{table}")).expect("table");
     let source = BigQueryTraceSource::new(project, table, 1_073_741_824);
     let query = TraceQuery {

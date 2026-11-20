@@ -26,7 +26,7 @@ fn base_cli() -> Command {
             Arg::new("project")
                 .long("project")
                 .required(true)
-                .help("GCP project whose Cloud Trace traces and Cloud Logging logs are read"),
+                .help("GCP project: Cloud Trace + Cloud Logging source, or the billing project for BigQuery queries (--traces bigquery://…)"),
         )
         .arg(
             Arg::new("store")

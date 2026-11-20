@@ -330,6 +330,7 @@ fn list_sql(table: &str) -> String {
   WHERE timestamp >= TIMESTAMP_SUB(@start, INTERVAL 1 DAY)\n\
     AND timestamp < TIMESTAMP_ADD(@end, INTERVAL 1 HOUR)\n\
     AND trace_id IS NOT NULL AND trace_id != ''\n\
+    AND REGEXP_CONTAINS(trace_id, r'^[0-9a-fA-F]{{32}}$')\n\
   GROUP BY trace_id),\n\
 r AS (\n\
   SELECT trace_id, first_ts, last_ts, root.event_type AS event_type, root.agent AS agent,\n\

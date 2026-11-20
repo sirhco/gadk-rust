@@ -242,6 +242,7 @@ pub enum SourceError {
     NotFound,
     /// A BigQuery call failed (the BigQuery trace source).
     #[error("BigQuery: {}{detail}", .status.map(|s| format!("HTTP {s}: ")).unwrap_or_default())]
+    #[non_exhaustive]
     BigQuery {
         /// The HTTP status, when BigQuery replied.
         status: Option<u16>,
@@ -276,8 +277,10 @@ impl SourceError {
             } => Some("needs roles/logging.viewer"),
             SourceError::Credentials(_) => Some("run `gcloud auth application-default login`"),
             SourceError::BigQuery {
-                status: Some(403), ..
-            } => Some(BQ_ROLES_HINT),
+                status: Some(403),
+                reason,
+                ..
+            } if matches!(reason.as_deref(), None | Some("accessDenied")) => Some(BQ_ROLES_HINT),
             SourceError::BigQuery { reason, detail, .. }
                 if reason.as_deref() == Some("bytesBilledLimitExceeded")
                     || detail
@@ -589,5 +592,21 @@ mod tests {
             detail: "bad".into(),
         };
         assert_eq!(other.hint(), None);
+
+        let no_reason = SourceError::BigQuery {
+            status: Some(403),
+            reason: None,
+            detail: "Access Denied".into(),
+        };
+        assert_eq!(no_reason.hint(), Some(BQ_ROLES_HINT));
+
+        for reason in ["quotaExceeded", "rateLimitExceeded", "billingNotEnabled"] {
+            let not_roles = SourceError::BigQuery {
+                status: Some(403),
+                reason: Some(reason.into()),
+                detail: "Quota exceeded".into(),
+            };
+            assert_eq!(not_roles.hint(), None, "{reason}");
+        }
     }
 }
