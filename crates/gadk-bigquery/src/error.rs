@@ -65,7 +65,6 @@ impl BigQueryError {
 }
 
 /// The error for a non-2xx reply with `body`.
-#[allow(dead_code)]
 pub(crate) fn api_error(status: u16, body: &[u8]) -> BigQueryError {
     let parsed: Option<Value> = serde_json::from_slice(body).ok();
     let message = parsed

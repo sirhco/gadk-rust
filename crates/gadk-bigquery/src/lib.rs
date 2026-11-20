@@ -21,11 +21,14 @@
 //! statement. `BigQueryClient` is the small BigQuery v2 REST client the tools use.
 
 mod auth;
+mod client;
 mod error;
 #[allow(dead_code)]
 mod ident;
-#[allow(dead_code)] // used by the client (Task 3)
 mod rows;
+mod types;
 
 pub use auth::{Adc, AuthHeaders, NoAuth};
+pub use client::{BigQueryClient, ENDPOINT};
 pub use error::BigQueryError;
+pub use types::{DryRunInfo, QueryOptions, QueryResult, SessionInfo, TableRef};
