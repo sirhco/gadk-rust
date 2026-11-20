@@ -15,6 +15,9 @@
 
 //! [`VertexAiMemoryService`]: a [`MemoryService`] backed by Vertex AI Agent Engine Memory Bank
 //! (the Memory Bank of an Agent Engine).
+//!
+//! [`rag::VertexAiRagMemoryService`] is a [`MemoryService`] backed by a Vertex AI RAG Engine
+//! corpus instead.
 
 use std::sync::Arc;
 
@@ -35,6 +38,15 @@ use crate::client::VertexClient;
 use crate::config::{host_url, resolve};
 use crate::error::{BoxError, memory_error, wrap};
 use crate::protojson::format_timestamp;
+
+pub mod rag;
+
+pub use rag::{VertexAiRagMemoryConfig, VertexAiRagMemoryService};
+
+#[cfg(test)]
+mod rag_live_tests;
+#[cfg(test)]
+mod rag_tests;
 
 #[cfg(test)]
 mod tests;

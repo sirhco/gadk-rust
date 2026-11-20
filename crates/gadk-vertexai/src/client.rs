@@ -44,6 +44,12 @@ const ALT: (&str, &str) = ("$alt", "json;enum-encoding=int");
 /// The routing header.
 const X_GOOG_REQUEST_PARAMS: HeaderName = HeaderName::from_static("x-goog-request-params");
 
+/// The upload-protocol header a multipart upload sends.
+const X_GOOG_UPLOAD_PROTOCOL: HeaderName = HeaderName::from_static("x-goog-upload-protocol");
+
+/// The content type of a JSON body.
+const JSON: &str = "application/json";
+
 /// No call is retried: the session and memory-bank calls use no retry options. (Operation
 /// polls retry a 503 themselves; see [`VertexClient::get_operation`].)
 const NO_RETRIES: RetryPolicy = RetryPolicy {
@@ -100,11 +106,14 @@ impl Backoff {
 }
 
 /// One attempt's headers: gadk's tracking `User-Agent`, the routing header (when the method
-/// has one), `Content-Type: application/json` (sent on every call, bodiless ones too),
-/// then the credentials' headers (fetched per call, so a refreshed token is used).
+/// has one), `Content-Type` (sent on every call, bodiless ones too: `application/json` for
+/// [`VertexClient::call`]), any extra headers, then the credentials' headers (fetched per
+/// call, so a refreshed token is used).
 struct CallHeaders<'a> {
     credentials: Option<&'a Credentials>,
     routing: Option<(&'a str, &'a str)>,
+    content_type: &'a str,
+    extra: &'a [(HeaderName, HeaderValue)],
 }
 
 #[async_trait::async_trait]
@@ -123,7 +132,13 @@ impl RequestHeaders for CallHeaders<'_> {
                 HeaderValue::from_str(&routing).map_err(invalid)?,
             );
         }
-        h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        h.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_str(self.content_type).map_err(invalid)?,
+        );
+        for (name, value) in self.extra {
+            h.insert(name.clone(), value.clone());
+        }
         if let Some(credentials) = self.credentials {
             let auth = credential_headers(credentials)
                 .await
@@ -132,6 +147,13 @@ impl RequestHeaders for CallHeaders<'_> {
         }
         Ok(h)
     }
+}
+
+/// A request body and the headers that describe it.
+struct Payload<'a> {
+    body: Bytes,
+    content_type: &'a str,
+    extra: &'a [(HeaderName, HeaderValue)],
 }
 
 /// The Vertex AI REST client both services use.
@@ -234,18 +256,32 @@ impl VertexClient {
         }
     }
 
-    /// Waits for a long-running operation: while `op.done` is not true,
-    /// GET the operation ([`get_operation`](Self::get_operation)) and, while still not done,
-    /// sleep a full-jitter pause (initial 1 s, ×2, cap 60 s; the first poll is immediate). The
-    /// poll path is `/ui/{name}` of the operation as given; the routing
-    /// header names the latest operation's `name`. A done operation with
-    /// `error` is `Err(VertexError::from_operation_error)`, else `Ok(op)`.
+    /// Waits for a long-running operation, polling it at `/ui/{name}` (the path the Agent
+    /// Engine services' operations use); see [`wait_operation_at`](Self::wait_operation_at).
     ///
     /// # Errors
     ///
     /// The operation's error, or a failed poll's.
-    pub(crate) async fn wait_operation(&self, mut op: Value) -> Result<Value, BoxError> {
-        let poll_path = format!("/ui/{}", operation_name(&op));
+    pub(crate) async fn wait_operation(&self, op: Value) -> Result<Value, BoxError> {
+        self.wait_operation_at(op, "/ui").await
+    }
+
+    /// Waits for a long-running operation: while `op.done` is not true,
+    /// GET the operation ([`get_operation`](Self::get_operation)) and, while still not done,
+    /// sleep a full-jitter pause (initial 1 s, ×2, cap 60 s; the first poll is immediate). The
+    /// poll path is `{poll_prefix}/{name}` of the operation as given (`poll_prefix` such as
+    /// `/ui` or `/v1`); the routing header names the latest operation's `name`. A done
+    /// operation with `error` is `Err(VertexError::from_operation_error)`, else `Ok(op)`.
+    ///
+    /// # Errors
+    ///
+    /// The operation's error, or a failed poll's.
+    pub(crate) async fn wait_operation_at(
+        &self,
+        mut op: Value,
+        poll_prefix: &str,
+    ) -> Result<Value, BoxError> {
+        let poll_path = format!("{poll_prefix}/{}", operation_name(&op));
         let mut backoff = Backoff::new(WAIT_INITIAL, WAIT_INTERVAL);
         loop {
             if !is_done(&op) {
@@ -303,18 +339,39 @@ impl VertexClient {
         body: Option<&Value>,
         timeout: CallTimeout,
     ) -> Result<Value, BoxError> {
-        let uri: Uri = url.parse()?;
         let body = match body {
             Some(body) => Bytes::from(serde_json::to_vec(body)?),
             None => Bytes::new(),
         };
+        let payload = Payload {
+            body,
+            content_type: JSON,
+            extra: &[],
+        };
+        self.send_bytes(method, url, routing, payload, timeout)
+            .await
+    }
+
+    /// Sends `payload` to `url` with the call headers and reads the reply: a 2xx reply is its
+    /// body as JSON (`{}` when empty); any other status is `VertexError::from_response`.
+    async fn send_bytes(
+        &self,
+        method: Method,
+        url: &str,
+        routing: Option<(&str, &str)>,
+        payload: Payload<'_>,
+        timeout: CallTimeout,
+    ) -> Result<Value, BoxError> {
+        let uri: Uri = url.parse()?;
         let headers = CallHeaders {
             credentials: self.credentials.as_ref(),
             routing,
+            content_type: payload.content_type,
+            extra: payload.extra,
         };
         let reply = self
             .transport
-            .send_method(method, &uri, body, false, &headers, timeout)
+            .send_method(method, &uri, payload.body, false, &headers, timeout)
             .await?;
         let RestReply::Read(parts, body) = reply else {
             return Err("unexpected streaming reply".into());
@@ -330,6 +387,44 @@ impl VertexClient {
         }
         Ok(serde_json::from_slice(&body)?)
     }
+
+    /// A multipart upload (the RAG Engine `ragFiles:upload` call): `POST
+    /// {origin}/upload{go_escaped_path(path)}` with no query, `Content-Type:
+    /// multipart/form-data; boundary=gadk-<32 random hex digits>`, `X-Goog-Upload-Protocol:
+    /// multipart`, and the routing, User-Agent and credential headers of
+    /// [`call`](Self::call) (no routing header when `routing.0` is empty). The body is
+    /// [`multipart_body`]. The reply is read as [`call`](Self::call) reads it. No retries.
+    ///
+    /// # Errors
+    ///
+    /// A [`VertexError`] for a non-2xx status; the [`RestError`] when no response was read; a
+    /// `serde_json::Error` when the metadata or reply cannot be (de)serialized.
+    pub(crate) async fn upload_multipart(
+        &self,
+        path: &str,
+        routing: (&str, &str),
+        metadata: &Value,
+        file_name: &str,
+        file_content_type: &str,
+        file: &[u8],
+    ) -> Result<Value, BoxError> {
+        let boundary = format!("gadk-{:032x}", rand::random::<u128>());
+        let body = multipart_body(&boundary, metadata, file_name, file_content_type, file)?;
+        let url = format!("{}/upload{}", self.origin, go_escaped_path(path));
+        let content_type = format!("multipart/form-data; boundary={boundary}");
+        let extra = [(
+            X_GOOG_UPLOAD_PROTOCOL,
+            HeaderValue::from_static("multipart"),
+        )];
+        let routing = (!routing.0.is_empty()).then_some(routing);
+        let payload = Payload {
+            body: Bytes::from(body),
+            content_type: &content_type,
+            extra: &extra,
+        };
+        self.send_bytes(Method::POST, &url, routing, payload, CallTimeout::None)
+            .await
+    }
 }
 
 /// An operation's `name` (`""` when absent).
@@ -340,4 +435,45 @@ fn operation_name(op: &Value) -> &str {
 /// Whether an operation's `done` is `true`.
 fn is_done(op: &Value) -> bool {
     op.get("done").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// A `multipart/form-data` body with two parts separated by `boundary`: `metadata`
+/// (`metadata` as JSON, `Content-Type: application/json`) and `file` (`file`, sent as
+/// `filename="<file_name>"` with `file_content_type`). `"`, CR and LF in `file_name` are
+/// percent-encoded (`%22`, `%0D`, `%0A`).
+///
+/// # Errors
+///
+/// A `serde_json::Error` when `metadata` cannot be serialized.
+fn multipart_body(
+    boundary: &str,
+    metadata: &Value,
+    file_name: &str,
+    file_content_type: &str,
+    file: &[u8],
+) -> Result<Vec<u8>, serde_json::Error> {
+    let file_name = file_name
+        .replace('"', "%22")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A");
+    let metadata = serde_json::to_vec(metadata)?;
+    let mut body = Vec::with_capacity(metadata.len() + file.len() + 512);
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\n\
+             Content-Type: {JSON}\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(&metadata);
+    body.extend_from_slice(
+        format!(
+            "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; \
+             filename=\"{file_name}\"\r\nContent-Type: {file_content_type}\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(file);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    Ok(body)
 }
