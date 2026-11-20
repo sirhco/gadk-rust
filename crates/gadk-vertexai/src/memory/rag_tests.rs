@@ -116,7 +116,7 @@ fn text_session() -> VertexSession {
 const TEXT_FILE: &str = r#"{"author":"user","timestamp":1700000000.5,"text":"hello"}"#;
 
 /// A fake RAG Engine: a list answers `files` (one page); a DELETE answers a pending operation
-/// `<file>/operations/op`; a `/ui/` poll answers that operation done; any other request (the
+/// `<file>/operations/op`; a GET of an operation (`/v1/…/operations/…`) answers it done; any other request (the
 /// upload) answers `upload`.
 fn rag_server(files: Value, upload: Value) -> FakeServer {
     FakeServer::start(move |req: &RecordedRequest| {
@@ -125,7 +125,8 @@ fn rag_server(files: Value, upload: Value) -> FakeServer {
         } else if req.method == "DELETE" {
             let name = req.path.trim_start_matches("/v1/");
             FakeResponse::json(json!({ "name": format!("{name}/operations/op") }).to_string())
-        } else if let Some(op) = req.path.strip_prefix("/ui/") {
+        } else if req.method == "GET" && req.path.contains("/operations/") {
+            let op = req.path.trim_start_matches("/v1/");
             FakeResponse::json(json!({ "name": op, "done": true }).to_string())
         } else {
             FakeResponse::json(upload.to_string())
@@ -369,7 +370,8 @@ async fn add_session_replaces_earlier_files_on_every_page() {
         } else if req.method == "DELETE" {
             let name = path.trim_start_matches("/v1/");
             FakeResponse::json(json!({"name": format!("{name}/operations/op")}).to_string())
-        } else if let Some(op) = path.strip_prefix("/ui/") {
+        } else if req.method == "GET" && path.contains("/operations/") {
+            let op = path.trim_start_matches("/v1/");
             FakeResponse::json(json!({"name": op, "done": true}).to_string())
         } else {
             FakeResponse::json(r#"{"ragFile":{}}"#)
@@ -383,9 +385,9 @@ async fn add_session_replaces_earlier_files_on_every_page() {
             format!("GET /v1/{CORPUS}/ragFiles?{ALT_QUERY}"),
             format!("GET /v1/{CORPUS}/ragFiles?{ALT_QUERY}&pageToken=t2"),
             format!("DELETE /v1/{CORPUS}/ragFiles/1?{ALT_QUERY}"),
-            format!("GET /ui/{CORPUS}/ragFiles/1/operations/op"),
+            format!("GET /v1/{CORPUS}/ragFiles/1/operations/op"),
             format!("DELETE /v1/{CORPUS}/ragFiles/3?{ALT_QUERY}"),
-            format!("GET /ui/{CORPUS}/ragFiles/3/operations/op"),
+            format!("GET /v1/{CORPUS}/ragFiles/3/operations/op"),
             format!("POST /upload/v1/{CORPUS}/ragFiles:upload"),
         ]
     );
@@ -414,7 +416,7 @@ async fn add_session_without_text_only_deletes() {
         vec![
             format!("GET /v1/{CORPUS}/ragFiles?{ALT_QUERY}"),
             format!("DELETE /v1/{CORPUS}/ragFiles/1?{ALT_QUERY}"),
-            format!("GET /ui/{CORPUS}/ragFiles/1/operations/op"),
+            format!("GET /v1/{CORPUS}/ragFiles/1/operations/op"),
         ]
     );
 }
@@ -528,7 +530,7 @@ async fn add_session_encodes_dots_in_app_and_user_ids() {
         vec![
             format!("GET /v1/{CORPUS}/ragFiles?{ALT_QUERY}"),
             format!("DELETE /v1/{CORPUS}/ragFiles/1?{ALT_QUERY}"),
-            format!("GET /ui/{CORPUS}/ragFiles/1/operations/op"),
+            format!("GET /v1/{CORPUS}/ragFiles/1/operations/op"),
             format!("POST /upload/v1/{CORPUS}/ragFiles:upload"),
         ]
     );

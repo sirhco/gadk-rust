@@ -386,6 +386,37 @@ async fn a_pending_operation_is_polled_at_its_ui_path_until_done() {
     );
 }
 
+/// `wait_operation_at` polls under the given prefix instead of `/ui` (RAG Engine operations
+/// are read at `/v1/{name}`), with the same routing header and no query.
+#[tokio::test(start_paused = true)]
+async fn a_pending_operation_is_polled_at_the_given_prefix() {
+    let name = "projects/p/locations/l/ragCorpora/c/operations/7";
+    let done = json!({"name": name, "done": true, "response": {}});
+    let scripted = ScriptedClient::sequence(vec![
+        FakeResponse::json(json!({"name": name, "done": false}).to_string()),
+        FakeResponse::json(done.to_string()),
+    ]);
+    let client = scripted_at("https://aiplatform.googleapis.com/prefix", &scripted);
+    let got = client
+        .wait_operation_at(json!({"name": name}), "/v1")
+        .await
+        .unwrap();
+    assert_eq!(got, done);
+    let requests = scripted.requests();
+    assert_eq!(requests.len(), 2);
+    for req in &requests {
+        assert_eq!(req.method, "GET");
+        assert_eq!(
+            req.url,
+            "https://aiplatform.googleapis.com/v1/projects/p/locations/l/ragCorpora/c/operations/7"
+        );
+        assert_eq!(
+            req.header("x-goog-request-params"),
+            "name=projects%2Fp%2Flocations%2Fl%2FragCorpora%2Fc%2Foperations%2F7"
+        );
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn an_operation_done_with_an_error_is_a_vertex_error() {
     let scripted = ScriptedClient::json(

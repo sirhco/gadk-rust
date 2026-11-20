@@ -226,7 +226,9 @@ impl VertexAiRagMemoryService {
             }
             Err(e) => return Err(e),
         };
-        self.client.wait_operation(op).await.map(|_| ())
+        // RAG Engine operations are polled at `/v1/{name}`; the `/ui/` path the Agent Engine
+        // services use answers 404 for them.
+        self.client.wait_operation_at(op, "/v1").await.map(|_| ())
     }
 }
 

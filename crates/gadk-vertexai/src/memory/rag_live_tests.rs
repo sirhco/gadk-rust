@@ -104,7 +104,7 @@ async fn cleanup(client: &VertexClient, corpus: &str, display: &str) -> bool {
             )
             .await
         {
-            Ok(op) => client.wait_operation(op).await.map(|_| ()),
+            Ok(op) => client.wait_operation_at(op, "/v1").await.map(|_| ()),
             Err(e) => Err(e),
         };
         if let Err(e) = deleted {

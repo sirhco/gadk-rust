@@ -256,18 +256,32 @@ impl VertexClient {
         }
     }
 
-    /// Waits for a long-running operation: while `op.done` is not true,
-    /// GET the operation ([`get_operation`](Self::get_operation)) and, while still not done,
-    /// sleep a full-jitter pause (initial 1 s, ×2, cap 60 s; the first poll is immediate). The
-    /// poll path is `/ui/{name}` of the operation as given; the routing
-    /// header names the latest operation's `name`. A done operation with
-    /// `error` is `Err(VertexError::from_operation_error)`, else `Ok(op)`.
+    /// Waits for a long-running operation, polling it at `/ui/{name}` (the path the Agent
+    /// Engine services' operations use); see [`wait_operation_at`](Self::wait_operation_at).
     ///
     /// # Errors
     ///
     /// The operation's error, or a failed poll's.
-    pub(crate) async fn wait_operation(&self, mut op: Value) -> Result<Value, BoxError> {
-        let poll_path = format!("/ui/{}", operation_name(&op));
+    pub(crate) async fn wait_operation(&self, op: Value) -> Result<Value, BoxError> {
+        self.wait_operation_at(op, "/ui").await
+    }
+
+    /// Waits for a long-running operation: while `op.done` is not true,
+    /// GET the operation ([`get_operation`](Self::get_operation)) and, while still not done,
+    /// sleep a full-jitter pause (initial 1 s, ×2, cap 60 s; the first poll is immediate). The
+    /// poll path is `{poll_prefix}/{name}` of the operation as given (`poll_prefix` such as
+    /// `/ui` or `/v1`); the routing header names the latest operation's `name`. A done
+    /// operation with `error` is `Err(VertexError::from_operation_error)`, else `Ok(op)`.
+    ///
+    /// # Errors
+    ///
+    /// The operation's error, or a failed poll's.
+    pub(crate) async fn wait_operation_at(
+        &self,
+        mut op: Value,
+        poll_prefix: &str,
+    ) -> Result<Value, BoxError> {
+        let poll_path = format!("{poll_prefix}/{}", operation_name(&op));
         let mut backoff = Backoff::new(WAIT_INITIAL, WAIT_INTERVAL);
         loop {
             if !is_done(&op) {
