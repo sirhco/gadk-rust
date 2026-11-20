@@ -107,7 +107,9 @@ How it behaves:
   again replaces the session file and all its batches. Events repeated across batches are
   stored again, but search returns each line once. A batch with an empty session id is named
   `{app}.{user}.`, the same as a session whose id is `""`, so a full add of that session
-  replaces those batches too. `custom_metadata` is ignored.
+  replaces those batches too. A batch uploaded while a full add of the same session is
+  running (after its list, before its upload) is not replaced by that add and stays searchable
+  until the next full add. `custom_metadata` is ignored.
 - `with_timeout` sets a deadline for each request (each page of a file list, each delete, the
   upload, the retrieval); by default there is none.
 

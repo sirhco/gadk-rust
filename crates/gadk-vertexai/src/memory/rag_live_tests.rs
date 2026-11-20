@@ -128,7 +128,10 @@ async fn rag_memory_round_trip() {
     let user = format!("u{:016x}", rand::random::<u64>());
     let display = format!("{APP}.{user}.s1");
     let code_word = format!("zephyr{:08x}", rand::random::<u32>());
-    let svc = VertexAiRagMemoryService::new(VertexAiRagMemoryConfig::new(corpus.clone())).unwrap();
+    let svc = VertexAiRagMemoryService::new(
+        VertexAiRagMemoryConfig::new(corpus.clone()).with_timeout(Duration::from_secs(60)),
+    )
+    .unwrap();
     let client = admin_client(&corpus);
 
     let outcome = AssertUnwindSafe(round_trip(
@@ -136,7 +139,7 @@ async fn rag_memory_round_trip() {
     ))
     .catch_unwind()
     .await;
-    // Delete this test's file whatever happened; the round trip's own panic wins.
+    // Delete this test's files whatever happened; the round trip's own panic wins.
     let cleaned = cleanup(&client, &corpus, &display).await;
     if let Err(panic) = outcome {
         std::panic::resume_unwind(panic);

@@ -395,6 +395,9 @@ impl EventAdder for VertexAiRagMemoryService {
     /// - Events that repeat an ID already stored are uploaded again; search drops repeated
     ///   (author, timestamp, text) lines, so each is returned once.
     /// - `custom_metadata` is ignored.
+    /// - A batch uploaded while a full add of the same session is running (after its list,
+    ///   before its upload) is not replaced by that add and stays searchable until the next
+    ///   full add.
     ///
     /// # Errors
     ///

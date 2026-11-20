@@ -878,7 +878,7 @@ async fn failures_carry_their_step_in_the_error_chain() {
     );
 }
 
-// ---- R9 ----
+// ---- event adds and timeout ----
 
 /// A zero or unset timeout is no timeout.
 #[test]
