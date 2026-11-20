@@ -97,7 +97,8 @@
   Trace transcript source) depend on it.
 - bigquery: `gadk-bigquery` (the BigQuery toolset) depends on exactly `gadk-agent`, `gadk-engine`,
   `gadk-model` and `gadk-session`; it may depend on `gadk-engine` (its tools are function tools),
-  and only the façade depends on it (feature `bigquery`, optional).
+  and the façade (feature `bigquery`, optional) and `gadk-console` (its BigQuery trace source)
+  depend on it.
 """
 import pathlib, sys, tomllib
 
@@ -145,7 +146,7 @@ ALLOWED = {
     "gadk-cloudtrace": {"gadk-model"},
     "gadk-bigquery": {"gadk-agent", "gadk-engine", "gadk-model", "gadk-session"},
     "gadk-console": {"gadk-cloudtrace", "gadk-model", "gadk-prompts", "gadk-prompts-cli",
-                     "gadk-eval", "gadk-eval-monitor"},
+                     "gadk-eval", "gadk-eval-monitor", "gadk-bigquery"},
     "gadk-eval": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
                   "gadk-prompts", "gadk-session"},
     "gadk-eval-monitor": {"gadk-cloudtrace", "gadk-eval", "gadk-gemini", "gadk-model",

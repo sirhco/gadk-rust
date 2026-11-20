@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 gadk-model = { workspace = true }
+gadk-bigquery = { workspace = true }
 gadk-cloudtrace = { workspace = true }
 gadk-eval = { workspace = true }
 gadk-eval-monitor = { workspace = true }
@@ -45,3 +46,4 @@ tempfile = { workspace = true }
 gadk-telemetry = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+pretty_assertions = { workspace = true }

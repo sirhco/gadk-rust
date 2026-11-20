@@ -429,86 +429,11 @@ fn error_reason(body: &[u8]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::sync::Mutex;
-
     use chrono::TimeZone;
-    use futures::StreamExt as _;
-    use gadk_model::BodyStream;
-    use http::StatusCode;
 
     use super::*;
+    use crate::traces::test_http::FakeHttp;
     use crate::traces::{EXCERPT_LIMIT, TimeRange};
-
-    /// One request the fake client saw.
-    struct Seen {
-        method: Method,
-        uri: String,
-        headers: HeaderMap,
-        body: Bytes,
-    }
-
-    /// Records requests; answers each with the next scripted reply
-    /// (`Ok((status, body))`, or `Err(detail)` for a transport failure).
-    #[derive(Default)]
-    struct FakeHttp {
-        replies: Mutex<VecDeque<Result<(u16, String), String>>>,
-        seen: Mutex<Vec<Seen>>,
-    }
-
-    impl FakeHttp {
-        fn new(replies: Vec<Result<(u16, String), String>>) -> Arc<Self> {
-            Arc::new(Self {
-                replies: Mutex::new(replies.into()),
-                seen: Mutex::default(),
-            })
-        }
-
-        fn uris(&self) -> Vec<String> {
-            self.seen
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|s| s.uri.clone())
-                .collect()
-        }
-
-        fn body(&self, i: usize) -> Value {
-            serde_json::from_slice(&self.seen.lock().unwrap()[i].body).unwrap()
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl HttpClient for FakeHttp {
-        async fn send(
-            &self,
-            req: http::Request<Bytes>,
-        ) -> Result<http::Response<BodyStream>, ModelError> {
-            let (parts, body) = req.into_parts();
-            self.seen.lock().unwrap().push(Seen {
-                method: parts.method,
-                uri: parts.uri.to_string(),
-                headers: parts.headers,
-                body,
-            });
-            let reply = self
-                .replies
-                .lock()
-                .unwrap()
-                .pop_front()
-                .expect("unscripted request");
-            match reply {
-                Ok((status, text)) => {
-                    let stream: BodyStream =
-                        futures::stream::once(async move { Ok(Bytes::from(text)) }).boxed();
-                    let mut resp = http::Response::new(stream);
-                    *resp.status_mut() = StatusCode::from_u16(status).unwrap();
-                    Ok(resp)
-                }
-                Err(detail) => Err(ModelError::Transport(detail.into())),
-            }
-        }
-    }
 
     /// Fixed credentials headers, including a stale quota project that must be replaced.
     struct FixedAuth;
