@@ -19,8 +19,8 @@ use std::process::ExitCode;
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> ExitCode {
     // A usage error prints clap's message and exits 2 (`--help` prints and exits 0).
-    let cfg = gadk_console::parse_args(std::env::args_os()).unwrap_or_else(|e| e.exit());
-    match gadk_console::run(cfg, &mut std::io::stdout()).await {
+    let cli = gadk_console::parse_cli(std::env::args_os()).unwrap_or_else(|e| e.exit());
+    match gadk_console::run_cli(cli, &mut std::io::stdout()).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("gadk-console: {e}");

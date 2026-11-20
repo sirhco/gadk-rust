@@ -22,7 +22,7 @@ use std::sync::Arc;
 use gadk_eval_monitor::{MonitorError, ReportStore};
 
 use crate::evals::{CACHE_CAP, ReportCache};
-use crate::traces::CloudTraceSource;
+use crate::traces::{BigQueryTable, BigQueryTraceSource, CloudTraceSource, TraceSource};
 
 mod cli;
 mod evals;
@@ -32,7 +32,7 @@ pub mod traces;
 mod url;
 mod web;
 
-pub use cli::parse_args;
+pub use cli::{parse_args, parse_cli};
 
 /// Console settings (from the command line).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +48,59 @@ pub struct ConsoleConfig {
     pub port: u16,
     /// Cloud Logging log id that gadk-telemetry writes (default `gadk`).
     pub log_id: String,
+}
+
+/// The default `--bigquery-max-bytes`: 1 GiB.
+pub(crate) const DEFAULT_MAX_BYTES: i64 = 1_073_741_824;
+
+/// The parsed command line: the console settings and where traces come from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Cli {
+    /// The console settings.
+    pub config: ConsoleConfig,
+    /// The trace source; `None` reads Cloud Trace and Cloud Logging.
+    pub traces: Option<TracesFrom>,
+}
+
+impl Cli {
+    /// `config` with the default trace source (Cloud Trace + Cloud Logging).
+    pub fn new(config: ConsoleConfig) -> Self {
+        Self {
+            config,
+            traces: None,
+        }
+    }
+
+    /// Reads traces from `traces` instead.
+    pub fn with_traces(mut self, traces: TracesFrom) -> Self {
+        self.traces = Some(traces);
+        self
+    }
+}
+
+/// A trace source other than Cloud Trace + Cloud Logging.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TracesFrom {
+    /// The agent-analytics BigQuery table.
+    #[non_exhaustive]
+    BigQuery {
+        /// The table read.
+        table: BigQueryTable,
+        /// The byte cap of every query.
+        max_bytes_billed: i64,
+    },
+}
+
+impl TracesFrom {
+    /// Traces from the agent-analytics table `table`, each query capped at `max_bytes_billed`.
+    pub fn bigquery(table: BigQueryTable, max_bytes_billed: i64) -> Self {
+        Self::BigQuery {
+            table,
+            max_bytes_billed,
+        }
+    }
 }
 
 /// Startup failures.
@@ -100,6 +153,18 @@ impl Bound {
 /// A `gs://` report store needs Application Default Credentials here; the trace source builds its
 /// credentials on the first GCP call.
 pub async fn bind(cfg: ConsoleConfig) -> Result<Bound, ConsoleError> {
+    let source = Arc::new(CloudTraceSource::new(
+        cfg.project.clone(),
+        cfg.log_id.clone(),
+    ));
+    bind_with_source(cfg, source).await
+}
+
+/// Like [`bind`] with an explicit trace source.
+pub async fn bind_with_source(
+    cfg: ConsoleConfig,
+    source: Arc<dyn TraceSource>,
+) -> Result<Bound, ConsoleError> {
     let store = cfg
         .store
         .as_deref()
@@ -125,10 +190,7 @@ pub async fn bind(cfg: ConsoleConfig) -> Result<Bound, ConsoleError> {
         .map_err(bind_err)?;
     let addr = listener.local_addr().map_err(bind_err)?;
     let state = web::AppState {
-        source: Arc::new(CloudTraceSource::new(
-            cfg.project.clone(),
-            cfg.log_id.clone(),
-        )),
+        source,
         store,
         reports,
         csrf: Arc::from(csrf_token()),
@@ -147,7 +209,26 @@ pub async fn run(
     cfg: ConsoleConfig,
     out: &mut (dyn std::io::Write + Send),
 ) -> Result<(), ConsoleError> {
-    let bound = bind(cfg).await?;
+    run_cli(Cli::new(cfg), out).await
+}
+
+/// Like [`run`], reading traces from the source `cli.traces` names.
+pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<(), ConsoleError> {
+    let source: Arc<dyn TraceSource> = match cli.traces {
+        None => Arc::new(CloudTraceSource::new(
+            cli.config.project.clone(),
+            cli.config.log_id.clone(),
+        )),
+        Some(TracesFrom::BigQuery {
+            table,
+            max_bytes_billed,
+        }) => Arc::new(BigQueryTraceSource::new(
+            cli.config.project.clone(),
+            table,
+            max_bytes_billed,
+        )),
+    };
+    let bound = bind_with_source(cli.config, source).await?;
     writeln!(out, "http://127.0.0.1:{}/", bound.local_addr().port())
         .and_then(|()| out.flush())
         .map_err(|e| ConsoleError::Serve(format!("print the URL: {e}")))?;
@@ -282,5 +363,29 @@ mod tests {
         let resp = raw_get(port, &format!("localhost:{port}")).await;
         assert!(resp.starts_with("HTTP/1.1 303"), "{resp}");
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn bind_with_source_serves_traces_from_the_given_source() {
+        let source = std::sync::Arc::new(crate::web::testutil::FakeSource::new());
+        let bound = super::bind_with_source(cfg(None), source.clone())
+            .await
+            .unwrap();
+        let port = bound.local_addr().port();
+        tokio::spawn(bound.serve());
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        let req =
+            format!("GET /traces HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let mut out = Vec::new();
+        stream.read_to_end(&mut out).await.unwrap();
+        let head = String::from_utf8_lossy(&out);
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert!(
+            source.calls.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "the page asked the given source"
+        );
     }
 }
