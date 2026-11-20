@@ -123,7 +123,9 @@ impl BigQueryToolset {
     ///
     /// # Errors
     ///
-    /// A [`ToolError`] when a tool cannot be built (an internal schema problem).
+    /// [`ToolError::InvalidArgument`] when the config is invalid (see
+    /// [`with_client`](Self::with_client)); a [`ToolError`] when a tool cannot be built (an
+    /// internal schema problem).
     pub fn new(config: BigQueryToolConfig) -> Result<Self, ToolError> {
         Self::with_client(config, Arc::new(BigQueryClient::new()))
     }
@@ -132,11 +134,15 @@ impl BigQueryToolset {
     ///
     /// # Errors
     ///
-    /// A [`ToolError`] when a tool cannot be built (an internal schema problem).
+    /// [`ToolError::InvalidArgument`] when the config is invalid: a
+    /// [`compute_project`](BigQueryToolConfig::compute_project) that is not a project id
+    /// (`[A-Za-z0-9.:_-]+`), or a [`max_query_result_rows`](BigQueryToolConfig::max_query_result_rows)
+    /// of 0; a [`ToolError`] when a tool cannot be built (an internal schema problem).
     pub fn with_client(
         config: BigQueryToolConfig,
         client: Arc<BigQueryClient>,
     ) -> Result<Self, ToolError> {
+        validate(&config)?;
         let config = Arc::new(config);
         let mut tools = Vec::with_capacity(5);
 
@@ -216,6 +222,25 @@ impl Toolset for BigQueryToolset {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
+
+/// Rejects a developer config the tools cannot run with.
+fn validate(config: &BigQueryToolConfig) -> Result<(), ToolError> {
+    if let Some(p) = config
+        .compute_project
+        .as_deref()
+        .filter(|p| !valid_project(p))
+    {
+        return Err(ToolError::InvalidArgument(format!(
+            "bigquery: compute_project {p:?} is not a valid project id"
+        )));
+    }
+    if config.max_query_result_rows == 0 {
+        return Err(ToolError::InvalidArgument(
+            "bigquery: max_query_result_rows must be at least 1".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// The `execute_sql` description: what it returns, the row cap and the write mode.
@@ -455,6 +480,42 @@ mod tests {
 
     fn obj(v: Value) -> Map<String, Value> {
         v.as_object().unwrap().clone()
+    }
+
+    fn build_err(config: BigQueryToolConfig) -> String {
+        let fake = FakeHttp::new(vec![]);
+        let err = BigQueryToolset::with_client(config, Arc::new(client(&fake))).unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgument(_)), "{err:?}");
+        err.to_string()
+    }
+
+    #[test]
+    fn an_invalid_compute_project_is_rejected() {
+        assert_eq!(
+            build_err(BigQueryToolConfig::new().with_compute_project("a/b")),
+            r#"bigquery: compute_project "a/b" is not a valid project id"#
+        );
+        assert_eq!(
+            build_err(BigQueryToolConfig::new().with_compute_project("")),
+            r#"bigquery: compute_project "" is not a valid project id"#
+        );
+    }
+
+    #[test]
+    fn zero_max_query_result_rows_is_rejected() {
+        assert_eq!(
+            build_err(BigQueryToolConfig::new().with_max_query_result_rows(0)),
+            "bigquery: max_query_result_rows must be at least 1"
+        );
+    }
+
+    #[test]
+    fn a_valid_config_builds() {
+        let fake = FakeHttp::new(vec![]);
+        let config = BigQueryToolConfig::new()
+            .with_compute_project("example.com:proj")
+            .with_max_query_result_rows(1);
+        assert!(BigQueryToolset::with_client(config, Arc::new(client(&fake))).is_ok());
     }
 
     #[test]
