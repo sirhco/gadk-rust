@@ -218,12 +218,11 @@ const FAMILIES: [(&[Match], &str, Suffix); 4] = [
     (&[Match::Prefix("TOOL_")], "execute_tool", Suffix::Tool),
 ];
 
-/// Whether an event type names a span: `USER_MESSAGE_RECEIVED` or the `INVOCATION_`, `AGENT_`,
-/// `LLM_` and `TOOL_` families.
+/// Whether an event type belongs to one of the span families in [`FAMILIES`].
 pub(crate) fn is_named_family(event_type: &str) -> bool {
     FAMILIES
         .iter()
-        .any(|(matches, ..)| matches.iter().any(|m| m.matches(event_type)))
+        .any(|(rules, ..)| rules.iter().any(|m| m.matches(event_type)))
 }
 
 /// The span name for a row: `invocation`, `invoke_agent <agent>`, `call_llm <model>`,
@@ -234,8 +233,8 @@ pub(crate) fn span_name(
     model: Option<&str>,
     tool: Option<&str>,
 ) -> String {
-    for (matches, base, suffix) in &FAMILIES {
-        if matches.iter().any(|m| m.matches(event_type)) {
+    for (rules, base, suffix) in &FAMILIES {
+        if rules.iter().any(|m| m.matches(event_type)) {
             return match suffix.pick(agent, model, tool).filter(|s| !s.is_empty()) {
                 Some(s) => format!("{base} {s}"),
                 None => (*base).to_owned(),
@@ -248,8 +247,8 @@ pub(crate) fn span_name(
 /// The root-name expression of the list query: [`span_name`] as SQL over the root row, one line.
 fn root_name_sql() -> String {
     let mut sql = String::from("CASE ");
-    for (matches, base, suffix) in &FAMILIES {
-        let conditions: Vec<String> = matches.iter().map(Match::sql).collect();
+    for (rules, base, suffix) in &FAMILIES {
+        let conditions: Vec<String> = rules.iter().map(Match::sql).collect();
         let name = match suffix.column() {
             None => format!("'{base}'"),
             Some(col) => {
@@ -266,8 +265,8 @@ fn root_name_sql() -> String {
 /// root row.
 fn root_order_regex() -> String {
     let mut alternatives = Vec::new();
-    for (matches, ..) in &FAMILIES {
-        alternatives.extend(matches.iter().map(Match::text));
+    for (rules, ..) in &FAMILIES {
+        alternatives.extend(rules.iter().map(Match::text));
     }
     format!("^({})", alternatives.join("|"))
 }
@@ -1422,6 +1421,18 @@ LIMIT @limit OFFSET @offset"#;
                 detail: "invalid table p.ds.t`; DROP".into()
             }
         );
+    }
+
+    /// `USER_MESSAGE_RECEIVED` matches exactly; `INVOCATION_` matches as a prefix.
+    #[test]
+    fn exact_and_prefix_matches_differ() {
+        assert_eq!(
+            span_name("USER_MESSAGE_RECEIVED_X", None, None, None),
+            "user_message_received_x"
+        );
+        assert!(!is_named_family("USER_MESSAGE_RECEIVED_X"));
+        assert_eq!(span_name("INVOCATION_X", None, None, None), "invocation");
+        assert!(is_named_family("INVOCATION_X"));
     }
 
     #[test]
