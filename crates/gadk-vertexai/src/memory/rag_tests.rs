@@ -471,6 +471,35 @@ async fn add_session_rejects_dotted_or_empty_app_and_user_ids() {
     assert_eq!(server.hits(), 0);
 }
 
+/// A search is scoped the same way: a dotted user id could otherwise match another user's
+/// dotted session id (`a.b` + session `c.x` vs user `b.c`).
+#[tokio::test]
+async fn search_rejects_dotted_or_empty_app_and_user_ids() {
+    let server = FakeServer::json("{}");
+    let svc = service(config(&server.url()));
+    for (app, user) in [("a.b", "u1"), ("app", "u.v"), ("", "u1"), ("app", "")] {
+        let err = svc
+            .search_memory(SearchRequest {
+                query: "coffee".into(),
+                user_id: user.into(),
+                app_name: app.into(),
+            })
+            .await
+            .unwrap_err();
+        match err {
+            MemoryError::InvalidRequest(text) => assert_eq!(
+                text,
+                format!(
+                    "invalid RAG memory scope: app name {app:?} and user id {user:?} must be \
+                     non-empty and contain no '.'"
+                )
+            ),
+            other => panic!("{app}/{user}: want InvalidRequest, got {other:?}"),
+        }
+    }
+    assert_eq!(server.hits(), 0);
+}
+
 // ---- R6: search request ----
 
 #[tokio::test]

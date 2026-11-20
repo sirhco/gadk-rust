@@ -298,11 +298,13 @@ impl MemoryService for VertexAiRagMemoryService {
     ///
     /// # Errors
     ///
-    /// [`MemoryError::Backend`]: `retrieve contexts failed: …`.
+    /// [`MemoryError::InvalidRequest`] when the app name or user id is empty or contains `.`
+    /// (nothing is sent); [`MemoryError::Backend`]: `retrieve contexts failed: …`.
     async fn search_memory(&self, req: SearchRequest) -> Result<SearchResponse, MemoryError> {
         if req.query.is_empty() {
             return Ok(SearchResponse::default());
         }
+        let prefix = scope_prefix(&req.app_name, &req.user_id)?;
         let mut retrieval = Map::new();
         if let Some(top_k) = self.similarity_top_k {
             retrieval.insert("topK".to_owned(), json!(top_k));
@@ -332,7 +334,6 @@ impl MemoryService for VertexAiRagMemoryService {
             )
             .await
             .map_err(|e| memory_error(wrap("retrieve contexts failed", e)))?;
-        let prefix = format!("{}.{}.", req.app_name, req.user_id);
         Ok(SearchResponse {
             memories: memories_from_contexts(&resp, &prefix),
         })
@@ -353,16 +354,23 @@ fn corpus_parts(name: &str) -> Option<(&str, &str)> {
     }
 }
 
-/// The RAG file display name `{app}.{user}.{session}`; an empty app or user, or one holding
-/// `.`, is rejected so the `{app}.{user}.` search prefix stays unambiguous.
-fn display_name(app: &str, user: &str, session: &str) -> Result<String, MemoryError> {
+/// The display-name prefix `{app}.{user}.` of an app and user's RAG files; an empty app or
+/// user, or one holding `.`, is rejected so the prefix stays unambiguous (a dotted user id
+/// could otherwise match another user's dotted session id).
+fn scope_prefix(app: &str, user: &str) -> Result<String, MemoryError> {
     if app.is_empty() || user.is_empty() || app.contains('.') || user.contains('.') {
         return Err(MemoryError::InvalidRequest(format!(
             "invalid RAG memory scope: app name {app:?} and user id {user:?} must be non-empty \
              and contain no '.'"
         )));
     }
-    Ok(format!("{app}.{user}.{session}"))
+    Ok(format!("{app}.{user}."))
+}
+
+/// The RAG file display name `{app}.{user}.{session}`, with the scope checked as
+/// [`scope_prefix`] does.
+fn display_name(app: &str, user: &str, session: &str) -> Result<String, MemoryError> {
+    Ok(format!("{}{session}", scope_prefix(app, user)?))
 }
 
 /// One line of a session file.
