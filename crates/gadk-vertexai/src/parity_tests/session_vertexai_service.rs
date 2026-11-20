@@ -38,14 +38,14 @@ const USER_ID: &str = "test-user";
 /// they run on [`FakeAgentEngine`] instead.
 const CASES_WITHOUT_REPLAY: [&str; 4] = [
     // Pinned offline in Go by TestAppendEvent_missingSession_wrapsErrNotFound.
-    "AppendEvent/when_session_deleted_returns_ErrNotFound",
+    "append_event/when_session_deleted_returns_not_found",
     // Go's recording predates trimming temp: keys before AppendEvent.
-    "StateManagement/temp_state_is_not_persisted",
+    "state_management/temp_state_is_not_persisted",
     // Pinned offline in Go by TestVertexAiClientRequestedAuthConfigsMatchPython (no recording).
-    "AppendEvent/requested_auth_configs_round_trip",
+    "append_event/requested_auth_configs_round_trip",
     // Pinned offline in Go by TestVertexAiClientRejectsRequestedAuthConfigThatDoesNotEncode and
     // TestAppendEvent_requestedAuthConfigThatDoesNotDecode_leavesSessionUntouched.
-    "AppendEvent/requested_auth_config_that_does_not_decode_is_refused",
+    "append_event/requested_auth_config_that_does_not_decode_is_refused",
 ];
 
 fn service(url: &str) -> Arc<dyn SessionService> {

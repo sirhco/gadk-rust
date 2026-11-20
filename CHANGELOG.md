@@ -7,6 +7,13 @@ the public API.
 
 ## [Unreleased]
 
+### Changed
+
+- `gadk-engine`: the function-response ordering errors list ids as `[a, b]` instead of
+  `map[a:{} b:{}]`, and read `function response ids` (was `function responses ids`).
+- `gadk-session` / `gadk-artifact`: the test-suite failure messages and step labels use Rust method
+  and field names.
+
 ## [0.4.6] - 2026-11-19
 
 ### Fixed
