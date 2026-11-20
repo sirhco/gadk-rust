@@ -131,6 +131,10 @@ name = "quickstart"
 required-features = ["gemini"]
 
 [[example]]
+name = "agentanalytics"
+required-features = ["gemini", "agentanalytics"]
+
+[[example]]
 name = "launcher"
 required-features = ["gemini", "launcher"]
 

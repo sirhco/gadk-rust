@@ -16,6 +16,8 @@ the public API.
   session) and `WriteMode::Allowed`. Results are capped at `max_query_result_rows` (default 50)
   with a truncation flag; `compute_project`, `location`, `maximum_bytes_billed` and `job_labels`
   are configurable. Includes the `bigquery_agent` example.
+- `agentanalytics` example (`gadk`, features `gemini,agentanalytics`): an agent with a function
+  tool whose runs are recorded in BigQuery by the Agent Analytics plugin.
 
 ## [0.4.4] - 2026-11-19
 
