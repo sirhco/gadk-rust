@@ -32,6 +32,7 @@ mod config;
 mod error;
 mod ident;
 mod rows;
+mod session;
 mod toolset;
 mod types;
 

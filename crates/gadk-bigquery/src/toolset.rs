@@ -408,9 +408,17 @@ async fn execute_sql(
             Ok(_) => Ok(error_result(READ_ONLY_MSG)),
             Err(e) => Err(e),
         },
-        WriteMode::Protected => Ok(error_result("Protected write mode is not available yet.")),
+        WriteMode::Protected => {
+            let state = ctx.state();
+            match crate::session::run(state.as_ref(), c, &compute, &args.query, &opts).await {
+                Ok(crate::session::Protected::Ran(r)) => Ok(rows_result(r)),
+                Ok(crate::session::Protected::Refused) => {
+                    Ok(error_result(crate::session::PROTECTED_MSG))
+                }
+                Err(e) => Err(e),
+            }
+        }
     };
-    let _ = &ctx;
     match outcome {
         Ok(m) => Ok(m),
         Err(e) => map_err(e),
@@ -829,5 +837,61 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("no credentials found"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn protected_mode_refusal_text_and_state_reuse() {
+        let fake = FakeHttp::new(vec![
+            (
+                200,
+                json!({ "jobComplete": true, "jobReference": { "projectId": "p", "jobId": "s" }, "sessionInfo": { "sessionId": "S1" } }),
+            ),
+            (
+                200,
+                json!({ "configuration": { "query": { "destinationTable": { "projectId": "p", "datasetId": "_anon", "tableId": "x" } } } }),
+            ),
+            (
+                200,
+                json!({ "statistics": { "query": { "statementType": "INSERT" } },
+                "configuration": { "query": { "destinationTable": { "projectId": "p", "datasetId": "gadk_examples", "tableId": "t" } } } }),
+            ),
+            (
+                200,
+                json!({ "statistics": { "query": { "statementType": "SELECT" } } }),
+            ),
+            (
+                200,
+                json!({ "jobComplete": true, "jobReference": { "projectId": "p", "jobId": "q" } }),
+            ),
+        ]);
+        let ts = toolset(
+            &fake,
+            BigQueryToolConfig::new().with_write_mode(WriteMode::Protected),
+        );
+        let c = ctx();
+        let r = call(
+            &ts,
+            &c,
+            "execute_sql",
+            json!({ "project_id": "p", "query": "INSERT gadk_examples.t VALUES (1)" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            r,
+            obj(json!({ "status": "ERROR", "error_details":
+            "Protected write mode only supports SELECT statements, or write operations in the anonymous dataset of a BigQuery session." }))
+        );
+        // The second call reuses the session stored in the agent session's state (no new session start).
+        let r = call(
+            &ts,
+            &c,
+            "execute_sql",
+            json!({ "project_id": "p", "query": "SELECT 1" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["status"], json!("SUCCESS"));
+        assert_eq!(fake.uris().len(), 5);
     }
 }
