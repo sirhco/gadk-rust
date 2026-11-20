@@ -385,8 +385,6 @@ impl VertexClient {
     ///
     /// A [`VertexError`] for a non-2xx status; the [`RestError`] when no response was read; a
     /// `serde_json::Error` when the metadata or reply cannot be (de)serialized.
-    // Used by the RAG memory service (next task).
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) async fn upload_multipart(
         &self,
         path: &str,
