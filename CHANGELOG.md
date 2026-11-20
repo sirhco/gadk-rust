@@ -7,6 +7,13 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-vertexai`: `VertexAiRagMemoryService` supports incremental adds through
+  `gadk_memory::add_events_to_memory` (each batch is one more RAG file named like the session's
+  file; a full add replaces them), and `VertexAiRagMemoryConfig::with_timeout` sets a deadline
+  for each RAG Engine request.
+
 ## [0.4.9] - 2026-11-20
 
 ### Added

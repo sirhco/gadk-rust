@@ -672,3 +672,57 @@ async fn upload_multipart_maps_an_error_status() {
         "rpc error: code = PermissionDenied desc = denied"
     );
 }
+
+/// With a timeout, a reply slower than it fails the call and the upload with
+/// `context deadline exceeded`.
+#[tokio::test(start_paused = true)]
+async fn a_timeout_bounds_calls_and_uploads() {
+    let scripted =
+        ScriptedClient::always(FakeResponse::json("{}").delay_headers(Duration::from_secs(5)));
+    let client = scripted_at("https://aiplatform.googleapis.com", &scripted)
+        .with_timeout(Duration::from_secs(1));
+    let err = client
+        .call(Method::GET, "/v1/x", &[], ("", ""), None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "context deadline exceeded");
+    let err = client
+        .upload_multipart(
+            "/v1/x:upload",
+            ("", ""),
+            &json!({}),
+            "f",
+            "text/plain",
+            b"x",
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "context deadline exceeded");
+}
+
+/// Without a timeout (the client every Agent Engine service uses), the same slow reply is
+/// waited for.
+#[tokio::test(start_paused = true)]
+async fn without_a_timeout_a_slow_reply_is_awaited() {
+    let scripted = ScriptedClient::always(
+        FakeResponse::json(r#"{"ok":true}"#).delay_headers(Duration::from_secs(5)),
+    );
+    let client = scripted_at("https://aiplatform.googleapis.com", &scripted);
+    let got = client
+        .call(Method::GET, "/v1/x", &[], ("", ""), None)
+        .await
+        .unwrap();
+    assert_eq!(got, json!({"ok": true}));
+    let got = client
+        .upload_multipart(
+            "/v1/x:upload",
+            ("", ""),
+            &json!({}),
+            "f",
+            "text/plain",
+            b"x",
+        )
+        .await
+        .unwrap();
+    assert_eq!(got, json!({"ok": true}));
+}
