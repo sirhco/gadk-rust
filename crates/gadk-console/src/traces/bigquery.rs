@@ -132,13 +132,98 @@ fn is_dataset_or_table(s: &str) -> bool {
     (1..=1024).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+/// How an event type joins a span family.
+enum Match {
+    /// The event type equals the string.
+    Exact(&'static str),
+    /// The event type starts with the string.
+    Prefix(&'static str),
+}
+
+impl Match {
+    fn matches(&self, event_type: &str) -> bool {
+        match self {
+            Self::Exact(s) => event_type == *s,
+            Self::Prefix(s) => event_type.starts_with(s),
+        }
+    }
+
+    /// The condition over `root.event_type` in the list query.
+    fn sql(&self) -> String {
+        match self {
+            Self::Exact(s) => format!("root.event_type = '{s}'"),
+            Self::Prefix(s) => format!("STARTS_WITH(root.event_type, '{s}')"),
+        }
+    }
+
+    /// The bare string: one alternative of the list query's root-order regex. The regex is not
+    /// anchored at the end, so there an exact match is a prefix match (as it always was).
+    fn text(&self) -> &'static str {
+        match self {
+            Self::Exact(s) | Self::Prefix(s) => s,
+        }
+    }
+}
+
+/// Which column supplies a span name's suffix.
+#[derive(Clone, Copy)]
+enum Suffix {
+    None,
+    Agent,
+    Model,
+    Tool,
+}
+
+impl Suffix {
+    /// The list query's column for the suffix.
+    fn column(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::Agent => Some("root.agent"),
+            Self::Model => Some("root.model"),
+            Self::Tool => Some("root.tool"),
+        }
+    }
+
+    /// The suffix value among a row's agent, model and tool.
+    fn pick<'a>(
+        self,
+        agent: Option<&'a str>,
+        model: Option<&'a str>,
+        tool: Option<&'a str>,
+    ) -> Option<&'a str> {
+        match self {
+            Self::None => None,
+            Self::Agent => agent,
+            Self::Model => model,
+            Self::Tool => tool,
+        }
+    }
+}
+
+/// The span families in match order: the event types each covers, its span-name base, and the
+/// column that supplies the name's suffix. The single source of the naming rules behind
+/// [`is_named_family`], [`span_name`], [`root_name_sql`] and [`root_order_regex`].
+const FAMILIES: [(&[Match], &str, Suffix); 4] = [
+    (
+        &[
+            Match::Exact("USER_MESSAGE_RECEIVED"),
+            Match::Prefix("INVOCATION_"),
+        ],
+        "invocation",
+        Suffix::None,
+    ),
+    (&[Match::Prefix("AGENT_")], "invoke_agent", Suffix::Agent),
+    (&[Match::Prefix("LLM_")], "call_llm", Suffix::Model),
+    (&[Match::Prefix("TOOL_")], "execute_tool", Suffix::Tool),
+];
+
 /// Whether an event type names a span: `USER_MESSAGE_RECEIVED` or the `INVOCATION_`, `AGENT_`,
 /// `LLM_` and `TOOL_` families.
 pub(crate) fn is_named_family(event_type: &str) -> bool {
-    event_type == "USER_MESSAGE_RECEIVED"
-        || ["INVOCATION_", "AGENT_", "LLM_", "TOOL_"]
-            .iter()
-            .any(|p| event_type.starts_with(p))
+    FAMILIES
+        .iter()
+        .any(|(matches, ..)| matches.iter().any(|m| m.matches(event_type)))
 }
 
 /// The span name for a row: `invocation`, `invoke_agent <agent>`, `call_llm <model>`,
@@ -149,22 +234,42 @@ pub(crate) fn span_name(
     model: Option<&str>,
     tool: Option<&str>,
 ) -> String {
-    let (base, suffix) =
-        if event_type == "USER_MESSAGE_RECEIVED" || event_type.starts_with("INVOCATION_") {
-            ("invocation", None)
-        } else if event_type.starts_with("AGENT_") {
-            ("invoke_agent", agent)
-        } else if event_type.starts_with("LLM_") {
-            ("call_llm", model)
-        } else if event_type.starts_with("TOOL_") {
-            ("execute_tool", tool)
-        } else {
-            return event_type.to_ascii_lowercase();
-        };
-    match suffix.filter(|s| !s.is_empty()) {
-        Some(s) => format!("{base} {s}"),
-        None => base.to_owned(),
+    for (matches, base, suffix) in &FAMILIES {
+        if matches.iter().any(|m| m.matches(event_type)) {
+            return match suffix.pick(agent, model, tool).filter(|s| !s.is_empty()) {
+                Some(s) => format!("{base} {s}"),
+                None => (*base).to_owned(),
+            };
+        }
     }
+    event_type.to_ascii_lowercase()
+}
+
+/// The root-name expression of the list query: [`span_name`] as SQL over the root row, one line.
+fn root_name_sql() -> String {
+    let mut sql = String::from("CASE ");
+    for (matches, base, suffix) in &FAMILIES {
+        let conditions: Vec<String> = matches.iter().map(Match::sql).collect();
+        let name = match suffix.column() {
+            None => format!("'{base}'"),
+            Some(col) => {
+                format!("IF(IFNULL({col}, '') = '', '{base}', CONCAT('{base} ', {col}))")
+            }
+        };
+        sql.push_str(&format!("WHEN {} THEN {name} ", conditions.join(" OR ")));
+    }
+    sql.push_str("ELSE LOWER(root.event_type) END");
+    sql
+}
+
+/// The list query's root-order regex: rows of a span family sort first when picking a trace's
+/// root row.
+fn root_order_regex() -> String {
+    let mut alternatives = Vec::new();
+    for (matches, ..) in &FAMILIES {
+        alternatives.extend(matches.iter().map(Match::text));
+    }
+    format!("^({})", alternatives.join("|"))
 }
 
 /// A `gadk-bigquery` error as a trace-source error.
@@ -197,14 +302,6 @@ pub(crate) fn from_bigquery(e: BigQueryError) -> SourceError {
 
 /// Traces listed per page.
 pub(crate) const PAGE_SIZE: usize = 50;
-
-/// The root-name expression of the list query: the SQL form of [`span_name`] over the root row.
-const ROOT_NAME_SQL: &str = "CASE \
-  WHEN root.event_type = 'USER_MESSAGE_RECEIVED' OR STARTS_WITH(root.event_type, 'INVOCATION_') THEN 'invocation' \
-  WHEN STARTS_WITH(root.event_type, 'AGENT_') THEN IF(IFNULL(root.agent, '') = '', 'invoke_agent', CONCAT('invoke_agent ', root.agent)) \
-  WHEN STARTS_WITH(root.event_type, 'LLM_') THEN IF(IFNULL(root.model, '') = '', 'call_llm', CONCAT('call_llm ', root.model)) \
-  WHEN STARTS_WITH(root.event_type, 'TOOL_') THEN IF(IFNULL(root.tool, '') = '', 'execute_tool', CONCAT('execute_tool ', root.tool)) \
-  ELSE LOWER(root.event_type) END";
 
 /// Traces from the agent-analytics BigQuery table. Every query runs (and is billed) in the
 /// compute project and stops at the byte cap.
@@ -315,6 +412,8 @@ pub(crate) fn timestamp(row: &Map<String, Value>, key: &str) -> Result<DateTime<
 }
 
 fn list_sql(table: &str) -> String {
+    let root_order = root_order_regex();
+    let root_name = root_name_sql();
     format!(
         "WITH t AS (\n\
   SELECT trace_id,\n\
@@ -322,7 +421,7 @@ fn list_sql(table: &str) -> String {
                      JSON_VALUE(attributes, '$.model') AS model,\n\
                      JSON_VALUE(content, '$.tool') AS tool)\n\
               ORDER BY IF(REGEXP_CONTAINS(event_type,\n\
-                            r'^(USER_MESSAGE_RECEIVED|INVOCATION_|AGENT_|LLM_|TOOL_)'), 0, 1),\n\
+                            r'{root_order}'), 0, 1),\n\
                        timestamp, event_type LIMIT 1)[OFFSET(0)] AS root,\n\
     MIN(timestamp) AS first_ts,\n\
     MAX(timestamp) AS last_ts\n\
@@ -335,7 +434,7 @@ fn list_sql(table: &str) -> String {
 r AS (\n\
   SELECT trace_id, first_ts, last_ts, root.event_type AS event_type, root.agent AS agent,\n\
     root.session_id AS session_id, root.model AS model, root.tool AS tool,\n\
-    {ROOT_NAME_SQL} AS root_name\n\
+    {root_name} AS root_name\n\
   FROM t)\n\
 SELECT trace_id, first_ts AS start, last_ts, event_type, agent, session_id, model, tool\n\
 FROM r\n\
@@ -626,6 +725,60 @@ mod tests {
     use super::*;
     use crate::traces::test_http::FakeHttp;
     use crate::traces::{LogEntry, RawSpan, SourceError, TimeRange, TraceQuery, TraceSource};
+
+    /// `list_sql("`p.d.t`")` as the list query was written before the span-family table.
+    const LIST_SQL_BEFORE: &str = r#"WITH t AS (
+SELECT trace_id,
+ARRAY_AGG(STRUCT(timestamp, event_type, agent, session_id,
+JSON_VALUE(attributes, '$.model') AS model,
+JSON_VALUE(content, '$.tool') AS tool)
+ORDER BY IF(REGEXP_CONTAINS(event_type,
+r'^(USER_MESSAGE_RECEIVED|INVOCATION_|AGENT_|LLM_|TOOL_)'), 0, 1),
+timestamp, event_type LIMIT 1)[OFFSET(0)] AS root,
+MIN(timestamp) AS first_ts,
+MAX(timestamp) AS last_ts
+FROM `p.d.t`
+WHERE timestamp >= TIMESTAMP_SUB(@start, INTERVAL 1 DAY)
+AND timestamp < TIMESTAMP_ADD(@end, INTERVAL 1 HOUR)
+AND trace_id IS NOT NULL AND trace_id != ''
+AND REGEXP_CONTAINS(trace_id, r'^[0-9a-fA-F]{32}$')
+GROUP BY trace_id),
+r AS (
+SELECT trace_id, first_ts, last_ts, root.event_type AS event_type, root.agent AS agent,
+root.session_id AS session_id, root.model AS model, root.tool AS tool,
+CASE WHEN root.event_type = 'USER_MESSAGE_RECEIVED' OR STARTS_WITH(root.event_type, 'INVOCATION_') THEN 'invocation' WHEN STARTS_WITH(root.event_type, 'AGENT_') THEN IF(IFNULL(root.agent, '') = '', 'invoke_agent', CONCAT('invoke_agent ', root.agent)) WHEN STARTS_WITH(root.event_type, 'LLM_') THEN IF(IFNULL(root.model, '') = '', 'call_llm', CONCAT('call_llm ', root.model)) WHEN STARTS_WITH(root.event_type, 'TOOL_') THEN IF(IFNULL(root.tool, '') = '', 'execute_tool', CONCAT('execute_tool ', root.tool)) ELSE LOWER(root.event_type) END AS root_name
+FROM t)
+SELECT trace_id, first_ts AS start, last_ts, event_type, agent, session_id, model, tool
+FROM r
+WHERE first_ts >= @start AND first_ts < @end
+AND (@agent IS NULL OR agent = @agent)
+AND (@session IS NULL OR session_id = @session)
+AND (@name IS NULL OR STARTS_WITH(root_name, @name))
+ORDER BY start DESC, trace_id
+LIMIT @limit OFFSET @offset"#;
+
+    /// The list query is byte-for-byte the one before the span-family table.
+    #[test]
+    fn the_list_sql_is_unchanged() {
+        assert_eq!(list_sql("`p.d.t`"), LIST_SQL_BEFORE);
+    }
+
+    /// The SQL the span-family table generates is the hand-written `ROOT_NAME_SQL` and root-order
+    /// regex the list query used before the table existed.
+    #[test]
+    fn the_generated_sql_matches_the_span_name_rules() {
+        let want = "CASE \
+  WHEN root.event_type = 'USER_MESSAGE_RECEIVED' OR STARTS_WITH(root.event_type, 'INVOCATION_') THEN 'invocation' \
+  WHEN STARTS_WITH(root.event_type, 'AGENT_') THEN IF(IFNULL(root.agent, '') = '', 'invoke_agent', CONCAT('invoke_agent ', root.agent)) \
+  WHEN STARTS_WITH(root.event_type, 'LLM_') THEN IF(IFNULL(root.model, '') = '', 'call_llm', CONCAT('call_llm ', root.model)) \
+  WHEN STARTS_WITH(root.event_type, 'TOOL_') THEN IF(IFNULL(root.tool, '') = '', 'execute_tool', CONCAT('execute_tool ', root.tool)) \
+  ELSE LOWER(root.event_type) END";
+        assert_eq!(root_name_sql(), want);
+        assert_eq!(
+            root_order_regex(),
+            "^(USER_MESSAGE_RECEIVED|INVOCATION_|AGENT_|LLM_|TOOL_)"
+        );
+    }
 
     const QUERIES: &str =
         "https://bigquery.googleapis.com/bigquery/v2/projects/billing-proj/queries";

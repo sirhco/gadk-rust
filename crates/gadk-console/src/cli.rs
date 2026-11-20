@@ -125,7 +125,7 @@ mod tests {
 
     use super::{parse_args, parse_cli};
     use crate::traces::BigQueryTable;
-    use crate::{Cli, ConsoleConfig, TracesFrom};
+    use crate::{Cli, ConsoleConfig, DEFAULT_MAX_BYTES, TracesFrom};
 
     #[test]
     fn defaults() {
@@ -211,7 +211,7 @@ mod tests {
             cli.traces,
             Some(TracesFrom::bigquery(
                 BigQueryTable::new("example.com:proj-1", "agent_analytics", "agent_events"),
-                1_073_741_824
+                DEFAULT_MAX_BYTES
             ))
         );
         let cli = parse_cli([

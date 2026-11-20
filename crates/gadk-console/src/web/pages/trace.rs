@@ -109,7 +109,6 @@ fn span_row(row: &SpanRow, has_children: bool) -> Markup {
     }
 }
 
-/// Log entries grouped under their span (tree order), then the unattached ones.
 /// `n` with a comma between each group of three digits ("1,000").
 fn thousands(n: usize) -> String {
     let digits = n.to_string();
@@ -123,6 +122,7 @@ fn thousands(n: usize) -> String {
     out
 }
 
+/// Log entries grouped under their span (tree order), then the unattached ones.
 fn log_sections(rows: &[SpanRow], view: &LogView) -> Markup {
     let a = &view.attached;
     html! {
