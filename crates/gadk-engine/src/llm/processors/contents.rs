@@ -404,14 +404,14 @@ pub(crate) fn drop_orphaned_function_calls(events: Vec<Event>) -> Vec<Event> {
     result
 }
 
-/// An id set formatted as `map[a:{} b:{}]`, ids sorted (the form used in error messages).
-fn go_id_set(ids: &BTreeSet<String>) -> String {
+/// An id set formatted as `[a, b]`, ids sorted (the form used in error messages).
+fn id_list(ids: &BTreeSet<String>) -> String {
     format!(
-        "map[{}]",
+        "[{}]",
         ids.iter()
-            .map(|i| format!("{i}:{{}}"))
+            .map(String::as_str)
             .collect::<Vec<_>>()
-            .join(" ")
+            .join(", ")
     )
 }
 
@@ -452,8 +452,8 @@ pub(crate) fn rearrange_events_for_latest_function_response(
         if !response_ids.is_subset(&all_call_ids) {
             return Err(AgentError::other(format!(
                 "validation failed: last response event has IDs not in the matching call event. Call IDs: {}, Response IDs: {}",
-                go_id_set(&all_call_ids),
-                go_id_set(&response_ids)
+                id_list(&all_call_ids),
+                id_list(&response_ids)
             )));
         }
         response_ids = all_call_ids;
@@ -462,8 +462,8 @@ pub(crate) fn rearrange_events_for_latest_function_response(
     }
     let Some(call_event_idx) = call_event_idx else {
         return Err(AgentError::other(format!(
-            "no function call event found for function responses ids: {}",
-            go_id_set(&response_ids)
+            "no function call event found for function response ids: {}",
+            id_list(&response_ids)
         )));
     };
 
@@ -1234,6 +1234,21 @@ mod tests {
     }
 
     #[test]
+    fn latest_response_with_no_call_event_errors() {
+        let events = vec![
+            ev(AGENT, "model", vec![call("a", "t", json!({}))]),
+            ev("user", "user", vec![text_part("x".into())]),
+            ev(AGENT, "user", vec![response("z", "t"), response("y", "t")]),
+        ];
+        let err =
+            rearrange_events_for_latest_function_response(events, &HashSet::new()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "no function call event found for function response ids: [y, z]"
+        );
+    }
+
+    #[test]
     fn latest_response_without_call_errors() {
         let events = vec![
             ev(AGENT, "model", vec![call("a", "t", json!({}))]),
@@ -1250,7 +1265,7 @@ mod tests {
             rearrange_events_for_latest_function_response(events, &HashSet::new()).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "validation failed: last response event has IDs not in the matching call event. Call IDs: map[b:{} c:{}], Response IDs: map[a:{} b:{}]"
+            "validation failed: last response event has IDs not in the matching call event. Call IDs: [b, c], Response IDs: [a, b]"
         );
     }
 }
