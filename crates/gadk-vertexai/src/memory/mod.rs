@@ -44,6 +44,8 @@ pub mod rag;
 pub use rag::{VertexAiRagMemoryConfig, VertexAiRagMemoryService};
 
 #[cfg(test)]
+mod rag_live_tests;
+#[cfg(test)]
 mod rag_tests;
 
 #[cfg(test)]
