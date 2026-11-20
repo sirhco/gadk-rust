@@ -15,19 +15,24 @@
 
 //! [`VertexAiRagMemoryService`]: a [`MemoryService`] backed by a Vertex AI RAG Engine corpus.
 //!
-//! Each session is stored as one RAG file named `{app_name}.{user_id}.{session_id}`, with `%`
+//! Each session is stored as a RAG file named `{app_name}.{user_id}.{session_id}`, with `%`
 //! and `.` percent-encoded in the app name and user id (`%25`, `%2E`): one JSON line
-//! `{"author", "timestamp", "text"}` per event with text. Adding a session again replaces its
-//! file. A search runs RAG retrieval over the corpus and keeps the lines of the requesting app
-//! and user's files.
+//! `{"author", "timestamp", "text"}` per event with text. Incremental batches
+//! (`gadk_memory::add_events_to_memory`) add one more file with the same name; adding the
+//! session again replaces the session file and all its batches. A search runs RAG retrieval
+//! over the corpus and keeps the lines of the requesting app and user's files.
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use gadk_genai::{Content, ROLE_USER};
-use gadk_memory::{MemoryEntry, MemoryError, MemoryService, SearchRequest, SearchResponse};
+use gadk_memory::{
+    AddEventsRequest, EventAdder, MemoryEntry, MemoryError, MemoryService, SearchRequest,
+    SearchResponse,
+};
 use gadk_model::HttpClient;
 use gadk_platform::env::{EnvProvider, ProcessEnv};
 use gadk_session::{Event, Session, zero_time};
@@ -52,6 +57,7 @@ pub struct VertexAiRagMemoryConfig {
     rag_corpus: String,
     similarity_top_k: Option<u32>,
     vector_distance_threshold: Option<f64>,
+    timeout: Option<Duration>,
     endpoint: Option<String>,
     credentials: Option<Credentials>,
     without_authentication: bool,
@@ -68,6 +74,7 @@ impl VertexAiRagMemoryConfig {
             rag_corpus: rag_corpus.into(),
             similarity_top_k: None,
             vector_distance_threshold: None,
+            timeout: None,
             endpoint: None,
             credentials: None,
             without_authentication: false,
@@ -90,6 +97,16 @@ impl VertexAiRagMemoryConfig {
     #[must_use]
     pub fn with_vector_distance_threshold(mut self, threshold: f64) -> Self {
         self.vector_distance_threshold = Some(threshold);
+        self
+    }
+
+    /// A deadline for each request the service sends — each page of a file list, each delete,
+    /// the upload and the retrieval — after which the request fails with `context deadline
+    /// exceeded`. Unset, or `Duration::ZERO`, means no timeout. Operation polls keep their own
+    /// 10 s deadline per poll.
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = (!timeout.is_zero()).then_some(timeout);
         self
     }
 
@@ -137,6 +154,7 @@ impl std::fmt::Debug for VertexAiRagMemoryConfig {
             .field("rag_corpus", &self.rag_corpus)
             .field("similarity_top_k", &self.similarity_top_k)
             .field("vector_distance_threshold", &self.vector_distance_threshold)
+            .field("timeout", &self.timeout)
             .field("endpoint", &self.endpoint)
             .field("credentials", &self.credentials.is_some())
             .field("without_authentication", &self.without_authentication)
@@ -148,12 +166,13 @@ impl std::fmt::Debug for VertexAiRagMemoryConfig {
 /// A [`MemoryService`] that stores sessions as files of a Vertex AI RAG Engine corpus and
 /// searches them with RAG retrieval.
 ///
-/// Each session becomes one RAG file, `{app_name}.{user_id}.{session_id}` (with `%` and `.`
-/// in the app name and user id percent-encoded as `%25` and `%2E`, so any non-empty id works),
-/// holding one JSON line per event with text; adding the session again replaces the file. Search retrieves
-/// contexts from the whole corpus, then keeps those of the requesting app and user. Indexing is
-/// asynchronous, so a session may not be searchable right after it is added. Incremental event
-/// adds are not supported.
+/// Each session becomes a RAG file, `{app_name}.{user_id}.{session_id}` (with `%` and `.` in
+/// the app name and user id percent-encoded as `%25` and `%2E`, so any non-empty id works),
+/// holding one JSON line per event with text. [`EventAdder::add_events`] uploads each batch as
+/// one more file with that name; adding the session again replaces the session file and all
+/// its batches. Search retrieves contexts from the whole corpus, then keeps those of the
+/// requesting app and user, dropping repeated lines. Indexing is asynchronous, so a session may
+/// not be searchable right after it is added.
 #[non_exhaustive]
 pub struct VertexAiRagMemoryService {
     client: VertexClient,
@@ -194,8 +213,13 @@ impl VertexAiRagMemoryService {
             config.env.as_ref(),
         )
         .map_err(|e| memory_error(wrap("failed to create the RAG memory client", e)))?;
+        let client = VertexClient::new(resolved);
+        let client = match config.timeout {
+            Some(timeout) => client.with_timeout(timeout),
+            None => client,
+        };
         Ok(Self {
-            client: VertexClient::new(resolved),
+            client,
             corpus: config.rag_corpus,
             parent,
             similarity_top_k: config.similarity_top_k,
@@ -229,6 +253,36 @@ impl VertexAiRagMemoryService {
         // RAG Engine operations are polled at `/v1/{name}`; the `/ui/` path the Agent Engine
         // services use answers 404 for them.
         self.client.wait_operation_at(op, "/v1").await.map(|_| ())
+    }
+
+    /// Uploads `file` as a RAG file named `display` (`{display}.txt`, `text/plain`); a reply
+    /// carrying an `error` object is a failure.
+    async fn upload_file(&self, display: &str, file: &str) -> Result<(), MemoryError> {
+        let metadata = json!({
+            "rag_file": {"display_name": display, "description": FILE_DESCRIPTION},
+        });
+        let reply = self
+            .client
+            .upload_multipart(
+                &format!("/v1/{}/ragFiles:upload", self.corpus),
+                ("parent", &self.corpus),
+                &metadata,
+                &format!("{display}.txt"),
+                "text/plain",
+                file.as_bytes(),
+            )
+            .await
+            .map_err(|e| memory_error(wrap("upload rag file failed", e)))?;
+        if let Some(error) = reply.get("error").filter(|e| e.is_object()) {
+            // Without a message, the error object itself is the cause.
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .filter(|m| !m.is_empty())
+                .map_or_else(|| error.to_string(), str::to_owned);
+            return Err(memory_error(wrap("upload rag file failed", message)));
+        }
+        Ok(())
     }
 }
 
@@ -273,31 +327,7 @@ impl MemoryService for VertexAiRagMemoryService {
         if file.is_empty() {
             return Ok(());
         }
-        let metadata = json!({
-            "rag_file": {"display_name": display, "description": FILE_DESCRIPTION},
-        });
-        let reply = self
-            .client
-            .upload_multipart(
-                &format!("/v1/{}/ragFiles:upload", self.corpus),
-                ("parent", &self.corpus),
-                &metadata,
-                &format!("{display}.txt"),
-                "text/plain",
-                file.as_bytes(),
-            )
-            .await
-            .map_err(|e| memory_error(wrap("upload rag file failed", e)))?;
-        if let Some(error) = reply.get("error").filter(|e| e.is_object()) {
-            // Without a message, the error object itself is the cause.
-            let message = error
-                .get("message")
-                .and_then(Value::as_str)
-                .filter(|m| !m.is_empty())
-                .map_or_else(|| error.to_string(), str::to_owned);
-            return Err(memory_error(wrap("upload rag file failed", message)));
-        }
-        Ok(())
+        self.upload_file(&display, &file).await
     }
 
     /// Retrieves contexts for `req.query` from the corpus and returns the lines of the
@@ -344,6 +374,39 @@ impl MemoryService for VertexAiRagMemoryService {
         Ok(SearchResponse {
             memories: memories_from_contexts(&resp, &prefix),
         })
+    }
+
+    /// This service's [`EventAdder`]: each batch becomes one more RAG file named like the
+    /// session's file.
+    fn as_event_adder(&self) -> Option<&dyn EventAdder> {
+        Some(self)
+    }
+}
+
+#[async_trait]
+impl EventAdder for VertexAiRagMemoryService {
+    /// Uploads the batch as one more RAG file named like the session's file,
+    /// `{app}.{user}.{session_id}`, without listing or deleting: earlier files and batches are
+    /// kept, and a later [`add_session_to_memory`](MemoryService::add_session_to_memory) of the
+    /// session replaces them all. A batch with no text sends nothing.
+    ///
+    /// - An empty `session_id` names the file `{app}.{user}.`, the same name as a session whose
+    ///   id is `""`, so a full add of such a session replaces these batches too.
+    /// - Events that repeat an ID already stored are uploaded again; search drops repeated
+    ///   (author, timestamp, text) lines, so each is returned once.
+    /// - `custom_metadata` is ignored.
+    ///
+    /// # Errors
+    ///
+    /// [`MemoryError::InvalidRequest`] when the app name or user id is empty (nothing is sent);
+    /// [`MemoryError::Backend`]: `upload rag file failed: …`.
+    async fn add_events(&self, req: AddEventsRequest) -> Result<(), MemoryError> {
+        let display = display_name(&req.app_name, &req.user_id, &req.session_id)?;
+        let file = session_file(&req.events);
+        if file.is_empty() {
+            return Ok(());
+        }
+        self.upload_file(&display, &file).await
     }
 }
 

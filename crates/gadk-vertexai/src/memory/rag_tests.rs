@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
@@ -189,6 +190,7 @@ fn config_debug_redacts_credentials_and_client() {
     let config = VertexAiRagMemoryConfig::new(CORPUS)
         .with_similarity_top_k(7)
         .with_vector_distance_threshold(0.25)
+        .with_timeout(Duration::from_secs(2))
         .with_endpoint("http://127.0.0.1:1")
         .with_credentials(bearer_credentials("secret-token"))
         .without_authentication()
@@ -198,9 +200,9 @@ fn config_debug_redacts_credentials_and_client() {
     assert_eq!(
         text,
         "VertexAiRagMemoryConfig { rag_corpus: \"projects/p/locations/us-central1/ragCorpora/c\", \
-         similarity_top_k: Some(7), vector_distance_threshold: Some(0.25), endpoint: \
-         Some(\"http://127.0.0.1:1\"), credentials: true, without_authentication: true, \
-         http_client: true, .. }"
+         similarity_top_k: Some(7), vector_distance_threshold: Some(0.25), timeout: Some(2s), \
+         endpoint: Some(\"http://127.0.0.1:1\"), credentials: true, without_authentication: \
+         true, http_client: true, .. }"
     );
     assert!(!text.contains("secret-token"));
 }
@@ -346,8 +348,9 @@ async fn add_session_lists_then_uploads_a_new_file() {
     assert_upload(&reqs[1], "app.u1.s1", TEXT_FILE);
 }
 
-/// Every page is listed; each file with the session's display name is deleted and its
-/// operation waited for, in list order, before the upload.
+/// Every page is listed; each file with the session's display name — the session file and
+/// any batch files `add_events_to_memory` added — is deleted and its operation waited for, in
+/// list order, before the upload.
 #[tokio::test]
 async fn add_session_replaces_earlier_files_on_every_page() {
     let server = FakeServer::start(|req: &RecordedRequest| {
@@ -877,13 +880,176 @@ async fn failures_carry_their_step_in_the_error_chain() {
 
 // ---- R9 ----
 
+/// A zero or unset timeout is no timeout.
+#[test]
+fn a_zero_or_unset_timeout_is_none() {
+    for config in [
+        VertexAiRagMemoryConfig::new(CORPUS),
+        VertexAiRagMemoryConfig::new(CORPUS).with_timeout(Duration::ZERO),
+    ] {
+        let text = format!("{config:?}");
+        assert!(
+            text.contains("vector_distance_threshold: None, timeout: None, endpoint: None"),
+            "{text}"
+        );
+    }
+}
+
+/// The event behind [`TEXT_FILE`].
+fn hello_event() -> Event {
+    event(
+        "user",
+        at(1_700_000_000, 500_000_000),
+        vec![Part::from_text("hello")],
+    )
+}
+
+/// An `add_events` request for `app`/`user`/`session` holding `events`.
+fn events_request(app: &str, user: &str, session: &str, events: Vec<Event>) -> AddEventsRequest {
+    AddEventsRequest {
+        app_name: app.into(),
+        user_id: user.into(),
+        session_id: session.into(),
+        events,
+        custom_metadata: Map::new(),
+    }
+}
+
+/// `add_events_to_memory` reaches the service's `EventAdder`: a batch with text is one
+/// multipart upload named like the session's file, with no list or delete (an existing file
+/// with that name is kept).
 #[tokio::test]
-async fn adding_events_is_unsupported() {
-    let server = FakeServer::json("{}");
+async fn adding_events_uploads_one_file_without_listing() {
+    let server = rag_server(json!([file("1", "app.u1.s1")]), json!({"ragFile": {}}));
     let svc = service(config(&server.url()));
-    let err = add_events_to_memory(&svc, AddEventsRequest::default())
+    assert!(svc.as_event_adder().is_some());
+    add_events_to_memory(&svc, events_request("app", "u1", "s1", vec![hello_event()]))
+        .await
+        .unwrap();
+    assert_eq!(
+        lines(&server),
+        vec![format!("POST /upload/v1/{CORPUS}/ragFiles:upload")]
+    );
+    assert_upload(&server.requests()[0], "app.u1.s1", TEXT_FILE);
+}
+
+/// A batch without text (thought-only, or no events) sends nothing.
+#[tokio::test]
+async fn adding_events_without_text_sends_nothing() {
+    let server = rag_server(json!([]), json!({}));
+    let svc = service(config(&server.url()));
+    let thinking = vec![event("user", at(1, 0), vec![thought("hmm")])];
+    add_events_to_memory(&svc, events_request("app", "u1", "s1", thinking))
+        .await
+        .unwrap();
+    add_events_to_memory(&svc, events_request("app", "u1", "s1", vec![]))
+        .await
+        .unwrap();
+    assert_eq!(server.hits(), 0);
+}
+
+/// An empty session id names the file `{app}.{user}.`; app and user are encoded as for
+/// sessions; `custom_metadata` is ignored (the upload is the same).
+#[tokio::test]
+async fn adding_events_names_the_file_like_a_session() {
+    let server = rag_server(json!([]), json!({"ragFile": {}}));
+    let svc = service(config(&server.url()));
+    let mut req = events_request("app", "u1", "", vec![hello_event()]);
+    req.custom_metadata.insert("k".into(), json!("v"));
+    add_events_to_memory(&svc, req).await.unwrap();
+    add_events_to_memory(
+        &svc,
+        events_request("my.app", "alice@example.com", "s.1", vec![hello_event()]),
+    )
+    .await
+    .unwrap();
+    let reqs = server.requests();
+    assert_eq!(reqs.len(), 2);
+    assert_upload(&reqs[0], "app.u1.", TEXT_FILE);
+    assert_upload(&reqs[1], "my%2Eapp.alice@example%2Ecom.s.1", TEXT_FILE);
+}
+
+#[tokio::test]
+async fn adding_events_rejects_empty_app_and_user_ids() {
+    let server = rag_server(json!([]), json!({}));
+    let svc = service(config(&server.url()));
+    for (app, user) in [("", "u1"), ("app", "")] {
+        let err = add_events_to_memory(&svc, events_request(app, user, "s1", vec![hello_event()]))
+            .await
+            .unwrap_err();
+        match err {
+            MemoryError::InvalidRequest(text) => assert_eq!(
+                text,
+                format!(
+                    "invalid RAG memory scope: app name {app:?} and user id {user:?} must be \
+                     non-empty"
+                )
+            ),
+            other => panic!("{app}/{user}: want InvalidRequest, got {other:?}"),
+        }
+    }
+    assert_eq!(server.hits(), 0);
+}
+
+#[tokio::test]
+async fn adding_events_reports_upload_failures() {
+    let server = FakeServer::always(google_error(400, "INVALID_ARGUMENT", "bad"));
+    let err = add_events_to_memory(
+        &service(config(&server.url())),
+        events_request("app", "u1", "s1", vec![hello_event()]),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        backend_text(&err),
+        "upload rag file failed: rpc error: code = InvalidArgument desc = bad"
+    );
+
+    let server = rag_server(
+        json!([]),
+        json!({"error": {"code": 3, "message": "bad file"}}),
+    );
+    let err = add_events_to_memory(
+        &service(config(&server.url())),
+        events_request("app", "u1", "s1", vec![hello_event()]),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(backend_text(&err), "upload rag file failed: bad file");
+}
+
+/// With `with_timeout`, a slower reply fails the request through the usual chains.
+#[tokio::test]
+async fn a_timeout_fails_slow_requests() {
+    let slow = || {
+        FakeServer::always(
+            FakeResponse::json(r#"{"ragFile":{}}"#).delay_headers(Duration::from_secs(2)),
+        )
+    };
+    let timeout = Duration::from_millis(200);
+
+    let server = slow();
+    let svc = service(config(&server.url()).with_timeout(timeout));
+    let err = add_events_to_memory(&svc, events_request("app", "u1", "s1", vec![hello_event()]))
         .await
         .unwrap_err();
-    assert!(matches!(err, MemoryError::AddEventsUnsupported), "{err:?}");
-    assert_eq!(server.hits(), 0);
+    assert_eq!(
+        backend_text(&err),
+        "upload rag file failed: context deadline exceeded"
+    );
+
+    let server = slow();
+    let svc = service(config(&server.url()).with_timeout(timeout));
+    let err = svc
+        .search_memory(SearchRequest {
+            query: "q".into(),
+            user_id: "u1".into(),
+            app_name: "app".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(
+        backend_text(&err),
+        "retrieve contexts failed: context deadline exceeded"
+    );
 }

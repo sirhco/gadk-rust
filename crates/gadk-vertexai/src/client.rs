@@ -195,8 +195,6 @@ impl VertexClient {
     /// (`CallTimeout::PerAttempt`; this client never retries, so it bounds the request): a
     /// slower request fails with `context deadline exceeded`. Operation polls keep their own
     /// 10 s deadline.
-    // Used by the RAG memory service (next task).
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
