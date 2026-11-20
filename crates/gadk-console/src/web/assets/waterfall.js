@@ -5,9 +5,6 @@
 (function () {
   "use strict";
 
-  /* Payload texts longer than this render collapsed (same limit as the server). */
-  var PAYLOAD_LIMIT = 4096;
-
   function depthOf(row) {
     return Number(row.getAttribute("data-depth")) || 0;
   }
@@ -86,21 +83,6 @@
     }
   }
 
-  /* The same collapsed markup the server renders for long payloads. */
-  function payload(text) {
-    if (text.length <= PAYLOAD_LIMIT) {
-      return make("pre", "payload", text);
-    }
-    var box = make("div", "payload collapsed");
-    box.setAttribute("data-full", "");
-    box.appendChild(make("pre", "preview", text.slice(0, PAYLOAD_LIMIT) + "…"));
-    var button = make("button", "expand", "expand (" + text.length + " chars)");
-    button.type = "button";
-    box.appendChild(button);
-    box.appendChild(make("pre", "full", text));
-    return box;
-  }
-
   function showSpan(data, id) {
     var pane = document.getElementById("span-detail");
     if (!pane || !data || !Array.isArray(data.spans)) {
@@ -134,17 +116,13 @@
     });
     pane.appendChild(dl);
 
-    var entries = (data.logs && data.logs[id]) || [];
+    /* The span's log entries: copies of the server-rendered ones under #logs-<id>, so the
+       page carries each payload once. */
+    var section = document.getElementById("logs-" + id);
+    var entries = section ? Array.prototype.slice.call(section.querySelectorAll(".log-entry")) : [];
     pane.appendChild(make("h3", null, entries.length === 1 ? "1 log entry" : entries.length + " log entries"));
     entries.forEach(function (entry) {
-      var box = make("div", "log-entry");
-      var meta = [entry.timestamp, entry.severity, entry.event].filter(Boolean).join(" · ");
-      box.appendChild(make("div", "meta", meta));
-      (entry.parts || []).forEach(function (part) {
-        box.appendChild(make("div", "meta", part.label));
-        box.appendChild(payload(String(part.text)));
-      });
-      pane.appendChild(box);
+      pane.appendChild(entry.cloneNode(true));
     });
   }
 

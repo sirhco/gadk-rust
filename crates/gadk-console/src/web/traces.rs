@@ -245,6 +245,15 @@ mod tests {
         &page[start..start + len]
     }
 
+    /// The `<section id="<id>">…</section>` of a page.
+    fn section<'a>(page: &'a str, id: &str) -> &'a str {
+        let start = page
+            .find(&format!(r#"<section class="span-logs" id="{id}">"#))
+            .unwrap_or_else(|| panic!("section {id}: {page}"));
+        let len = page[start..].find("</section>").expect("closing tag");
+        &page[start..start + len]
+    }
+
     // ---- /traces ----
 
     #[tokio::test]
@@ -395,7 +404,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn json_block_holds_labels_and_attached_entries() {
+    async fn json_block_holds_labels_and_entries_render_once_under_their_span() {
         let d = detail(
             600,
             logs(
@@ -414,23 +423,29 @@ mod tests {
         assert_eq!(spans[1]["labels"]["prompt.name"], "greet");
         assert_eq!(spans[1]["labels"]["prompt.version"], "3");
         assert_eq!(spans[0]["labels"]["gen_ai.agent.name"], "weather_bot");
-        let attached = data["logs"][PROMPT].as_array().unwrap();
-        assert_eq!(attached.len(), 1);
-        assert_eq!(attached[0]["event"], "gen_ai.user.message");
-        assert_eq!(attached[0]["severity"], "INFO");
-        assert_eq!(
-            attached[0]["parts"][0],
-            json!({"label": "body", "text": "hello"})
-        );
-        assert_eq!(attached[0]["parts"][1]["label"], "attributes");
-        assert_eq!(data["unattached"][0]["parts"][0]["text"], "stray");
-        assert!(data["logs"].get(ROOT).is_none());
-        // Server-rendered too, under the span's heading and under "Unattached".
+        // Log entries live only in the server-rendered sections (the span pane clones them).
         assert!(
-            body.contains("<pre class=\"payload\">hello</pre>"),
-            "{body}"
+            data.get("logs").is_none() && data.get("unattached").is_none(),
+            "{data}"
         );
-        assert!(body.contains("Unattached"), "{body}");
+        let attached = section(&body, &format!("logs-{PROMPT}"));
+        assert!(attached.contains("gen_ai.user.message"), "{attached}");
+        assert!(attached.contains("INFO"), "{attached}");
+        assert!(
+            attached.contains("<pre class=\"payload\">hello</pre>"),
+            "{attached}"
+        );
+        assert!(
+            attached.contains(r#"<div class="meta">attributes</div>"#),
+            "{attached}"
+        );
+        let unattached = section(&body, "logs-unattached");
+        assert!(
+            unattached.contains("Unattached") && unattached.contains("stray"),
+            "{unattached}"
+        );
+        assert!(!body.contains(&format!("logs-{ROOT}")), "{body}");
+        assert_eq!(body.matches("hello").count(), 1, "{body}");
     }
 
     #[tokio::test]
@@ -528,7 +543,7 @@ mod tests {
         }
         let data: Value = serde_json::from_str(json_block(&body)).unwrap();
         assert_eq!(data["spans"].as_array().unwrap().len(), 3);
-        assert_eq!(data["logs"], json!({}));
+        assert!(data.get("logs").is_none(), "{data}");
     }
 
     #[tokio::test]
@@ -547,6 +562,11 @@ mod tests {
             "{body}"
         );
         assert!(body.contains(&full), "the full text is in the page");
+        assert_eq!(
+            body.matches(&long).count(),
+            1,
+            "the full text is in the page once"
+        );
 
         let exact = "c".repeat(4096);
         let (_, body) = trace_page(detail(600, logs(vec![entry(Some(ROOT), &exact)], false))).await;
@@ -608,7 +628,6 @@ mod tests {
         let data: Value = serde_json::from_str(block).expect("the block is whole JSON");
         assert_eq!(data["spans"][0]["name"], evil);
         assert_eq!(data["spans"][0]["labels"]["note"], evil);
-        assert_eq!(data["logs"][ROOT][0]["parts"][0]["text"], evil);
         assert!(
             body.contains("&lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt;"),
             "{body}"

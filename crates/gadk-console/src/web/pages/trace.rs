@@ -16,7 +16,7 @@
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use maud::{Markup, PreEscaped, html};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use super::error::banner;
 use super::layout::{Nav, page};
@@ -76,7 +76,7 @@ pub(crate) fn render(
             (log_sections(rows, view))
         }
         script type="application/json" id="trace-data" {
-            (PreEscaped(script_json(&data(id, rows, logs))))
+            (PreEscaped(script_json(&data(id, rows))))
         }
     };
     page(&format!("Trace {}", id.as_str()), Nav::Traces, body)
@@ -192,22 +192,10 @@ fn entry_parts(payload: &Value) -> Vec<(&'static str, String)> {
     parts
 }
 
-fn entry_json(e: &LogEntry) -> Value {
-    let parts: Vec<Value> = entry_parts(&e.payload)
-        .into_iter()
-        .map(|(label, text)| json!({ "label": label, "text": text }))
-        .collect();
-    json!({
-        "timestamp": millis(e.timestamp),
-        "severity": e.severity,
-        "event": event_name(&e.payload),
-        "parts": parts,
-    })
-}
-
-/// `{"trace_id", "spans": [{id, parent, name, depth, start, duration_ms, labels}],
-/// "logs": {span_id: [entry]}, "unattached": [entry]}` for `waterfall.js`.
-fn data(id: &TraceId, rows: &[SpanRow], logs: &Result<LogView, SourceError>) -> Value {
+/// `{"trace_id", "spans": [{id, parent, name, depth, start, duration_ms, labels}]}` for
+/// `waterfall.js`. Log entries are not repeated here: the span pane clones the server-rendered
+/// entries under `#logs-<span id>`, so each payload is in the page once.
+fn data(id: &TraceId, rows: &[SpanRow]) -> Value {
     let spans: Vec<Value> = rows
         .iter()
         .map(|r| {
@@ -222,22 +210,9 @@ fn data(id: &TraceId, rows: &[SpanRow], logs: &Result<LogView, SourceError>) -> 
             })
         })
         .collect();
-    let (by_span, unattached) = match logs {
-        Ok(view) => (
-            view.attached
-                .by_span
-                .iter()
-                .map(|(span, entries)| (span.clone(), entries.iter().map(entry_json).collect()))
-                .collect::<Map<String, Value>>(),
-            view.attached.unattached.iter().map(entry_json).collect(),
-        ),
-        Err(_) => (Map::new(), Vec::new()),
-    };
     json!({
         "trace_id": id.as_str(),
         "spans": spans,
-        "logs": by_span,
-        "unattached": unattached,
     })
 }
 
