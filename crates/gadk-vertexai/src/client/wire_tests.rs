@@ -507,3 +507,137 @@ fn backoff_pauses_are_full_jitter_up_to_the_doubling_bound() {
         bound = (bound * 2).min(POLL_RETRY_MAX);
     }
 }
+
+/// The RAG upload path the multipart tests use (unescaped, as callers pass it).
+const UPLOAD_PATH: &str = "/v1/projects/p/locations/l/ragCorpora/c/ragFiles:upload";
+/// The corpus named in the routing header.
+const UPLOAD_CORPUS: &str = "projects/p/locations/l/ragCorpora/c";
+
+/// The multipart body: a JSON `metadata` part, then a `file` part, CRLF-delimited.
+#[test]
+fn multipart_body_has_a_metadata_part_and_a_file_part() {
+    let body = multipart_body(
+        "b0",
+        &json!({"k": "v"}),
+        "f.txt",
+        "text/plain",
+        b"line1\nline2",
+    )
+    .unwrap();
+    assert_eq!(
+        String::from_utf8(body).unwrap(),
+        "--b0\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: \
+         application/json\r\n\r\n{\"k\":\"v\"}\r\n--b0\r\nContent-Disposition: form-data; \
+         name=\"file\"; filename=\"f.txt\"\r\nContent-Type: text/plain\r\n\r\nline1\nline2\r\n\
+         --b0--\r\n"
+    );
+}
+
+/// `"`, CR and LF in the file name are percent-encoded so the part header stays intact.
+#[test]
+fn multipart_body_escapes_quotes_and_line_breaks_in_the_file_name() {
+    let body = multipart_body("b0", &json!({}), "a\"b\r\nc.txt", "text/plain", b"").unwrap();
+    let body = String::from_utf8(body).unwrap();
+    assert!(body.contains("filename=\"a%22b%0D%0Ac.txt\""), "{body}");
+}
+
+/// The upload: POST `{origin}/upload/v1/…`, no query, multipart content type with a
+/// `gadk-` + 32 lowercase hex boundary, `X-Goog-Upload-Protocol: multipart`, routing,
+/// User-Agent and credentials like `call`; the reply is the JSON body.
+#[tokio::test]
+async fn upload_multipart_posts_the_parts_with_the_upload_headers() {
+    let server = FakeServer::json(r#"{"ragFile":{"name":"f1"}}"#);
+    let client = client_at(&server.url(), Some(bearer_credentials("test-token")));
+    let metadata = json!({"rag_file": {"display_name": "d"}});
+    let reply = client
+        .upload_multipart(
+            UPLOAD_PATH,
+            ("parent", UPLOAD_CORPUS),
+            &metadata,
+            "d.txt",
+            "text/plain",
+            b"hello",
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply, json!({"ragFile": {"name": "f1"}}));
+    let req = server.last_request();
+    assert_eq!(req.method, "POST");
+    assert_eq!(req.path_and_query(), format!("/upload{UPLOAD_PATH}"));
+    assert_eq!(req.header("x-goog-upload-protocol"), "multipart");
+    assert_eq!(
+        req.header("x-goog-request-params"),
+        "parent=projects%2Fp%2Flocations%2Fl%2FragCorpora%2Fc"
+    );
+    assert_eq!(req.header("user-agent"), gadk_platform::tracking_header());
+    assert_eq!(req.header("authorization"), "Bearer test-token");
+    let content_type = req.header("content-type");
+    let boundary = content_type
+        .strip_prefix("multipart/form-data; boundary=")
+        .unwrap();
+    let hex = boundary.strip_prefix("gadk-").unwrap();
+    assert_eq!(hex.len(), 32, "{boundary}");
+    assert!(
+        hex.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "{boundary}"
+    );
+    let expected = multipart_body(boundary, &metadata, "d.txt", "text/plain", b"hello").unwrap();
+    assert_eq!(req.body.as_ref(), expected.as_slice());
+}
+
+/// The upload replaces the whole path (any endpoint path prefix is dropped), draws a fresh
+/// boundary per call, and sends no credentials when there are none.
+#[tokio::test]
+async fn upload_multipart_uses_the_origin_and_a_fresh_boundary() {
+    let server = FakeServer::json("{}");
+    let client = client_at(&format!("{}/prefix", server.url()), None);
+    for _ in 0..2 {
+        let reply = client
+            .upload_multipart(
+                UPLOAD_PATH,
+                ("parent", UPLOAD_CORPUS),
+                &json!({}),
+                "f",
+                "text/plain",
+                b"x",
+            )
+            .await
+            .unwrap();
+        assert_eq!(reply, json!({}));
+    }
+    let reqs = server.requests();
+    assert_eq!(reqs.len(), 2);
+    assert_eq!(reqs[0].path, format!("/upload{UPLOAD_PATH}"));
+    assert_ne!(
+        reqs[0].header("content-type"),
+        reqs[1].header("content-type")
+    );
+    assert!(reqs[0].headers.get("authorization").is_none());
+}
+
+/// A non-2xx upload reply is a `VertexError`.
+#[tokio::test]
+async fn upload_multipart_maps_an_error_status() {
+    let server = FakeServer::always(FakeResponse::json_status(
+        403,
+        r#"{"error":{"code":403,"message":"denied","status":"PERMISSION_DENIED"}}"#,
+    ));
+    let client = client_at(&server.url(), None);
+    let err = client
+        .upload_multipart(
+            UPLOAD_PATH,
+            ("parent", UPLOAD_CORPUS),
+            &json!({}),
+            "f",
+            "text/plain",
+            b"x",
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(vertex_error(&err).status, 403);
+    assert_eq!(
+        err.to_string(),
+        "rpc error: code = PermissionDenied desc = denied"
+    );
+}
