@@ -86,6 +86,31 @@ The console is for one developer on their own machine:
   processes you run) can read your traces, logs and monitor reports, which may include prompts, completions and
   production user messages, and change prompt labels with your credentials. Don't run it on a shared host.
 
+## BigQuery traces
+
+`--traces bigquery://<project>.<dataset>.<table>` reads traces from the table that the
+`gadk-agentanalytics` plugin writes (`agent_events`) instead of Cloud Trace and Cloud Logging:
+
+    gadk-console --project my-billing-project \
+      --traces bigquery://my-data-project.agent_analytics.agent_events
+
+- Queries run in `--project` (billed there) and need `roles/bigquery.jobUser` there and
+  `roles/bigquery.dataViewer` on the table. The project may be domain-scoped
+  (`example.com:proj`).
+- Every query stops at `--bigquery-max-bytes` bytes billed (default 1,073,741,824 = 1 GiB); a
+  query over the cap fails with a hint to raise it. List queries read the chosen window plus the
+  day before it (a 1h view scans about 25 hours of partitions); opening a trace reads that
+  trace's rows across the whole table.
+- Rows that share a `trace_id` are one trace and rows that share a `span_id` are one span. Span
+  names: `invocation` (user message and invocation rows), `invoke_agent <agent>`,
+  `call_llm <model>`, `execute_tool <tool>`, else the event type in lower case. A span starts at
+  its first row and ends at its last row, or later when `latency_ms.total_ms` says so.
+- Each row is also a log entry of its span (`event.name` = event type, `body` = `content`,
+  `attributes` = `attributes` plus `error_message`); rows with an `ERROR` status or an `_ERROR`
+  event type are severity `ERROR`. Rows without a span id are listed under "Unattached".
+- A trace shows at most 1,000 rows. Paging uses offsets, so rows written while you page can
+  shift the list.
+
 ## Limits
 
 - Trace lists: 50 traces per page (a "Next page" link follows the API's page token).

@@ -12,6 +12,13 @@ the public API.
 - `gadk-telemetry`: structured stdout log lines carry a `message` summary
   (`<event.name>: <body>`, at most 200 characters) when the record has an event name or a string
   body; the README explains flushing at exit (5 s shutdown wait, `OTEL_BLRP_*` tuning).
+- `gadk-console`: `--traces bigquery://<project>.<dataset>.<table>` reads traces from the
+  agent-analytics BigQuery table instead of Cloud Trace and Cloud Logging, with a per-query
+  byte cap (`--bigquery-max-bytes`, default 1 GiB). New public API: `traces::BigQueryTraceSource`,
+  `traces::BigQueryTable`, `Cli`, `TracesFrom`, `parse_cli`, `run_cli`, `bind_with_source`, and
+  the `SourceError::BigQuery` variant.
+- `gadk-bigquery`: `QueryOptions::query_parameters` / `with_query_parameters` send named query
+  parameters.
 
 ### Fixed
 
