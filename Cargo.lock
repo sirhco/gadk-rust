@@ -1535,6 +1535,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "gadk-bigquery"
+version = "0.4.4"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "gadk-agent",
+ "gadk-engine",
+ "gadk-model",
+ "gadk-session",
+ "google-cloud-auth",
+ "http",
+ "reqwest",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "gadk-cli"
 version = "0.4.4"
 dependencies = [
