@@ -14,7 +14,7 @@
 
 //! The `gadk-console` command line.
 
-use clap::{Arg, Command, value_parser};
+use clap::{Arg, ArgMatches, Command, value_parser};
 
 use crate::traces::BigQueryTable;
 use crate::{Cli, ConsoleConfig, DEFAULT_MAX_BYTES, TracesFrom};
@@ -63,14 +63,19 @@ where
     T: Into<std::ffi::OsString> + Clone,
 {
     let m = base_cli().try_get_matches_from(args)?;
+    Ok(config_from(&m))
+}
+
+/// The [`ConsoleConfig`] from matches of `base_cli` (or a command extending it).
+fn config_from(m: &ArgMatches) -> ConsoleConfig {
     let string = |id: &str| m.get_one::<String>(id).cloned();
-    Ok(ConsoleConfig {
+    ConsoleConfig {
         project: string("project").unwrap_or_default(),
         store: string("store"),
         reports: string("reports"),
         port: m.get_one::<u16>("port").copied().unwrap_or(8765),
         log_id: string("log-id").unwrap_or_else(|| "gadk".into()),
-    })
+    }
 }
 
 /// `base_cli` plus the trace-source flags (`parse_cli` only).
@@ -102,14 +107,7 @@ where
     T: Into<std::ffi::OsString> + Clone,
 {
     let m = full_cli().try_get_matches_from(args)?;
-    let string = |id: &str| m.get_one::<String>(id).cloned();
-    let config = ConsoleConfig {
-        project: string("project").unwrap_or_default(),
-        store: string("store"),
-        reports: string("reports"),
-        port: m.get_one::<u16>("port").copied().unwrap_or(8765),
-        log_id: string("log-id").unwrap_or_else(|| "gadk".into()),
-    };
+    let config = config_from(&m);
     let max_bytes = m
         .get_one::<i64>("bigquery-max-bytes")
         .copied()
