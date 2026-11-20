@@ -95,14 +95,21 @@ How it behaves:
   next add. App names and user ids must be non-empty; `%` and `.` in them are
   percent-encoded in the file name (`alice@example.com` → `alice@example%2Ecom`), so any id
   works.
-- Each add lists every file in the corpus to find the session's file, so adds slow down as the
-  corpus grows.
+- Each full add lists every file in the corpus to find the session's files, so full adds slow
+  down as the corpus grows.
 - Indexing is asynchronous: a session may not be searchable for a while after it is added.
 - Search retrieves from the whole corpus, then keeps the requesting app and user's lines, so
   other users' files can take retrieval slots: raise `with_similarity_top_k` for a shared
   corpus. A line split across RAG chunks is skipped. File display names have a length limit,
   so very long ids make the upload fail.
-- Incremental event adds (`add_events_to_memory`) are not supported.
+- `add_events_to_memory` uploads each batch of events as one more file named like the
+  session's file, without listing or deleting, so earlier batches are kept; adding the session
+  again replaces the session file and all its batches. Events repeated across batches are
+  stored again, but search returns each line once. A batch with an empty session id is named
+  `{app}.{user}.`, the same as a session whose id is `""`, so a full add of that session
+  replaces those batches too. `custom_metadata` is ignored.
+- `with_timeout` sets a deadline for each request (each page of a file list, each delete, the
+  upload, the retrieval); by default there is none.
 
 ### Cost and teardown
 

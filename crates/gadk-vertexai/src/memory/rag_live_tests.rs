@@ -21,7 +21,7 @@
 //! `GADK_TEST_VERTEX_RAG_CORPUS=projects/my-project/locations/us-central1/ragCorpora/123
 //! cargo test -p gadk-vertexai memory::rag_live_tests -- --ignored --nocapture`
 //!
-//! The test works as a random user and deletes the RAG file it created, even when an
+//! The test works as a random user and deletes the RAG files it created, even when an
 //! assertion fails. It does not delete the corpus or the project's RAG database; see the
 //! README's "Cost and teardown".
 
@@ -31,7 +31,7 @@ use std::time::Duration;
 use chrono::Utc;
 use futures::FutureExt as _;
 use gadk_genai::{Content, ROLE_USER};
-use gadk_memory::{MemoryService, SearchRequest};
+use gadk_memory::{AddEventsRequest, MemoryService, SearchRequest, add_events_to_memory};
 use gadk_model::LlmResponse;
 use gadk_platform::env::ProcessEnv;
 use gadk_session::Event;
@@ -147,8 +147,55 @@ async fn rag_memory_round_trip() {
     );
 }
 
-/// Adds the session twice (the second add replaces the file), checks one file exists, then
-/// searches every 5 s for at most 120 s until the code word comes back.
+/// A user event with `text`, timestamped now.
+fn text_event(text: &str) -> Event {
+    Event {
+        author: "user".into(),
+        timestamp: Utc::now(),
+        response: LlmResponse {
+            content: Some(Content::from_text(text, ROLE_USER)),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// Searches every 5 s for at most 120 s until a memory's text contains `needle`; a failed
+/// search is logged and retried.
+async fn search_until_found(svc: &VertexAiRagMemoryService, user: &str, query: &str, needle: &str) {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        let found = svc
+            .search_memory(SearchRequest {
+                query: query.into(),
+                user_id: user.into(),
+                app_name: APP.into(),
+            })
+            .await;
+        match found {
+            Ok(found) => {
+                let hit = found.memories.iter().any(|m| {
+                    m.content
+                        .as_ref()
+                        .is_some_and(|c| c.parts.iter().any(|p| p.text.contains(needle)))
+                });
+                if hit {
+                    return;
+                }
+            }
+            Err(e) => eprintln!("search failed ({e}); retrying"),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{needle} was not retrieved within 120 s"
+        );
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+}
+
+/// Adds the session twice (the second add replaces the file) and finds the code word; adds a
+/// batch with a second fact (one more file with the session's name) and finds it; then adds
+/// the session again, which replaces the session file and the batch with one file.
 async fn round_trip(
     svc: &VertexAiRagMemoryService,
     client: &VertexClient,
@@ -158,44 +205,30 @@ async fn round_trip(
     code_word: &str,
 ) {
     let session = VertexSession::new(APP.into(), user.into(), "s1".into(), Map::new(), Utc::now());
-    session.set_events(vec![Event {
-        author: "user".into(),
-        timestamp: Utc::now(),
-        response: LlmResponse {
-            content: Some(Content::from_text(
-                format!("My secret code word is {code_word}."),
-                ROLE_USER,
-            )),
-            ..Default::default()
-        },
-        ..Default::default()
-    }]);
+    session.set_events(vec![text_event(&format!(
+        "My secret code word is {code_word}."
+    ))]);
     svc.add_session_to_memory(&session).await.unwrap();
     svc.add_session_to_memory(&session).await.unwrap();
     assert_eq!(files_named(client, corpus, display).await.unwrap().len(), 1);
+    search_until_found(svc, user, "What is my secret code word?", code_word).await;
 
-    let deadline = Instant::now() + Duration::from_secs(120);
-    loop {
-        let found = svc
-            .search_memory(SearchRequest {
-                query: "What is my secret code word?".into(),
-                user_id: user.into(),
-                app_name: APP.into(),
-            })
-            .await
-            .unwrap();
-        let hit = found.memories.iter().any(|m| {
-            m.content
-                .as_ref()
-                .is_some_and(|c| c.parts.iter().any(|p| p.text.contains(code_word)))
-        });
-        if hit {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the code word was not retrieved within 120 s"
-        );
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    }
+    let color = format!("vermilion{:08x}", rand::random::<u32>());
+    add_events_to_memory(
+        svc,
+        AddEventsRequest {
+            app_name: APP.into(),
+            user_id: user.into(),
+            session_id: "s1".into(),
+            events: vec![text_event(&format!("My favorite color is {color}."))],
+            custom_metadata: Map::new(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(files_named(client, corpus, display).await.unwrap().len(), 2);
+    search_until_found(svc, user, "What is my favorite color?", &color).await;
+
+    svc.add_session_to_memory(&session).await.unwrap();
+    assert_eq!(files_named(client, corpus, display).await.unwrap().len(), 1);
 }
