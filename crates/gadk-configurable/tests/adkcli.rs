@@ -387,19 +387,51 @@ impl Drop for Server {
     }
 }
 
-/// Waits until `127.0.0.1:<port>` accepts a connection; fails when the child exits first.
-fn wait_listening(server: &mut Server, port: u16, logs: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
-        if let Some(status) = server.0.try_wait().unwrap() {
-            panic!(
-                "adkcli exited ({status}) before listening; stderr:\n{}",
-                std::fs::read_to_string(logs.join("stderr")).unwrap_or_default()
-            );
+/// Starts `adkcli web -port <p> api` in `root` and waits until it serves `list-apps` with
+/// `app` in the body; returns the server and its port.
+///
+/// The port comes from [`free_port`], so another process can take it before the child binds.
+/// A child that exits with `address already in use` is retried on a fresh port, and readiness
+/// is an answer from this server's API rather than any connection to the port.
+async fn start_api_server(root: &str, logs: &Path, app: &str) -> (Server, u16) {
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    for _attempt in 0..5 {
+        let port = free_port();
+        let mut server = Server(
+            Command::new(env!("CARGO_BIN_EXE_adkcli"))
+                .args(["web", "-port", &port.to_string(), "api"])
+                .current_dir(root)
+                .env("PWD", root)
+                .env("GOOGLE_API_KEY", "fake-key")
+                .env_remove("GEMINI_API_KEY")
+                .env_remove("GOOGLE_GENAI_USE_VERTEXAI")
+                .stdin(Stdio::null())
+                .stdout(std::fs::File::create(logs.join("stdout")).unwrap())
+                .stderr(std::fs::File::create(logs.join("stderr")).unwrap())
+                .spawn()
+                .unwrap(),
+        );
+        let url = format!("http://127.0.0.1:{port}/api/list-apps");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Some(status) = server.0.try_wait().unwrap() {
+                let stderr = std::fs::read_to_string(logs.join("stderr")).unwrap_or_default();
+                if stderr.contains("address already in use") {
+                    break; // lost the port race: try another port
+                }
+                panic!("adkcli exited ({status}) before listening; stderr:\n{stderr}");
+            }
+            if let Ok(resp) = client.get(&url).send().await
+                && resp.status() == 200
+                && resp.text().await.is_ok_and(|body| body.contains(app))
+            {
+                return (server, port);
+            }
+            assert!(Instant::now() < deadline, "adkcli does not serve {url}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert!(Instant::now() < deadline, "nothing listens on port {port}");
-        std::thread::sleep(Duration::from_millis(20));
     }
+    panic!("adkcli lost the port race 5 times");
 }
 
 /// REST (`adkcli web -port <p> api`) replay of the Go-generated `runner-tools-agent` case: the
@@ -421,22 +453,7 @@ async fn rest_api_replays_a_go_recorded_case() {
     let logs = tmp.path().join("logs");
     std::fs::create_dir_all(&logs).unwrap();
 
-    let port = free_port();
-    let mut server = Server(
-        Command::new(env!("CARGO_BIN_EXE_adkcli"))
-            .args(["web", "-port", &port.to_string(), "api"])
-            .current_dir(&root)
-            .env("PWD", &root)
-            .env("GOOGLE_API_KEY", "fake-key")
-            .env_remove("GEMINI_API_KEY")
-            .env_remove("GOOGLE_GENAI_USE_VERTEXAI")
-            .stdin(Stdio::null())
-            .stdout(std::fs::File::create(logs.join("stdout")).unwrap())
-            .stderr(std::fs::File::create(logs.join("stderr")).unwrap())
-            .spawn()
-            .unwrap(),
-    );
-    wait_listening(&mut server, port, &logs);
+    let (server, port) = start_api_server(&root, &logs, "tools_agent").await;
 
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let base = format!("http://127.0.0.1:{port}/api");
