@@ -84,7 +84,7 @@ pub struct SuiteOptions {
 }
 
 /// Runs every conformance case against a fresh service from `factory`, sequentially, and
-/// panics listing every failure as `sessiontestsuite/<Case/subcase>: <message>`.
+/// panics listing every failure as `session_testsuite/<Case/subcase>: <message>`.
 pub async fn run<F, Fut>(opts: SuiteOptions, factory: F)
 where
     F: Fn() -> Fut,
@@ -94,8 +94,8 @@ where
 }
 
 /// Like [`run`], but passes each case's name to the factory before the case runs. The name is
-/// spelled exactly as the failure lines spell it after `sessiontestsuite/` (`"Create/full_key"`,
-/// `"Get/ok"`, `"Create/when_already_exists,_it_fails"`, `"List"`, …: the case's subtest name
+/// spelled exactly as the failure lines spell it after `session_testsuite/` (`"create/full_key"`,
+/// `"get/ok"`, `"create/when_already_exists,_it_fails"`, `"list"`, …: the case's subtest name
 /// with spaces as `_`), so a backend can, for example, pick the recording made for that case.
 pub async fn run_named<F, Fut>(opts: SuiteOptions, factory: F)
 where
@@ -112,39 +112,39 @@ where
                     t.errors.push(fatal);
                 }
                 for e in t.errors {
-                    failures.push(format!("sessiontestsuite/{}: {}", $name, e));
+                    failures.push(format!("session_testsuite/{}: {}", $name, e));
                 }
             )*
             failures
         }};
     }
     let failures = cases! {
-        "Create/full_key" => create_full_key,
-        "Create/generated_session_id" => create_generated_session_id,
-        "Create/when_already_exists,_it_fails" => create_when_already_exists_it_fails,
-        "Get/ok" => get_ok,
-        "Get/error_when_not_found" => get_error_when_not_found,
-        "Get/get_session_respects_user_id" => get_session_respects_user_id,
-        "Get/with_config_filters" => get_with_config_filters,
-        "List" => list,
-        "Delete" => delete,
+        "create/full_key" => create_full_key,
+        "create/generated_session_id" => create_generated_session_id,
+        "create/when_already_exists,_it_fails" => create_when_already_exists_it_fails,
+        "get/ok" => get_ok,
+        "get/error_when_not_found" => get_error_when_not_found,
+        "get/get_session_respects_user_id" => get_session_respects_user_id,
+        "get/with_config_filters" => get_with_config_filters,
+        "list" => list,
+        "delete" => delete,
         "delete_session_respects_user_id" => delete_session_respects_user_id,
-        "AppendEvent/when_session_not_found_should_fail" => append_event_when_session_not_found_should_fail,
-        "AppendEvent/when_session_deleted_returns_ErrNotFound" => append_event_when_session_deleted_returns_err_not_found,
-        "AppendEvent/ok" => append_event_ok,
-        "AppendEvent/compaction_record_round_trips" => append_event_compaction_record_round_trips,
-        "AppendEvent/requested_auth_configs_round_trip" => append_event_requested_auth_configs_round_trip,
-        "AppendEvent/requested_auth_config_that_does_not_decode_is_refused" => append_event_requested_auth_config_that_does_not_decode_is_refused,
-        "AppendEvent/a_hole_still_names_its_event_after_a_round_trip" => append_event_a_hole_still_names_its_event_after_a_round_trip,
-        "AppendEvent/a_missing_event_id_is_assigned" => append_event_a_missing_event_id_is_assigned,
-        "AppendEvent/partial_events_are_not_persisted" => append_event_partial_events_are_not_persisted,
-        "AppendEvent/with_bytes_content" => append_event_with_bytes_content,
-        "AppendEvent/with_existing_events" => append_event_with_existing_events,
-        "AppendEvent/with_all_fields" => append_event_with_all_fields,
-        "StateManagement/app_state_is_shared" => state_management_app_state_is_shared,
-        "StateManagement/user_state_is_user_specific" => state_management_user_state_is_user_specific,
-        "StateManagement/session_state_is_not_shared" => state_management_session_state_is_not_shared,
-        "StateManagement/temp_state_is_not_persisted" => state_management_temp_state_is_not_persisted,
+        "append_event/when_session_not_found_should_fail" => append_event_when_session_not_found_should_fail,
+        "append_event/when_session_deleted_returns_not_found" => append_event_when_session_deleted_returns_err_not_found,
+        "append_event/ok" => append_event_ok,
+        "append_event/compaction_record_round_trips" => append_event_compaction_record_round_trips,
+        "append_event/requested_auth_configs_round_trip" => append_event_requested_auth_configs_round_trip,
+        "append_event/requested_auth_config_that_does_not_decode_is_refused" => append_event_requested_auth_config_that_does_not_decode_is_refused,
+        "append_event/a_hole_still_names_its_event_after_a_round_trip" => append_event_a_hole_still_names_its_event_after_a_round_trip,
+        "append_event/a_missing_event_id_is_assigned" => append_event_a_missing_event_id_is_assigned,
+        "append_event/partial_events_are_not_persisted" => append_event_partial_events_are_not_persisted,
+        "append_event/with_bytes_content" => append_event_with_bytes_content,
+        "append_event/with_existing_events" => append_event_with_existing_events,
+        "append_event/with_all_fields" => append_event_with_all_fields,
+        "state_management/app_state_is_shared" => state_management_app_state_is_shared,
+        "state_management/user_state_is_user_specific" => state_management_user_state_is_user_specific,
+        "state_management/session_state_is_not_shared" => state_management_session_state_is_not_shared,
+        "state_management/temp_state_is_not_persisted" => state_management_temp_state_is_not_persisted,
     };
     if !failures.is_empty() {
         panic!("{}", failures.join("\n"));
@@ -238,30 +238,30 @@ async fn create_full_key(t: &mut T, s: Arc<dyn SessionService>, opts: &SuiteOpti
     };
     let got = s.create(req.clone()).await;
     if opts.supports_user_provided_session_id {
-        let got = got.map_err(|e| format!("Create() error = {e}, wantErr false"))?;
+        let got = got.map_err(|e| format!("create() error = {e}, want Ok"))?;
         if got.app_name() != req.app_name {
             t.errorf(format!(
-                "AppName got: {}, want: {}",
+                "app_name got: {}, want: {}",
                 got.app_name(),
                 req.app_name
             ));
         }
         if got.user_id() != req.user_id {
             t.errorf(format!(
-                "UserID got: {}, want: {}",
+                "user_id got: {}, want: {}",
                 got.user_id(),
                 req.user_id
             ));
         }
         if Some(got.id()) != req.session_id.as_deref() {
             t.errorf(format!(
-                "SessionID got: {}, want: {:?}",
+                "session_id got: {}, want: {:?}",
                 got.id(),
                 req.session_id
             ));
         }
     } else if got.is_ok() {
-        return Err("Expected error for user-provided SessionID".into());
+        return Err("Expected error for user-provided session_id".into());
     }
     Ok(())
 }
@@ -278,9 +278,9 @@ async fn create_generated_session_id(
             ..create_req(&app, "testUserID")
         })
         .await
-        .map_err(|e| format!("Create() error = {e}"))?;
+        .map_err(|e| format!("create() error = {e}"))?;
     if got.id().is_empty() {
-        t.errorf("Expected generated SessionID, got empty");
+        t.errorf("Expected generated session_id, got empty");
     }
     Ok(())
 }
@@ -294,7 +294,7 @@ async fn create_when_already_exists_it_fails(
     let got1 = s
         .create(create_req(&app, "testUserID"))
         .await
-        .map_err(|e| format!("First Create() failed: {e}"))?;
+        .map_err(|e| format!("First create() failed: {e}"))?;
     let req2 = CreateRequest {
         session_id: Some(got1.id().to_string()),
         ..create_req(&app, "testUserID")
@@ -321,27 +321,27 @@ async fn get_ok(t: &mut T, s: Arc<dyn SessionService>, opts: &SuiteOptions) -> O
     let created = s
         .create(req.clone())
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
     let got = s
         .get(get_req(&req.app_name, &req.user_id, created.id()))
         .await
-        .map_err(|e| format!("Get() error = {e}"))?;
+        .map_err(|e| format!("get() error = {e}"))?;
     let snap = snapshot(got.as_ref());
     if snap.app_name != req.app_name {
         t.errorf(format!(
-            "Get AppName = {}, want {}",
+            "get app_name = {}, want {}",
             snap.app_name, req.app_name
         ));
     }
     if snap.user_id != req.user_id {
         t.errorf(format!(
-            "Get UserID = {}, want {}",
+            "get user_id = {}, want {}",
             snap.user_id, req.user_id
         ));
     }
     if value_of(&snap, "k1") != Some(json!("v1")) {
         t.errorf(format!(
-            "Get State[k1] = {:?}, want v1",
+            "get state[k1] = {:?}, want v1",
             value_of(&snap, "k1")
         ));
     }
@@ -368,12 +368,12 @@ async fn get_session_respects_user_id(
     let c1 = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Create user1 failed: {e}"))?;
+        .map_err(|e| format!("create user1 failed: {e}"))?;
     s.append_event(c1.as_ref(), &mut simple_event("event1", "inv1"))
         .await
-        .map_err(|e| format!("AppendEvent failed: {e}"))?;
+        .map_err(|e| format!("append_event failed: {e}"))?;
     if s.get(get_req(&app, "user2", c1.id())).await.is_ok() {
-        t.errorf("Expected error or not found when getting session with wrong UserID");
+        t.errorf("Expected error or not found when getting session with wrong user_id");
     }
     Ok(())
 }
@@ -391,7 +391,7 @@ async fn get_with_config_filters(
     let created = s
         .create(req)
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
 
     let num_test_events = 5;
     let base_time = utc(2025, 1, 1, 0, 0, 0, 0);
@@ -405,7 +405,7 @@ async fn get_with_config_filters(
         };
         s.append_event(created.as_ref(), &mut event)
             .await
-            .map_err(|e| format!("AppendEvent failed: {e}"))?;
+            .map_err(|e| format!("append_event failed: {e}"))?;
     }
 
     let id = created.id().to_string();
@@ -416,34 +416,34 @@ async fn get_with_config_filters(
             after,
             ..get_req(&app, "user1", &id)
         };
-        async move { s.get(req).await.map_err(|e| format!("Get error: {e}")) }
+        async move { s.get(req).await.map_err(|e| format!("get error: {e}")) }
     };
 
     let got_normal = get(0, None).await?;
     if got_normal.events().len() != 5 {
         t.errorf(format!(
-            "Get no filter events len = {}, want 5",
+            "get no filter events len = {}, want 5",
             got_normal.events().len()
         ));
     }
     let got_limit = get(3, None).await?;
     if got_limit.events().len() != 3 {
         t.errorf(format!(
-            "Get NumRecentEvents len = {}, want 3",
+            "get num_recent_events len = {}, want 3",
             got_limit.events().len()
         ));
     }
     let got_after = get(0, Some(timestamps[1])).await?;
     if got_after.events().len() != 4 {
         t.errorf(format!(
-            "Get After filter events len = {}, want 4",
+            "get after filter events len = {}, want 4",
             got_after.events().len()
         ));
     }
     let got_combined = get(2, Some(timestamps[0])).await?;
     if got_combined.events().len() != 2 {
         t.errorf(format!(
-            "Get Combined filters len = {}, want 2",
+            "get combined filters len = {}, want 2",
             got_combined.events().len()
         ));
     }
@@ -456,13 +456,13 @@ async fn list(t: &mut T, s: Arc<dyn SessionService>, opts: &SuiteOptions) -> Out
     let app = app_name(opts);
     s.create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Create user1 session1 failed: {e}"))?;
+        .map_err(|e| format!("create user1 session1 failed: {e}"))?;
     s.create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Create user1 session2 failed: {e}"))?;
+        .map_err(|e| format!("create user1 session2 failed: {e}"))?;
     s.create(create_req(&app, "user2"))
         .await
-        .map_err(|e| format!("Create user2 failed: {e}"))?;
+        .map_err(|e| format!("create user2 failed: {e}"))?;
 
     let list_req = |user: &str| ListRequest {
         app_name: app.clone(),
@@ -477,9 +477,9 @@ async fn list(t: &mut T, s: Arc<dyn SessionService>, opts: &SuiteOptions) -> Out
         let got = s
             .list(list_req(user))
             .await
-            .map_err(|e| format!("List {what} failed: {e}"))?;
+            .map_err(|e| format!("list {what} failed: {e}"))?;
         if got.len() != want {
-            t.errorf(format!("List {what} len = {}, want {want}", got.len()));
+            t.errorf(format!("list {what} len = {}, want {want}", got.len()));
         }
     }
     Ok(())
@@ -490,14 +490,14 @@ async fn delete(t: &mut T, s: Arc<dyn SessionService>, opts: &SuiteOptions) -> O
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
     s.delete(DeleteRequest {
         app_name: app.clone(),
         user_id: "user1".into(),
         session_id: created.id().to_string(),
     })
     .await
-    .map_err(|e| format!("Delete() error = {e}"))?;
+    .map_err(|e| format!("delete() error = {e}"))?;
 
     match s.get(get_req(&app, "user1", created.id())).await {
         Ok(_) => t.errorf("Expected error when getting deleted session"),
@@ -505,7 +505,7 @@ async fn delete(t: &mut T, s: Arc<dyn SessionService>, opts: &SuiteOptions) -> O
         // to tell it from a storage failure.
         Err(SessionError::NotFound) => {}
         Err(e) => t.errorf(format!(
-            "Get(deleted session) error = {e}, want SessionError::NotFound"
+            "get(deleted session) error = {e}, want SessionError::NotFound"
         )),
     }
 
@@ -522,7 +522,7 @@ async fn delete(t: &mut T, s: Arc<dyn SessionService>, opts: &SuiteOptions) -> O
         match res {
             Ok(()) | Err(SessionError::InvalidRequest(_)) => {}
             Err(e) => t.errorf(format!(
-                "Delete() non-existent error = {e}, want Ok or InvalidRequest"
+                "delete() non-existent error = {e}, want Ok or InvalidRequest"
             )),
         }
     }
@@ -538,7 +538,7 @@ async fn delete_session_respects_user_id(
     let c1 = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Create user1 failed: {e}"))?;
+        .map_err(|e| format!("create user1 failed: {e}"))?;
     // A delete by a different user must not remove user1's session. Backends may either
     // error or no-op; the invariant is that the session survives.
     let _ = s
@@ -618,7 +618,7 @@ async fn append_event_when_session_not_found_should_fail(
     };
     let mut event = simple_event("event1", "inv1");
     if s.append_event(&m, &mut event).await.is_ok() {
-        t.errorf("AppendEvent() expected error for non-existent session, got Ok");
+        t.errorf("append_event() expected error for non-existent session, got Ok");
     }
     Ok(())
 }
@@ -632,14 +632,14 @@ async fn append_event_when_session_deleted_returns_err_not_found(
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
     s.delete(DeleteRequest {
         app_name: app.clone(),
         user_id: "user1".into(),
         session_id: created.id().to_string(),
     })
     .await
-    .map_err(|e| format!("Setup: Delete failed: {e}"))?;
+    .map_err(|e| format!("Setup: delete failed: {e}"))?;
 
     // Unlike the case above, this passes the service a session of its own type, so it
     // reaches the storage lookup instead of stopping at a type check.
@@ -649,12 +649,12 @@ async fn append_event_when_session_deleted_returns_err_not_found(
     {
         Ok(()) => {
             return Err(
-                "AppendEvent(deleted session) returned Ok, want SessionError::NotFound".into(),
+                "append_event(deleted session) returned Ok, want SessionError::NotFound".into(),
             );
         }
         Err(SessionError::NotFound) => {}
         Err(e) => t.errorf(format!(
-            "AppendEvent(deleted session) error = {e}, want SessionError::NotFound"
+            "append_event(deleted session) error = {e}, want SessionError::NotFound"
         )),
     }
     Ok(())
@@ -665,15 +665,15 @@ async fn append_event_ok(t: &mut T, s: Arc<dyn SessionService>, opts: &SuiteOpti
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
     let mut event = simple_event("new_event1", "inv1");
     s.append_event(created.as_ref(), &mut event)
         .await
-        .map_err(|e| format!("AppendEvent() error = {e}"))?;
+        .map_err(|e| format!("append_event() error = {e}"))?;
     let got = s
         .get(get_req(&app, "user1", created.id()))
         .await
-        .map_err(|e| format!("Get() error = {e}"))?;
+        .map_err(|e| format!("get() error = {e}"))?;
     let snap = snapshot(got.as_ref());
     if snap.events.len() != 1 {
         t.errorf(format!("Expected 1 event, got {}", snap.events.len()));
@@ -697,7 +697,7 @@ async fn append_event_compaction_record_round_trips(
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
 
     // Nanosecond precision on purpose: a millisecond-truncated fixture cannot tell a
     // faithful backend from one that rounds.
@@ -727,18 +727,18 @@ async fn append_event_compaction_record_round_trips(
     };
     s.append_event(created.as_ref(), &mut event)
         .await
-        .map_err(|e| format!("AppendEvent() error = {e}"))?;
+        .map_err(|e| format!("append_event() error = {e}"))?;
 
     let got = s
         .get(get_req(&app, "user1", created.id()))
         .await
-        .map_err(|e| format!("Get() error = {e}"))?;
+        .map_err(|e| format!("get() error = {e}"))?;
     let snap = snapshot(got.as_ref());
     if snap.events.len() != 1 {
         return Err(format!("Expected 1 event, got {}", snap.events.len()));
     }
     let Some(c) = snap.events[0].actions.compaction.clone() else {
-        return Err("Actions.Compaction was not persisted, so the summary is unrecoverable".into());
+        return Err("actions.compaction was not persisted, so the summary is unrecoverable".into());
     };
     if c.start_timestamp != start || c.end_timestamp != end {
         t.errorf(format!(
@@ -806,7 +806,7 @@ async fn append_event_requested_auth_configs_round_trip(
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
     let mut event = Event {
         actions: EventActions {
             requested_auth_configs: requested_auth_configs(),
@@ -817,12 +817,12 @@ async fn append_event_requested_auth_configs_round_trip(
     };
     s.append_event(created.as_ref(), &mut event)
         .await
-        .map_err(|e| format!("AppendEvent() error = {e}"))?;
+        .map_err(|e| format!("append_event() error = {e}"))?;
 
     let got = s
         .get(get_req(&app, "user1", created.id()))
         .await
-        .map_err(|e| format!("Get() error = {e}"))?;
+        .map_err(|e| format!("get() error = {e}"))?;
     let snap = snapshot(got.as_ref());
     if snap.events.len() != 1 {
         return Err(format!("Expected 1 event, got {}", snap.events.len()));
@@ -830,7 +830,7 @@ async fn append_event_requested_auth_configs_round_trip(
     let want = requested_auth_configs();
     if snap.events[0].actions.requested_auth_configs != want {
         t.errorf(format!(
-            "RequestedAuthConfigs mismatch after a round trip: want {want:?}, got {:?}",
+            "requested_auth_configs mismatch after a round trip: want {want:?}, got {:?}",
             snap.events[0].actions.requested_auth_configs
         ));
     }
@@ -896,7 +896,7 @@ async fn append_event_requested_auth_config_that_does_not_decode_is_refused(
             let created = s
                 .create(create_req(&app, "user1"))
                 .await
-                .map_err(|e| format!("Setup: Create failed: {e}"))?;
+                .map_err(|e| format!("Setup: create failed: {e}"))?;
             let mut event = Event {
                 actions: EventActions {
                     requested_auth_configs: BTreeMap::from([("call-1".into(), config)]),
@@ -907,16 +907,16 @@ async fn append_event_requested_auth_config_that_does_not_decode_is_refused(
             };
             if s.append_event(created.as_ref(), &mut event).await.is_ok() {
                 sub.errorf(
-                    "AppendEvent() succeeded, want an error for a request that does not decode",
+                    "append_event() succeeded, want an error for a request that does not decode",
                 );
             }
             let got = s
                 .get(get_req(&app, "user1", created.id()))
                 .await
-                .map_err(|e| format!("Get() after the refused append failed: {e}"))?;
+                .map_err(|e| format!("get() after the refused append failed: {e}"))?;
             let n = got.events().len();
             if n != 0 {
-                sub.errorf(format!("Get() returned {n} events, want 0"));
+                sub.errorf(format!("get() returned {n} events, want 0"));
             }
             let n = created.events().len();
             if n != 0 {
@@ -951,7 +951,7 @@ async fn append_event_a_hole_still_names_its_event_after_a_round_trip(
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
 
     let mut turn = Event {
         author: "user".into(),
@@ -961,7 +961,7 @@ async fn append_event_a_hole_still_names_its_event_after_a_round_trip(
     };
     s.append_event(created.as_ref(), &mut turn)
         .await
-        .map_err(|e| format!("AppendEvent() error = {e}"))?;
+        .map_err(|e| format!("append_event() error = {e}"))?;
 
     let read_back = || {
         let s = s.clone();
@@ -970,7 +970,7 @@ async fn append_event_a_hole_still_names_its_event_after_a_round_trip(
             s.get(req)
                 .await
                 .map(|got| snapshot(got.as_ref()).events)
-                .map_err(|e| format!("Get() error = {e}"))
+                .map_err(|e| format!("get() error = {e}"))
         }
     };
 
@@ -999,7 +999,7 @@ async fn append_event_a_hole_still_names_its_event_after_a_round_trip(
     };
     s.append_event(created.as_ref(), &mut record)
         .await
-        .map_err(|e| format!("AppendEvent() error = {e}"))?;
+        .map_err(|e| format!("append_event() error = {e}"))?;
 
     let after = read_back().await?;
     let mut event = None;
@@ -1042,22 +1042,22 @@ async fn append_event_a_missing_event_id_is_assigned(
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
     for _ in 0..2 {
         let mut event = simple_event("", "inv1");
         s.append_event(created.as_ref(), &mut event)
             .await
-            .map_err(|e| format!("AppendEvent() error = {e}"))?;
+            .map_err(|e| format!("append_event() error = {e}"))?;
         // Where the server names the event, the caller's struct is not where the name
         // appears; the stored event must have one everywhere, which the read below checks.
         if !opts.provides_server_assigned_event_id && event.id.is_empty() {
-            t.errorf("AppendEvent left the event without an ID");
+            t.errorf("append_event left the event without an ID");
         }
     }
     let got = s
         .get(get_req(&app, "user1", created.id()))
         .await
-        .map_err(|e| format!("Get() error = {e}"))?;
+        .map_err(|e| format!("get() error = {e}"))?;
     let snap = snapshot(got.as_ref());
     if snap.events.len() != 2 {
         return Err(format!("stored {} events, want 2", snap.events.len()));
@@ -1084,7 +1084,7 @@ async fn append_event_partial_events_are_not_persisted(
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
     let mut event = Event {
         response: LlmResponse {
             partial: true,
@@ -1094,15 +1094,15 @@ async fn append_event_partial_events_are_not_persisted(
     };
     s.append_event(created.as_ref(), &mut event)
         .await
-        .map_err(|e| format!("AppendEvent() error = {e}"))?;
+        .map_err(|e| format!("append_event() error = {e}"))?;
     let got = s
         .get(get_req(&app, "user1", created.id()))
         .await
-        .map_err(|e| format!("Get() error = {e}"))?;
+        .map_err(|e| format!("get() error = {e}"))?;
     let snap = snapshot(got.as_ref());
     if !snap.events.is_empty() {
         t.errorf(format!(
-            "Expected 0 events (Partial=true should be skipped), got {}",
+            "Expected 0 events (partial=true should be skipped), got {}",
             snap.events.len()
         ));
     }
@@ -1118,7 +1118,7 @@ async fn append_event_with_bytes_content(
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
     let mut event = Event {
         response: LlmResponse {
             content: Some(Content::from_bytes(
@@ -1132,11 +1132,11 @@ async fn append_event_with_bytes_content(
     };
     s.append_event(created.as_ref(), &mut event)
         .await
-        .map_err(|e| format!("AppendEvent() error = {e}"))?;
+        .map_err(|e| format!("append_event() error = {e}"))?;
     let got = s
         .get(get_req(&app, "user1", created.id()))
         .await
-        .map_err(|e| format!("Get() error = {e}"))?;
+        .map_err(|e| format!("get() error = {e}"))?;
     let snap = snapshot(got.as_ref());
     if snap.events.len() != 1 {
         return Err(format!("Expected 1 event, got {}", snap.events.len()));
@@ -1160,7 +1160,7 @@ async fn append_event_with_existing_events(
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
     let base_time = utc(2025, 1, 1, 0, 0, 0, 0);
     let mut event1 = Event {
         timestamp: base_time + Duration::seconds(1),
@@ -1168,19 +1168,19 @@ async fn append_event_with_existing_events(
     };
     s.append_event(created.as_ref(), &mut event1)
         .await
-        .map_err(|e| format!("AppendEvent(1) failed: {e}"))?;
+        .map_err(|e| format!("append_event(1) failed: {e}"))?;
     let mut event2 = Event {
         timestamp: base_time + Duration::seconds(2),
         ..simple_event("event2", "inv2")
     };
     s.append_event(created.as_ref(), &mut event2)
         .await
-        .map_err(|e| format!("AppendEvent(2) failed: {e}"))?;
+        .map_err(|e| format!("append_event(2) failed: {e}"))?;
 
     let got = s
         .get(get_req(&app, "user1", created.id()))
         .await
-        .map_err(|e| format!("Get() failed: {e}"))?;
+        .map_err(|e| format!("get() failed: {e}"))?;
     let snap = snapshot(got.as_ref());
     if snap.events.len() != 2 {
         return Err(format!("Expected 2 events, got {}", snap.events.len()));
@@ -1193,7 +1193,7 @@ async fn append_event_with_existing_events(
         .any(|(e, want)| e.invocation_id != want)
     {
         t.errorf(format!(
-            "Expected event order for {expected_order:?}, got events with InvocationIDs"
+            "Expected event order for {expected_order:?}, got events with invocation_ids"
         ));
     }
     Ok(())
@@ -1208,7 +1208,7 @@ async fn append_event_with_all_fields(
     let created = s
         .create(create_req(&app, "user1"))
         .await
-        .map_err(|e| format!("Setup: Create failed: {e}"))?;
+        .map_err(|e| format!("Setup: create failed: {e}"))?;
     let mut event = Event {
         long_running_tool_ids: vec!["tool123".into()],
         actions: EventActions {
@@ -1248,12 +1248,12 @@ async fn append_event_with_all_fields(
     };
     s.append_event(created.as_ref(), &mut event)
         .await
-        .map_err(|e| format!("AppendEvent() error = {e}"))?;
+        .map_err(|e| format!("append_event() error = {e}"))?;
 
     let got = s
         .get(get_req(&app, "user1", created.id()))
         .await
-        .map_err(|e| format!("Get() error = {e}"))?;
+        .map_err(|e| format!("get() error = {e}"))?;
     let snap = snapshot(got.as_ref());
     if snap.events.len() != 1 {
         return Err(format!("Expected 1 event, got {}", snap.events.len()));
@@ -1301,14 +1301,14 @@ async fn state_management_app_state_is_shared(
             ..create_req(&app, "u1")
         })
         .await
-        .map_err(|e| format!("Create user1 failed: {e}"))?;
+        .map_err(|e| format!("create user1 failed: {e}"))?;
     s.append_event(s1.as_ref(), &mut delta_event(&[("app:k2", json!("v2"))]))
         .await
-        .map_err(|e| format!("AppendEvent failed: {e}"))?;
+        .map_err(|e| format!("append_event failed: {e}"))?;
     let s2 = s
         .create(create_req(&app, "u2"))
         .await
-        .map_err(|e| format!("Create user2 failed: {e}"))?;
+        .map_err(|e| format!("create user2 failed: {e}"))?;
     let snap = snapshot(s2.as_ref());
     if value_of(&snap, "app:k1") != Some(json!("v1"))
         || value_of(&snap, "app:k2") != Some(json!("v2"))
@@ -1330,15 +1330,15 @@ async fn state_management_user_state_is_user_specific(
             ..create_req(&app, "u1")
         })
         .await
-        .map_err(|e| format!("Create u1 failed: {e}"))?;
+        .map_err(|e| format!("create u1 failed: {e}"))?;
     s.append_event(s1.as_ref(), &mut delta_event(&[("user:k2", json!("v2"))]))
         .await
-        .map_err(|e| format!("AppendEvent failed: {e}"))?;
+        .map_err(|e| format!("append_event failed: {e}"))?;
 
     let s1b = s
         .create(create_req(&app, "u1"))
         .await
-        .map_err(|e| format!("Create u1 (second) failed: {e}"))?;
+        .map_err(|e| format!("create u1 (second) failed: {e}"))?;
     let snap1b = snapshot(s1b.as_ref());
     if value_of(&snap1b, "user:k1") != Some(json!("v1"))
         || value_of(&snap1b, "user:k2") != Some(json!("v2"))
@@ -1352,7 +1352,7 @@ async fn state_management_user_state_is_user_specific(
     let s2 = s
         .create(create_req(&app, "u2"))
         .await
-        .map_err(|e| format!("Create u2 failed: {e}"))?;
+        .map_err(|e| format!("create u2 failed: {e}"))?;
     let snap2 = snapshot(s2.as_ref());
     if snap2.state.contains_key("user:k1") {
         t.errorf(format!(
@@ -1375,14 +1375,14 @@ async fn state_management_session_state_is_not_shared(
             ..create_req(&app, "u1")
         })
         .await
-        .map_err(|e| format!("Create u1 failed: {e}"))?;
+        .map_err(|e| format!("create u1 failed: {e}"))?;
     s.append_event(s1.as_ref(), &mut delta_event(&[("sk2", json!("v2"))]))
         .await
-        .map_err(|e| format!("AppendEvent failed: {e}"))?;
+        .map_err(|e| format!("append_event failed: {e}"))?;
     let s1b = s
         .create(create_req(&app, "u1"))
         .await
-        .map_err(|e| format!("Create u1 (second) failed: {e}"))?;
+        .map_err(|e| format!("create u1 (second) failed: {e}"))?;
     let snap = snapshot(s1b.as_ref());
     if snap.state.contains_key("sk1") {
         t.errorf(format!(
@@ -1402,18 +1402,18 @@ async fn state_management_temp_state_is_not_persisted(
     let s1 = s
         .create(create_req(&app, "u1"))
         .await
-        .map_err(|e| format!("Create u1 failed: {e}"))?;
+        .map_err(|e| format!("create u1 failed: {e}"))?;
     s.append_event(
         s1.as_ref(),
         &mut delta_event(&[("temp:k1", json!("v1")), ("sk", json!("v2"))]),
     )
     .await
-    .map_err(|e| format!("AppendEvent failed: {e}"))?;
+    .map_err(|e| format!("append_event failed: {e}"))?;
 
     let got = s
         .get(get_req(&app, "u1", s1.id()))
         .await
-        .map_err(|e| format!("Get failed: {e}"))?;
+        .map_err(|e| format!("get failed: {e}"))?;
     let snap = snapshot(got.as_ref());
     if snap.state.contains_key("temp:k1") {
         t.errorf(format!(
@@ -1487,32 +1487,32 @@ mod tests {
         assert_eq!(
             *seen.lock(),
             vec![
-                "Create/full_key",
-                "Create/generated_session_id",
-                "Create/when_already_exists,_it_fails",
-                "Get/ok",
-                "Get/error_when_not_found",
-                "Get/get_session_respects_user_id",
-                "Get/with_config_filters",
-                "List",
-                "Delete",
+                "create/full_key",
+                "create/generated_session_id",
+                "create/when_already_exists,_it_fails",
+                "get/ok",
+                "get/error_when_not_found",
+                "get/get_session_respects_user_id",
+                "get/with_config_filters",
+                "list",
+                "delete",
                 "delete_session_respects_user_id",
-                "AppendEvent/when_session_not_found_should_fail",
-                "AppendEvent/when_session_deleted_returns_ErrNotFound",
-                "AppendEvent/ok",
-                "AppendEvent/compaction_record_round_trips",
-                "AppendEvent/requested_auth_configs_round_trip",
-                "AppendEvent/requested_auth_config_that_does_not_decode_is_refused",
-                "AppendEvent/a_hole_still_names_its_event_after_a_round_trip",
-                "AppendEvent/a_missing_event_id_is_assigned",
-                "AppendEvent/partial_events_are_not_persisted",
-                "AppendEvent/with_bytes_content",
-                "AppendEvent/with_existing_events",
-                "AppendEvent/with_all_fields",
-                "StateManagement/app_state_is_shared",
-                "StateManagement/user_state_is_user_specific",
-                "StateManagement/session_state_is_not_shared",
-                "StateManagement/temp_state_is_not_persisted",
+                "append_event/when_session_not_found_should_fail",
+                "append_event/when_session_deleted_returns_not_found",
+                "append_event/ok",
+                "append_event/compaction_record_round_trips",
+                "append_event/requested_auth_configs_round_trip",
+                "append_event/requested_auth_config_that_does_not_decode_is_refused",
+                "append_event/a_hole_still_names_its_event_after_a_round_trip",
+                "append_event/a_missing_event_id_is_assigned",
+                "append_event/partial_events_are_not_persisted",
+                "append_event/with_bytes_content",
+                "append_event/with_existing_events",
+                "append_event/with_all_fields",
+                "state_management/app_state_is_shared",
+                "state_management/user_state_is_user_specific",
+                "state_management/session_state_is_not_shared",
+                "state_management/temp_state_is_not_persisted",
             ]
         );
     }

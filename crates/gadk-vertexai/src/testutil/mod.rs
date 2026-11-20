@@ -43,10 +43,26 @@ pub const ENGINE_ID: &str = "1491331942182813696";
 pub const ENGINE_ID2: &str = "6857370898194759680";
 
 /// The replay fixture stem of a shared-suite case: `"Test_vertexaiService_" + case` with
-/// `" "`, `,` and `/` each replaced by `_` — e.g.
-/// `fixture_stem("Create/when_already_exists,_it_fails")` =
+/// `" "`, `,` and `/` each replaced by `_`, and the leading group name in the recordings'
+/// CamelCase spelling — e.g. `fixture_stem("create/when_already_exists,_it_fails")` =
 /// `"Test_vertexaiService_Create_when_already_exists__it_fails"`.
 pub fn fixture_stem(case: &str) -> String {
+    let (group, rest) = case
+        .split_once('/')
+        .map_or((case, None), |(g, r)| (g, Some(r)));
+    let group = match group {
+        "create" => "Create",
+        "get" => "Get",
+        "list" => "List",
+        "delete" => "Delete",
+        "append_event" => "AppendEvent",
+        "state_management" => "StateManagement",
+        other => other,
+    };
+    let case = match rest {
+        Some(r) => format!("{group}/{r}"),
+        None => group.to_owned(),
+    };
     format!(
         "Test_vertexaiService_{}",
         case.replace([' ', ',', '/'], "_")
@@ -227,20 +243,20 @@ mod tests {
     #[test]
     fn fixture_stems_name_committed_fixtures() {
         assert_eq!(
-            fixture_stem("Create/when_already_exists,_it_fails"),
+            fixture_stem("create/when_already_exists,_it_fails"),
             "Test_vertexaiService_Create_when_already_exists__it_fails"
         );
-        assert_eq!(fixture_stem("Get/ok"), "Test_vertexaiService_Get_ok");
+        assert_eq!(fixture_stem("get/ok"), "Test_vertexaiService_Get_ok");
         assert_eq!(fixture_stem("a b"), "Test_vertexaiService_a_b");
         for case in [
-            "Create/full_key",
-            "Create/generated_session_id",
-            "Create/when_already_exists,_it_fails",
-            "Get/ok",
-            "List",
-            "Delete",
+            "create/full_key",
+            "create/generated_session_id",
+            "create/when_already_exists,_it_fails",
+            "get/ok",
+            "list",
+            "delete",
             "delete_session_respects_user_id",
-            "AppendEvent/with_all_fields",
+            "append_event/with_all_fields",
         ] {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("testdata/replays")

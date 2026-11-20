@@ -132,7 +132,7 @@ fn gav_req(session_id: &str, file_name: &str, version: i64) -> GetArtifactVersio
 /// Deletes, failing the suite on error.
 async fn must_delete(srv: &dyn ArtifactService, step: &str, req: DeleteRequest) {
     if let Err(e) = srv.delete(req).await {
-        fail!(step, "Delete failed: {e}");
+        fail!(step, "delete failed: {e}");
     }
 }
 
@@ -158,7 +158,7 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
             .await
         {
             Ok(got) if got.version == want_version => {}
-            got => fail!(s, "[{i}] Save() = {got:?}, want Ok({want_version})"),
+            got => fail!(s, "[{i}] save() = {got:?}, want Ok({want_version})"),
         }
     }
 
@@ -171,8 +171,8 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
         match srv.load(load_req(SESSION, "file1", version)).await {
             Ok(got) if got.part.as_ref() == Some(&want) => {}
             got => fail!(
-                format!("{s}/Load/{name}"),
-                "Load({version}) = {got:?}, want Ok({want:?})"
+                format!("{s}/load/{name}"),
+                "load({version}) = {got:?}, want Ok({want:?})"
             ),
         }
     }
@@ -181,34 +181,34 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
     let got = srv.load(load_req(SESSION, "file1", 99)).await;
     if !is_not_found(&got) {
         fail!(
-            format!("{s}/LoadNonexistentVersion"),
-            "Load('file1', ver=99) = {got:?}, want NotFound"
+            format!("{s}/load_nonexistent_version"),
+            "load('file1', ver=99) = {got:?}, want NotFound"
         );
     }
 
     // List
     let mut got = match srv.list(list_req(SESSION)).await {
         Ok(r) => r.file_names,
-        Err(e) => fail!(format!("{s}/List"), "List() failed: {e}"),
+        Err(e) => fail!(format!("{s}/list"), "list() failed: {e}"),
     };
     got.sort();
     if got != ["file1", "file2", "file3"] {
         fail!(
-            format!("{s}/List"),
-            "List() = {got:?}, want [file1 file2 file3]"
+            format!("{s}/list"),
+            "list() = {got:?}, want [file1 file2 file3]"
         );
     }
 
     // Versions
     let mut got = match srv.versions(versions_req(SESSION, "file1")).await {
         Ok(r) => r.versions,
-        Err(e) => fail!(format!("{s}/Versions"), "Versions() failed: {e}"),
+        Err(e) => fail!(format!("{s}/versions"), "versions() failed: {e}"),
     };
     got.sort_unstable();
     if got != [1, 2, 3] {
         fail!(
-            format!("{s}/Versions"),
-            "Versions('file1') = {got:?}, want [1 2 3]"
+            format!("{s}/versions"),
+            "versions('file1') = {got:?}, want [1 2 3]"
         );
     }
 
@@ -216,15 +216,15 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
     must_delete(srv, s, delete_req(SESSION, "file1", 3)).await;
 
     // LoadAfterDeleteVersion3
-    let step = format!("{s}/LoadAfterDeleteVersion3");
+    let step = format!("{s}/load_after_delete_version3");
     match srv.load(load_req(SESSION, "file1", 0)).await {
         Ok(r) if r.part == Some(bytes("file v2", "text/plain")) => {}
-        Ok(r) => fail!(step, "Load('file1') = {:?}, want file v2", r.part),
-        Err(e) => fail!(step, "Load('file1') failed: {e}"),
+        Ok(r) => fail!(step, "load('file1') = {:?}, want file v2", r.part),
+        Err(e) => fail!(step, "load('file1') failed: {e}"),
     }
     let deleted = srv.load(load_req(SESSION, "file1", 3)).await;
     if !is_not_found(&deleted) {
-        fail!(step, "Load('file1', ver=3) = {deleted:?}, want NotFound");
+        fail!(step, "load('file1', ver=3) = {deleted:?}, want NotFound");
     }
 
     must_delete(srv, s, delete_req(SESSION, "file1", 0)).await;
@@ -233,21 +233,21 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
     let got = srv.load(load_req(SESSION, "file1", 0)).await;
     if !is_not_found(&got) {
         fail!(
-            format!("{s}/LoadAfterDelete"),
-            "Load('file1') = {got:?}, want NotFound"
+            format!("{s}/load_after_delete"),
+            "load('file1') = {got:?}, want NotFound"
         );
     }
 
     // ListAfterDelete
     let mut got = match srv.list(list_req(SESSION)).await {
         Ok(r) => r.file_names,
-        Err(e) => fail!(format!("{s}/ListAfterDelete"), "List() failed: {e}"),
+        Err(e) => fail!(format!("{s}/list_after_delete"), "list() failed: {e}"),
     };
     got.sort();
     if got != ["file2", "file3"] {
         fail!(
-            format!("{s}/ListAfterDelete"),
-            "List() = {got:?}, want [file2 file3]"
+            format!("{s}/list_after_delete"),
+            "list() = {got:?}, want [file2 file3]"
         );
     }
 
@@ -255,8 +255,8 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
     let got = srv.versions(versions_req(SESSION, "file1")).await;
     if !is_not_found(&got) {
         fail!(
-            format!("{s}/VersionsAfterDelete"),
-            "Versions('file1') = {got:?}, want NotFound"
+            format!("{s}/versions_after_delete"),
+            "versions('file1') = {got:?}, want NotFound"
         );
     }
 
@@ -268,7 +268,7 @@ async fn basic(srv: Arc<dyn ArtifactService>) {
 /// Scenario: `user:` artifacts are shared across sessions of one user.
 async fn user_scoped(srv: Arc<dyn ArtifactService>) {
     let srv = srv.as_ref();
-    let s = "ArtifactService_UserScoped";
+    let s = "ArtifactService_user_scoped";
 
     // Save these artifacts for later subtests.
     let test_data = [
@@ -314,7 +314,7 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
     for (i, (file_name, session_id, want_version, part, md)) in test_data.into_iter().enumerate() {
         match srv.save(save_req(session_id, file_name, part, md)).await {
             Ok(got) if got.version == want_version => {}
-            got => fail!(s, "[{i}] Save() = {got:?}, want Ok({want_version})"),
+            got => fail!(s, "[{i}] save() = {got:?}, want Ok({want_version})"),
         }
     }
 
@@ -334,8 +334,8 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
         {
             Ok(got) if got.part.as_ref() == Some(&want) => {}
             got => fail!(
-                format!("{s}/Load/{name}"),
-                "Load({version}) = {got:?}, want Ok({want:?})"
+                format!("{s}/load/{name}"),
+                "load({version}) = {got:?}, want Ok({want:?})"
             ),
         }
     }
@@ -343,25 +343,25 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
     // List
     let got = match srv.list(list_req(SESSION)).await {
         Ok(r) => r.file_names,
-        Err(e) => fail!(format!("{s}/List"), "List() failed: {e}"),
+        Err(e) => fail!(format!("{s}/list"), "list() failed: {e}"),
     };
     if got != ["file2", "user:file1", "user:file3"] {
         fail!(
-            format!("{s}/List"),
-            "List() = {got:?}, want [file2 user:file1 user:file3]"
+            format!("{s}/list"),
+            "list() = {got:?}, want [file2 user:file1 user:file3]"
         );
     }
 
     // Versions
     let mut got = match srv.versions(versions_req(SESSION, "user:file1")).await {
         Ok(r) => r.versions,
-        Err(e) => fail!(format!("{s}/Versions"), "Versions() failed: {e}"),
+        Err(e) => fail!(format!("{s}/versions"), "versions() failed: {e}"),
     };
     got.sort_unstable();
     if got != [1, 2, 3] {
         fail!(
-            format!("{s}/Versions"),
-            "Versions('user:file1') = {got:?}, want [1 2 3]"
+            format!("{s}/versions"),
+            "versions('user:file1') = {got:?}, want [1 2 3]"
         );
     }
 
@@ -370,7 +370,7 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
         ("latest", 0, 3, meta(json!({"version": "v3"}))),
         ("specific", 2, 2, meta(json!({"version": "v2"}))),
     ] {
-        let step = format!("{s}/GetArtifactVersion/{name}");
+        let step = format!("{s}/get_artifact_version/{name}");
         let req = gav_req("'user' should be used instead", "user:file1", version);
         match srv.get_artifact_version(req).await {
             Ok(r) => assert_artifact_version(
@@ -380,7 +380,7 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
                 "text/plain",
                 &want_md,
             ),
-            Err(e) => fail!(step, "GetArtifactVersion({version}) failed: {e}"),
+            Err(e) => fail!(step, "get_artifact_version({version}) failed: {e}"),
         }
     }
 
@@ -388,7 +388,7 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
     must_delete(srv, s, delete_req(SESSION, "user:file1", 3)).await;
 
     // GetArtifactVersionAfterDeleteLatest
-    let step = format!("{s}/GetArtifactVersionAfterDeleteLatest");
+    let step = format!("{s}/get_artifact_version_after_delete_latest");
     match srv
         .get_artifact_version(gav_req("another-read-session", "user:file1", 0))
         .await
@@ -400,15 +400,15 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
             "text/plain",
             &meta(json!({"version": "v2"})),
         ),
-        Err(e) => fail!(step, "GetArtifactVersion() failed: {e}"),
+        Err(e) => fail!(step, "get_artifact_version() failed: {e}"),
     }
 
     // LoadAfterDeleteVersion3
-    let step = format!("{s}/LoadAfterDeleteVersion3");
+    let step = format!("{s}/load_after_delete_version3");
     match srv.load(load_req(SESSION, "user:file1", 0)).await {
         Ok(r) if r.part == Some(bytes("file v2", "text/plain")) => {}
-        Ok(r) => fail!(step, "Load('user:file1') = {:?}, want file v2", r.part),
-        Err(e) => fail!(step, "Load('user:file1') failed: {e}"),
+        Ok(r) => fail!(step, "load('user:file1') = {:?}, want file v2", r.part),
+        Err(e) => fail!(step, "load('user:file1') failed: {e}"),
     }
 
     must_delete(srv, s, delete_req(SESSION, "user:file1", 0)).await;
@@ -417,21 +417,21 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
     let got = srv.load(load_req(SESSION, "user:file1", 0)).await;
     if !is_not_found(&got) {
         fail!(
-            format!("{s}/LoadAfterDelete"),
-            "Load('user:file1') = {got:?}, want NotFound"
+            format!("{s}/load_after_delete"),
+            "load('user:file1') = {got:?}, want NotFound"
         );
     }
 
     // ListAfterDelete
     let mut got = match srv.list(list_req(SESSION)).await {
         Ok(r) => r.file_names,
-        Err(e) => fail!(format!("{s}/ListAfterDelete"), "List() failed: {e}"),
+        Err(e) => fail!(format!("{s}/list_after_delete"), "list() failed: {e}"),
     };
     got.sort();
     if got != ["file2", "user:file3"] {
         fail!(
-            format!("{s}/ListAfterDelete"),
-            "List() = {got:?}, want [file2 user:file3]"
+            format!("{s}/list_after_delete"),
+            "list() = {got:?}, want [file2 user:file3]"
         );
     }
 
@@ -439,8 +439,8 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
     let got = srv.versions(versions_req(SESSION, "user:file1")).await;
     if !is_not_found(&got) {
         fail!(
-            format!("{s}/VersionsAfterDelete"),
-            "Versions('user:file1') = {got:?}, want NotFound"
+            format!("{s}/versions_after_delete"),
+            "versions('user:file1') = {got:?}, want NotFound"
         );
     }
 
@@ -452,7 +452,7 @@ async fn user_scoped(srv: Arc<dyn ArtifactService>) {
 /// Scenario: operations on an empty service.
 async fn empty(srv: Arc<dyn ArtifactService>) {
     let srv = srv.as_ref();
-    let s = "ArtifactService_Empty";
+    let s = "ArtifactService_empty";
     let req = |file: &str| (APP, "user", "session", file.to_owned());
 
     let (app, user, session, file) = req("file");
@@ -466,7 +466,7 @@ async fn empty(srv: Arc<dyn ArtifactService>) {
         })
         .await;
     if !is_not_found(&got) {
-        fail!(format!("{s}/Load"), "Load() = {got:?}, want NotFound");
+        fail!(format!("{s}/load"), "load() = {got:?}, want NotFound");
     }
 
     let (app, user, session, _) = req("");
@@ -478,7 +478,7 @@ async fn empty(srv: Arc<dyn ArtifactService>) {
         })
         .await
     {
-        fail!(format!("{s}/List"), "List() failed: {e}");
+        fail!(format!("{s}/list"), "list() failed: {e}");
     }
 
     let (app, user, session, file) = req("file1");
@@ -492,7 +492,7 @@ async fn empty(srv: Arc<dyn ArtifactService>) {
         })
         .await
     {
-        fail!(format!("{s}/Delete"), "Delete() failed: {e}");
+        fail!(format!("{s}/delete"), "delete() failed: {e}");
     }
 
     let (app, user, session, file) = req("file1");
@@ -506,8 +506,8 @@ async fn empty(srv: Arc<dyn ArtifactService>) {
         .await;
     if !is_not_found(&got) {
         fail!(
-            format!("{s}/Versions"),
-            "Versions() = {got:?}, want NotFound"
+            format!("{s}/versions"),
+            "versions() = {got:?}, want NotFound"
         );
     }
 
@@ -523,8 +523,8 @@ async fn empty(srv: Arc<dyn ArtifactService>) {
         .await;
     if !is_not_found(&got) {
         fail!(
-            format!("{s}/GetArtifactVersion"),
-            "GetArtifactVersion() = {got:?}, want NotFound"
+            format!("{s}/get_artifact_version"),
+            "get_artifact_version() = {got:?}, want NotFound"
         );
     }
 }
@@ -533,7 +533,7 @@ async fn empty(srv: Arc<dyn ArtifactService>) {
 /// not see, and lists each file name once however many versions it has.
 async fn list_session_named_user(srv: Arc<dyn ArtifactService>) {
     let srv = srv.as_ref();
-    let s = "ArtifactService_ListSessionNamedUser";
+    let s = "ArtifactService_list_session_named_user";
     for (session_id, file_name) in [
         ("user", "private.txt"),
         ("user", "private.txt"), // Multiple versions must not duplicate filenames.
@@ -550,7 +550,7 @@ async fn list_session_named_user(srv: Arc<dyn ArtifactService>) {
             ..Default::default()
         };
         if let Err(e) = srv.save(req).await {
-            fail!(s, "Save failed: {e}");
+            fail!(s, "save failed: {e}");
         }
     }
 
@@ -581,10 +581,10 @@ async fn list_session_named_user(srv: Arc<dyn ArtifactService>) {
             Ok(r) if r.file_names == want => {}
             Ok(r) => fail!(
                 step,
-                "List must return only the session's own and user-scoped filenames, sorted and without duplicates: got {:?}, want {want:?}",
+                "list must return only the session's own and user-scoped filenames, sorted and without duplicates: got {:?}, want {want:?}",
                 r.file_names
             ),
-            Err(e) => fail!(step, "List failed: {e}"),
+            Err(e) => fail!(step, "list failed: {e}"),
         }
     }
 }
@@ -592,7 +592,7 @@ async fn list_session_named_user(srv: Arc<dyn ArtifactService>) {
 /// Scenario: metadata of specific versions, the latest version, and missing versions or files.
 async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
     let srv = srv.as_ref();
-    let s = "ArtifactService_GetArtifactVersion";
+    let s = "ArtifactService_get_artifact_version";
     let file_name = "verfile";
 
     for (i, (part, md)) in [
@@ -612,7 +612,7 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
         let want_version = i64::try_from(i + 1).unwrap();
         match srv.save(save_req(SESSION, file_name, part, md)).await {
             Ok(got) if got.version == want_version => {}
-            got => fail!(s, "[{i}] Save() = {got:?}, want Ok({want_version})"),
+            got => fail!(s, "[{i}] save() = {got:?}, want Ok({want_version})"),
         }
     }
 
@@ -634,7 +634,7 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
         ),
         ("empty metadata", 1, 1, "text/plain", Map::new()),
     ] {
-        let step = format!("{s}/GetArtifactVersion_{name}");
+        let step = format!("{s}/get_artifact_version_{name}");
         match srv
             .get_artifact_version(gav_req(SESSION, file_name, version))
             .await
@@ -646,7 +646,7 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
                     canonical_uris.insert(want_version, av.canonical_uri.clone());
                 }
             }
-            Err(e) => fail!(step, "GetArtifactVersion({version}) failed: {e}"),
+            Err(e) => fail!(step, "get_artifact_version({version}) failed: {e}"),
         }
     }
     for (version, uri) in &canonical_uris {
@@ -654,7 +654,7 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
             if version < other_version && uri == other_uri {
                 fail!(
                     s,
-                    "versions {version} and {other_version} have the same CanonicalURI"
+                    "versions {version} and {other_version} have the same canonical_uri"
                 );
             }
         }
@@ -663,7 +663,7 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
         ("different session", "another-session", file_name),
         ("different file", SESSION, "another-file"),
     ] {
-        let step = format!("{s}/GetArtifactVersion_URI_{name}");
+        let step = format!("{s}/get_artifact_version_uri_{name}");
         if let Err(e) = srv
             .save(save_req(
                 session_id,
@@ -673,20 +673,20 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
             ))
             .await
         {
-            fail!(step, "Save() failed: {e}");
+            fail!(step, "save() failed: {e}");
         }
         let got = match srv.get_artifact_version(gav_req(session_id, file, 0)).await {
             Ok(r) => r
                 .artifact_version
                 .map(|av| av.canonical_uri)
                 .unwrap_or_default(),
-            Err(e) => fail!(step, "GetArtifactVersion() failed: {e}"),
+            Err(e) => fail!(step, "get_artifact_version() failed: {e}"),
         };
         for (version, uri) in &canonical_uris {
             if &got == uri {
                 fail!(
                     step,
-                    "distinct artifact shares CanonicalURI with version {version}"
+                    "distinct artifact shares canonical_uri with version {version}"
                 );
             }
         }
@@ -697,8 +697,8 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
         .await;
     if !is_not_found(&got) {
         fail!(
-            format!("{s}/GetArtifactVersion_nonexistent-version"),
-            "GetArtifactVersion(99) = {got:?}, want NotFound"
+            format!("{s}/get_artifact_version_nonexistent-version"),
+            "get_artifact_version(99) = {got:?}, want NotFound"
         );
     }
     let got = srv
@@ -706,13 +706,13 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
         .await;
     if !is_not_found(&got) {
         fail!(
-            format!("{s}/GetArtifactVersion_nonexistent-file"),
-            "GetArtifactVersion(missing file) = {got:?}, want NotFound"
+            format!("{s}/get_artifact_version_nonexistent-file"),
+            "get_artifact_version(missing file) = {got:?}, want NotFound"
         );
     }
 
     must_delete(srv, s, delete_req(SESSION, file_name, 3)).await;
-    let step = format!("{s}/GetArtifactVersionAfterDeleteLatest");
+    let step = format!("{s}/get_artifact_version_after_delete_latest");
     match srv
         .get_artifact_version(gav_req(SESSION, file_name, 0))
         .await
@@ -724,7 +724,7 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
             "image/png",
             &meta(json!({"version": "v2", "count": "2"})),
         ),
-        Err(e) => fail!(step, "GetArtifactVersion() failed: {e}"),
+        Err(e) => fail!(step, "get_artifact_version() failed: {e}"),
     }
 
     must_delete(srv, s, delete_req(SESSION, file_name, 0)).await;
@@ -733,8 +733,8 @@ async fn get_artifact_version(srv: Arc<dyn ArtifactService>) {
         .await;
     if !is_not_found(&got) {
         fail!(
-            format!("{s}/GetArtifactVersionAfterDelete"),
-            "GetArtifactVersion() = {got:?}, want NotFound"
+            format!("{s}/get_artifact_version_after_delete"),
+            "get_artifact_version() = {got:?}, want NotFound"
         );
     }
 }
@@ -750,34 +750,34 @@ fn assert_artifact_version(
     let Some(got) = got else {
         fail!(
             step,
-            "GetArtifactVersion().ArtifactVersion = None, want Some"
+            "get_artifact_version().artifact_version = None, want Some"
         );
     };
     if got.version != want_version {
         fail!(
             step,
-            "ArtifactVersion.Version = {}, want {want_version}",
+            "ArtifactVersion::version = {}, want {want_version}",
             got.version
         );
     }
     if got.mime_type != want_mime_type {
         fail!(
             step,
-            "ArtifactVersion.MimeType = {:?}, want {want_mime_type:?}",
+            "ArtifactVersion::mime_type = {:?}, want {want_mime_type:?}",
             got.mime_type
         );
     }
     if &got.custom_metadata != want_metadata {
         fail!(
             step,
-            "ArtifactVersion.CustomMetadata = {:?}, want {want_metadata:?}",
+            "ArtifactVersion::custom_metadata = {:?}, want {want_metadata:?}",
             got.custom_metadata
         );
     }
     if got.canonical_uri.is_empty() {
-        fail!(step, "ArtifactVersion.CanonicalURI is empty");
+        fail!(step, "ArtifactVersion::canonical_uri is empty");
     }
     if got.create_time == DateTime::<Utc>::default() {
-        fail!(step, "ArtifactVersion.CreateTime is zero");
+        fail!(step, "ArtifactVersion::create_time is zero");
     }
 }
