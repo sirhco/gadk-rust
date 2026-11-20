@@ -726,3 +726,34 @@ async fn without_a_timeout_a_slow_reply_is_awaited() {
         .unwrap();
     assert_eq!(got, json!({"ok": true}));
 }
+
+/// Operation polls keep their own 10 s deadline under a client timeout: with
+/// `with_timeout(1 s)`, a poll answered after 5 s still completes the wait, and one answered
+/// after 11 s fails with `context deadline exceeded`.
+#[tokio::test(start_paused = true)]
+async fn operation_polls_keep_their_own_deadline_under_a_client_timeout() {
+    let name = "projects/p/locations/l/ragCorpora/c/operations/7";
+    let done = json!({"name": name, "done": true, "response": {}});
+
+    let slow = ScriptedClient::always(
+        FakeResponse::json(done.to_string()).delay_headers(Duration::from_secs(5)),
+    );
+    let client = scripted_at("https://aiplatform.googleapis.com", &slow)
+        .with_timeout(Duration::from_secs(1));
+    let got = client
+        .wait_operation_at(json!({"name": name}), "/v1")
+        .await
+        .unwrap();
+    assert_eq!(got, done);
+
+    let too_slow = ScriptedClient::always(
+        FakeResponse::json(done.to_string()).delay_headers(Duration::from_secs(11)),
+    );
+    let client = scripted_at("https://aiplatform.googleapis.com", &too_slow)
+        .with_timeout(Duration::from_secs(1));
+    let err = client
+        .wait_operation_at(json!({"name": name}), "/v1")
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "context deadline exceeded");
+}

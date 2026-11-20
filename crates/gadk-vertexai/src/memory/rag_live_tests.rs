@@ -164,7 +164,7 @@ fn text_event(text: &str) -> Event {
 }
 
 /// Searches every 5 s for at most 120 s until a memory's text contains `needle`; a failed
-/// search is logged and retried.
+/// search is logged and retried, and the deadline panic names the last search error.
 async fn search_until_found(svc: &VertexAiRagMemoryService, user: &str, query: &str, needle: &str) {
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
@@ -175,7 +175,7 @@ async fn search_until_found(svc: &VertexAiRagMemoryService, user: &str, query: &
                 app_name: APP.into(),
             })
             .await;
-        match found {
+        let last_error = match found {
             Ok(found) => {
                 let hit = found.memories.iter().any(|m| {
                     m.content
@@ -185,13 +185,21 @@ async fn search_until_found(svc: &VertexAiRagMemoryService, user: &str, query: &
                 if hit {
                     return;
                 }
+                None
             }
-            Err(e) => eprintln!("search failed ({e}); retrying"),
+            Err(e) => {
+                eprintln!("search failed ({e}); retrying");
+                Some(e.to_string())
+            }
+        };
+        if Instant::now() >= deadline {
+            match &last_error {
+                Some(e) => {
+                    panic!("{needle} was not retrieved within 120 s (last search error: {e})")
+                }
+                None => panic!("{needle} was not retrieved within 120 s"),
+            }
         }
-        assert!(
-            Instant::now() < deadline,
-            "{needle} was not retrieved within 120 s"
-        );
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
