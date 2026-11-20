@@ -33,7 +33,7 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics, gadk-prompts and gadk-eval may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics, gadk-prompts, gadk-eval and gadk-bigquery may depend on gadk-engine" in e for e in errs), errs)
 
     def test_tools_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()
@@ -507,6 +507,34 @@ class EdgeTest(unittest.TestCase):
         self.edit("gadk-cloudtrace", 'gadk-model = { workspace = true, features = ["gcp-auth"] }\n', "")
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-cloudtrace -> gadk-model is missing" in e for e in errs), errs)
+
+    def test_bigquery_edges_are_exactly_agent_engine_model_session(self):
+        self.assertEqual(cwd.ALLOWED["gadk-bigquery"],
+                         {"gadk-agent", "gadk-engine", "gadk-model", "gadk-session"})
+        self.assertIn("gadk-bigquery", cwd.ENGINE_DEPENDENTS)
+
+    def test_bigquery_dependency_on_tools_is_rejected(self):
+        self.edit("gadk-bigquery", "[dependencies]\n", "[dependencies]\ngadk-tools = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-bigquery -> gadk-tools is not allowed" in e for e in errs), errs)
+
+    def test_bigquery_missing_session_edge_is_rejected(self):
+        self.edit("gadk-bigquery", "gadk-session = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-bigquery -> gadk-session is missing" in e for e in errs), errs)
+
+    def test_facade_bigquery_edge_is_optional(self):
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-bigquery" in deps], ["gadk"])
+        self.assertIn(("gadk", "gadk-bigquery"), cwd.OPTIONAL)
+        self.edit("gadk", "gadk-bigquery = { workspace = true, optional = true }",
+                  "gadk-bigquery = { workspace = true }")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-bigquery must be optional = true" in e for e in errs), errs)
+
+    def test_facade_missing_bigquery_edge_is_rejected(self):
+        self.edit("gadk", "gadk-bigquery = { workspace = true, optional = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-bigquery is missing" in e for e in errs), errs)
 
     def test_eval_monitor_missing_cloudtrace_edge_is_rejected(self):
         self.edit("gadk-eval-monitor", "gadk-cloudtrace = { workspace = true }\n", "")

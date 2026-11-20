@@ -62,6 +62,12 @@ pub use gadk_artifact_gcs as artifact_gcs;
 /// store, the refresh-and-retry transport and (feature `gcp`) per-user Google Cloud credentials
 /// (re-export of `gadk-auth`).
 pub use gadk_auth as auth;
+/// The BigQuery toolset: `list_dataset_ids`, `get_dataset_info`, `list_table_ids`,
+/// `get_table_info` and `execute_sql` (read-only by default; `WriteMode` opts into writes),
+/// and the BigQuery REST client the tools use (feature `bigquery`, not on by default; re-export
+/// of `gadk-bigquery`).
+#[cfg(feature = "bigquery")]
+pub use gadk_bigquery as bigquery;
 pub use gadk_engine as engine;
 /// Offline agent evaluation: YAML eval sets, deterministic, tool-trajectory and LLM-judge
 /// scorers, and per-variant reports (feature `eval`, not on by default; re-export of `gadk-eval`).

@@ -1,0 +1,34 @@
+[package]
+name = "gadk-bigquery"
+description = "A BigQuery toolset for gadk agents: list datasets and tables, read their metadata and run SQL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gadk-agent = { workspace = true }
+gadk-engine = { workspace = true }
+gadk-model = { workspace = true, features = ["gcp-auth"] }
+gadk-session = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+# Names `google_cloud_auth::credentials::Credentials` (the credentials `Adc` keeps).
+google-cloud-auth = { workspace = true }
+http = { workspace = true }
+reqwest = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+# Builds the fake HTTP client's `BodyStream` in the client tests.
+futures = { workspace = true }

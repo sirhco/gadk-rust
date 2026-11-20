@@ -80,6 +80,7 @@ Always present: `agent`, `artifact`, `auth`, `compaction`, `engine`, `genai`, `m
 | `telemetry` | | OpenTelemetry export (`gadk::telemetry`) |
 | `agentregistry` | | Google Cloud Agent Registry client (`gadk::agentregistry`) |
 | `agentanalytics` | | BigQuery Agent Analytics plugin (`gadk::agentanalytics`) |
+| `bigquery` | | BigQuery toolset: list datasets and tables, read metadata, run SQL (`gadk::bigquery`) |
 | `eval` | | Offline agent evaluation: eval sets, scorers, LLM judge (`gadk::eval`) |
 
 For PostgreSQL sessions, also enable the `postgres` feature of `gadk-session-database` in your

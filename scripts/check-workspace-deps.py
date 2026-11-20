@@ -95,6 +95,9 @@
 - cloudtrace: `gadk-cloudtrace` (the Cloud Trace v1 read client) depends on exactly `gadk-model`
   (HTTP seam, `gcp-auth`); `gadk-console` (its trace reads) and `gadk-eval-monitor` (the Cloud
   Trace transcript source) depend on it.
+- bigquery: `gadk-bigquery` (the BigQuery toolset) depends on exactly `gadk-agent`, `gadk-engine`,
+  `gadk-model` and `gadk-session`; it may depend on `gadk-engine` (its tools are function tools),
+  and only the façade depends on it (feature `bigquery`, optional).
 """
 import pathlib, sys, tomllib
 
@@ -140,6 +143,7 @@ ALLOWED = {
     "gadk-prompts-firestore": {"gadk-prompts", "gadk-model", "gadk-platform"},
     "gadk-prompts-cli": {"gadk-prompts", "gadk-prompts-firestore"},
     "gadk-cloudtrace": {"gadk-model"},
+    "gadk-bigquery": {"gadk-agent", "gadk-engine", "gadk-model", "gadk-session"},
     "gadk-console": {"gadk-cloudtrace", "gadk-model", "gadk-prompts", "gadk-prompts-cli",
                      "gadk-eval", "gadk-eval-monitor"},
     "gadk-eval": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
@@ -151,7 +155,7 @@ ALLOWED = {
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
              "gadk-artifact-gcs", "gadk-vertexai", "gadk-server", "gadk-a2a", "gadk-launcher",
              "gadk-agentregistry", "gadk-telemetry", "gadk-agentanalytics", "gadk-prompts",
-             "gadk-prompts-firestore", "gadk-eval"},
+             "gadk-prompts-firestore", "gadk-eval", "gadk-bigquery"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("gadk-a2a", "gadk-server"),
@@ -159,11 +163,12 @@ OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("ga
             ("gadk-agentregistry", "gadk-a2a"), ("gadk-agentregistry", "gadk-mcp"),
             ("gadk", "gadk-telemetry"), ("gadk", "gadk-agentanalytics"),
             ("gadk-prompts-cli", "gadk-prompts-firestore"), ("gadk", "gadk-prompts"),
-            ("gadk", "gadk-prompts-firestore"), ("gadk", "gadk-eval")}
+            ("gadk", "gadk-prompts-firestore"), ("gadk", "gadk-eval"),
+            ("gadk", "gadk-bigquery")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
                      "gadk-agentregistry", "gadk-telemetry", "gadk-configurable",
-                     "gadk-agentanalytics", "gadk-prompts", "gadk-eval")  # the only crates that may depend on gadk-engine
+                     "gadk-agentanalytics", "gadk-prompts", "gadk-eval", "gadk-bigquery")  # the only crates that may depend on gadk-engine
 TOOLS_DEPENDENT = "gadk"  # the only crate that may depend on gadk-tools
 OPENAI_DEPENDENT = "gadk"  # the only crate that may depend on gadk-openai (3b)
 LICENSE_OVERRIDES = {
@@ -224,7 +229,7 @@ def check(repo):
             if d == name:
                 continue
             if d == "gadk-engine" and name not in ENGINE_DEPENDENTS:
-                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics, gadk-prompts and gadk-eval may depend on gadk-engine (dev-dependency)")
+                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics, gadk-prompts, gadk-eval and gadk-bigquery may depend on gadk-engine (dev-dependency)")
             elif d == "gadk-tools" and name != TOOLS_DEPENDENT:
                 errs.append(f"{rel}: only {TOOLS_DEPENDENT} may depend on gadk-tools (dev-dependency)")
             elif d == "gadk-openai" and name != OPENAI_DEPENDENT:
