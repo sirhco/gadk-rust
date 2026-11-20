@@ -7,12 +7,19 @@ the public API.
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-11-20
+
 ### Changed
 
 - `gadk-engine`: the function-response ordering errors list ids as `[a, b]` instead of
   `map[a:{} b:{}]`, and read `function response ids` (was `function responses ids`).
 - `gadk-session` / `gadk-artifact`: the test-suite failure messages and step labels use Rust method
   and field names.
+
+### Fixed
+
+- `gadk-configurable`: the `adkcli` REST replay test no longer fails when another process takes
+  its port first under a parallel test run.
 
 ## [0.4.6] - 2026-11-19
 
@@ -488,7 +495,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.7...HEAD
+[0.4.7]: https://github.com/sirhco/gadk-rust/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/sirhco/gadk-rust/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/sirhco/gadk-rust/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/sirhco/gadk-rust/compare/v0.4.3...v0.4.4
