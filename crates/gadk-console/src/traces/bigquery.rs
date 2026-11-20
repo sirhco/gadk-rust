@@ -17,11 +17,16 @@
 //! Rows that share a `trace_id` are one trace; rows that share a `span_id` are one span; every
 //! row is also one log entry of its span. Rows are never joined to Cloud Logging.
 
+use std::collections::{BTreeMap, HashMap};
+
 use chrono::{DateTime, Utc};
 use gadk_bigquery::{BigQueryClient, BigQueryError, QueryOptions};
 use serde_json::{Map, Value, json};
 
-use super::{SourceError, TraceId, TracePage, TraceQuery, TraceSource, TraceSummary};
+use super::{
+    LogEntry, LogSet, RawSpan, SourceError, TraceDetail, TraceId, TracePage, TraceQuery,
+    TraceSource, TraceSummary,
+};
 
 /// The URL form `--traces` accepts.
 const URL_FORM: &str = "bigquery://<project>.<dataset>.<table>";
@@ -129,7 +134,6 @@ fn is_dataset_or_table(s: &str) -> bool {
 
 /// Whether an event type names a span: `USER_MESSAGE_RECEIVED` or the `INVOCATION_`, `AGENT_`,
 /// `LLM_` and `TOOL_` families.
-#[allow(dead_code)] // used by BigQueryTraceSource (Tasks 3-4)
 pub(crate) fn is_named_family(event_type: &str) -> bool {
     event_type == "USER_MESSAGE_RECEIVED"
         || ["INVOCATION_", "AGENT_", "LLM_", "TOOL_"]
@@ -343,6 +347,182 @@ LIMIT @limit OFFSET @offset"
     )
 }
 
+/// The most rows (log entries) read for one trace.
+pub(crate) const MAX_ROWS: usize = 1000;
+
+fn get_sql(table: &str) -> String {
+    format!(
+        "SELECT timestamp, event_type, agent, session_id, invocation_id, span_id, parent_span_id,\n\
+  content, attributes, latency_ms, status, error_message\n\
+FROM {table} WHERE trace_id = @trace_id\n\
+ORDER BY timestamp, event_type LIMIT @limit"
+    )
+}
+
+/// One decoded `agent_events` row.
+struct Row {
+    ts: DateTime<Utc>,
+    event_type: String,
+    agent: Option<String>,
+    session: Option<String>,
+    invocation: Option<String>,
+    span_id: Option<String>,
+    parent: Option<String>,
+    content: Option<Value>,
+    attributes: Option<Value>,
+    latency: Option<Value>,
+    status: Option<String>,
+    error: Option<String>,
+}
+
+/// A JSON cell: JSON text (or an already-decoded value); NULL and JSON `null` are absent.
+fn json_cell(row: &Map<String, Value>, key: &str) -> Result<Option<Value>, SourceError> {
+    let parsed = match row.get(key) {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(s)) => {
+            serde_json::from_str::<Value>(s).map_err(|e| SourceError::BigQuery {
+                status: None,
+                reason: None,
+                detail: format!("{key} is not JSON: {e}"),
+            })?
+        }
+        Some(other) => other.clone(),
+    };
+    Ok((!parsed.is_null()).then_some(parsed))
+}
+
+fn decode_row(row: &Map<String, Value>) -> Result<Row, SourceError> {
+    Ok(Row {
+        ts: timestamp(row, "timestamp")?,
+        event_type: text(row, "event_type").unwrap_or_default(),
+        agent: text(row, "agent"),
+        session: text(row, "session_id"),
+        invocation: text(row, "invocation_id"),
+        span_id: text(row, "span_id").map(|s| s.to_ascii_lowercase()),
+        parent: text(row, "parent_span_id").map(|s| s.to_ascii_lowercase()),
+        content: json_cell(row, "content")?,
+        attributes: json_cell(row, "attributes")?,
+        latency: json_cell(row, "latency_ms")?,
+        status: text(row, "status"),
+        error: text(row, "error_message"),
+    })
+}
+
+impl Row {
+    fn model(&self) -> Option<&str> {
+        self.attributes.as_ref()?.get("model")?.as_str()
+    }
+
+    fn tool(&self) -> Option<&str> {
+        self.content.as_ref()?.get("tool")?.as_str()
+    }
+
+    fn severity(&self) -> &'static str {
+        if self.status.as_deref() == Some("ERROR") || self.event_type.ends_with("_ERROR") {
+            "ERROR"
+        } else {
+            "INFO"
+        }
+    }
+
+    fn entry(&self) -> LogEntry {
+        let mut payload = Map::new();
+        payload.insert("event.name".into(), Value::from(self.event_type.clone()));
+        if let Some(body) = &self.content {
+            payload.insert("body".into(), body.clone());
+        }
+        let mut attributes = self.attributes.clone();
+        if let Some(error) = &self.error {
+            match attributes.get_or_insert_with(|| json!({})) {
+                Value::Object(map) => {
+                    map.insert("error_message".into(), Value::from(error.clone()));
+                }
+                other => *other = json!({ "value": other.clone(), "error_message": error }),
+            }
+        }
+        if let Some(attributes) = attributes {
+            payload.insert("attributes".into(), attributes);
+        }
+        LogEntry {
+            timestamp: self.ts,
+            span_id: self.span_id.clone(),
+            severity: Some(self.severity().to_owned()),
+            payload: Value::Object(payload),
+        }
+    }
+}
+
+/// Rows (oldest first) grouped into spans by `span_id`, in first-seen order.
+fn spans(rows: &[Row]) -> Vec<RawSpan> {
+    let mut order: Vec<&str> = Vec::new();
+    let mut groups: HashMap<&str, Vec<&Row>> = HashMap::new();
+    for row in rows {
+        if let Some(id) = row.span_id.as_deref() {
+            groups
+                .entry(id)
+                .or_insert_with(|| {
+                    order.push(id);
+                    Vec::new()
+                })
+                .push(row);
+        }
+    }
+    order
+        .into_iter()
+        .map(|id| {
+            let group = &groups[id];
+            let first_some =
+                |f: fn(&Row) -> Option<&str>| group.iter().find_map(|r| f(r)).map(str::to_owned);
+            let last_some = |f: fn(&Row) -> Option<&str>| {
+                group.iter().rev().find_map(|r| f(r)).map(str::to_owned)
+            };
+            let namer = group
+                .iter()
+                .find(|r| is_named_family(&r.event_type))
+                .unwrap_or(&group[0]);
+            let agent = first_some(|r| r.agent.as_deref());
+            let name = span_name(
+                &namer.event_type,
+                agent.as_deref(),
+                first_some(Row::model).as_deref(),
+                first_some(Row::tool).as_deref(),
+            );
+            let start = group.iter().map(|r| r.ts).min().unwrap_or(group[0].ts);
+            let latest = group.iter().map(|r| r.ts).max().unwrap_or(start);
+            let by_latency = group
+                .iter()
+                .filter_map(|r| r.latency.as_ref()?.get("total_ms")?.as_f64())
+                .filter(|ms| *ms >= 0.0)
+                .map(|ms| start + chrono::TimeDelta::microseconds((ms * 1000.0) as i64))
+                .max();
+            let end = by_latency.map_or(latest, |t| t.max(latest));
+            let mut labels = BTreeMap::new();
+            for (key, value) in [
+                ("gen_ai.agent.name", agent),
+                (
+                    "gen_ai.conversation.id",
+                    first_some(|r| r.session.as_deref()),
+                ),
+                ("invocation_id", first_some(|r| r.invocation.as_deref())),
+                ("status", last_some(|r| r.status.as_deref())),
+                ("error_message", last_some(|r| r.error.as_deref())),
+            ] {
+                if let Some(value) = value {
+                    labels.insert(key.to_owned(), value);
+                }
+            }
+            RawSpan {
+                span_id: id.to_owned(),
+                parent_id: first_some(|r| r.parent.as_deref()),
+                name,
+                start,
+                end,
+                labels,
+            }
+        })
+        .collect()
+}
+
 #[async_trait::async_trait]
 impl TraceSource for BigQueryTraceSource {
     async fn list(&self, query: &TraceQuery) -> Result<TracePage, SourceError> {
@@ -401,9 +581,32 @@ impl TraceSource for BigQueryTraceSource {
         })
     }
 
-    async fn get(&self, _id: &TraceId) -> Result<super::TraceDetail, SourceError> {
-        // Task 4 replaces this.
-        Err(SourceError::NotFound)
+    async fn get(&self, id: &TraceId) -> Result<TraceDetail, SourceError> {
+        let sql = get_sql(&self.table.sql_path()?);
+        let params = vec![
+            param("trace_id", "STRING", Some(id.as_str().to_owned())),
+            param("limit", "INT64", Some((MAX_ROWS + 1).to_string())),
+        ];
+        let opts = self.options(params).with_max_rows((MAX_ROWS + 1) as u32);
+        let result = self.run(&sql, &opts).await?;
+        if result.rows.is_empty() {
+            return Err(SourceError::NotFound);
+        }
+        let truncated = result.rows.len() > MAX_ROWS || result.has_more;
+        let rows = result
+            .rows
+            .iter()
+            .take(MAX_ROWS)
+            .map(decode_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(TraceDetail {
+            trace_id: id.clone(),
+            spans: spans(&rows),
+            logs: Ok(LogSet {
+                entries: rows.iter().map(Row::entry).collect(),
+                truncated,
+            }),
+        })
     }
 }
 
@@ -418,7 +621,7 @@ mod tests {
 
     use super::*;
     use crate::traces::test_http::FakeHttp;
-    use crate::traces::{SourceError, TimeRange, TraceQuery, TraceSource};
+    use crate::traces::{LogEntry, RawSpan, SourceError, TimeRange, TraceQuery, TraceSource};
 
     const QUERIES: &str =
         "https://bigquery.googleapis.com/bigquery/v2/projects/billing-proj/queries";
@@ -646,6 +849,339 @@ mod tests {
                 detail: "Access Denied".into()
             }
         );
+    }
+
+    const GET_FIELDS: [(&str, &str); 12] = [
+        ("timestamp", "TIMESTAMP"),
+        ("event_type", "STRING"),
+        ("agent", "STRING"),
+        ("session_id", "STRING"),
+        ("invocation_id", "STRING"),
+        ("span_id", "STRING"),
+        ("parent_span_id", "STRING"),
+        ("content", "JSON"),
+        ("attributes", "JSON"),
+        ("latency_ms", "JSON"),
+        ("status", "STRING"),
+        ("error_message", "STRING"),
+    ];
+
+    const ID: &str = "0af7651916cd43dd8448eb211c80319c";
+    const ROOT: &str = "aaaaaaaaaaaaaaaa";
+    const AGENT: &str = "bbbbbbbbbbbbbbbb";
+    const LLM: &str = "cccccccccccccccc";
+
+    /// One `agent_events` row at `now + ms`.
+    #[allow(clippy::too_many_arguments)]
+    fn ev(
+        ms: i64,
+        event: &str,
+        span: Option<&str>,
+        parent: Option<&str>,
+        content: Option<Value>,
+        attributes: Option<Value>,
+        latency: Option<Value>,
+        status: &str,
+        error: Option<&str>,
+    ) -> Vec<Value> {
+        let json_text = |v: Option<Value>| v.map_or(Value::Null, |v| json!(v.to_string()));
+        vec![
+            json!(micros(now() + chrono::TimeDelta::milliseconds(ms))),
+            json!(event),
+            json!("weather_bot"),
+            json!("s-1"),
+            json!("inv-1"),
+            span.map_or(Value::Null, |s| json!(s)),
+            parent.map_or(Value::Null, |s| json!(s)),
+            json_text(content),
+            json_text(attributes),
+            json_text(latency),
+            json!(status),
+            error.map_or(Value::Null, |s| json!(s)),
+        ]
+    }
+
+    fn trace_rows() -> Vec<Vec<Value>> {
+        vec![
+            ev(
+                0,
+                "USER_MESSAGE_RECEIVED",
+                Some(ROOT),
+                None,
+                Some(json!({"text": "hi"})),
+                None,
+                None,
+                "OK",
+                None,
+            ),
+            ev(
+                1,
+                "INVOCATION_STARTING",
+                Some(ROOT),
+                None,
+                None,
+                None,
+                None,
+                "OK",
+                None,
+            ),
+            ev(
+                2,
+                "AGENT_STARTING",
+                Some(AGENT),
+                Some(ROOT),
+                None,
+                None,
+                None,
+                "OK",
+                None,
+            ),
+            ev(
+                3,
+                "LLM_REQUEST",
+                Some(LLM),
+                Some(AGENT),
+                None,
+                Some(json!({"model": "gemini-3.8-flash"})),
+                None,
+                "OK",
+                None,
+            ),
+            ev(
+                10,
+                "LLM_RESPONSE",
+                Some(LLM),
+                Some(AGENT),
+                Some(json!({"text": "hello"})),
+                None,
+                Some(json!({"total_ms": 900})),
+                "OK",
+                None,
+            ),
+            ev(
+                20,
+                "STATE_DELTA",
+                None,
+                None,
+                Some(json!({"k": 1})),
+                None,
+                None,
+                "OK",
+                None,
+            ),
+            ev(
+                30,
+                "AGENT_ERROR",
+                Some(AGENT),
+                Some(ROOT),
+                None,
+                Some(Value::Null),
+                None,
+                "ERROR",
+                Some("boom"),
+            ),
+            ev(
+                40,
+                "INVOCATION_COMPLETED",
+                Some(ROOT),
+                None,
+                None,
+                None,
+                None,
+                "OK",
+                None,
+            ),
+        ]
+    }
+
+    fn at(ms: i64) -> DateTime<Utc> {
+        now() + chrono::TimeDelta::milliseconds(ms)
+    }
+
+    #[tokio::test]
+    async fn get_builds_spans_and_entries() {
+        let fake = FakeHttp::new(vec![reply(&GET_FIELDS, trace_rows(), false)]);
+        let id = TraceId::parse(ID).unwrap();
+        let detail = source(&fake).get(&id).await.unwrap();
+        assert_eq!(detail.trace_id, id);
+
+        let names: Vec<(&str, &str, Option<&str>)> = detail
+            .spans
+            .iter()
+            .map(|s| (s.span_id.as_str(), s.name.as_str(), s.parent_id.as_deref()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                (ROOT, "invocation", None),
+                (AGENT, "invoke_agent weather_bot", Some(ROOT)),
+                (LLM, "call_llm gemini-3.8-flash", Some(AGENT)),
+            ]
+        );
+        let root: &RawSpan = &detail.spans[0];
+        assert_eq!((root.start, root.end), (at(0), at(40)));
+        let llm = &detail.spans[2];
+        assert_eq!(
+            (llm.start, llm.end),
+            (at(3), at(903)),
+            "end from latency_ms.total_ms"
+        );
+        let agent = &detail.spans[1];
+        assert_eq!(agent.labels["gen_ai.agent.name"], "weather_bot");
+        assert_eq!(agent.labels["gen_ai.conversation.id"], "s-1");
+        assert_eq!(agent.labels["invocation_id"], "inv-1");
+        assert_eq!(agent.labels["status"], "ERROR");
+        assert_eq!(agent.labels["error_message"], "boom");
+        assert!(!root.labels.contains_key("error_message"));
+
+        let logs = detail.logs.unwrap();
+        assert!(!logs.truncated);
+        assert_eq!(logs.entries.len(), 8);
+        let first: &LogEntry = &logs.entries[0];
+        assert_eq!(first.span_id.as_deref(), Some(ROOT));
+        assert_eq!(first.severity.as_deref(), Some("INFO"));
+        assert_eq!(
+            first.payload,
+            json!({ "event.name": "USER_MESSAGE_RECEIVED", "body": { "text": "hi" } })
+        );
+        let stray = &logs.entries[5];
+        assert_eq!(stray.span_id, None, "rows without span_id are unattached");
+        let error = &logs.entries[6];
+        assert_eq!(error.severity.as_deref(), Some("ERROR"));
+        assert_eq!(
+            error.payload,
+            json!({ "event.name": "AGENT_ERROR", "attributes": { "error_message": "boom" } })
+        );
+
+        let body = fake.body(0);
+        assert_eq!(fake.uris(), [QUERIES]);
+        assert_eq!(body["maximumBytesBilled"], json!("1000"));
+        assert_eq!(body["maxResults"], json!(1001));
+        assert_eq!(
+            param_value(&body, "trace_id")["parameterValue"]["value"],
+            json!(ID)
+        );
+        assert_eq!(
+            param_value(&body, "limit")["parameterValue"]["value"],
+            json!("1001")
+        );
+        assert!(!body["query"].as_str().unwrap().contains(ID));
+    }
+
+    #[tokio::test]
+    async fn get_names_spans_from_the_first_named_row() {
+        let rows = vec![
+            ev(
+                0,
+                "STATE_DELTA",
+                Some(ROOT),
+                None,
+                None,
+                None,
+                None,
+                "OK",
+                None,
+            ),
+            ev(
+                1,
+                "TOOL_STARTING",
+                Some(ROOT),
+                None,
+                Some(json!({"tool": "get_weather"})),
+                None,
+                None,
+                "OK",
+                None,
+            ),
+        ];
+        let fake = FakeHttp::new(vec![reply(&GET_FIELDS, rows, false)]);
+        let detail = source(&fake)
+            .get(&TraceId::parse(ID).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(detail.spans[0].name, "execute_tool get_weather");
+    }
+
+    #[tokio::test]
+    async fn get_truncates_by_row_count_and_by_page_token() {
+        let many: Vec<Vec<Value>> = (0..1001)
+            .map(|i| {
+                ev(
+                    i,
+                    "LLM_REQUEST",
+                    Some(LLM),
+                    None,
+                    None,
+                    None,
+                    None,
+                    "OK",
+                    None,
+                )
+            })
+            .collect();
+        let fake = FakeHttp::new(vec![reply(&GET_FIELDS, many, false)]);
+        let logs = source(&fake)
+            .get(&TraceId::parse(ID).unwrap())
+            .await
+            .unwrap()
+            .logs
+            .unwrap();
+        assert!(logs.truncated);
+        assert_eq!(logs.entries.len(), 1000);
+
+        let some: Vec<Vec<Value>> = (0..300)
+            .map(|i| {
+                ev(
+                    i,
+                    "LLM_REQUEST",
+                    Some(LLM),
+                    None,
+                    None,
+                    None,
+                    None,
+                    "OK",
+                    None,
+                )
+            })
+            .collect();
+        let fake = FakeHttp::new(vec![reply(&GET_FIELDS, some, true)]);
+        let logs = source(&fake)
+            .get(&TraceId::parse(ID).unwrap())
+            .await
+            .unwrap()
+            .logs
+            .unwrap();
+        assert!(logs.truncated, "a pageToken means more rows exist");
+        assert_eq!(logs.entries.len(), 300);
+    }
+
+    #[tokio::test]
+    async fn get_without_rows_is_not_found() {
+        let fake = FakeHttp::new(vec![reply(&GET_FIELDS, vec![], false)]);
+        let err = source(&fake)
+            .get(&TraceId::parse(ID).unwrap())
+            .await
+            .unwrap_err();
+        assert_eq!(err, SourceError::NotFound);
+    }
+
+    #[tokio::test]
+    async fn get_rejects_rows_without_timestamps_or_with_bad_json() {
+        let mut no_ts = trace_rows();
+        no_ts[0][0] = Value::Null;
+        let mut bad_json = trace_rows();
+        bad_json[0][7] = json!("{not json");
+        for rows in [no_ts, bad_json] {
+            let fake = FakeHttp::new(vec![reply(&GET_FIELDS, rows, false)]);
+            let err = source(&fake)
+                .get(&TraceId::parse(ID).unwrap())
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, SourceError::BigQuery { status: None, .. }),
+                "{err:?}"
+            );
+        }
     }
 
     #[test]
