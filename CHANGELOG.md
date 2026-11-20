@@ -13,7 +13,7 @@ the public API.
   a `MemoryService` backed by a Vertex AI RAG Engine corpus: each session is stored as one RAG
   file of its text events (replaced when the session is added again), and search runs RAG
   retrieval filtered to the requesting app and user. The README covers corpus setup, behavior,
-  and stopping the RAG database's hourly billing.
+  and teardown for Serverless and Spanner modes.
 
 ## [0.4.8] - 2026-11-20
 

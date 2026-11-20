@@ -52,17 +52,25 @@ let memory = Arc::new(VertexAiMemoryService::new(VertexAiMemoryServiceConfig {
 ## RAG memory
 
 `VertexAiRagMemoryService` keeps memory in a RAG Engine corpus you create once. RAG Engine is
-regional: use a region such as `us-central1` (not `us` or `global`). The caller needs the
-Vertex AI User role (`roles/aiplatform.user`) on the project.
+regional: use `us-central1` (not `us` or `global`). The caller needs the Vertex AI User role
+(`roles/aiplatform.user`) on the project.
+
+New projects must use RAG Engine's Serverless mode (a preview feature, `us-central1` only);
+Spanner mode (RagManagedDb) is restricted to allowlisted projects. Set up once per project:
 
 ```sh
-curl -X POST -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  -H "Content-Type: application/json" \
-  "https://us-central1-aiplatform.googleapis.com/v1/projects/MY_PROJECT/locations/us-central1/ragCorpora" \
-  -d '{"displayName": "gadk-memory"}'
-# The reply is an operation; once done, list the corpora to read the corpus name:
-curl -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  "https://us-central1-aiplatform.googleapis.com/v1/projects/MY_PROJECT/locations/us-central1/ragCorpora"
+TOKEN=$(gcloud auth print-access-token)
+BASE=https://us-central1-aiplatform.googleapis.com/v1/projects/MY_PROJECT/locations/us-central1
+# 1. Enable the Vector Search API.
+gcloud services enable vectorsearch.googleapis.com --project=MY_PROJECT
+# 2. Switch RAG Engine to Serverless mode.
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "$BASE/ragEngineConfig" -d '{"ragManagedDbConfig": {"serverless": {}}}'
+# 3. Create the corpus. The reply is an operation; once done, list the corpora to read the
+#    corpus name.
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "$BASE/ragCorpora" -d '{"displayName": "gadk-memory"}'
+curl -H "Authorization: Bearer $TOKEN" "$BASE/ragCorpora"
 ```
 
 ```rust
@@ -98,22 +106,30 @@ How it behaves:
 
 ### Cost and teardown
 
-RAG Engine stores vectors in RagManagedDb, a Spanner instance billed **per hour, per project
-and region**, from the first corpus until the project's RAG Engine config is set to
-Unprovisioned (the Basic tier is 100 processing units). Deleting a corpus does **not** stop
-that billing. To stop it when you are done:
+**Serverless mode** has no mode fee or hourly charge: you pay for Vector Search usage,
+embeddings and models. Each corpus gets a Vector Search collection in your project (named
+`vertex-rag-<corpus id>`) that holds its vectors. Deleting the corpus with `force=true` deletes
+the collection too; confirm that nothing is left:
 
 ```sh
 TOKEN=$(gcloud auth print-access-token)
 BASE=https://us-central1-aiplatform.googleapis.com/v1/projects/MY_PROJECT/locations/us-central1
-# 1. Delete the corpus and its files.
 curl -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE/ragCorpora/123?force=true"
-# 2. Unprovision the RAG database. This DELETES EVERY RAG corpus's data in this project and
-#    region, and cannot be undone.
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://vectorsearch.googleapis.com/v1/projects/MY_PROJECT/locations/us-central1/collections"
+```
+
+**Spanner mode** (allowlisted projects) stores vectors in RagManagedDb, a Spanner instance
+billed **per hour, per project and region**, from the first corpus until the RAG Engine config
+is set to unprovisioned. Deleting a corpus does **not** stop that billing. After deleting the
+corpus as above, stop it with:
+
+```sh
+# This DELETES EVERY RAG corpus's data in this project and region, and cannot be undone.
 curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   "$BASE/ragEngineConfig" \
-  -d '{"ragManagedDbConfig": {"unprovisioned": {}}}'
-# 3. Confirm: the config shows "unprovisioned" (after the PATCH operation finishes).
+  -d '{"ragManagedDbConfig": {"spanner": {"unprovisioned": {}}}}'
+# Confirm: the config shows "unprovisioned" (after the PATCH operation finishes).
 curl -H "Authorization: Bearer $TOKEN" "$BASE/ragEngineConfig"
 ```
 
