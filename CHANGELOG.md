@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-11-20
+
 ### Added
 
 - `gadk-telemetry`: structured stdout log lines carry a `message` summary
@@ -25,6 +27,8 @@ the public API.
 - `gadk-console`: the trace page carries each log payload once instead of three times (the span
   pane copies the server-rendered entries); the README lists `X-Content-Type-Options: nosniff`
   and `Cache-Control: no-store` with the CSP.
+- `gadk-console`: the "trace has more log entries" banner states how many entries are shown
+  (it always said 1,000, also when fewer had been read).
 
 ## [0.4.7] - 2026-11-20
 
@@ -514,7 +518,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.7...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/sirhco/gadk-rust/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/sirhco/gadk-rust/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/sirhco/gadk-rust/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/sirhco/gadk-rust/compare/v0.4.4...v0.4.5
