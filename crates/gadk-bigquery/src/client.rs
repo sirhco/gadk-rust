@@ -197,6 +197,10 @@ impl BigQueryClient {
         if let Some(id) = &opts.session_id {
             query["connectionProperties"] = json!([{ "key": "session_id", "value": id }]);
         }
+        if !opts.query_parameters.is_empty() {
+            query["parameterMode"] = json!("NAMED");
+            query["queryParameters"] = json!(opts.query_parameters);
+        }
         let body = json!({
             "jobReference": job_ref,
             "configuration": { "dryRun": true, "labels": opts.labels, "query": query },
@@ -251,6 +255,10 @@ impl BigQueryClient {
         }
         if opts.create_session {
             body["createSession"] = json!(true);
+        }
+        if !opts.query_parameters.is_empty() {
+            body["parameterMode"] = json!("NAMED");
+            body["queryParameters"] = json!(opts.query_parameters);
         }
         let url = format!("{}/projects/{}/queries", self.base, seg(compute_project));
         let first = job_ok(self.call(Method::POST, &url, Some(body)).await?)?;
@@ -1033,5 +1041,71 @@ pub(crate) mod tests {
             format!("{:?}", client(&fake)),
             format!("BigQueryClient {{ base: {B:?}, .. }}")
         );
+    }
+
+    fn param() -> Value {
+        json!({ "name": "id", "parameterType": { "type": "STRING" }, "parameterValue": { "value": "x" } })
+    }
+
+    #[tokio::test]
+    async fn query_sends_named_parameters_only_when_given() {
+        let done = || {
+            (
+                200,
+                json!({ "jobComplete": true, "jobReference": { "projectId": "cp", "jobId": "j" } }),
+            )
+        };
+        let fake = FakeHttp::new(vec![done(), done()]);
+        let c = client(&fake);
+        c.query(
+            "cp",
+            "SELECT @id",
+            &QueryOptions::new().with_query_parameters(vec![param()]),
+        )
+        .await
+        .unwrap();
+        c.query("cp", "SELECT 1", &QueryOptions::new())
+            .await
+            .unwrap();
+        let with = fake.body(0);
+        assert_eq!(with["parameterMode"], json!("NAMED"));
+        assert_eq!(with["queryParameters"], json!([param()]));
+        let without = fake.body(1);
+        assert!(without.get("parameterMode").is_none(), "{without}");
+        assert!(without.get("queryParameters").is_none(), "{without}");
+    }
+
+    #[tokio::test]
+    async fn dry_run_sends_named_parameters_only_when_given() {
+        let typed = || {
+            (
+                200,
+                json!({ "statistics": { "query": { "statementType": "SELECT" } } }),
+            )
+        };
+        let fake = FakeHttp::new(vec![typed(), typed()]);
+        let c = client(&fake);
+        c.dry_run(
+            "cp",
+            "SELECT @id",
+            &QueryOptions::new().with_query_parameters(vec![param()]),
+        )
+        .await
+        .unwrap();
+        c.dry_run("cp", "SELECT 1", &QueryOptions::new())
+            .await
+            .unwrap();
+        let with = fake.body(0);
+        assert_eq!(
+            with["configuration"]["query"]["parameterMode"],
+            json!("NAMED")
+        );
+        assert_eq!(
+            with["configuration"]["query"]["queryParameters"],
+            json!([param()])
+        );
+        let without = &fake.body(1)["configuration"]["query"];
+        assert!(without.get("parameterMode").is_none(), "{without}");
+        assert!(without.get("queryParameters").is_none(), "{without}");
     }
 }
