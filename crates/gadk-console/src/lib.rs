@@ -24,6 +24,7 @@ use gadk_eval_monitor::{MonitorError, ReportStore};
 
 use crate::evals::{CACHE_CAP, ReportCache};
 use crate::traces::{BigQueryTable, BigQueryTraceSource, CloudTraceSource, TraceSource};
+use crate::usage::UsageSource;
 
 mod cli;
 mod evals;
@@ -32,6 +33,7 @@ mod prices;
 mod prompts;
 pub mod traces;
 mod url;
+mod usage;
 mod web;
 
 pub use cli::{parse_args, parse_cli};
@@ -193,6 +195,8 @@ pub async fn bind_with_source(
 pub(crate) struct Extras {
     /// The loaded price file.
     pub(crate) prices: Option<Arc<PriceTable>>,
+    /// The usage queries (BigQuery trace source only).
+    pub(crate) usage: Option<Arc<UsageSource>>,
 }
 
 /// [`bind_with_source`] plus `extras`.
@@ -233,6 +237,7 @@ pub(crate) async fn bind_full(
         port: addr.port(),
         now: chrono::Utc::now,
         prices: extras.prices,
+        usage: extras.usage,
     };
     Ok(Bound {
         listener,
@@ -258,21 +263,31 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
         .map(PriceTable::load)
         .transpose()?
         .map(Arc::new);
-    let source: Arc<dyn TraceSource> = match cli.traces {
-        None => Arc::new(CloudTraceSource::new(
-            cli.config.project.clone(),
-            cli.config.log_id.clone(),
-        )),
+    let (source, usage): (Arc<dyn TraceSource>, Option<Arc<UsageSource>>) = match cli.traces {
+        None => (
+            Arc::new(CloudTraceSource::new(
+                cli.config.project.clone(),
+                cli.config.log_id.clone(),
+            )),
+            None,
+        ),
         Some(TracesFrom::BigQuery {
             table,
             max_bytes_billed,
-        }) => Arc::new(BigQueryTraceSource::new(
-            cli.config.project.clone(),
-            table,
-            max_bytes_billed,
-        )),
+        }) => (
+            Arc::new(BigQueryTraceSource::new(
+                cli.config.project.clone(),
+                table.clone(),
+                max_bytes_billed,
+            )),
+            Some(Arc::new(UsageSource::new(
+                cli.config.project.clone(),
+                table,
+                max_bytes_billed,
+            ))),
+        ),
     };
-    let bound = bind_full(cli.config, source, Extras { prices }).await?;
+    let bound = bind_full(cli.config, source, Extras { prices, usage }).await?;
     writeln!(out, "http://127.0.0.1:{}/", bound.local_addr().port())
         .and_then(|()| out.flush())
         .map_err(|e| ConsoleError::Serve(format!("print the URL: {e}")))?;

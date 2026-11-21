@@ -91,6 +91,7 @@ pub(crate) fn state_with_reports(
         port: PORT,
         now: fixed_now,
         prices: None,
+        usage: None,
     }
 }
 

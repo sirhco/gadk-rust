@@ -23,3 +23,4 @@ pub(crate) mod prompt;
 pub(crate) mod prompts;
 pub(crate) mod trace;
 pub(crate) mod traces;
+pub(crate) mod usage;

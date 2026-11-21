@@ -781,7 +781,7 @@ mod tests {
 
     use super::*;
     use crate::prices::Usage;
-    use crate::traces::test_http::FakeHttp;
+    use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::traces::{LogEntry, RawSpan, SourceError, TimeRange, TraceQuery, TraceSource};
 
     /// `list_sql("`p.d.t`")` as the list query was written before the span-family table.
@@ -850,32 +850,6 @@ LIMIT @limit OFFSET @offset"#;
         t.timestamp_micros().to_string()
     }
 
-    /// A completed `jobs.query` reply with `fields` (name, type) and `rows` (one JSON per cell).
-    fn reply(
-        fields: &[(&str, &str)],
-        rows: Vec<Vec<Value>>,
-        page_token: bool,
-    ) -> Result<(u16, String), String> {
-        let schema: Vec<Value> = fields
-            .iter()
-            .map(|(n, t)| json!({ "name": n, "type": t, "mode": "NULLABLE" }))
-            .collect();
-        let rows: Vec<Value> = rows
-            .into_iter()
-            .map(|cells| json!({ "f": cells.into_iter().map(|v| json!({ "v": v })).collect::<Vec<_>>() }))
-            .collect();
-        let mut body = json!({
-            "jobComplete": true,
-            "jobReference": { "projectId": "billing-proj", "jobId": "job_1" },
-            "schema": { "fields": schema },
-            "rows": rows,
-        });
-        if page_token {
-            body["pageToken"] = json!("next");
-        }
-        Ok((200, body.to_string()))
-    }
-
     fn source(fake: &Arc<FakeHttp>) -> BigQueryTraceSource {
         let client = BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth));
         let mut s = BigQueryTraceSource::with_client(
@@ -915,16 +889,6 @@ LIMIT @limit OFFSET @offset"#;
             Value::Null,
             Value::Null,
         ]
-    }
-
-    fn param_value(body: &Value, name: &str) -> Value {
-        body["queryParameters"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|p| p["name"] == json!(name))
-            .unwrap_or_else(|| panic!("no parameter {name}: {body}"))
-            .clone()
     }
 
     #[tokio::test]
