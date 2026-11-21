@@ -37,3 +37,4 @@ pub use result::{Outcome, RunTranscript, ScoreResult, ToolCall, TurnRecord};
 pub use score::score_transcript;
 pub use spec::{EvalCase, EvalSet, ScorerSpec, ToolExpect};
 pub use variant::Variant;
+pub use write::append_cases;

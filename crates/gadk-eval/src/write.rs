@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Writing eval sets as YAML ([`EvalSet::to_yaml`]).
+//! Writing eval sets as YAML ([`EvalSet::to_yaml`]) and appending cases to the text of an
+//! existing eval-set file ([`append_cases`]).
 //!
 //! Every string is written double-quoted: its JSON form, with the characters YAML does not allow
 //! unescaped (U+007F, U+0080 to U+009F, U+FFFE and U+FFFF) written as `\uXXXX`. `state` and tool
@@ -21,6 +22,7 @@
 
 use serde_json::{Map, Value};
 
+use crate::error::EvalError;
 use crate::spec::{EvalCase, EvalSet, ScorerSpec, ToolExpect};
 
 /// The indentation of the case items [`EvalSet::to_yaml`] writes.
@@ -53,6 +55,93 @@ impl EvalSet {
         }
         out
     }
+}
+
+/// `existing` (the text of an eval-set file) with `cases` appended to its `cases` list, each
+/// preceded by the `comments` lines for it. The existing text is kept byte for byte; the new
+/// items follow at the list's item indentation, with `\n` line endings.
+///
+/// The existing text must parse as an eval set whose last top-level key is `cases:` with
+/// nothing after its colon (a block list), and it must have no `...` document-end marker.
+///
+/// # Errors
+///
+/// [`EvalError::Load`] when `existing` does not parse, when a new id is already in the set or
+/// repeated, when `cases:` is not the last top-level key or is not a block list, when the text
+/// has a `...` marker, or when the result does not parse with the old ids followed by the new
+/// ones.
+pub fn append_cases(
+    existing: &str,
+    cases: &[EvalCase],
+    comments: &dyn Fn(&EvalCase) -> Vec<String>,
+) -> Result<String, EvalError> {
+    let old = EvalSet::from_yaml(existing)?;
+    let mut ids: Vec<&str> = old.cases.iter().map(|c| c.id.as_str()).collect();
+    for case in cases {
+        if ids.contains(&case.id.as_str()) {
+            return Err(EvalError::load(Some(&case.id), "duplicate case id"));
+        }
+        ids.push(&case.id);
+    }
+    let lines: Vec<&str> = existing.lines().collect();
+    if lines.iter().any(|l| l.trim_end() == "...") {
+        return Err(EvalError::load(
+            None,
+            "cannot append: the file has a `...` document-end marker",
+        ));
+    }
+    let last_key = lines
+        .iter()
+        .rposition(|l| is_top_level_key(l))
+        .filter(|&i| lines[i].trim_end() == "cases:")
+        .ok_or_else(|| {
+            EvalError::load(
+                None,
+                "cannot append: `cases:` must be the last top-level key, with nothing after its colon",
+            )
+        })?;
+    let indent = lines[last_key + 1..]
+        .iter()
+        .find_map(|l| {
+            let item = l.trim_start_matches(' ');
+            (item.starts_with("- ") || item == "-").then(|| l.len() - item.len())
+        })
+        .ok_or_else(|| EvalError::load(None, "cannot append: `cases` is not a block list"))?;
+    let mut out = existing.to_owned();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    for case in cases {
+        push_case(
+            &mut out,
+            case,
+            indent,
+            old.judge_rubric.as_deref(),
+            &comments(case),
+        );
+    }
+    let new = EvalSet::from_yaml(&out)?;
+    if !new
+        .cases
+        .iter()
+        .map(|c| c.id.as_str())
+        .eq(ids.iter().copied())
+    {
+        return Err(EvalError::load(
+            None,
+            "cannot append: the new cases did not parse as items of `cases`",
+        ));
+    }
+    Ok(out)
+}
+
+/// Whether `line` starts a top-level key: `^[A-Za-z_]+:`.
+fn is_top_level_key(line: &str) -> bool {
+    let name = line
+        .bytes()
+        .take_while(|b| b.is_ascii_alphabetic() || *b == b'_')
+        .count();
+    name > 0 && line.as_bytes().get(name) == Some(&b':')
 }
 
 /// Writes `case` as a list item at `indent` spaces, after its comment lines.
@@ -448,6 +537,116 @@ mod tests {
         for line in yaml.lines().filter(|l| l.trim_start().starts_with('#')) {
             assert!(line.starts_with("  # "), "{line:?}");
             assert!(!line.chars().any(char::is_control), "{line:?}");
+        }
+    }
+
+    const TWO: &str = "name: s\njudge_rubric: \"be kind\"\ncases:\n  - id: a\n    turns: [hi]\n    expect: [contains: x]\n";
+
+    #[test]
+    fn appends_after_a_two_space_list_keeping_the_text() {
+        let new = case(
+            "b",
+            &["hello"],
+            vec![ScorerSpec::LlmJudge {
+                rubric: "be kind".into(),
+                min_score: 3,
+            }],
+        );
+        let out = append_cases(TWO, &[new], &|c| vec![format!("added {}", c.id)]).unwrap();
+        assert_eq!(
+            out,
+            format!(
+                "{TWO}  # added b\n  - id: \"b\"\n    turns:\n      - \"hello\"\n    expect:\n      - llm_judge: {{}}\n"
+            )
+        );
+        let set = EvalSet::from_yaml(&out).unwrap();
+        let ids: Vec<&str> = set.cases.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b"]);
+    }
+
+    #[test]
+    fn appends_after_a_zero_indent_list_without_a_final_newline() {
+        let zero = "name: s\ncases:\n- id: a\n  turns: [hi]\n  expect: [contains: x]";
+        let new = [
+            case(
+                "b",
+                &["x"],
+                vec![ScorerSpec::Equals {
+                    text: "y".into(),
+                    turn: None,
+                }],
+            ),
+            case(
+                "c",
+                &["z"],
+                vec![ScorerSpec::Contains {
+                    text: "w".into(),
+                    ignore_case: false,
+                    turn: None,
+                }],
+            ),
+        ];
+        let out = append_cases(zero, &new, &|_| Vec::new()).unwrap();
+        assert_eq!(
+            out,
+            format!(
+                "{zero}\n- id: \"b\"\n  turns:\n    - \"x\"\n  expect:\n    - equals: {{text: \"y\"}}\n\
+                 - id: \"c\"\n  turns:\n    - \"z\"\n  expect:\n    - contains: {{text: \"w\"}}\n"
+            )
+        );
+        let ids: Vec<String> = EvalSet::from_yaml(&out)
+            .unwrap()
+            .cases
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+    }
+
+    fn append_err(existing: &str, new: &[EvalCase]) -> (Option<String>, String) {
+        match append_cases(existing, new, &|_| Vec::new()) {
+            Err(EvalError::Load { case, message }) => (case, message),
+            other => panic!("expected a load error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn appending_refuses_what_it_cannot_place() {
+        let b = || {
+            case(
+                "b",
+                &["x"],
+                vec![ScorerSpec::Equals {
+                    text: "y".into(),
+                    turn: None,
+                }],
+            )
+        };
+        let (id, msg) = append_err(TWO, &[case("a", &["x"], b().expect)]);
+        assert_eq!(
+            (id.as_deref(), msg.as_str()),
+            (Some("a"), "duplicate case id")
+        );
+        let (id, _) = append_err(TWO, &[b(), b()]);
+        assert_eq!(id.as_deref(), Some("b"));
+        let flow = "name: s\ncases: [{id: a, turns: [hi], expect: [contains: x]}]\n";
+        for (text, needle) in [
+            (flow.to_owned(), "`cases:` must be the last top-level key"),
+            (
+                "cases:\n  - id: a\n    turns: [hi]\n    expect: [contains: x]\nname: s\n"
+                    .to_owned(),
+                "`cases:` must be the last top-level key",
+            ),
+            (format!("{TWO}...\n"), "document-end marker"),
+            ("name: [".to_owned(), "invalid YAML"),
+            (
+                "name: s\ncases: []\n".to_owned(),
+                "`cases` must be a non-empty list",
+            ),
+        ] {
+            let (id, msg) = append_err(&text, &[b()]);
+            assert_eq!(id, None, "{text}");
+            assert!(msg.contains(needle), "{text}: {msg}");
         }
     }
 }
