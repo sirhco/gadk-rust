@@ -28,7 +28,7 @@ use gadk_eval::{EvalCase, ScorerSpec, ToolExpect};
 use serde_json::{Map, Value};
 
 use crate::error::MonitorError;
-use crate::source::ProductionRun;
+use crate::source::{ProductionRun, TranscriptQuery};
 
 /// The most characters of the production reply quoted in a case's comments.
 const REPLY_COMMENT_MAX: usize = 2_000;
@@ -330,6 +330,37 @@ pub trait ExportSource: Send + Sync {
         &self,
         runs: &[ProductionRun],
     ) -> Result<HashMap<String, Vec<ProductionRun>>, MonitorError>;
+
+    /// For each of the invocations `ids` (every id gets an entry): its latest `FEEDBACK` row per
+    /// (score name, source) and the prompt version of its first model request that has one,
+    /// both read from `from` on.
+    async fn contexts(
+        &self,
+        ids: &[String],
+        from: DateTime<Utc>,
+    ) -> Result<HashMap<String, ExportContext>, MonitorError>;
+
+    /// The invocations, with their start, that started in `[q.from, q.to)` (of root agent
+    /// `q.agent` when set) and whose latest score of each filtered name, across sources and
+    /// recorded from `q.from` on, satisfies every filter; newest first, at most `q.limit`. With
+    /// no filters, every invocation in the window.
+    async fn matching(
+        &self,
+        filters: &[ScoreFilter],
+        q: &TranscriptQuery,
+    ) -> Result<Vec<(String, DateTime<Utc>)>, MonitorError>;
+}
+
+impl CompareOp {
+    /// The SQL operator.
+    pub(crate) fn as_sql(self) -> &'static str {
+        match self {
+            CompareOp::Lt => "<",
+            CompareOp::Le => "<=",
+            CompareOp::Gt => ">",
+            CompareOp::Ge => ">=",
+        }
+    }
 }
 
 /// `run` as a case. `history` holds the session's earlier runs, oldest first (used only with
