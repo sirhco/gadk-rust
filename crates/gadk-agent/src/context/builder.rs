@@ -223,6 +223,7 @@ impl ContextBuilder {
             llm_call_limiter: self.llm_call_limiter,
             compaction: self.compaction,
             teardowns: self.teardowns,
+            prompts: Default::default(),
         };
         InvocationContext::from_inner(ContextInner {
             shared: Arc::new(shared),

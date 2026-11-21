@@ -16,6 +16,7 @@
 //! The read-only context view and the shared context state.
 
 use std::any::Any;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -31,6 +32,7 @@ use crate::agent::Agent;
 use crate::context::activation::ActivationId;
 use crate::context::cancel::CancelScope;
 use crate::context::identity::Identity;
+use crate::context::prompt_use::PromptUse;
 use crate::mode::BoundModes;
 use crate::parent_map::ParentMap;
 use crate::plugin_manager::PluginManager;
@@ -58,6 +60,10 @@ pub(crate) struct Shared {
     /// The invocation's teardown registry ([`crate::teardown::Teardowns`]); the runner installs
     /// one per invocation.
     pub(crate) teardowns: Option<Arc<crate::teardown::Teardowns>>,
+    /// The prompt version each agent's instruction was last rendered from, by agent name
+    /// ([`ReadonlyContext::record_prompt`]). Created empty with the invocation; every derived
+    /// context (deltas included) shares it.
+    pub(crate) prompts: parking_lot::Mutex<HashMap<String, PromptUse>>,
 }
 
 /// One snapshot of every context field; deltas clone it (cheap: `Arc`s and short strings).
@@ -168,6 +174,34 @@ impl ReadonlyContext {
     pub fn cancellation_token(&self) -> &CancellationToken {
         &self.inner.cancel_scope.token
     }
+
+    /// Records `used` as the prompt version this context's agent rendered its instruction from,
+    /// replacing an earlier record of the same agent. Every context of the invocation (including
+    /// `fresh_invocation` deltas such as parallel branches) sees it; each runner invocation starts
+    /// with none. Records are keyed by agent name, so two agents with the same name in one
+    /// invocation share one record.
+    pub fn record_prompt(&self, used: PromptUse) {
+        self.inner
+            .shared
+            .prompts
+            .lock()
+            .insert(self.agent_name(), used);
+    }
+
+    /// Removes the prompt version recorded for this context's agent.
+    pub fn clear_recorded_prompt(&self) {
+        self.inner.shared.prompts.lock().remove(&self.agent_name());
+    }
+
+    /// The prompt version recorded for this context's agent, if any.
+    pub fn recorded_prompt(&self) -> Option<PromptUse> {
+        self.inner
+            .shared
+            .prompts
+            .lock()
+            .get(&self.agent_name())
+            .cloned()
+    }
 }
 
 /// The session's state seen read-only.
@@ -187,6 +221,8 @@ impl ReadonlyState for SessionReadonlyState {
 mod tests {
     use tokio_util::sync::CancellationToken;
 
+    use crate::context::builder::test_support::named_agent;
+    use crate::context::prompt_use::PromptUse;
     use crate::context::{ContextDelta, InvocationContext};
 
     /// R18: the read-only view hands out the invocation's own token, on every context shape.
@@ -214,5 +250,72 @@ mod tests {
             assert!(ro.cancellation_token().is_cancelled(), "{name}");
         }
         assert!(ic.cancellation_token().is_cancelled());
+    }
+
+    /// R2: records are per agent name, shared by every context of the invocation (fresh
+    /// invocation deltas and tool contexts included), replaced by a later record and removed by
+    /// a clear.
+    #[test]
+    fn recorded_prompts_are_per_agent_and_shared_by_the_invocation() {
+        let inv = InvocationContext::builder()
+            .agent(named_agent("a"))
+            .build_invocation();
+        assert_eq!(inv.recorded_prompt(), None);
+        inv.record_prompt(PromptUse::new("triage", 2).with_label("production"));
+
+        let branch_b = inv.with_delta(ContextDelta {
+            fresh_invocation: true,
+            agent: Some(named_agent("b")),
+            ..Default::default()
+        });
+        assert_eq!(branch_b.recorded_prompt(), None, "b has no record");
+        branch_b.record_prompt(PromptUse::new("summary", 1));
+
+        let a_again = branch_b.with_delta(ContextDelta {
+            agent: Some(named_agent("a")),
+            ..Default::default()
+        });
+        assert_eq!(
+            a_again.recorded_prompt(),
+            Some(PromptUse::new("triage", 2).with_label("production")),
+            "a fresh-invocation delta sees the invocation's records"
+        );
+        let tool_ctx = inv.clone().into_context().with_delta(ContextDelta {
+            function_call_id: Some("fc-1".into()),
+            ..Default::default()
+        });
+        assert_eq!(
+            tool_ctx.recorded_prompt(),
+            Some(PromptUse::new("triage", 2).with_label("production"))
+        );
+
+        tool_ctx.record_prompt(PromptUse::new("triage", 3));
+        assert_eq!(
+            inv.recorded_prompt(),
+            Some(PromptUse::new("triage", 3)),
+            "replaced"
+        );
+
+        a_again.clear_recorded_prompt();
+        assert_eq!(inv.recorded_prompt(), None, "cleared");
+        assert_eq!(
+            branch_b.recorded_prompt(),
+            Some(PromptUse::new("summary", 1)),
+            "b's record is untouched"
+        );
+    }
+
+    /// R2: each built invocation starts with an empty slot.
+    #[test]
+    fn each_built_invocation_starts_empty() {
+        let first = InvocationContext::builder()
+            .agent(named_agent("a"))
+            .build_invocation();
+        first.record_prompt(PromptUse::new("triage", 1));
+        let second = InvocationContext::builder()
+            .agent(named_agent("a"))
+            .build_invocation();
+        assert_eq!(second.recorded_prompt(), None);
+        assert_eq!(first.recorded_prompt(), Some(PromptUse::new("triage", 1)));
     }
 }
