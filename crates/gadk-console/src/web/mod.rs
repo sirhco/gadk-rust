@@ -39,12 +39,13 @@ pub(crate) struct AppState {
     pub source: Arc<dyn TraceSource>,
     pub store: Option<Arc<dyn gadk_prompts::PromptStore>>,
     pub reports: Option<Arc<crate::evals::ReportCache>>,
-    pub csrf: Arc<str>,                                 // 64 hex chars
-    pub port: u16,                                      // the bound port
-    pub now: fn() -> chrono::DateTime<chrono::Utc>,     // Utc::now in production; fixed in tests
-    pub prices: Option<Arc<crate::prices::PriceTable>>, // the --prices file, if any
-    pub usage: Option<Arc<crate::usage::UsageSource>>,  // Some with --traces bigquery://… only
-    pub author: String,                                 // the author of console scores
+    pub csrf: Arc<str>,                                   // 64 hex chars
+    pub port: u16,                                        // the bound port
+    pub now: fn() -> chrono::DateTime<chrono::Utc>,       // Utc::now in production; fixed in tests
+    pub prices: Option<Arc<crate::prices::PriceTable>>,   // the --prices file, if any
+    pub usage: Option<Arc<crate::usage::UsageSource>>,    // Some with --traces bigquery://… only
+    pub author: String,                                   // the author of console scores
+    pub datasets: Option<Arc<crate::datasets::Datasets>>, // Some with --datasets and BigQuery
 }
 
 const CONSOLE_CSS: &str = include_str!("assets/console.css");

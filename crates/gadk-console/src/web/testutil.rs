@@ -15,13 +15,17 @@
 //! Test helpers for the web layer: a scripted trace source, a fixed state, and in-process
 //! requests through the full router (guards and CSP included).
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use chrono::{DateTime, TimeZone, Utc};
 use gadk_eval::{Outcome, RunTranscript, ScoreResult, TurnRecord};
-use gadk_eval_monitor::{MonitorReport, MonitoredRun, ProductionRun, ReportStore, Window};
+use gadk_eval_monitor::{
+    ExportContext, ExportSource, MonitorError, MonitorReport, MonitoredRun, ProductionRun,
+    ReportStore, ScoreFilter, TraceInvocation, TranscriptQuery, Window,
+};
 use gadk_prompts::PromptStore;
 use http::header::{CONTENT_TYPE, HOST, ORIGIN};
 use http::{HeaderMap, Request, StatusCode};
@@ -75,6 +79,78 @@ impl TraceSource for FakeSource {
     }
 }
 
+/// Scripted ExportSource: the trace's invocations, the runs among `runs` that are asked for,
+/// no history and the given contexts (or the error `fail`); counts calls.
+#[derive(Default)]
+pub(crate) struct FakeExport {
+    pub invocations: Vec<TraceInvocation>,
+    pub runs: Vec<ProductionRun>,
+    pub contexts: HashMap<String, ExportContext>,
+    pub fail: Option<String>,
+    pub calls: AtomicUsize,
+}
+
+impl FakeExport {
+    fn call(&self) -> Result<(), MonitorError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        match &self.fail {
+            Some(e) => Err(MonitorError::Source(e.clone())),
+            None => Ok(()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ExportSource for FakeExport {
+    async fn trace_invocations(
+        &self,
+        _traces: &[String],
+    ) -> Result<Vec<TraceInvocation>, MonitorError> {
+        self.call()?;
+        Ok(self.invocations.clone())
+    }
+
+    async fn runs(
+        &self,
+        ids: &[String],
+        _from: DateTime<Utc>,
+    ) -> Result<Vec<ProductionRun>, MonitorError> {
+        self.call()?;
+        Ok(self
+            .runs
+            .iter()
+            .filter(|r| ids.contains(&r.invocation_id))
+            .cloned()
+            .collect())
+    }
+
+    async fn histories(
+        &self,
+        _runs: &[ProductionRun],
+    ) -> Result<HashMap<String, Vec<ProductionRun>>, MonitorError> {
+        self.call()?;
+        Ok(HashMap::new())
+    }
+
+    async fn contexts(
+        &self,
+        _ids: &[String],
+        _from: DateTime<Utc>,
+    ) -> Result<HashMap<String, ExportContext>, MonitorError> {
+        self.call()?;
+        Ok(self.contexts.clone())
+    }
+
+    async fn matching(
+        &self,
+        _filters: &[ScoreFilter],
+        _q: &TranscriptQuery,
+    ) -> Result<Vec<(String, DateTime<Utc>)>, MonitorError> {
+        self.call()?;
+        Ok(Vec::new())
+    }
+}
+
 /// State with csrf `CSRF`, port `PORT`, clock `fixed_now` and no report store.
 pub(crate) fn state(source: Arc<FakeSource>, store: Option<Arc<dyn PromptStore>>) -> AppState {
     state_with_reports(source, store, None)
@@ -96,6 +172,7 @@ pub(crate) fn state_with_reports(
         prices: None,
         usage: None,
         author: AUTHOR.to_owned(),
+        datasets: None,
     }
 }
 

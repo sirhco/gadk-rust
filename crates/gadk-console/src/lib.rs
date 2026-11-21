@@ -20,13 +20,15 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gadk_eval_monitor::{MonitorError, ReportStore};
+use gadk_eval_monitor::{BigQueryTranscriptSource, MonitorError, ReportStore};
 
+use crate::datasets::Datasets;
 use crate::evals::{CACHE_CAP, ReportCache};
 use crate::traces::{BigQueryTable, BigQueryTraceSource, CloudTraceSource, TraceSource};
 use crate::usage::UsageSource;
 
 mod cli;
+mod datasets;
 mod evals;
 mod model;
 mod prices;
@@ -223,6 +225,8 @@ pub(crate) struct Extras {
     pub(crate) usage: Option<Arc<UsageSource>>,
     /// The author of console scores; `None` is [`default_author`] over the environment.
     pub(crate) author: Option<String>,
+    /// The `--datasets` directory and its export source (BigQuery trace source only).
+    pub(crate) datasets: Option<Arc<Datasets>>,
 }
 
 /// The author of console scores without `--author`: the first non-empty of the `USER` and
@@ -291,6 +295,7 @@ pub(crate) async fn bind_full(
         prices: extras.prices,
         usage: extras.usage,
         author: resolve_author(extras.author, env_var),
+        datasets: extras.datasets,
     };
     Ok(Bound {
         listener,
@@ -321,6 +326,23 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
     if let Some(dir) = &cli.datasets {
         check_datasets_dir(dir)?;
     }
+    let datasets = match (&cli.datasets, &cli.traces) {
+        (
+            Some(dir),
+            Some(TracesFrom::BigQuery {
+                table,
+                max_bytes_billed,
+            }),
+        ) => {
+            let source =
+                BigQueryTranscriptSource::new(&table.project, &table.dataset, &table.table)
+                    .map_err(|e| ConsoleError::Datasets(e.to_string()))?
+                    .with_billing_project(&cli.config.project)
+                    .with_max_bytes_billed(*max_bytes_billed);
+            Some(Arc::new(Datasets::new(dir.clone(), Arc::new(source))))
+        }
+        _ => None,
+    };
     let (source, usage): (Arc<dyn TraceSource>, Option<Arc<UsageSource>>) = match cli.traces {
         None => (
             Arc::new(CloudTraceSource::new(
@@ -352,6 +374,7 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
             prices,
             usage,
             author: Some(author),
+            datasets,
         },
     )
     .await?;

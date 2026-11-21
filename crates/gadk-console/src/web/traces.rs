@@ -28,6 +28,7 @@ use super::pages::error::{error_page, source_error};
 use super::pages::layout::{Nav, html};
 use super::pages::trace::{LogView, NEEDS_BIGQUERY_SCORES, ScoresView};
 use super::pages::{trace, traces};
+use crate::datasets::{AddError, NEEDS_DATASETS};
 use crate::model::{attach_logs, build_tree, trace_end};
 use crate::scores::{BQ_EDITOR_HINT, NewScore};
 use crate::traces::{RawSpan, SourceError, TimeRange, TraceId, TraceQuery};
@@ -40,6 +41,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/traces", get(list))
         .route("/traces/{id}", get(detail))
         .route("/traces/{id}/scores", post(add_score))
+        .route("/traces/{id}/dataset", post(add_to_dataset))
 }
 
 /// `/traces` query parameters, as sent by the filter form and the next-page link.
@@ -202,16 +204,77 @@ fn insert_failed(e: &SourceError) -> Response {
     error_page(StatusCode::BAD_GATEWAY, Nav::Traces, &e.to_string(), hint)
 }
 
+/// The add-to-dataset form; missing fields are empty strings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct DatasetForm {
+    dataset: String,
+    rubric: String,
+    csrf: String,
+}
+
+/// `POST /traces/{id}/dataset`: checks the token, adds the trace's runs as cases to
+/// `<dir>/<dataset>.yaml` and redirects to the trace with the count (303). Without
+/// `--datasets` it is a 404 page.
+async fn add_to_dataset(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Form(form): Form<DatasetForm>,
+) -> Response {
+    if let Err(resp) = check_csrf(&state, &form.csrf) {
+        return resp;
+    }
+    let Some(id) = TraceId::parse(&id) else {
+        return source_error(&SourceError::NotFound);
+    };
+    let Some(datasets) = &state.datasets else {
+        return error_page(StatusCode::NOT_FOUND, Nav::Traces, NEEDS_DATASETS, None);
+    };
+    let rubric = Some(form.rubric.as_str()).filter(|r| !r.trim().is_empty());
+    match datasets.add_trace(id.as_str(), &form.dataset, rubric).await {
+        Ok(added) => Redirect::to(&format!(
+            "/traces/{}?added={added}&dataset={}",
+            id.as_str(),
+            form.dataset
+        ))
+        .into_response(),
+        Err(e) => dataset_failed(&e),
+    }
+}
+
+/// The page for a trace that was not added: 400 for the request or the file, 404 for an
+/// unknown trace, 502 for BigQuery, 500 for a failed write.
+fn dataset_failed(e: &AddError) -> Response {
+    let (status, text) = match e {
+        AddError::BadName => (
+            StatusCode::BAD_REQUEST,
+            "dataset: must be 1-64 of A-Z, a-z, 0-9, _ and -".to_owned(),
+        ),
+        AddError::NoTrace => return source_error(&SourceError::NotFound),
+        AddError::NothingAdded(reasons) => (
+            StatusCode::BAD_REQUEST,
+            format!("no case added: {}", reasons.join("; ")),
+        ),
+        AddError::File(text) => (StatusCode::BAD_REQUEST, text.clone()),
+        AddError::Source(text) => (StatusCode::BAD_GATEWAY, text.clone()),
+        AddError::Write(text) => (StatusCode::INTERNAL_SERVER_ERROR, text.clone()),
+    };
+    error_page(status, Nav::Traces, &text, None)
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
 
     use chrono::{DateTime, TimeDelta, Utc};
+    use gadk_eval::{EvalSet, RunTranscript, TurnRecord};
+    use gadk_eval_monitor::{ExportContext, ProductionRun, RunScore, TraceInvocation};
     use http::StatusCode;
     use serde_json::{Value, json};
 
+    use crate::datasets::Datasets;
     use crate::prices::PriceTable;
     use crate::traces::BigQueryTable;
     use crate::traces::test_http::{FakeHttp, param_value, reply};
@@ -221,7 +284,7 @@ mod tests {
     };
     use crate::usage::UsageSource;
     use crate::web::AppState;
-    use crate::web::testutil::{AUTHOR, CSRF, post_form};
+    use crate::web::testutil::{AUTHOR, CSRF, FakeExport, post_form};
     use crate::web::testutil::{FakeSource, fixed_now, get, state};
     use gadk_bigquery::{BigQueryClient, NoAuth};
     use http::header::LOCATION;
@@ -1296,5 +1359,268 @@ mod tests {
             page.contains("Scores need the BigQuery trace source"),
             "{page}"
         );
+    }
+
+    // ---- adding to a dataset ----
+
+    /// A complete run `id` of trace `ID`, started `secs_ago` seconds before `fixed_now`, with
+    /// one turn `user` → `reply`.
+    fn trace_run(id: &str, secs_ago: i64, user: &str, reply: &str) -> ProductionRun {
+        ProductionRun {
+            invocation_id: id.into(),
+            session_id: "s-1".into(),
+            trace_id: Some(ID.into()),
+            agent: "shop".into(),
+            started_at: fixed_now() - TimeDelta::seconds(secs_ago),
+            transcript: RunTranscript {
+                turns: vec![TurnRecord {
+                    user: user.into(),
+                    reply: reply.into(),
+                    calls: Vec::new(),
+                }],
+                error: None,
+            },
+            content_complete: true,
+            tools_complete: true,
+            notes: Vec::new(),
+        }
+    }
+
+    /// Trace `ID` with invocations e-1 (a thumbs up) and e-2 (no score).
+    fn trace_export() -> FakeExport {
+        let mut contexts = HashMap::new();
+        contexts.insert(
+            "e-1".to_owned(),
+            ExportContext::new(vec![RunScore::new(
+                "thumbs",
+                json!(true),
+                "bool",
+                "app",
+                "u-1",
+                fixed_now(),
+            )]),
+        );
+        FakeExport {
+            invocations: vec![
+                TraceInvocation::new(ID, "e-1", fixed_now() - TimeDelta::seconds(120)),
+                TraceInvocation::new(ID, "e-2", fixed_now() - TimeDelta::seconds(60)),
+            ],
+            runs: vec![
+                trace_run("e-1", 120, "Where is order 7?", "It ships today."),
+                trace_run("e-2", 60, "And order 8?", "Unknown."),
+            ],
+            contexts,
+            ..FakeExport::default()
+        }
+    }
+
+    /// `with_get(Ok(detail(600, …)))` with `--datasets dir` read through `fake`.
+    fn with_datasets(dir: &std::path::Path, fake: &Arc<FakeExport>) -> AppState {
+        let (_, mut st) = with_get(Ok(detail(600, logs(vec![], false))));
+        st.datasets = Some(Arc::new(Datasets::new(dir.to_path_buf(), fake.clone())));
+        st
+    }
+
+    fn dataset_path() -> String {
+        format!("/traces/{ID}/dataset")
+    }
+
+    #[tokio::test]
+    async fn adding_a_trace_creates_the_dataset_then_skips_what_it_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(trace_export());
+        let body = format!("dataset=regressions&rubric=Be+right.&csrf={CSRF}");
+        let (status, headers, page) = post_form(
+            with_datasets(dir.path(), &fake),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        assert_eq!(
+            headers[LOCATION],
+            format!("/traces/{ID}?added=2&dataset=regressions")
+        );
+        let path = dir.path().join("regressions.yaml");
+        let set = EvalSet::load(&path).unwrap();
+        assert_eq!(set.name, "regressions");
+        assert_eq!(set.judge_rubric.as_deref(), Some("Be right."));
+        let cases: Vec<(&str, &str)> = set
+            .cases
+            .iter()
+            .map(|c| (c.id.as_str(), c.expect[0].kind()))
+            .collect();
+        assert_eq!(cases, [("inv-e-1", "reference"), ("inv-e-2", "llm_judge")]);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains(&format!("  # trace {ID}\n")), "{text}");
+
+        let (status, _, page) = post_form(
+            with_datasets(dir.path(), &fake),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            page.contains("no case added: inv-e-1: already in regressions.yaml; inv-e-2: already in regressions.yaml"),
+            "{page}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[tokio::test]
+    async fn adding_appends_with_the_files_rubric() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("evals.yaml");
+        let before = "name: evals\njudge_rubric: \"File rubric.\"\ncases:\n- id: kept\n  turns: [hi]\n  expect: [contains: x]\n";
+        std::fs::write(&path, before).unwrap();
+        let fake = Arc::new(trace_export());
+        let body = format!("dataset=evals&rubric=+&csrf={CSRF}");
+        let (status, headers, page) = post_form(
+            with_datasets(dir.path(), &fake),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        assert_eq!(
+            headers[LOCATION],
+            format!("/traces/{ID}?added=2&dataset=evals")
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with(before), "{text}");
+        assert!(text.ends_with("    - llm_judge: {}\n"), "{text}");
+        let set = EvalSet::load(&path).unwrap();
+        assert_eq!(set.cases.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn bad_names_tokens_and_rubric_less_judges_add_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["", "a%20b", "..%2Fx", &"a".repeat(65)] {
+            let fake = Arc::new(trace_export());
+            let body = format!("dataset={name}&csrf={CSRF}");
+            let (status, _, page) = post_form(
+                with_datasets(dir.path(), &fake),
+                &dataset_path(),
+                &body,
+                Some(ORIGIN),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{name}");
+            assert!(page.contains("dataset: must be 1-64 of"), "{page}");
+            assert_eq!(fake.calls.load(Ordering::SeqCst), 0, "{name}");
+        }
+        let fake = Arc::new(trace_export());
+        let body = format!("dataset=x&csrf={}", "b".repeat(64));
+        let (status, _, _) = post_form(
+            with_datasets(dir.path(), &fake),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let body = format!("dataset=x&csrf={CSRF}");
+        let (status, _, _) = post_form(
+            with_datasets(dir.path(), &fake),
+            &dataset_path(),
+            &body,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "no Origin");
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 0);
+
+        let mut unscored = trace_export();
+        unscored.contexts.clear();
+        let body = format!("dataset=x&csrf={CSRF}");
+        let (status, _, page) = post_form(
+            with_datasets(dir.path(), &Arc::new(unscored)),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            page.contains("no case added: inv-e-1: needs a rubric; inv-e-2: needs a rubric"),
+            "{page}"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn unknown_traces_and_a_console_without_datasets_are_404() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = format!("dataset=x&csrf={CSRF}");
+        let none = Arc::new(FakeExport::default());
+        let (status, _, page) = post_form(
+            with_datasets(dir.path(), &none),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(page.contains("trace not found"), "{page}");
+        let (status, _, _) = post_form(
+            with_datasets(dir.path(), &none),
+            "/traces/not-a-trace/dataset",
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (_, st) = with_get(Ok(detail(600, logs(vec![], false))));
+        let (status, _, page) = post_form(st, &dataset_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(
+            page.contains("Adding traces to a dataset needs --datasets"),
+            "{page}"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn source_failures_are_502_and_unappendable_files_400() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = format!("dataset=evals&rubric=r&csrf={CSRF}");
+        let mut failing = trace_export();
+        failing.fail = Some("HTTP 403: Access Denied".into());
+        let (status, _, page) = post_form(
+            with_datasets(dir.path(), &Arc::new(failing)),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert!(
+            page.contains("transcript source: HTTP 403: Access Denied"),
+            "{page}"
+        );
+
+        let path = dir.path().join("evals.yaml");
+        let flow = "name: s\ncases: [{id: a, turns: [hi], expect: [contains: x]}]\n";
+        std::fs::write(&path, flow).unwrap();
+        let (status, _, page) = post_form(
+            with_datasets(dir.path(), &Arc::new(trace_export())),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            page.contains(
+                "evals.yaml: eval set: cannot append: `cases:` must be the last top-level key"
+            ),
+            "{page}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), flow);
     }
 }
