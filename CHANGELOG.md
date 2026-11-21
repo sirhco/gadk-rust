@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.4.11] - 2026-11-20
+
 ### Added
 
 - `gadk-agent`: `PromptUse` and `ReadonlyContext::{record_prompt, clear_recorded_prompt,
@@ -556,7 +558,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.10...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.11...HEAD
+[0.4.11]: https://github.com/sirhco/gadk-rust/compare/v0.4.10...v0.4.11
 [0.4.10]: https://github.com/sirhco/gadk-rust/compare/v0.4.9...v0.4.10
 [0.4.9]: https://github.com/sirhco/gadk-rust/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/sirhco/gadk-rust/compare/v0.4.7...v0.4.8
