@@ -16,6 +16,8 @@ cargo install gadk-eval-monitor
 gadk-eval monitor monitors/support.yaml --out gs://my-bucket/monitors
 gadk-eval report gs://my-bucket/monitors
 gadk-eval report gs://my-bucket/monitors support-bot-prod-20261117T080000Z.json
+gadk-eval export --source bigquery://my-proj.agent_analytics.agent_events \
+  --out evals/regressions.yaml --since 1d --score 'thumbs=true' --rubric "Answers correctly."
 ```
 
 ## Monitor spec
@@ -179,18 +181,80 @@ Limits:
 |---|---|
 | `gadk-eval monitor <spec.yaml> [--out <url>] [--limit N]` | Runs the monitor, prints its summary and, with `--out`, stores the report. `--limit` (1-1000) overrides the spec. |
 | `gadk-eval report <url> [<name>] [--limit N]` | Lists the newest stored reports (name, spec, time, runs, pass rate, runs with errors; default 20), or prints one report's summary. |
+| `gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [options]` | Writes production runs as eval-set cases to a new file, or `--append`s them; see [Exporting runs as eval cases](#exporting-runs-as-eval-cases). |
 
 `<url>` is a directory, `file://<dir>` or `gs://<bucket>[/<prefix>]`; other schemes (such as
 `s3://`) are rejected. Reports are named
 `<spec>-<YYYYMMDDTHHMMSSZ>.json`, with `-2`, `-3`, … added when the name is taken.
 
-| Exit | `monitor` | `report` |
-|---|---|---|
-| 0 | success | success |
-| 1 | `min_pass_rate` is set and either the pass rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0) | — |
-| 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, or a usage error | a store error, an unknown or invalid report name, or a usage error |
+| Exit | `monitor` | `report` | `export` |
+|---|---|---|---|
+| 0 | success | success | at least one case was added |
+| 1 | `min_pass_rate` is set and either the pass rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0) | — | no case was added (nothing is written) |
+| 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, or a usage error | a store error, an unknown or invalid report name, or a usage error | the file exists (without `--append`) or cannot be read, appended to or written, a query fails, or a usage error |
 
 A judge call that fails or times out is an error result for that scorer, not exit 2.
+
+## Exporting runs as eval cases
+
+`gadk-eval export` turns runs logged in the agent-analytics table into
+[`gadk-eval`](../gadk-eval/README.md) eval-set cases, so production failures and good answers
+become offline regression cases:
+
+```sh
+# The runs of one trace, into a new file.
+gadk-eval export --source bigquery://my-proj.agent_analytics.agent_events \
+  --out evals/regressions.yaml --trace 0123456789abcdef0123456789abcdef \
+  --rubric "Answers the question correctly and politely."
+
+# The last day's runs whose latest `rating` is at least 4, added to the same file.
+gadk-eval export --source bigquery://my-proj.agent_analytics.agent_events \
+  --out evals/regressions.yaml --append --since 1d --score 'rating>=4' --limit 20
+```
+
+| Option | Meaning |
+|---|---|
+| `--source bigquery://<project>.<dataset>.<table>` | The agent-analytics table: project `[A-Za-z0-9_-]+` (no domain-scoped project), dataset and table `[A-Za-z0-9_]+`. Queries run in that project. |
+| `--out <file>` | The eval-set file. Without `--append` it is created and never overwritten: named `--name` (default: the file stem), with `judge_rubric` = `--rubric`. |
+| `--append` | Add to the set at `--out`; runs whose case id is already in it are skipped. Not with `--name`. |
+| `--trace <id>` | The runs of this trace (32 hex digits) that started in the last 30 days; repeatable. Not with `--since`, `--agent`, `--score` or `--limit`. |
+| `--since <n>h\|<n>d` | Runs that started in this window, 1h to 90d (default `7d`). |
+| `--agent <name>` | Only runs of this root agent. |
+| `--score <filter>` | `name=value`, `name<n`, `name<=n`, `name>n` or `name>=n` on the latest score of that name from any source; repeatable, every filter must hold. `=` compares the value as text (`true`, `4`, `helpful`); the comparisons need a `number` score. |
+| `--limit <n>` | The newest runs to read, 1-1000 (default 50). |
+| `--rubric <text>` | The rubric of `llm_judge` cases (default: the set's `judge_rubric`). |
+| `--min-good <x>` | The lowest `number` score that counts as positive (default 4). |
+| `--no-history` | A case starts with the run's own user message, without the session's earlier ones. |
+| `--tool-args` | `tools` scorers keep each call's arguments (default: names only, since arguments often hold ids and times). |
+
+Each run becomes a case with id `inv-<invocation id>` and no `state` (session state is not
+logged):
+
+- Turns: the user messages of up to 50 earlier runs of the same session that started at most 30
+  days before it, oldest first, then the run's own. An earlier run whose content could not be
+  rebuilt is left out and named in a comment.
+- Scorers follow the latest score of each name across sources. A run with a positive score (a
+  `bool` true, or a `number` of at least `--min-good`), no negative one (a `bool` false or a
+  smaller `number`) and a non-empty reply gets `reference` (the production reply, `min_score` 3)
+  and, when it called tools and every call was rebuilt, `tools` (`ordered: true`, `exact:
+  false`). Every other run (negative, unscored, only `category` scores, or an empty reply) gets
+  one `llm_judge` with the rubric, and is skipped with `needs a rubric` when there is none.
+- Comments above the case name its trace (or `none`), session, invocation, start time, agent,
+  prompt version (`name@version`, when logged), every latest score per name and source (value,
+  source, author, comment) and the production reply (its first 2,000 characters).
+
+A run whose own content is incomplete is skipped with its notes. The command prints `added
+inv-<id> (reference|judge) trace <id|none>` or `skipped inv-<id>: <reason>` per run, then `<n>
+cases added to <file>`. An append keeps the file's text byte for byte and needs `cases:` as its
+last top-level key (see the gadk-eval README). Every write goes through a temporary file next
+to the target: a new file is linked into place and never overwrites one, an append renames over
+the old file. Two writers appending to one file at once (two exports, or an export and
+`gadk-console`'s "Add to dataset") can lose one write: the last one wins.
+
+The files hold production text (user messages, replies, and tool arguments with
+`--tool-args`): keep them as private as the table. Nothing is uploaded. Cases are a starting
+point to review and edit: a user message with several parts is its logged summary, and the reply
+of a run that transferred to a sub-agent includes the sub-agent's text.
 
 ## Library
 
@@ -210,7 +274,11 @@ ReportStore::open("gs://my-bucket/monitors")?.put(&report).await?;
 ```
 
 Implement `TranscriptSource` to grade runs from elsewhere; `gadk_eval::score_transcript` grades
-a single `RunTranscript` with the same scorers.
+a single `RunTranscript` with the same scorers. The `export` module is the library side of
+`gadk-eval export`: `ExportSource` (implemented by `BigQueryTranscriptSource`, which can run its
+queries in another project with `with_billing_project` and cap them with
+`with_max_bytes_billed`), `run_to_case`, `export_runs`, `cases_text`, `write_set_file`,
+`ScoreFilter` (with `ScoreFilter::parse` for the `--score` syntax) and `ExportedCase::new`.
 
 ## Access (IAM)
 
@@ -233,6 +301,10 @@ that started in the window, then the rows of at most `limit` of them. Both filte
 `timestamp` (the analytics plugin's default) scans only the window's partitions; keep the window
 short and the event types filtered. Judge cost grows with `limit` times the number of
 `llm_judge` scorers; runs are graded 8 at a time.
+`export` issues up to eight queries per call (the trace's invocations or the matching ones,
+their run headers and rows, the sessions' earlier run headers and rows, the scores and the
+prompt versions), each bounded by `timestamp` and by invocation, session or trace ids, with no
+byte cap.
 
 With the Cloud Trace source, each monitor run makes up to 50 `COMPLETE` `traces.list` calls of
 100 traces each, counted against the Cloud Trace API read quota.

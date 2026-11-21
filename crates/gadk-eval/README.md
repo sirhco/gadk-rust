@@ -63,6 +63,24 @@ Each case runs in a fresh in-memory session; its turns are sent in order in that
 `turn` is 1-based and defaults to the last turn. Loading fails with the case named on any
 unknown key, bad regex, out-of-range `turn` or `min_score`, duplicate id, or missing rubric.
 
+## Writing eval sets
+
+`EvalSet::to_yaml()` writes a set as YAML that `EvalSet::from_yaml` reads back unchanged: every
+string double-quoted (its JSON form, with U+007F, U+0080 to U+009F, U+FFFE and U+FFFF escaped
+as `\uXXXX`), `state` and tool `args` as JSON flow mappings, each scorer as a one-line mapping,
+and an `llm_judge` whose rubric is the set's `judge_rubric` as `llm_judge: {}` (or
+`{min_score: n}`). `to_yaml_with_comments(&|case| …)` writes the lines it returns as `# `
+comments above each case; line breaks and other control characters in them become spaces.
+
+`append_cases(text, &cases, &comments)` returns an eval-set file's text with new cases appended
+after the last item of its `cases` list, at that list's item indentation (zero-indented lists
+included), with `\n` line endings. The existing text, comments and formatting included, is kept
+byte for byte. The file must parse, have `cases:` as its last top-level key with nothing after
+its colon (a block list, not `cases: [ … ]`) and no `...` document-end marker. A new id that is
+already in the set, or anything the function cannot place, is an `EvalError::Load` and nothing
+is returned; the result is parsed again, and returned only when its ids are the old ones
+followed by the new ones.
+
 ## Scorers and pass rules
 
 | Scorer | Passes when |

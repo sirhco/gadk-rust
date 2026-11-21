@@ -20,6 +20,19 @@ the public API.
   `--traces bigquery://…`.
 - `gadk`: the `feedback_e2e` example runs a prompt version, analytics rows and scores end to
   end.
+- `gadk-eval`: `EvalSet::to_yaml` and `to_yaml_with_comments` write an eval set as YAML that
+  `EvalSet::from_yaml` reads back unchanged, and `append_cases` appends cases to an eval-set
+  file's text, keeping the existing text byte for byte.
+- `gadk-eval-monitor`: `gadk-eval export` writes runs from the agent-analytics table as eval-set
+  cases (by trace, or by window, agent and latest-score filters, with the session's earlier user
+  messages as turns): positive runs become `reference` (and `tools`) cases, the others
+  `llm_judge` cases. Library: the `export` module (`ExportSource`, `run_to_case`, `export_runs`,
+  `cases_text`, `write_set_file`, `ScoreFilter`, `RunScore`, `ExportContext`, `ExportOptions`,
+  `ExportedCase`, `TraceInvocation`), `Backends::export_source` (default: not supported) and
+  `BigQueryTranscriptSource::{with_billing_project, with_max_bytes_billed}`.
+- `gadk-console`: `--datasets <dir>` (`Cli::with_datasets`, `ConsoleError::Datasets`) adds an
+  "Add to dataset" form to `/traces/{id}` (BigQuery source) that appends the trace's runs as
+  cases to `<dir>/<dataset>.yaml`.
 
 ## [0.4.11] - 2026-11-20
 
