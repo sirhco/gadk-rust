@@ -3,8 +3,9 @@
 `gadk-console`, a local web console for gadk agents. It shows the traces your agents exported
 to Cloud Trace, with each span's Cloud Logging entries attached, and it browses the
 `gadk-prompts` registry: versions, diffs and labels. With `--reports`, it also shows the reports
-of `gadk-eval-monitor` monitors. With a price file (`--prices`) it prices token counts, and with
-the BigQuery trace source it shows usage and cost by model, agent, prompt version and trace. It
+of `gadk-eval-monitor` monitors. With a price file (`--prices`) it prices token counts. With
+the BigQuery trace source it also shows usage and cost by model, agent, prompt version and
+trace, lists and adds scores, and, with `--datasets`, adds a trace's runs to an eval set. It
 runs on your machine, listens on 127.0.0.1 only, and reads Google Cloud with your Application
 Default Credentials.
 
@@ -27,10 +28,12 @@ The console prints its URL and serves until you stop it (Ctrl-C).
 | `--log-id <id>` | `gadk` | Cloud Logging log id the agents write (`with_cloud_log_name` in `gadk-telemetry`) |
 | `--prices <file>` | none | Price file (YAML, USD per 1,000,000 tokens per model). Without it, cost cells show `—`; token counts still show. See [Usage and cost](#usage-and-cost). |
 | `--author <name>` | `$USER`, else `$USERNAME`, else `console` | Author of the scores you add on `/traces/{id}` (BigQuery source). See [Scores](#scores). |
+| `--datasets <dir>` | none | Directory of eval-set YAML files that `/traces/{id}` adds runs to (BigQuery trace source only; ignored with Cloud Trace). It must exist. See [Datasets](#datasets). |
 
 Exit codes: 2 for a usage error (clap's message), 1 when startup fails (a bad store URL, a bad
-report store URL, a bad price file, missing credentials for a `gs://` report store, or a port
-already in use), with a one-line `gadk-console: …` message.
+report store URL, a bad price file, a `--datasets` directory that does not exist, missing
+credentials for a `gs://` report store or for `--datasets`, or a port already in use), with a
+one-line `gadk-console: …` message.
 
 ## Prerequisites
 
@@ -59,7 +62,7 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | Page | Shows |
 |---|---|
 | `/traces` | Traces, newest first, 50 per page. Filters: time range (`1h`, `6h`, `24h`, `7d`), root span name prefix, agent (`gen_ai.agent.name`), session (`gen_ai.conversation.id`). |
-| `/traces/{id}` | The span waterfall (tree order, indented by depth). Selecting a span shows its labels and the log entries whose `spanId` matches it; entries matching no span are listed as "unattached". A `render_prompt …` span with `prompt.name` and `prompt.version` links to that prompt version. A trace that ended less than 2 minutes ago notes that logs may still be arriving. Model calls (spans whose `gen_ai.operation.name` is `generate_content`) are listed with their tokens and cost, plus totals. With the BigQuery source a Scores section lists the trace's scores and a form adds one ([Scores](#scores)). |
+| `/traces/{id}` | The span waterfall (tree order, indented by depth). Selecting a span shows its labels and the log entries whose `spanId` matches it; entries matching no span are listed as "unattached". A `render_prompt …` span with `prompt.name` and `prompt.version` links to that prompt version. A trace that ended less than 2 minutes ago notes that logs may still be arriving. Model calls (spans whose `gen_ai.operation.name` is `generate_content`) are listed with their tokens and cost, plus totals. With the BigQuery source a Scores section lists the trace's scores and a form adds one ([Scores](#scores)). With `--datasets`, an "Add to dataset" form adds its runs to an eval set ([Datasets](#datasets)). |
 | `/prompts` | Every prompt in the store: latest version, labels and when the latest version was created. |
 | `/prompts/{name}` | All versions (newest first) with their labels; `?v=<n>` shows a version's template and config, `?a=<n>&b=<m>` diffs two versions. Forms set, move and remove labels, conditional on the label not having changed since the page was rendered (a stale page gets 409). "Production metrics" (BigQuery source, `?range=`, default `7d`): calls, mean tokens and cost, p50/p95 latency and, with `--reports`, eval pass rate per version, then a Feedback table of the scores per version. |
 | `/evals` | The newest 100 monitor reports: a card per monitor (latest pass rate, errors, and a pass-rate trend over its listed reports), then a table of reports. `?spec=<name>` shows only that monitor's newest 100. Reports are read once and kept in memory (up to 256), so the first load of a `gs://` store can take a while. |
@@ -194,6 +197,31 @@ shows a note and no form.
   the most common value (`category`; a tie goes to the lowest value). Scores count from the
   start of the range with no end, since they arrive after the calls, and map to versions
   through their invocations' `LLM_REQUEST` rows like the eval pass rate.
+
+## Datasets
+
+With `--datasets <dir>` and `--traces bigquery://…`, `/traces/{id}` shows an "Add to dataset"
+form below the scores: a dataset name (1-64 of `A-Z`, `a-z`, `0-9`, `_` and `-`; the sets
+already in `<dir>` are suggested) and an optional judge rubric. The page asks for confirmation;
+the console checks its token and the request's origin, reads the trace's invocations from the
+last 30 days, their runs, session history and scores, and adds one case per run to
+`<dir>/<dataset>.yaml`, as `gadk-eval export` does (see the gadk-eval-monitor README). A new
+file gets the dataset as its name and the form's rubric as its `judge_rubric`; an existing one
+is appended to with its text kept byte for byte, and its `judge_rubric` grades judge cases when
+the form has no rubric. Runs already in the file are skipped. The trace page then says how many
+cases were added.
+
+- A bad dataset name, a file that cannot be appended to (checked before any query), or no case
+  added (every reason is listed, such as `needs a rubric` or `already in <dataset>.yaml`) is a
+  400; an unknown trace a 404; a BigQuery error a 502.
+- The queries run in `--project` under `--bigquery-max-bytes`. The table's project must be
+  `[A-Za-z0-9_-]+` (a domain-scoped project fails at startup).
+- Adds from this console are serialized, and every write goes through a temporary file next to
+  the target: a new file is linked into place (never overwriting one that appeared meanwhile),
+  an append renames over the old file, keeping its permissions. The lock does not cover other writers: a concurrent
+  `gadk-eval export --append` to the same file, or a hand edit, can be lost (the last write
+  wins), so do not run both on one file at once.
+- The files hold production text; nothing is uploaded.
 
 ## Limits
 

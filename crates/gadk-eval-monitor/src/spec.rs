@@ -420,7 +420,7 @@ fn parse_scorer(i: usize, v: &Value) -> Result<ScorerSpec, String> {
 }
 
 /// `n` and its one-letter unit, with `n >= 1`.
-fn amount(s: &str) -> Option<(i64, char)> {
+pub(crate) fn amount(s: &str) -> Option<(i64, char)> {
     let unit = s.chars().last()?;
     let n: i64 = s[..s.len() - unit.len_utf8()].parse().ok()?;
     (n >= 1).then_some((n, unit))

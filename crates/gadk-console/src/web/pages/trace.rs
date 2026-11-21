@@ -36,6 +36,22 @@ pub(crate) const PAYLOAD_LIMIT: usize = 4096;
 /// The note shown in the Scores section when the trace source is not BigQuery.
 pub(crate) const NEEDS_BIGQUERY_SCORES: &str = "Scores need the BigQuery trace source: start the console with --traces bigquery://<project>.<dataset>.<table>.";
 
+/// The "Add to dataset" section of a trace page.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct DatasetView {
+    /// The existing datasets, offered by the form; `None` (no `--datasets`) hides the form.
+    pub names: Option<Vec<String>>,
+    /// The notice after an add: how many cases went to which dataset.
+    pub added: Option<(usize, String)>,
+}
+
+/// The sections of a trace page that read or write annotations: scores and datasets.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Annotations {
+    pub scores: ScoresView,
+    pub dataset: DatasetView,
+}
+
 /// The Scores section of a trace page.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ScoresView {
@@ -58,19 +74,24 @@ pub(crate) struct LogView {
 }
 
 /// The trace detail page: notes and banners, the waterfall, the span detail pane (filled by
-/// `waterfall.js`), the LLM calls with their tokens and cost, the scores, the log entries per
-/// span, and the JSON data block.
+/// `waterfall.js`), the LLM calls with their tokens and cost, the scores, the add-to-dataset
+/// form, the log entries per span, and the JSON data block.
 pub(crate) fn render(
     id: &TraceId,
     rows: &[SpanRow],
     logs: &Result<LogView, SourceError>,
     still_arriving: bool,
     prices: Option<&PriceTable>,
-    scores: &ScoresView,
+    annotations: &Annotations,
     csrf: &str,
 ) -> Markup {
     let body = html! {
         h1 { "Trace " span class="mono" { (id.as_str()) } }
+        @if let Some((added, dataset)) = &annotations.dataset.added {
+            div class="banner info" {
+                p { "Added " (added) " case(s) to " (dataset) ".yaml" }
+            }
+        }
         @if still_arriving {
             div class="banner info" {
                 p { "Log entries may still be arriving: the trace ended less than 2 minutes ago." }
@@ -102,7 +123,8 @@ pub(crate) fn render(
             }
         }
         (llm_calls(rows, prices))
-        (scores_section(id, scores, csrf))
+        (scores_section(id, &annotations.scores, csrf))
+        (dataset_section(id, &annotations.dataset, csrf))
         @if let Ok(view) = logs {
             (log_sections(rows, view))
         }
@@ -280,6 +302,32 @@ fn scores_section(id: &TraceId, scores: &ScoresView, csrf: &str) -> Markup {
         }
         @if !matches!(scores, ScoresView::NeedsBigQuery) {
             (score_form(id, csrf))
+        }
+    }
+}
+
+/// The form that adds the trace's runs to a dataset (`POST /traces/{id}/dataset`, confirmed
+/// first), offering the existing datasets; nothing without `--datasets`.
+fn dataset_section(id: &TraceId, view: &DatasetView, csrf: &str) -> Markup {
+    html! {
+        @if let Some(names) = &view.names {
+            h2 { "Add to dataset" }
+            form method="post" action={ "/traces/" (id.as_str()) "/dataset" }
+                data-confirm="Add this trace's runs to the dataset?" class="inline" {
+                input type="hidden" name="csrf" value=(csrf);
+                input type="text" name="dataset" list="datasets" placeholder="dataset"
+                    required maxlength="64";
+                datalist id="datasets" {
+                    @for name in names {
+                        option value=(name) {}
+                    }
+                }
+                " "
+                input type="text" name="rubric" placeholder="judge rubric (optional)"
+                    maxlength="2000";
+                " "
+                button type="submit" { "Add to dataset" }
+            }
         }
     }
 }
