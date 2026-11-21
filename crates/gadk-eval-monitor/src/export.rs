@@ -22,9 +22,12 @@
 //! every other run becomes an `llm_judge` case graded against a rubric.
 
 use std::collections::HashMap;
+use std::io::Write as _;
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use gadk_eval::{EvalCase, ScorerSpec, ToolExpect};
+use gadk_eval::{EvalCase, EvalError, EvalSet, ScorerSpec, ToolExpect, append_cases};
 use serde_json::{Map, Value};
 
 use crate::error::MonitorError;
@@ -479,6 +482,131 @@ pub fn run_to_case(
     Ok(ExportedCase::new(case, comments, positive))
 }
 
+/// The invocations `selected` (ids with their start, as [`ExportSource::trace_invocations`]
+/// or [`ExportSource::matching`] give them) as cases: reads their runs from the earliest start
+/// on, their session histories (with [`ExportOptions::history`]) and their contexts, then
+/// converts each run with [`run_to_case`]. The runs come oldest first, each with its case or
+/// the reason it was skipped; nothing is read when `selected` is empty.
+///
+/// # Errors
+///
+/// The first [`ExportSource`] error.
+pub async fn export_runs(
+    source: &dyn ExportSource,
+    selected: &[(String, DateTime<Utc>)],
+    opts: &ExportOptions,
+) -> Result<Vec<(ProductionRun, Result<ExportedCase, String>)>, MonitorError> {
+    let Some(from) = selected.iter().map(|(_, at)| *at).min() else {
+        return Ok(Vec::new());
+    };
+    let ids: Vec<String> = selected.iter().map(|(id, _)| id.clone()).collect();
+    let runs = source.runs(&ids, from).await?;
+    let histories = if opts.history {
+        source.histories(&runs).await?
+    } else {
+        HashMap::new()
+    };
+    let contexts = source.contexts(&ids, from).await?;
+    Ok(runs
+        .into_iter()
+        .map(|run| {
+            let history = histories
+                .get(&run.invocation_id)
+                .map_or(&[][..], Vec::as_slice);
+            let ctx = contexts
+                .get(&run.invocation_id)
+                .cloned()
+                .unwrap_or_default();
+            let case = run_to_case(&run, history, &ctx, opts);
+            (run, case)
+        })
+        .collect())
+}
+
+/// The eval-set text with `cases` (each with its comment lines) added: appended to the text
+/// `existing` with [`append_cases`], or, for `None`, a new set named `name` with the default
+/// rubric `judge_rubric`.
+///
+/// # Errors
+///
+/// [`EvalError::Load`] when `existing` cannot take the cases (see [`append_cases`]) or the new
+/// set is invalid (an empty name, or no cases).
+pub fn cases_text(
+    existing: Option<&str>,
+    name: &str,
+    judge_rubric: Option<&str>,
+    cases: &[ExportedCase],
+) -> Result<String, EvalError> {
+    let comments = |c: &EvalCase| {
+        cases
+            .iter()
+            .find(|e| e.case.id == c.id)
+            .map(|e| e.comments.clone())
+            .unwrap_or_default()
+    };
+    let plain: Vec<EvalCase> = cases.iter().map(|e| e.case.clone()).collect();
+    match existing {
+        Some(text) => append_cases(text, &plain, &comments),
+        None => {
+            let set = EvalSet {
+                name: name.to_owned(),
+                judge_rubric: judge_rubric.map(str::to_owned),
+                cases: plain,
+            };
+            let text = set.to_yaml_with_comments(&comments);
+            EvalSet::from_yaml(&text)?;
+            Ok(text)
+        }
+    }
+}
+
+/// Writes the eval-set text `text` to `path` through a new temporary file next to it, so
+/// readers never see a partial file. With `create` the temporary file is hard-linked as `path`,
+/// which fails when `path` exists (it is never overwritten); otherwise it is renamed over
+/// `path`. The temporary file is removed either way.
+///
+/// # Errors
+///
+/// The I/O error; with `create`, [`std::io::ErrorKind::AlreadyExists`] when `path` exists.
+pub fn write_set_file(path: &Path, text: &str, create: bool) -> std::io::Result<()> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let tmp = path.with_file_name(format!(".{name}.{}.{nanos}.tmp", std::process::id()));
+    write_new(&tmp, text)?;
+    if create {
+        let linked = std::fs::hard_link(&tmp, path);
+        // Best effort: the link result is the one worth reporting.
+        let _ = std::fs::remove_file(&tmp);
+        return linked;
+    }
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        // Best effort: the rename error is the one worth reporting.
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// Creates `path` (failing when it exists) with `text`, synced; removes it when writing fails.
+fn write_new(path: &Path, text: &str) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    let written = file
+        .write_all(text.as_bytes())
+        .and_then(|()| file.sync_all());
+    if written.is_err() {
+        drop(file);
+        // Best effort: the write error is the one worth reporting.
+        let _ = std::fs::remove_file(path);
+    }
+    written
+}
+
 /// Whether the latest score of each name (across sources) has a positive one and no negative
 /// one: a `bool` true or a `number` at least `min_good` is positive, a `bool` false or a smaller
 /// `number` negative; categories are neither.
@@ -909,6 +1037,53 @@ mod tests {
         assert_eq!(
             (e.case.id.as_str(), e.comments.len(), e.positive),
             ("inv-e-1", 1, true)
+        );
+    }
+
+    #[test]
+    fn write_set_file_creates_once_and_replaces_through_a_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("set.yaml");
+        write_set_file(&path, "one", true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "one");
+        let err = write_set_file(&path, "two", true).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "one");
+        write_set_file(&path, "three", false).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "three");
+        let names: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["set.yaml"]);
+    }
+
+    #[test]
+    fn cases_text_appends_or_starts_a_set() {
+        let up = ctx(vec![score("thumbs", json!(true), "bool", 1)]);
+        let exported = run_to_case(&order_run(), &[], &up, &opts()).unwrap();
+        let text = cases_text(
+            None,
+            "regressions",
+            Some(RUBRIC),
+            std::slice::from_ref(&exported),
+        )
+        .unwrap();
+        assert!(text.starts_with("name: \"regressions\"\njudge_rubric: \"Answers the question.\"\ncases:\n  # trace t-1\n"), "{text}");
+        let set = EvalSet::from_yaml(&text).unwrap();
+        assert_eq!(set.cases[0].id, "inv-e-1");
+        let mut second = exported.clone();
+        second.case.id = "inv-e-2".into();
+        let more = cases_text(Some(&text), "ignored", None, &[second]).unwrap();
+        assert!(more.starts_with(&text));
+        assert_eq!(EvalSet::from_yaml(&more).unwrap().cases.len(), 2);
+        assert!(
+            cases_text(Some(&text), "x", None, std::slice::from_ref(&exported)).is_err(),
+            "duplicate"
+        );
+        assert!(
+            cases_text(None, " ", None, &[exported]).is_err(),
+            "blank name"
         );
     }
 }
