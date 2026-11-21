@@ -68,6 +68,9 @@ pub struct Cli {
     pub traces: Option<TracesFrom>,
     /// The price file (`--prices`); `None` shows no costs.
     pub prices: Option<PathBuf>,
+    /// The author of scores added in the console (`--author`); `None` uses `USER`, else
+    /// `USERNAME`, else `console`.
+    pub author: Option<String>,
 }
 
 impl Cli {
@@ -77,6 +80,7 @@ impl Cli {
             config,
             traces: None,
             prices: None,
+            author: None,
         }
     }
 
@@ -89,6 +93,12 @@ impl Cli {
     /// Prices token counts with the price file at `path` (see [`PriceTable`]).
     pub fn with_prices(mut self, path: PathBuf) -> Self {
         self.prices = Some(path);
+        self
+    }
+
+    /// Writes `author` as the author of the scores added on `/traces/{id}`.
+    pub fn with_author(mut self, author: impl Into<String>) -> Self {
+        self.author = Some(author.into());
         self
     }
 }
