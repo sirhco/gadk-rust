@@ -64,6 +64,8 @@ pub struct Cli {
     pub config: ConsoleConfig,
     /// The trace source; `None` reads Cloud Trace and Cloud Logging.
     pub traces: Option<TracesFrom>,
+    /// The price file (`--prices`); `None` shows no costs.
+    pub prices: Option<PathBuf>,
 }
 
 impl Cli {
@@ -72,12 +74,19 @@ impl Cli {
         Self {
             config,
             traces: None,
+            prices: None,
         }
     }
 
     /// Reads traces from `traces` instead.
     pub fn with_traces(mut self, traces: TracesFrom) -> Self {
         self.traces = Some(traces);
+        self
+    }
+
+    /// Prices token counts with the price file at `path` (see [`PriceTable`]).
+    pub fn with_prices(mut self, path: PathBuf) -> Self {
+        self.prices = Some(path);
         self
     }
 }
@@ -176,6 +185,22 @@ pub async fn bind_with_source(
     cfg: ConsoleConfig,
     source: Arc<dyn TraceSource>,
 ) -> Result<Bound, ConsoleError> {
+    bind_full(cfg, source, Extras::default()).await
+}
+
+/// What [`run_cli`] adds to a bound console besides the trace source.
+#[derive(Default)]
+pub(crate) struct Extras {
+    /// The loaded price file.
+    pub(crate) prices: Option<Arc<PriceTable>>,
+}
+
+/// [`bind_with_source`] plus `extras`.
+pub(crate) async fn bind_full(
+    cfg: ConsoleConfig,
+    source: Arc<dyn TraceSource>,
+    extras: Extras,
+) -> Result<Bound, ConsoleError> {
     let store = cfg
         .store
         .as_deref()
@@ -207,7 +232,7 @@ pub async fn bind_with_source(
         csrf: Arc::from(csrf_token()),
         port: addr.port(),
         now: chrono::Utc::now,
-        prices: None,
+        prices: extras.prices,
     };
     Ok(Bound {
         listener,
@@ -224,8 +249,15 @@ pub async fn run(
     run_cli(Cli::new(cfg), out).await
 }
 
-/// Like [`run`], reading traces from the source `cli.traces` names.
+/// Like [`run`], reading traces from the source `cli.traces` names and prices from
+/// `cli.prices` (read before anything is bound).
 pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<(), ConsoleError> {
+    let prices = cli
+        .prices
+        .as_deref()
+        .map(PriceTable::load)
+        .transpose()?
+        .map(Arc::new);
     let source: Arc<dyn TraceSource> = match cli.traces {
         None => Arc::new(CloudTraceSource::new(
             cli.config.project.clone(),
@@ -240,7 +272,7 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
             max_bytes_billed,
         )),
     };
-    let bound = bind_with_source(cli.config, source).await?;
+    let bound = bind_full(cli.config, source, Extras { prices }).await?;
     writeln!(out, "http://127.0.0.1:{}/", bound.local_addr().port())
         .and_then(|()| out.flush())
         .map_err(|e| ConsoleError::Serve(format!("print the URL: {e}")))?;
@@ -271,6 +303,29 @@ mod tests {
             port: 0,
             log_id: "gadk".into(),
         }
+    }
+
+    #[tokio::test]
+    async fn run_cli_fails_on_a_bad_price_file_before_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("prices.yaml");
+        std::fs::write(&path, "- model: m\n  input: -1\n  output: 1\n").unwrap();
+        let mut out = Vec::new();
+        let err = super::run_cli(
+            super::Cli::new(cfg(None)).with_prices(path.clone()),
+            &mut out,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, ConsoleError::Prices { .. }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "price file {}: model m: prices must be finite and not negative",
+                path.display()
+            )
+        );
+        assert!(out.is_empty(), "no URL is printed");
     }
 
     /// One raw HTTP/1.1 GET of `/` to 127.0.0.1:`port` with the given Host; the response head.

@@ -14,6 +14,8 @@
 
 //! The `gadk-console` command line.
 
+use std::path::PathBuf;
+
 use clap::{Arg, ArgMatches, Command, value_parser};
 
 use crate::traces::BigQueryTable;
@@ -94,6 +96,12 @@ fn full_cli() -> Command {
                 .default_value("1073741824")
                 .help("Most bytes one BigQuery query may bill (with --traces bigquery://…)"),
         )
+        .arg(
+            Arg::new("prices")
+                .long("prices")
+                .value_parser(value_parser!(PathBuf))
+                .help("Price file (YAML): USD per 1,000,000 tokens per model; enables cost columns"),
+        )
 }
 
 /// Parses the full command line: [`ConsoleConfig`] plus the trace source.
@@ -116,11 +124,16 @@ where
     if let Some(table) = m.get_one::<BigQueryTable>("traces") {
         cli = cli.with_traces(TracesFrom::bigquery(table.clone(), max_bytes));
     }
+    if let Some(path) = m.get_one::<PathBuf>("prices") {
+        cli = cli.with_prices(path.clone());
+    }
     Ok(cli)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use clap::error::ErrorKind;
 
     use super::{parse_args, parse_cli};
@@ -261,6 +274,7 @@ mod tests {
         for flag in [
             ["--traces", "bigquery://sirhco-apps.ds.tbl"],
             ["--bigquery-max-bytes", "5"],
+            ["--prices", "prices.yaml"],
         ] {
             let err = parse_args(["gadk-console", "--project", "p", flag[0], flag[1]]).unwrap_err();
             assert_eq!(err.kind(), ErrorKind::UnknownArgument, "{flag:?}");
@@ -272,8 +286,26 @@ mod tests {
         let err = parse_cli(["gadk-console", "--help"]).unwrap_err();
         let help = err.render().to_string();
         assert!(
-            help.contains("--traces") && help.contains("--bigquery-max-bytes"),
+            help.contains("--traces")
+                && help.contains("--bigquery-max-bytes")
+                && help.contains("--prices"),
             "{help}"
+        );
+    }
+
+    #[test]
+    fn parse_cli_reads_the_price_file_path() {
+        let cli = parse_cli(["gadk-console", "--project", "p", "--prices", "prices.yaml"]).unwrap();
+        assert_eq!(
+            cli,
+            Cli::new(parse_args(["gadk-console", "--project", "p"]).unwrap())
+                .with_prices(PathBuf::from("prices.yaml"))
+        );
+        assert_eq!(
+            parse_cli(["gadk-console", "--project", "p"])
+                .unwrap()
+                .prices,
+            None
         );
     }
 }
