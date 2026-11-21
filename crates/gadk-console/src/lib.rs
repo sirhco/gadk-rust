@@ -222,6 +222,17 @@ pub(crate) fn default_author(lookup: impl Fn(&str) -> Option<String>) -> String 
         .unwrap_or_else(|| "console".to_owned())
 }
 
+/// The author of console scores: `given` (`--author`) unless it is absent or empty after
+/// trimming, else [`default_author`] over `lookup`.
+pub(crate) fn resolve_author(
+    given: Option<String>,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> String {
+    given
+        .filter(|a| !a.trim().is_empty())
+        .unwrap_or_else(|| default_author(lookup))
+}
+
 /// Reads an environment variable (`None` when unset or not Unicode).
 fn env_var(key: &str) -> Option<String> {
     std::env::var(key).ok()
@@ -266,7 +277,7 @@ pub(crate) async fn bind_full(
         now: chrono::Utc::now,
         prices: extras.prices,
         usage: extras.usage,
-        author: extras.author.unwrap_or_else(|| default_author(env_var)),
+        author: resolve_author(extras.author, env_var),
     };
     Ok(Bound {
         listener,
@@ -287,7 +298,7 @@ pub async fn run(
 /// `cli.prices` (read before anything is bound); console scores are written by `cli.author`,
 /// else `USER`, else `USERNAME`, else `console`.
 pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<(), ConsoleError> {
-    let author = cli.author.unwrap_or_else(|| default_author(env_var));
+    let author = resolve_author(cli.author, env_var);
     let prices = cli
         .prices
         .as_deref()
@@ -375,6 +386,25 @@ mod tests {
         assert_eq!(default_author(env(Some(""), Some("olson"))), "olson");
         assert_eq!(default_author(env(Some(" "), Some(""))), "console");
         assert_eq!(default_author(env(None, None)), "console");
+    }
+
+    #[test]
+    fn a_blank_author_falls_back_like_an_absent_one() {
+        use super::resolve_author;
+        let env = |key: &str| (key == "USER").then(|| "chris".to_owned());
+        assert_eq!(resolve_author(None, env), "chris");
+        assert_eq!(resolve_author(Some(String::new()), env), "chris");
+        assert_eq!(resolve_author(Some(" \t".into()), env), "chris");
+        assert_eq!(resolve_author(Some("olson".into()), env), "olson");
+        assert_eq!(resolve_author(Some(" ".into()), |_: &str| None), "console");
+        assert_eq!(
+            super::Cli::new(cfg(None))
+                .with_author(" ")
+                .author
+                .as_deref(),
+            Some(" "),
+            "with_author stores what it is given"
+        );
     }
 
     #[tokio::test]

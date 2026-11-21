@@ -151,8 +151,11 @@ analytics.record_score(&target, &score, user_id);
 - The row has `event_type` `FEEDBACK`, the target's `session_id`, `invocation_id`, `user_id` and
   (when given) `trace_id`, and no `agent`. `content` is
   `{"name": "<name>", "value": true | 4.5 | "<category>", "data_type": "bool" | "number" | "category", "comment": "<comment>"}`
-  (`comment` only when set); `attributes` holds `"source": "app"` and `"author": "<author>"`
+  (`comment` only when set and not blank); `attributes` holds `"source": "app"` and `"author": "<author>"`
   next to the usual `adk` envelope and the plugin's other attributes.
+- `FEEDBACK` content goes through the same pipeline as every other row: a configured
+  `content_formatter`, sensitive-key redaction and `max_content_len` truncation apply to it too,
+  so a formatter that reshapes content changes what `gadk-console` reads.
 - `record_score` never blocks and never fails. It follows the event filters like every other
   row: an `event_allowlist` that does not list `FEEDBACK` drops every score, and so does
   `FEEDBACK` in `event_denylist`. A disabled plugin writes nothing, and a score recorded after

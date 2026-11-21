@@ -184,7 +184,7 @@ shows a note and no form.
   older than that cannot be scored (404). The author is `--author`, else `$USER`, else
   `$USERNAME`, else `console`.
 - Adding scores needs `roles/bigquery.dataEditor` on the table (and `roles/bigquery.jobUser` in
-  `--project`). BigQuery bills every DML statement at least 10 MB, so the insert runs with a
+  `--project`). BigQuery bills every DML statement at least 10 MiB, so the insert runs with a
   byte cap of at least 10,485,760 bytes even when `--bigquery-max-bytes` is lower (about
   $0.00006 per score at on-demand prices).
 - Scores are append-only: there is no editing or deleting. Summaries use the latest score per

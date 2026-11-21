@@ -110,9 +110,11 @@ impl Score {
         })
     }
 
-    /// The score with `comment`.
+    /// The score with `comment`. A comment that is empty after trimming is no comment
+    /// ([`comment`](Self::comment) is `None` and the row's `content` has no `comment` key).
     pub fn with_comment(mut self, comment: impl Into<String>) -> Self {
-        self.comment = Some(comment.into());
+        let comment = comment.into();
+        self.comment = (!comment.trim().is_empty()).then_some(comment);
         self
     }
 
@@ -249,11 +251,13 @@ mod tests {
         let s = Score::new("thumbs", ScoreValue::Bool(true)).unwrap();
         assert_eq!(s.name(), "thumbs");
         assert_eq!(s.value(), &ScoreValue::Bool(true));
+        assert_eq!(s.value().data_type(), "bool");
         assert_eq!(s.comment(), None);
         let s = Score::new("rating", ScoreValue::Number(4.5))
             .unwrap()
             .with_comment("good answer");
         assert_eq!(s.value(), &ScoreValue::Number(4.5));
+        assert_eq!(s.value().data_type(), "number");
         assert_eq!(s.comment(), Some("good answer"));
         let s = Score::new(" quality ", ScoreValue::Category("helpful".into())).unwrap();
         assert_eq!(s.name(), " quality ");
@@ -280,10 +284,31 @@ mod tests {
                 ScoreValue::Number(f64::INFINITY),
                 ScoreError::NonFiniteNumber,
             ),
+            (
+                "rating",
+                ScoreValue::Number(f64::NEG_INFINITY),
+                ScoreError::NonFiniteNumber,
+            ),
         ];
         for (name, value, want) in cases {
             assert_eq!(Score::new(name, value).unwrap_err(), want, "{name:?}");
         }
+    }
+
+    #[test]
+    fn blank_comments_are_no_comment() {
+        for blank in ["", "  ", " \t\n"] {
+            let s = Score::new("thumbs", ScoreValue::Bool(true))
+                .unwrap()
+                .with_comment(blank);
+            assert_eq!(s.comment(), None, "{blank:?}");
+            let content = feedback_content(&s);
+            assert!(content.get("comment").is_none(), "{blank:?}: {content}");
+        }
+        let s = Score::new("thumbs", ScoreValue::Bool(true))
+            .unwrap()
+            .with_comment(" kept ");
+        assert_eq!(s.comment(), Some(" kept "));
     }
 
     #[test]

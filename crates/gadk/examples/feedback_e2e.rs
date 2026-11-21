@@ -33,6 +33,7 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use anyhow::Context;
 use futures::StreamExt;
 use gadk::agent::RunConfig;
 use gadk::agentanalytics::{
@@ -82,10 +83,12 @@ async fn ensure_prompt(store: &dyn PromptStore) -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let project = std::env::var("GOOGLE_CLOUD_PROJECT")?;
-    let dataset = std::env::var("GADK_ANALYTICS_DATASET")?;
+    let project =
+        std::env::var("GOOGLE_CLOUD_PROJECT").context("GOOGLE_CLOUD_PROJECT is not set")?;
+    let dataset =
+        std::env::var("GADK_ANALYTICS_DATASET").context("GADK_ANALYTICS_DATASET is not set")?;
     let table = std::env::var("GADK_ANALYTICS_TABLE").unwrap_or_else(|_| "agent_events".into());
-    let prompts_dir = std::env::var("GADK_E2E_PROMPTS")?;
+    let prompts_dir = std::env::var("GADK_E2E_PROMPTS").context("GADK_E2E_PROMPTS is not set")?;
 
     let store: Arc<dyn PromptStore> = Arc::new(FileStore::new(prompts_dir));
     ensure_prompt(store.as_ref()).await?;
