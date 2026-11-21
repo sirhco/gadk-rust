@@ -32,7 +32,7 @@ use super::AppState;
 use super::guard::check_csrf;
 use super::pages::error::{banner, error_page, store_error, store_status, store_text};
 use super::pages::layout::{self, Nav};
-use super::pages::prompt::{MetricsBody, MetricsRow, PassColumn, ProductionMetrics};
+use super::pages::prompt::{FeedbackBody, MetricsBody, MetricsRow, PassColumn, ProductionMetrics};
 use super::pages::{prompt, prompts};
 use crate::evals::ReportCache;
 use crate::prices::{CostSum, PriceTable, cost_of};
@@ -214,11 +214,19 @@ async fn production_metrics(state: &AppState, name: &str, range: TimeRange) -> P
                 Ok(m) => {
                     let (pass, counts) =
                         pass_rates(state.reports.as_deref(), source, name, start, end).await;
+                    let feedback = match source.version_feedback(name, start, end).await {
+                        Ok(f) => FeedbackBody::Rows {
+                            rows: f.rows,
+                            truncated: f.truncated,
+                        },
+                        Err(e) => FeedbackBody::Failed(e.to_string(), e.hint()),
+                    };
                     MetricsBody::Rows {
                         rows: metric_rows(&m, state.prices.as_deref(), &counts),
                         priced: state.prices.is_some(),
                         pass,
                         truncated: m.truncated,
+                        feedback,
                     }
                 }
             }
@@ -1157,6 +1165,22 @@ mod tests {
         )
     }
 
+    const FEEDBACK_FIELDS: [(&str, &str); 8] = [
+        ("version", "INT64"),
+        ("name", "STRING"),
+        ("source", "STRING"),
+        ("data_type", "STRING"),
+        ("category", "STRING"),
+        ("count", "INT64"),
+        ("positive", "INT64"),
+        ("total", "FLOAT64"),
+    ];
+
+    /// The feedback query's reply without rows.
+    fn no_feedback_reply() -> Result<(u16, String), String> {
+        reply(&FEEDBACK_FIELDS, vec![], false)
+    }
+
     #[tokio::test]
     async fn production_metrics_show_calls_cost_latency_and_pass_rate_per_version() {
         let (_dir, store) = seeded().await;
@@ -1169,7 +1193,12 @@ mod tests {
             &[&[Outcome::Pass], &[Outcome::Fail], &[Outcome::Pass]],
         );
         let (_rdir, cache, _) = report_cache(&[r], 4).await;
-        let fake = FakeHttp::new(vec![stats_reply(), models_reply(), ids_reply()]);
+        let fake = FakeHttp::new(vec![
+            stats_reply(),
+            models_reply(),
+            ids_reply(),
+            no_feedback_reply(),
+        ]);
         let (status, _, body) = get(bq_state(&store, &fake, Some(cache)), "/prompts/greet").await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert!(body.contains("<h2>Production metrics</h2>"), "{body}");
@@ -1191,7 +1220,7 @@ mod tests {
             "{body}"
         );
 
-        assert_eq!(fake.uris().len(), 3);
+        assert_eq!(fake.uris().len(), 4);
         let stats = fake.body(0);
         assert_eq!(
             param_value(&stats, "prompt")["parameterValue"]["value"],
@@ -1214,7 +1243,7 @@ mod tests {
     #[tokio::test]
     async fn production_metrics_take_the_range_and_skip_pass_rates_without_reports() {
         let (_dir, store) = seeded().await;
-        let fake = FakeHttp::new(vec![stats_reply(), models_reply()]);
+        let fake = FakeHttp::new(vec![stats_reply(), models_reply(), no_feedback_reply()]);
         let (status, _, body) =
             get(bq_state(&store, &fake, None), "/prompts/greet?range=24h").await;
         assert_eq!(status, StatusCode::OK, "{body}");
@@ -1223,7 +1252,15 @@ mod tests {
             body.contains(r#"<td class="num">1900 ms</td></tr>"#),
             "{body}"
         );
-        assert_eq!(fake.uris().len(), 2, "no mapping query without --reports");
+        assert_eq!(
+            fake.uris().len(),
+            3,
+            "stats, cost and feedback; no mapping query without --reports"
+        );
+        assert!(
+            body.contains("No scores for calls of this prompt in the last 24h."),
+            "{body}"
+        );
         assert_eq!(
             param_value(&fake.body(0), "start")["parameterValue"]["value"],
             json!("2026-11-15 12:00:00.000000+00:00")
@@ -1320,7 +1357,7 @@ mod tests {
             vec![vec![json!("inv-0"), json!("2")]],
             true,
         );
-        let fake = FakeHttp::new(vec![stats, models_reply(), ids]);
+        let fake = FakeHttp::new(vec![stats, models_reply(), ids, no_feedback_reply()]);
         let (status, _, body) = get(bq_state(&store, &fake, Some(cache)), "/prompts/greet").await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert!(
@@ -1332,5 +1369,119 @@ mod tests {
             "{body}"
         );
         assert!(body.contains("100.0% (1/1)"), "{body}");
+    }
+
+    /// One row of `FEEDBACK_FIELDS`: version, name, source, data type, category, count,
+    /// positive, total.
+    fn feedback_cells(cells: [Value; 8]) -> Vec<Value> {
+        cells.to_vec()
+    }
+
+    #[tokio::test]
+    async fn production_metrics_show_feedback_per_version_name_and_source() {
+        let (_dir, store) = seeded().await;
+        let feedback = reply(
+            &FEEDBACK_FIELDS,
+            vec![
+                feedback_cells([
+                    json!("2"),
+                    json!("quality"),
+                    json!("app"),
+                    json!("category"),
+                    json!("helpful"),
+                    json!("2"),
+                    json!("0"),
+                    Value::Null,
+                ]),
+                feedback_cells([
+                    json!("2"),
+                    json!("quality"),
+                    json!("app"),
+                    json!("category"),
+                    json!("clear"),
+                    json!("2"),
+                    json!("0"),
+                    Value::Null,
+                ]),
+                feedback_cells([
+                    json!("2"),
+                    json!("rating"),
+                    json!("console"),
+                    json!("number"),
+                    Value::Null,
+                    json!("2"),
+                    json!("0"),
+                    json!("7.5"),
+                ]),
+                feedback_cells([
+                    json!("2"),
+                    json!("thumbs"),
+                    json!("app"),
+                    json!("bool"),
+                    Value::Null,
+                    json!("3"),
+                    json!("2"),
+                    Value::Null,
+                ]),
+                feedback_cells([
+                    json!("1"),
+                    json!("thumbs"),
+                    json!("app"),
+                    json!("bool"),
+                    Value::Null,
+                    json!("1"),
+                    json!("0"),
+                    Value::Null,
+                ]),
+            ],
+            true,
+        );
+        let fake = FakeHttp::new(vec![stats_reply(), models_reply(), feedback]);
+        let (status, _, body) = get(bq_state(&store, &fake, None), "/prompts/greet").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains("<h3>Feedback</h3>"), "{body}");
+        for row in [
+            r#"<tr><td><a href="/prompts/greet?v=2">v2</a></td><td>quality</td><td>app</td><td>category</td><td class="num">4</td><td>most common: clear</td></tr>"#,
+            r#"<tr><td><a href="/prompts/greet?v=2">v2</a></td><td>rating</td><td>console</td><td>number</td><td class="num">2</td><td>mean 3.75</td></tr>"#,
+            r#"<tr><td><a href="/prompts/greet?v=2">v2</a></td><td>thumbs</td><td>app</td><td>bool</td><td class="num">3</td><td>66.7% positive</td></tr>"#,
+            r#"<tr><td><a href="/prompts/greet?v=1">v1</a></td><td>thumbs</td><td>app</td><td>bool</td><td class="num">1</td><td>0.0% positive</td></tr>"#,
+        ] {
+            assert!(body.contains(row), "{row}: {body}");
+        }
+        assert!(
+            body.contains(super::super::pages::prompt::FEEDBACK_TRUNCATED),
+            "{body}"
+        );
+        let f = fake.body(2);
+        let sql = f["query"].as_str().unwrap();
+        assert!(sql.contains("WHERE event_type = 'FEEDBACK'"), "{sql}");
+        assert_eq!(
+            param_value(&f, "prompt")["parameterValue"]["value"],
+            json!("greet")
+        );
+        assert_eq!(
+            param_value(&f, "start")["parameterValue"]["value"],
+            json!("2026-11-09 12:00:00.000000+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_feedback_query_is_a_banner_under_the_metrics() {
+        let (_dir, store) = seeded().await;
+        let denied = Ok((
+            403,
+            json!({ "error": { "code": 403, "message": "Access Denied", "errors": [{ "reason": "accessDenied" }] } }).to_string(),
+        ));
+        let fake = FakeHttp::new(vec![stats_reply(), models_reply(), denied]);
+        let (status, _, body) = get(bq_state(&store, &fake, None), "/prompts/greet").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(
+            body.contains("Feedback could not be loaded: BigQuery: HTTP 403: Access Denied"),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"<td class="num">1900 ms</td></tr>"#),
+            "the metrics still show: {body}"
+        );
     }
 }

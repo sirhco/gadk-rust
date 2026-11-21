@@ -357,7 +357,7 @@ impl UsageSource {
 }
 
 /// The `@start` and `@end` TIMESTAMP parameters.
-fn window_params(start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<Value> {
+pub(crate) fn window_params(start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<Value> {
     vec![
         param("start", "TIMESTAMP", Some(ts_param(start))),
         param("end", "TIMESTAMP", Some(ts_param(end))),
@@ -365,7 +365,7 @@ fn window_params(start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<Value> {
 }
 
 /// An INT64 cell as a count; 0 when NULL or not a non-negative integer.
-fn count(row: &Map<String, Value>, key: &str) -> u64 {
+pub(crate) fn count(row: &Map<String, Value>, key: &str) -> u64 {
     row.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
@@ -384,7 +384,7 @@ fn model_calls(row: &Map<String, Value>) -> ModelCalls {
 }
 
 /// The `version` cell as a prompt version.
-fn version_of(row: &Map<String, Value>) -> Option<u32> {
+pub(crate) fn version_of(row: &Map<String, Value>) -> Option<u32> {
     row.get("version")
         .and_then(Value::as_u64)
         .and_then(|v| u32::try_from(v).ok())

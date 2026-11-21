@@ -23,6 +23,7 @@ use super::layout::{Nav, page};
 use crate::evals::percent;
 use crate::prices::thousands;
 use crate::prompts::{DiffLine, DiffTag, DiffView, PromptDetail, VersionView};
+use crate::scores::FeedbackRow;
 use crate::traces::TimeRange;
 use crate::url::percent_encode;
 
@@ -80,6 +81,24 @@ pub(crate) const METRICS_TRUNCATED: &str =
 pub(crate) const PASS_RATES_TRUNCATED: &str =
     "Eval pass rates leave out some runs: the version mapping reached its row limit.";
 
+/// The note shown when the feedback query hit its row cap.
+pub(crate) const FEEDBACK_TRUNCATED: &str =
+    "Some scores are left out: the feedback query reached its row limit.";
+
+/// The Feedback table of the production-metrics section.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum FeedbackBody {
+    /// The query failed: the error text and its hint.
+    Failed(String, Option<&'static str>),
+    /// One row per version, score name, source and data type.
+    Rows {
+        /// The rows, newest version first.
+        rows: Vec<FeedbackRow>,
+        /// The query hit its row cap.
+        truncated: bool,
+    },
+}
+
 /// The production-metrics section of a prompt page.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ProductionMetrics {
@@ -106,6 +125,8 @@ pub(crate) enum MetricsBody {
         pass: PassColumn,
         /// A metrics query hit its row cap: some versions or costs are left out.
         truncated: bool,
+        /// The scores per version.
+        feedback: FeedbackBody,
     },
 }
 
@@ -166,6 +187,68 @@ fn pass_text(pass: Option<(u64, u64)>) -> String {
     }
 }
 
+/// A feedback row's summary: `NN.N% positive` (`bool`), `mean N.NN` (`number`), `most common:
+/// <value>` (`category`), else `—`.
+fn feedback_result(r: &FeedbackRow) -> String {
+    match r.data_type.as_str() {
+        "bool" if r.count > 0 => format!(
+            "{} positive",
+            percent(Some(r.positive as f64 / r.count as f64))
+        ),
+        "number" => r
+            .mean
+            .map_or_else(|| "—".to_owned(), |m| format!("mean {m:.2}")),
+        "category" => r
+            .mode
+            .as_ref()
+            .map_or_else(|| "—".to_owned(), |m| format!("most common: {m}")),
+        _ => "—".to_owned(),
+    }
+}
+
+/// The Feedback table: per version, score name, source and data type, the count and summary.
+fn feedback_table(base: &str, range: TimeRange, f: &FeedbackBody) -> Markup {
+    html! {
+        h3 { "Feedback" }
+        @match f {
+            FeedbackBody::Failed(text, hint) => {
+                (banner(&format!("Feedback could not be loaded: {text}"), *hint))
+            }
+            FeedbackBody::Rows { rows, truncated } => {
+                @if rows.is_empty() {
+                    p class="empty" {
+                        "No scores for calls of this prompt in the last " (range.as_str()) "."
+                    }
+                } @else {
+                    table {
+                        thead {
+                            tr {
+                                th { "Version" } th { "Score" } th { "Source" } th { "Type" }
+                                th { "Count" } th { "Result" }
+                            }
+                        }
+                        tbody {
+                            @for r in rows {
+                                tr {
+                                    td { a href={ (base) "?v=" (r.version) } { "v" (r.version) } }
+                                    td { (r.name) }
+                                    td { (r.source) }
+                                    td { (r.data_type) }
+                                    td class="num" { (thousands(r.count)) }
+                                    td { (feedback_result(r)) }
+                                }
+                            }
+                        }
+                    }
+                }
+                @if *truncated {
+                    p class="empty" { (FEEDBACK_TRUNCATED) }
+                }
+            }
+        }
+    }
+}
+
 /// The production-metrics section: range picker, then the note, the error banner or the table.
 fn metrics_section(base: &str, m: &ProductionMetrics) -> Markup {
     html! {
@@ -188,7 +271,7 @@ fn metrics_section(base: &str, m: &ProductionMetrics) -> Markup {
             MetricsBody::Failed(text, hint) => {
                 (banner(text, *hint))
             }
-            MetricsBody::Rows { rows, priced, pass, truncated } => {
+            MetricsBody::Rows { rows, priced, pass, truncated, feedback } => {
                 @let pass_on = matches!(pass, PassColumn::On { .. });
                 @if rows.is_empty() {
                     p class="empty" {
@@ -245,6 +328,7 @@ fn metrics_section(base: &str, m: &ProductionMetrics) -> Markup {
                     }
                     PassColumn::Off => {}
                 }
+                (feedback_table(base, m.range, feedback))
             }
         }
     }

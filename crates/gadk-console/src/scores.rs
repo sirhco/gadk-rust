@@ -24,10 +24,44 @@ use chrono::{DateTime, Utc};
 use serde_json::{Map, Value, json};
 
 use crate::traces::{SourceError, param, text, timestamp, ts_param};
-use crate::usage::{UsageSource, string_array_param};
+use crate::usage::{UsageSource, count, string_array_param, version_of, window_params};
 
 /// The most scores `/traces/{id}` shows.
 pub(crate) const TRACE_SCORES_CAP: usize = 200;
+
+/// The most version × score × value rows the feedback query returns.
+pub(crate) const FEEDBACK_CAP: usize = 5_000;
+
+/// The scores of one prompt version with one name, source and data type.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FeedbackRow {
+    /// The prompt version.
+    pub(crate) version: u32,
+    /// The score name.
+    pub(crate) name: String,
+    /// `app` or `console` (empty when the rows have none).
+    pub(crate) source: String,
+    /// `bool`, `number` or `category` (empty when the rows have none).
+    pub(crate) data_type: String,
+    /// How many scores (the latest per invocation, name and source).
+    pub(crate) count: u64,
+    /// `bool` scores that are `true`.
+    pub(crate) positive: u64,
+    /// The mean of `number` scores.
+    pub(crate) mean: Option<f64>,
+    /// The most common `category` (ties: the lowest value).
+    pub(crate) mode: Option<String>,
+}
+
+/// The per-version feedback of one prompt.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct VersionFeedback {
+    /// One row per version, name, source and data type: newest version first, then by name,
+    /// source and data type.
+    pub(crate) rows: Vec<FeedbackRow>,
+    /// The query hit its row cap: some scores are left out.
+    pub(crate) truncated: bool,
+}
 
 /// The error-banner hint for a score insert refused for lack of permission.
 pub(crate) const BQ_EDITOR_HINT: &str =
@@ -253,6 +287,137 @@ impl UsageSource {
         ];
         self.run_dml(&sql, params).await
     }
+}
+
+impl UsageSource {
+    /// The scores of the calls of prompt `prompt`: `FEEDBACK` rows written since `start` (no
+    /// upper bound: scores arrive after the calls), the latest per invocation, name and source,
+    /// mapped to versions through the `LLM_REQUEST` rows of `[start, end)` widened by one day
+    /// before and one hour after (an invocation that used several versions counts for each).
+    pub(crate) async fn version_feedback(
+        &self,
+        prompt: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<VersionFeedback, SourceError> {
+        let sql = version_feedback_sql(&self.table_path()?);
+        let mut params = window_params(start, end);
+        params.push(param("prompt", "STRING", Some(prompt.to_owned())));
+        let (rows, truncated) = self.run_capped(&sql, params, FEEDBACK_CAP).await?;
+        Ok(VersionFeedback {
+            rows: merge_feedback(&rows),
+            truncated,
+        })
+    }
+}
+
+/// A [`FeedbackRow`] being merged: the sum of its numbers and its category counts.
+struct Merging {
+    row: FeedbackRow,
+    total: f64,
+    categories: Vec<(String, u64)>,
+}
+
+/// The rows of [`version_feedback_sql`] (one per version, name, source, data type and
+/// category) merged into one per version, name, source and data type, in first-seen order.
+fn merge_feedback(rows: &[Map<String, Value>]) -> Vec<FeedbackRow> {
+    let mut out: Vec<Merging> = Vec::new();
+    for row in rows {
+        let (Some(version), Some(name)) = (version_of(row), text(row, "name")) else {
+            continue;
+        };
+        let source = text(row, "source").unwrap_or_default();
+        let data_type = text(row, "data_type").unwrap_or_default();
+        let n = count(row, "count");
+        let i = match out.iter().position(|m| {
+            m.row.version == version
+                && m.row.name == name
+                && m.row.source == source
+                && m.row.data_type == data_type
+        }) {
+            Some(i) => i,
+            None => {
+                out.push(Merging {
+                    row: FeedbackRow {
+                        version,
+                        name,
+                        source,
+                        data_type,
+                        count: 0,
+                        positive: 0,
+                        mean: None,
+                        mode: None,
+                    },
+                    total: 0.0,
+                    categories: Vec::new(),
+                });
+                out.len() - 1
+            }
+        };
+        let m = &mut out[i];
+        m.row.count += n;
+        m.row.positive += count(row, "positive");
+        m.total += row.get("total").and_then(Value::as_f64).unwrap_or(0.0);
+        if let Some(category) = text(row, "category") {
+            m.categories.push((category, n));
+        }
+    }
+    out.into_iter()
+        .map(|m| {
+            let mut r = m.row;
+            if r.data_type == "number" && r.count > 0 {
+                r.mean = Some(m.total / r.count as f64);
+            }
+            r.mode = m
+                .categories
+                .into_iter()
+                .reduce(|best, c| {
+                    if c.1 > best.1 || (c.1 == best.1 && c.0 < best.0) {
+                        c
+                    } else {
+                        best
+                    }
+                })
+                .map(|(category, _)| category);
+            r
+        })
+        .collect()
+}
+
+/// Scores of the calls of `@prompt`, per version, name, source, data type and category (NULL
+/// unless `category`): count, `true` values and the sum of numbers.
+fn version_feedback_sql(table: &str) -> String {
+    format!(
+        r"WITH s AS (
+  SELECT invocation_id, JSON_VALUE(content, '$.name') AS name,
+    JSON_VALUE(attributes, '$.source') AS source,
+    JSON_VALUE(content, '$.data_type') AS data_type,
+    JSON_VALUE(content, '$.value') AS value
+  FROM {table}
+  WHERE event_type = 'FEEDBACK' AND timestamp >= @start
+    AND invocation_id IS NOT NULL AND invocation_id != ''
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')
+    ORDER BY timestamp DESC, event_id DESC) = 1),
+v AS (
+  SELECT DISTINCT invocation_id,
+    SAFE_CAST(JSON_VALUE(attributes, '$.prompt.version') AS INT64) AS version
+  FROM {table}
+  WHERE event_type = 'LLM_REQUEST'
+    AND timestamp >= TIMESTAMP_SUB(@start, INTERVAL 1 DAY)
+    AND timestamp < TIMESTAMP_ADD(@end, INTERVAL 1 HOUR)
+    AND JSON_VALUE(attributes, '$.prompt.name') = @prompt
+    AND SAFE_CAST(JSON_VALUE(attributes, '$.prompt.version') AS INT64) IS NOT NULL)
+SELECT v.version AS version, s.name AS name, IFNULL(s.source, '') AS source,
+  IFNULL(s.data_type, '') AS data_type,
+  IF(s.data_type = 'category', s.value, NULL) AS category,
+  COUNT(*) AS count, COUNTIF(s.value = 'true') AS positive,
+  SUM(IF(s.data_type = 'number', SAFE_CAST(s.value AS FLOAT64), NULL)) AS total
+FROM s JOIN v ON v.invocation_id = s.invocation_id
+GROUP BY 1, 2, 3, 4, 5
+ORDER BY 1 DESC, 2, 3, 4, 5
+LIMIT @limit"
+    )
 }
 
 /// The first row of `@trace_id` (not a score) with an invocation id, in the last 30 days.
@@ -629,6 +794,168 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(fake.body(0)["maximumBytesBilled"], json!("50000000"));
+    }
+
+    const FEEDBACK_FIELDS: [(&str, &str); 8] = [
+        ("version", "INT64"),
+        ("name", "STRING"),
+        ("source", "STRING"),
+        ("data_type", "STRING"),
+        ("category", "STRING"),
+        ("count", "INT64"),
+        ("positive", "INT64"),
+        ("total", "FLOAT64"),
+    ];
+
+    /// A category row of `FEEDBACK_FIELDS` for version 2 of score `quality` from the app.
+    fn category(value: &str, count: &str) -> Vec<Value> {
+        vec![
+            json!("2"),
+            json!("quality"),
+            json!("app"),
+            json!("category"),
+            json!(value),
+            json!(count),
+            json!("0"),
+            Value::Null,
+        ]
+    }
+
+    /// A `bool` row of `FEEDBACK_FIELDS` for score `thumbs`.
+    fn thumbs(version: &str, source: &str, count: &str, positive: &str) -> Vec<Value> {
+        vec![
+            json!(version),
+            json!("thumbs"),
+            json!(source),
+            json!("bool"),
+            Value::Null,
+            json!(count),
+            json!(positive),
+            Value::Null,
+        ]
+    }
+
+    #[tokio::test]
+    async fn version_feedback_summarizes_each_version_name_and_source() {
+        let rating = vec![
+            json!("2"),
+            json!("rating"),
+            json!("console"),
+            json!("number"),
+            Value::Null,
+            json!("2"),
+            json!("0"),
+            json!("7.5"),
+        ];
+        let fake = FakeHttp::new(vec![reply(
+            &FEEDBACK_FIELDS,
+            vec![
+                category("clear", "2"),
+                category("helpful", "2"),
+                category("vague", "1"),
+                rating,
+                thumbs("2", "app", "3", "2"),
+                thumbs("2", "console", "1", "0"),
+                thumbs("1", "app", "1", "1"),
+            ],
+            false,
+        )]);
+        let start = Utc.with_ymd_and_hms(2026, 11, 13, 12, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 11, 20, 12, 0, 0).unwrap();
+        let f = source(&fake)
+            .version_feedback("greet", start, end)
+            .await
+            .unwrap();
+        assert!(!f.truncated);
+        let row = |version, name: &str, source: &str, data_type: &str| FeedbackRow {
+            version,
+            name: name.into(),
+            source: source.into(),
+            data_type: data_type.into(),
+            count: 0,
+            positive: 0,
+            mean: None,
+            mode: None,
+        };
+        assert_eq!(
+            f.rows,
+            vec![
+                FeedbackRow {
+                    count: 5,
+                    mode: Some("clear".into()),
+                    ..row(2, "quality", "app", "category")
+                },
+                FeedbackRow {
+                    count: 2,
+                    mean: Some(3.75),
+                    ..row(2, "rating", "console", "number")
+                },
+                FeedbackRow {
+                    count: 3,
+                    positive: 2,
+                    ..row(2, "thumbs", "app", "bool")
+                },
+                FeedbackRow {
+                    count: 1,
+                    ..row(2, "thumbs", "console", "bool")
+                },
+                FeedbackRow {
+                    count: 1,
+                    positive: 1,
+                    ..row(1, "thumbs", "app", "bool")
+                },
+            ]
+        );
+        let body = fake.body(0);
+        assert_eq!(body["maximumBytesBilled"], json!("1000"));
+        let sql = body["query"].as_str().unwrap();
+        for piece in [
+            "WHERE event_type = 'FEEDBACK' AND timestamp >= @start\n    AND invocation_id IS NOT NULL",
+            "QUALIFY ROW_NUMBER() OVER (\n    PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')\n    ORDER BY timestamp DESC, event_id DESC) = 1",
+            "WHERE event_type = 'LLM_REQUEST'",
+            "AND timestamp >= TIMESTAMP_SUB(@start, INTERVAL 1 DAY)",
+            "AND timestamp < TIMESTAMP_ADD(@end, INTERVAL 1 HOUR)",
+            "AND JSON_VALUE(attributes, '$.prompt.name') = @prompt",
+            "FROM s JOIN v ON v.invocation_id = s.invocation_id",
+            "GROUP BY 1, 2, 3, 4, 5",
+            "LIMIT @limit",
+        ] {
+            assert!(sql.contains(piece), "{piece}: {sql}");
+        }
+        assert!(!sql.contains("greet"), "{sql}");
+        assert_eq!(
+            param_value(&body, "prompt")["parameterValue"]["value"],
+            json!("greet")
+        );
+        assert_eq!(
+            param_value(&body, "start")["parameterValue"]["value"],
+            json!("2026-11-13 12:00:00.000000+00:00")
+        );
+        assert_eq!(
+            param_value(&body, "end")["parameterValue"]["value"],
+            json!("2026-11-20 12:00:00.000000+00:00")
+        );
+        assert_eq!(
+            param_value(&body, "limit")["parameterValue"]["value"],
+            json!("5001")
+        );
+    }
+
+    #[test]
+    fn the_mode_breaks_ties_by_the_lowest_value_in_any_row_order() {
+        // Decoded rows, as `gadk-bigquery` returns them: INT64 cells are numbers.
+        let cells = |category: &str, count: u64| -> Map<String, Value> {
+            let row = json!({
+                "version": 1, "name": "q", "source": "app", "data_type": "category",
+                "category": category, "count": count, "positive": 0, "total": null,
+            });
+            row.as_object().unwrap().clone()
+        };
+        let rows = merge_feedback(&[cells("zeta", 2), cells("alpha", 2), cells("mid", 1)]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].mode.as_deref(), Some("alpha"));
+        assert_eq!(rows[0].count, 5);
+        assert_eq!(rows[0].mean, None);
     }
 
     #[tokio::test]
