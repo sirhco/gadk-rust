@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use gadk_agent::{AgentError, ReadonlyContext};
+use gadk_agent::{AgentError, PromptUse, ReadonlyContext};
 use gadk_engine::llm::InstructionProvider;
 use tracing::Instrument;
 
@@ -27,7 +27,8 @@ use crate::store::StoreError;
 /// snapshot (so a label moved mid-session applies from the next model call) with session-state
 /// templating (`{var}`, `{var?}`, `{artifact.x}`). Each render records a `render_prompt <name>`
 /// span with `prompt.name`, `prompt.version`, `prompt.label`, `prompt.hash` and
-/// `prompt.fallback` (never the text).
+/// `prompt.fallback` (never the text), and records the version it used in the invocation's
+/// context (see [`render`](Self::render)).
 #[derive(Clone)]
 pub struct PromptInstruction {
     registry: PromptRegistry,
@@ -79,6 +80,14 @@ impl PromptInstruction {
 
     /// Resolves and renders the prompt for `ctx`.
     ///
+    /// A resolved version is recorded for `ctx`'s agent with
+    /// [`ReadonlyContext::record_prompt`] as `PromptUse { name, version, label }`, where `label`
+    /// is the selector's label, `latest` for [`Selector::Latest`], or none for
+    /// [`Selector::Version`] (the span's `prompt.label`); a fallback render clears the agent's
+    /// record. Analytics plugins read the record to attribute model calls to prompt versions.
+    /// When an agent renders more than one `PromptInstruction` (instruction and global
+    /// instruction), the last render before the model call wins.
+    ///
     /// # Errors
     ///
     /// Not found without a fallback, or a template that fails to render; messages start with
@@ -90,14 +99,24 @@ impl PromptInstruction {
             Selector::Version(_) => String::new(),
         };
         let (text, version, hash, fallback) = match self.registry.get(&self.name, &self.sel) {
-            Ok(v) => (
-                v.template.clone(),
-                i64::from(v.version),
-                v.meta.hash.clone(),
-                false,
-            ),
+            Ok(v) => {
+                let mut used = PromptUse::new(self.name.clone(), v.version);
+                if !label.is_empty() {
+                    used = used.with_label(label.clone());
+                }
+                ctx.record_prompt(used);
+                (
+                    v.template.clone(),
+                    i64::from(v.version),
+                    v.meta.hash.clone(),
+                    false,
+                )
+            }
             Err(e @ StoreError::NotFound { .. }) => match &self.fallback {
-                Some(fb) => (fb.clone(), 0, String::new(), true),
+                Some(fb) => {
+                    ctx.clear_recorded_prompt();
+                    (fb.clone(), 0, String::new(), true)
+                }
                 None => return Err(self.err(e)),
             },
             Err(e) => return Err(self.err(e)),

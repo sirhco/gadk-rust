@@ -262,3 +262,55 @@ async fn render_span_is_child_of_invoke_agent_without_text() {
         "{spans:?}"
     );
 }
+
+/// R3: a resolved render records the version with the selector's label (`latest`, or none for a
+/// pinned version); a fallback render clears the record.
+#[tokio::test]
+async fn render_records_the_prompt_version_it_used() {
+    use gadk_agent::{InvocationContext, PromptUse};
+
+    let dir = tempfile::tempdir().unwrap();
+    let (store, r) = registry_with(dir.path(), &[("p", "v1"), ("p", "v2")]).await;
+    store
+        .set_label("p", &Label::production(), 1, None)
+        .await
+        .unwrap();
+    r.refresh().await.unwrap();
+    let ic = InvocationContext::builder().build_invocation();
+    assert_eq!(ic.recorded_prompt(), None);
+
+    r.instruction("p", Selector::Label(Label::production()))
+        .render(&ic)
+        .await
+        .unwrap();
+    assert_eq!(
+        ic.recorded_prompt(),
+        Some(PromptUse::new("p", 1).with_label("production"))
+    );
+
+    r.instruction("p", Selector::Latest)
+        .render(&ic)
+        .await
+        .unwrap();
+    assert_eq!(
+        ic.recorded_prompt(),
+        Some(PromptUse::new("p", 2).with_label("latest"))
+    );
+
+    r.instruction("p", Selector::Version(1))
+        .render(&ic)
+        .await
+        .unwrap();
+    assert_eq!(ic.recorded_prompt(), Some(PromptUse::new("p", 1)));
+
+    r.instruction("nope", Selector::Latest)
+        .with_fallback("fallback")
+        .render(&ic)
+        .await
+        .unwrap();
+    assert_eq!(
+        ic.recorded_prompt(),
+        None,
+        "a fallback render clears the record"
+    );
+}
