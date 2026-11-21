@@ -28,6 +28,7 @@ mod score;
 mod set;
 mod spec;
 mod variant;
+mod write;
 
 pub use error::EvalError;
 pub use evaluator::Evaluator;
