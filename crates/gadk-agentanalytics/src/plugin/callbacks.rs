@@ -44,7 +44,7 @@ use serde_json::{Map, Value};
 
 use super::rows::{
     agent_starting_data, identity_of, llm_request_attributes, llm_response_attributes,
-    runner_agent_of,
+    prompt_attribute, runner_agent_of,
 };
 use super::{AnalyticsPlugin, EventData, PLUGIN_NAME, Payload, PluginState, USER_AUTHOR};
 use crate::context::ContextError;
@@ -462,6 +462,7 @@ impl AnalyticsPlugin {
     pub(crate) fn before_model(&self, ctx: &CallbackCtx, req: &LlmRequest) {
         let Some(tm) = self.tm() else { return };
         let id = identity_of(ctx);
+        let prompt = prompt_attribute(ctx);
         self.log_event(
             ctx,
             &id,
@@ -470,6 +471,9 @@ impl AnalyticsPlugin {
             Some(&mut |d: &mut EventData| {
                 d.content = Some(Payload::LlmRequest(Box::new(req.clone())));
                 d.attributes = llm_request_attributes(req);
+                if let Some(prompt) = &prompt {
+                    d.attributes.insert("prompt".to_owned(), prompt.clone());
+                }
             }),
         );
     }
@@ -493,6 +497,7 @@ impl AnalyticsPlugin {
                 return;
             }
             let key = llm_key(&id);
+            let prompt = prompt_attribute(ctx);
             match err {
                 Some(err) => tm.record_error(ctx, &id, &key, trace_error_of_model(err)),
                 None => tm.clear_error(ctx, &id, &key),
@@ -511,6 +516,9 @@ impl AnalyticsPlugin {
                         d.content = Some(Payload::LlmResponse(Box::new(res.clone())));
                     }
                     d.attributes = llm_response_attributes(res);
+                    if let Some(prompt) = &prompt {
+                        d.attributes.insert("prompt".to_owned(), prompt.clone());
+                    }
                     d.custom_metadata =
                         (!res.custom_metadata.is_empty()).then(|| res.custom_metadata.clone());
                     d.err_msg = if err_text.is_empty() {
@@ -1098,5 +1106,75 @@ mod tests {
         assert!(is_canceled(&e));
         let e = trace_error_of_model(&ModelError::Other(Box::new(AgentError::Cancelled)));
         assert!(is_canceled(&e));
+    }
+
+    /// R4: `LLM_REQUEST` and `LLM_RESPONSE` rows carry `attributes.prompt` only when the agent
+    /// has a recorded prompt.
+    #[tokio::test]
+    async fn model_rows_carry_the_recorded_prompt() {
+        use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
+            MockCtx, default_config, json_object_column, only_row_of_type, queue_processor,
+            take_rows,
+        };
+
+        let config = default_config();
+        let processor = queue_processor(&config).await;
+        let plugin = AnalyticsPlugin {
+            config,
+            processor: Some(Arc::clone(&processor)),
+            traces: Some(Arc::new(TraceManager::new())),
+            ..AnalyticsPlugin::default()
+        };
+        let adk = MockCtx::new().context();
+        let ctx = CallbackCtx::from_context(&adk);
+        let req = LlmRequest {
+            model: "gemini-test".into(),
+            ..LlmRequest::default()
+        };
+        let res = LlmResponse {
+            content: Some(Content::from_text("hello", "model")),
+            ..LlmResponse::default()
+        };
+        let model_call = |p: &AnalyticsPlugin| {
+            p.before_model(&ctx, &req);
+            p.after_model(&ctx, &res, None);
+        };
+        let prompts = |rows: &[crate::row::Row]| -> Vec<Option<Value>> {
+            [EVENT_LLM_REQUEST, EVENT_LLM_RESPONSE]
+                .iter()
+                .map(|event| {
+                    json_object_column(&only_row_of_type(rows, event), "attributes")
+                        .get("prompt")
+                        .cloned()
+                })
+                .collect()
+        };
+
+        plugin.on_user_message(&ctx, &Content::from_text("hi", "user"));
+        plugin.before_run(&ctx);
+        plugin.before_agent(&ctx);
+        model_call(&plugin);
+        let rows = take_rows(Some(&processor));
+        assert_eq!(
+            prompts(&rows),
+            vec![None, None],
+            "no record: rows unchanged"
+        );
+
+        adk.record_prompt(gadk_agent::PromptUse::new("triage", 3).with_label("production"));
+        model_call(&plugin);
+        let want = json!({"name": "triage", "version": 3, "label": "production"});
+        assert_eq!(
+            prompts(&take_rows(Some(&processor))),
+            vec![Some(want.clone()), Some(want)]
+        );
+
+        adk.record_prompt(gadk_agent::PromptUse::new("triage", 4));
+        model_call(&plugin);
+        let want = json!({"name": "triage", "version": 4});
+        assert_eq!(
+            prompts(&take_rows(Some(&processor))),
+            vec![Some(want.clone()), Some(want)]
+        );
     }
 }
