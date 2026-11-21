@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-21
+
 ### Added
 
 - `gadk-agentanalytics`: `EVENT_FEEDBACK` and `BigQueryAgentAnalyticsPlugin::record_score`
@@ -585,7 +587,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.4.11...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sirhco/gadk-rust/compare/v0.4.11...v0.5.0
 [0.4.11]: https://github.com/sirhco/gadk-rust/compare/v0.4.10...v0.4.11
 [0.4.10]: https://github.com/sirhco/gadk-rust/compare/v0.4.9...v0.4.10
 [0.4.9]: https://github.com/sirhco/gadk-rust/compare/v0.4.8...v0.4.9
