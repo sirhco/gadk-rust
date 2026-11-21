@@ -26,9 +26,9 @@ use super::AppState;
 use super::guard::check_csrf;
 use super::pages::error::{error_page, source_error};
 use super::pages::layout::{Nav, html};
-use super::pages::trace::{LogView, NEEDS_BIGQUERY_SCORES, ScoresView};
+use super::pages::trace::{Annotations, DatasetView, LogView, NEEDS_BIGQUERY_SCORES, ScoresView};
 use super::pages::{trace, traces};
-use crate::datasets::{AddError, NEEDS_DATASETS};
+use crate::datasets::{AddError, NEEDS_DATASETS, is_dataset_name};
 use crate::model::{attach_logs, build_tree, trace_end};
 use crate::scores::{BQ_EDITOR_HINT, NewScore};
 use crate::traces::{RawSpan, SourceError, TimeRange, TraceId, TraceQuery};
@@ -84,7 +84,27 @@ async fn list(State(state): State<AppState>, Query(params): Query<ListParams>) -
     }
 }
 
-async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+/// The notice after an add to a dataset, from the `/traces/{id}` query: exactly one `added`
+/// that is a count and one `dataset` that is a valid name; anything else shows no notice (and
+/// never fails the page).
+fn added_notice(params: &[(String, String)]) -> Option<(usize, String)> {
+    let one = |key: &str| {
+        let mut values = params.iter().filter(|(k, _)| k == key).map(|(_, v)| v);
+        match (values.next(), values.next()) {
+            (Some(v), None) => Some(v.clone()),
+            _ => None,
+        }
+    };
+    let added = one("added")?.parse::<usize>().ok()?;
+    let dataset = one("dataset").filter(|d| is_dataset_name(d))?;
+    Some((added, dataset))
+}
+
+async fn detail(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<Vec<(String, String)>>,
+) -> Response {
     // A malformed id never reaches the source.
     let Some(id) = TraceId::parse(&id) else {
         return source_error(&SourceError::NotFound);
@@ -96,7 +116,13 @@ async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Respon
     let rows = build_tree(&detail.spans);
     let still_arriving =
         trace_end(&detail.spans).is_some_and(|end| (state.now)() - end < STILL_ARRIVING);
-    let scores = trace_scores(&state, &id, &detail.spans).await;
+    let annotations = Annotations {
+        scores: trace_scores(&state, &id, &detail.spans).await,
+        dataset: DatasetView {
+            names: state.datasets.as_ref().map(|d| d.names()),
+            added: added_notice(&params),
+        },
+    };
     let logs = detail.logs.map(|set| LogView {
         shown: set.entries.len(),
         attached: attach_logs(&detail.spans, set.entries),
@@ -110,7 +136,7 @@ async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Respon
             &logs,
             still_arriving,
             state.prices.as_deref(),
-            &scores,
+            &annotations,
             &state.csrf,
         ),
     )
@@ -1622,5 +1648,64 @@ mod tests {
             "{page}"
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), flow);
+    }
+
+    #[tokio::test]
+    async fn the_dataset_form_offers_the_existing_datasets() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "b.yaml",
+            "a.yaml",
+            "notes.txt",
+            "bad name.yaml",
+            ".a.yaml.1.2.tmp",
+        ] {
+            std::fs::write(dir.path().join(name), "x").unwrap();
+        }
+        let fake = Arc::new(FakeExport::default());
+        let (status, _, page) =
+            get(with_datasets(dir.path(), &fake), &format!("/traces/{ID}")).await;
+        assert_eq!(status, StatusCode::OK);
+        let form = format!(
+            r#"<h2>Add to dataset</h2><form method="post" action="/traces/{ID}/dataset" data-confirm="Add this trace's runs to the dataset?" class="inline"><input type="hidden" name="csrf" value="{CSRF}"><input type="text" name="dataset" list="datasets" placeholder="dataset" required maxlength="64"><datalist id="datasets"><option value="a"></option><option value="b"></option></datalist> <input type="text" name="rubric" placeholder="judge rubric (optional)" maxlength="2000"> <button type="submit">Add to dataset</button></form>"#
+        );
+        assert!(page.contains(&form), "{page}");
+        let scores = page.find("<h2>Scores</h2>").unwrap();
+        let add = page.find("<h2>Add to dataset</h2>").unwrap();
+        assert!(scores < add, "the form is below the scores");
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 0, "a GET reads no runs");
+
+        let (_, page) = trace_page(detail(600, logs(vec![], false))).await;
+        assert!(
+            !page.contains("Add to dataset"),
+            "no form without --datasets: {page}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_page_names_the_cases_just_added() {
+        let (_, st) = with_get(Ok(detail(600, logs(vec![], false))));
+        let (status, _, page) = get(st, &format!("/traces/{ID}?added=2&dataset=regressions")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            page.contains(
+                r#"<div class="banner info"><p>Added 2 case(s) to regressions.yaml</p></div>"#
+            ),
+            "{page}"
+        );
+        for query in [
+            "added=2&dataset=%3Cscript%3E",
+            "added=x&dataset=a",
+            "dataset=a",
+            "added=1",
+            "added=1&added=2&dataset=a",
+            "added=1&dataset=a&dataset=b",
+        ] {
+            let (_, st) = with_get(Ok(detail(600, logs(vec![], false))));
+            let (status, _, page) = get(st, &format!("/traces/{ID}?{query}")).await;
+            assert_eq!(status, StatusCode::OK, "{query}");
+            assert!(!page.contains("case(s) to"), "{query}: {page}");
+            assert!(!page.contains("<script>"), "{query}");
+        }
     }
 }

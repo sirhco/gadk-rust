@@ -67,6 +67,21 @@ impl Datasets {
         }
     }
 
+    /// The names of the eval sets in the directory (the stems of its `*.yaml` files that are
+    /// valid dataset names), sorted; none when it cannot be read.
+    pub(crate) fn names(&self) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter_map(|n| n.strip_suffix(".yaml").map(str::to_owned))
+            .filter(|n| is_dataset_name(n))
+            .collect();
+        names.sort();
+        names
+    }
+
     /// Adds the runs of trace `trace` as cases to `<dir>/<dataset>.yaml` and returns how many
     /// were added. The file is created (set name `dataset`, default rubric `rubric`) when
     /// absent, else appended to; judge cases use `rubric`, else the file's `judge_rubric`.
