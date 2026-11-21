@@ -26,6 +26,7 @@ The console prints its URL and serves until you stop it (Ctrl-C).
 | `--port <n>` | `8765` | Port on 127.0.0.1; `0` picks a free one (the printed URL shows it) |
 | `--log-id <id>` | `gadk` | Cloud Logging log id the agents write (`with_cloud_log_name` in `gadk-telemetry`) |
 | `--prices <file>` | none | Price file (YAML, USD per 1,000,000 tokens per model). Without it, cost cells show `—`; token counts still show. See [Usage and cost](#usage-and-cost). |
+| `--author <name>` | `$USER`, else `$USERNAME`, else `console` | Author of the scores you add on `/traces/{id}` (BigQuery source). See [Scores](#scores). |
 
 Exit codes: 2 for a usage error (clap's message), 1 when startup fails (a bad store URL, a bad
 report store URL, a bad price file, missing credentials for a `gs://` report store, or a port
@@ -58,9 +59,9 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | Page | Shows |
 |---|---|
 | `/traces` | Traces, newest first, 50 per page. Filters: time range (`1h`, `6h`, `24h`, `7d`), root span name prefix, agent (`gen_ai.agent.name`), session (`gen_ai.conversation.id`). |
-| `/traces/{id}` | The span waterfall (tree order, indented by depth). Selecting a span shows its labels and the log entries whose `spanId` matches it; entries matching no span are listed as "unattached". A `render_prompt …` span with `prompt.name` and `prompt.version` links to that prompt version. A trace that ended less than 2 minutes ago notes that logs may still be arriving. Model calls (spans whose `gen_ai.operation.name` is `generate_content`) are listed with their tokens and cost, plus totals. |
+| `/traces/{id}` | The span waterfall (tree order, indented by depth). Selecting a span shows its labels and the log entries whose `spanId` matches it; entries matching no span are listed as "unattached". A `render_prompt …` span with `prompt.name` and `prompt.version` links to that prompt version. A trace that ended less than 2 minutes ago notes that logs may still be arriving. Model calls (spans whose `gen_ai.operation.name` is `generate_content`) are listed with their tokens and cost, plus totals. With the BigQuery source a Scores section lists the trace's scores and a form adds one ([Scores](#scores)). |
 | `/prompts` | Every prompt in the store: latest version, labels and when the latest version was created. |
-| `/prompts/{name}` | All versions (newest first) with their labels; `?v=<n>` shows a version's template and config, `?a=<n>&b=<m>` diffs two versions. Forms set, move and remove labels, conditional on the label not having changed since the page was rendered (a stale page gets 409). "Production metrics" (BigQuery source, `?range=`, default `7d`): calls, mean tokens and cost, p50/p95 latency and, with `--reports`, eval pass rate per version. |
+| `/prompts/{name}` | All versions (newest first) with their labels; `?v=<n>` shows a version's template and config, `?a=<n>&b=<m>` diffs two versions. Forms set, move and remove labels, conditional on the label not having changed since the page was rendered (a stale page gets 409). "Production metrics" (BigQuery source, `?range=`, default `7d`): calls, mean tokens and cost, p50/p95 latency and, with `--reports`, eval pass rate per version, then a Feedback table of the scores per version. |
 | `/evals` | The newest 100 monitor reports: a card per monitor (latest pass rate, errors, and a pass-rate trend over its listed reports), then a table of reports. `?spec=<name>` shows only that monitor's newest 100. Reports are read once and kept in memory (up to 256), so the first load of a `gs://` store can take a while. |
 | `/evals/{report}` | One report: window, source, runs, pass rate and errors, then one row per run with a chip per scorer. Expanding a run shows each score's outcome, judge score and rationale, the run error, notes on incomplete transcripts, and the transcript with tool calls; runs that recorded a trace id link to `/traces/{id}`. |
 | `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`): totals, then LLM calls, tokens and cost by model, by agent and by prompt version, and the 20 traces with the most tokens. |
@@ -165,6 +166,34 @@ leaves out calls to models without a price.
   newest first; the page notes when capped), and maps each invocation to the prompt versions its
   `LLM_REQUEST` rows recorded (rows from one day before to one hour after the range). A run that
   used several versions counts for each.
+
+## Scores
+
+Scores are the `FEEDBACK` rows of the agent-analytics table: end-user feedback that apps record
+with `gadk-agentanalytics` (`record_score`, source `app`) and annotations added here (source
+`console`). They need `--traces bigquery://…`; with the Cloud Trace source the Scores section
+shows a note and no form.
+
+- `/traces/{id}` lists the trace's scores, newest first, at most 200: rows whose `trace_id` is
+  the trace or whose `invocation_id` is one of its spans' invocations, written from a day before
+  the trace started until now. The trace list and the trace itself leave `FEEDBACK` rows out.
+- The form under the list adds a score: a name, a value (thumbs up or down, a number or a
+  category) and an optional comment. The page asks for confirmation; the console checks its
+  token, looks up the trace's first row with an invocation id and inserts one row for that
+  invocation with a parameterized `INSERT`. The lookup reads only the last 30 days, so a trace
+  older than that cannot be scored (404). The author is `--author`, else `$USER`, else
+  `$USERNAME`, else `console`.
+- Adding scores needs `roles/bigquery.dataEditor` on the table (and `roles/bigquery.jobUser` in
+  `--project`). BigQuery bills every DML statement at least 10 MB, so the insert runs with a
+  byte cap of at least 10,485,760 bytes even when `--bigquery-max-bytes` is lower (about
+  $0.00006 per score at on-demand prices).
+- Scores are append-only: there is no editing or deleting. Summaries use the latest score per
+  invocation, name and source.
+- `/prompts/{name}` adds a Feedback table under the production metrics: per version, score
+  name, source and type, the count and the share of thumbs up (`bool`), the mean (`number`) or
+  the most common value (`category`; a tie goes to the lowest value). Scores count from the
+  start of the range with no end, since they arrive after the calls, and map to versions
+  through their invocations' `LLM_REQUEST` rows like the eval pass rate.
 
 ## Limits
 
