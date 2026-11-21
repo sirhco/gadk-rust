@@ -36,6 +36,9 @@ pub(crate) const PORT: u16 = 8765;
 /// The CSRF token every test state carries (64 × 'a').
 pub(crate) const CSRF: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+/// The score author every test state carries.
+pub(crate) const AUTHOR: &str = "tester";
+
 /// 2026-11-16T12:00:00Z.
 pub(crate) fn fixed_now() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 11, 16, 12, 0, 0).unwrap()
@@ -92,6 +95,7 @@ pub(crate) fn state_with_reports(
         now: fixed_now,
         prices: None,
         usage: None,
+        author: AUTHOR.to_owned(),
     }
 }
 

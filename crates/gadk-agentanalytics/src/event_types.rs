@@ -77,6 +77,9 @@ pub const EVENT_AGENT_RESPONSE: &str = "AGENT_RESPONSE";
 pub const EVENT_NODE_OUTPUT: &str = "NODE_OUTPUT";
 /// A workflow node error.
 pub const EVENT_NODE_ERROR: &str = "NODE_ERROR";
+/// A score of an invocation: end-user feedback an app records with the plugin's `record_score`,
+/// or an annotation added in `gadk-console` (no view).
+pub const EVENT_FEEDBACK: &str = "FEEDBACK";
 
 /// The items as a set.
 #[cfg(test)]
@@ -127,13 +130,14 @@ mod tests {
             (EVENT_AGENT_RESPONSE, "AGENT_RESPONSE"),
             (EVENT_NODE_OUTPUT, "NODE_OUTPUT"),
             (EVENT_NODE_ERROR, "NODE_ERROR"),
+            (EVENT_FEEDBACK, "FEEDBACK"),
         ];
-        assert_eq!(all.len(), 28);
+        assert_eq!(all.len(), 29);
         for (got, want) in all {
             assert_eq!(got, want);
         }
         let distinct = new_set(&all.map(|(name, _)| name));
-        assert_eq!(distinct.len(), 28);
+        assert_eq!(distinct.len(), 29);
     }
 
     #[test]

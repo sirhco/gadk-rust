@@ -7,6 +7,20 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-agentanalytics`: `EVENT_FEEDBACK` and `BigQueryAgentAnalyticsPlugin::record_score`
+  (`Score`, `ScoreValue`, `ScoreTarget`, `ScoreError`) record end-user scores of an invocation
+  as `FEEDBACK` rows (`content` `{"name", "value", "data_type", "comment"}`, `attributes.source`
+  `app` and `attributes.author`); the event filters apply to them.
+- `gadk-console`: `/traces/{id}` lists a trace's scores and adds new ones (`POST
+  /traces/{id}/scores`, one parameterized `INSERT`, needs `roles/bigquery.dataEditor`);
+  `--author` (`Cli::with_author`) names their author; `/prompts/{name}` adds a Feedback table
+  per version. The trace list and trace detail leave `FEEDBACK` rows out. Scores need
+  `--traces bigquery://…`.
+- `gadk`: the `feedback_e2e` example runs a prompt version, analytics rows and scores end to
+  end.
+
 ## [0.4.11] - 2026-11-20
 
 ### Added

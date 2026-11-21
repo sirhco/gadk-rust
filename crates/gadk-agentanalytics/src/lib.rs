@@ -70,6 +70,7 @@ pub mod plugin;
 pub mod row;
 pub mod schema;
 pub mod schema_upgrade;
+pub mod score;
 pub mod storagepb;
 pub mod views;
 pub mod write;
@@ -115,5 +116,6 @@ pub use schema_upgrade::{
     TableMetadata, TableMetadataOps, TableMetadataUpdate, ensure_table_and_schema,
     maybe_upgrade_schema,
 };
+pub use score::{Score, ScoreError, ScoreTarget, ScoreValue};
 pub use views::{BigQueryViewRunner, ViewDefinition, ViewRunner, sync_analytics_views};
 pub use write::gapic::WriteClient;

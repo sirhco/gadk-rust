@@ -102,6 +102,11 @@ fn full_cli() -> Command {
                 .value_parser(value_parser!(PathBuf))
                 .help("Price file (YAML): USD per 1,000,000 tokens per model; enables cost columns"),
         )
+        .arg(
+            Arg::new("author")
+                .long("author")
+                .help("Author of the scores added on /traces/{id} (default: $USER, else $USERNAME, else console)"),
+        )
 }
 
 /// Parses the full command line: [`ConsoleConfig`] plus the trace source.
@@ -126,6 +131,9 @@ where
     }
     if let Some(path) = m.get_one::<PathBuf>("prices") {
         cli = cli.with_prices(path.clone());
+    }
+    if let Some(author) = m.get_one::<String>("author") {
+        cli = cli.with_author(author.clone());
     }
     Ok(cli)
 }
@@ -275,6 +283,7 @@ mod tests {
             ["--traces", "bigquery://sirhco-apps.ds.tbl"],
             ["--bigquery-max-bytes", "5"],
             ["--prices", "prices.yaml"],
+            ["--author", "chris"],
         ] {
             let err = parse_args(["gadk-console", "--project", "p", flag[0], flag[1]]).unwrap_err();
             assert_eq!(err.kind(), ErrorKind::UnknownArgument, "{flag:?}");
@@ -288,7 +297,8 @@ mod tests {
         assert!(
             help.contains("--traces")
                 && help.contains("--bigquery-max-bytes")
-                && help.contains("--prices"),
+                && help.contains("--prices")
+                && help.contains("--author"),
             "{help}"
         );
     }
@@ -305,6 +315,22 @@ mod tests {
             parse_cli(["gadk-console", "--project", "p"])
                 .unwrap()
                 .prices,
+            None
+        );
+    }
+
+    #[test]
+    fn parse_cli_reads_the_author() {
+        let cli = parse_cli(["gadk-console", "--project", "p", "--author", "chris"]).unwrap();
+        assert_eq!(
+            cli,
+            Cli::new(parse_args(["gadk-console", "--project", "p"]).unwrap()).with_author("chris")
+        );
+        assert_eq!(cli.author.as_deref(), Some("chris"));
+        assert_eq!(
+            parse_cli(["gadk-console", "--project", "p"])
+                .unwrap()
+                .author,
             None
         );
     }

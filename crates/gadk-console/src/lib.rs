@@ -31,6 +31,7 @@ mod evals;
 mod model;
 mod prices;
 mod prompts;
+mod scores;
 pub mod traces;
 mod url;
 mod usage;
@@ -68,6 +69,9 @@ pub struct Cli {
     pub traces: Option<TracesFrom>,
     /// The price file (`--prices`); `None` shows no costs.
     pub prices: Option<PathBuf>,
+    /// The author of scores added in the console (`--author`); `None` uses `USER`, else
+    /// `USERNAME`, else `console`.
+    pub author: Option<String>,
 }
 
 impl Cli {
@@ -77,6 +81,7 @@ impl Cli {
             config,
             traces: None,
             prices: None,
+            author: None,
         }
     }
 
@@ -89,6 +94,12 @@ impl Cli {
     /// Prices token counts with the price file at `path` (see [`PriceTable`]).
     pub fn with_prices(mut self, path: PathBuf) -> Self {
         self.prices = Some(path);
+        self
+    }
+
+    /// Writes `author` as the author of the scores added on `/traces/{id}`.
+    pub fn with_author(mut self, author: impl Into<String>) -> Self {
+        self.author = Some(author.into());
         self
     }
 }
@@ -197,6 +208,34 @@ pub(crate) struct Extras {
     pub(crate) prices: Option<Arc<PriceTable>>,
     /// The usage queries (BigQuery trace source only).
     pub(crate) usage: Option<Arc<UsageSource>>,
+    /// The author of console scores; `None` is [`default_author`] over the environment.
+    pub(crate) author: Option<String>,
+}
+
+/// The author of console scores without `--author`: the first non-empty of the `USER` and
+/// `USERNAME` variables (read with `lookup`), else `console`.
+pub(crate) fn default_author(lookup: impl Fn(&str) -> Option<String>) -> String {
+    ["USER", "USERNAME"]
+        .into_iter()
+        .filter_map(lookup)
+        .find(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "console".to_owned())
+}
+
+/// The author of console scores: `given` (`--author`) unless it is absent or empty after
+/// trimming, else [`default_author`] over `lookup`.
+pub(crate) fn resolve_author(
+    given: Option<String>,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> String {
+    given
+        .filter(|a| !a.trim().is_empty())
+        .unwrap_or_else(|| default_author(lookup))
+}
+
+/// Reads an environment variable (`None` when unset or not Unicode).
+fn env_var(key: &str) -> Option<String> {
+    std::env::var(key).ok()
 }
 
 /// [`bind_with_source`] plus `extras`.
@@ -238,6 +277,7 @@ pub(crate) async fn bind_full(
         now: chrono::Utc::now,
         prices: extras.prices,
         usage: extras.usage,
+        author: resolve_author(extras.author, env_var),
     };
     Ok(Bound {
         listener,
@@ -255,8 +295,10 @@ pub async fn run(
 }
 
 /// Like [`run`], reading traces from the source `cli.traces` names and prices from
-/// `cli.prices` (read before anything is bound).
+/// `cli.prices` (read before anything is bound); console scores are written by `cli.author`,
+/// else `USER`, else `USERNAME`, else `console`.
 pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<(), ConsoleError> {
+    let author = resolve_author(cli.author, env_var);
     let prices = cli
         .prices
         .as_deref()
@@ -287,7 +329,16 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
             ))),
         ),
     };
-    let bound = bind_full(cli.config, source, Extras { prices, usage }).await?;
+    let bound = bind_full(
+        cli.config,
+        source,
+        Extras {
+            prices,
+            usage,
+            author: Some(author),
+        },
+    )
+    .await?;
     writeln!(out, "http://127.0.0.1:{}/", bound.local_addr().port())
         .and_then(|()| out.flush())
         .map_err(|e| ConsoleError::Serve(format!("print the URL: {e}")))?;
@@ -318,6 +369,42 @@ mod tests {
             port: 0,
             log_id: "gadk".into(),
         }
+    }
+
+    #[test]
+    fn default_author_is_user_then_username_then_console() {
+        use super::default_author;
+        let env = |user: Option<&'static str>, username: Option<&'static str>| {
+            move |key: &str| match key {
+                "USER" => user.map(str::to_owned),
+                "USERNAME" => username.map(str::to_owned),
+                _ => None,
+            }
+        };
+        assert_eq!(default_author(env(Some("chris"), Some("other"))), "chris");
+        assert_eq!(default_author(env(None, Some("olson"))), "olson");
+        assert_eq!(default_author(env(Some(""), Some("olson"))), "olson");
+        assert_eq!(default_author(env(Some(" "), Some(""))), "console");
+        assert_eq!(default_author(env(None, None)), "console");
+    }
+
+    #[test]
+    fn a_blank_author_falls_back_like_an_absent_one() {
+        use super::resolve_author;
+        let env = |key: &str| (key == "USER").then(|| "chris".to_owned());
+        assert_eq!(resolve_author(None, env), "chris");
+        assert_eq!(resolve_author(Some(String::new()), env), "chris");
+        assert_eq!(resolve_author(Some(" \t".into()), env), "chris");
+        assert_eq!(resolve_author(Some("olson".into()), env), "olson");
+        assert_eq!(resolve_author(Some(" ".into()), |_: &str| None), "console");
+        assert_eq!(
+            super::Cli::new(cfg(None))
+                .with_author(" ")
+                .author
+                .as_deref(),
+            Some(" "),
+            "with_author stores what it is given"
+        );
     }
 
     #[tokio::test]

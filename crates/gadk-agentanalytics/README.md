@@ -130,6 +130,43 @@ tokens per prompt version:
 
 `gadk-console` shows these per version on `/prompts/{name}` (see its README).
 
+## Scores
+
+An app records end-user feedback on an invocation as a `FEEDBACK` row with
+`BigQueryAgentAnalyticsPlugin::record_score`:
+
+```rust,ignore
+use gadk_agentanalytics::{Score, ScoreTarget, ScoreValue, as_bigquery_agent_analytics_plugin};
+
+let analytics = as_bigquery_agent_analytics_plugin(&plugin).expect("built by this crate");
+// Every event the runner returns carries its invocation id (`Event::invocation_id`).
+let target = ScoreTarget::invocation("my_app", user_id, session_id, invocation_id);
+let score = Score::new("thumbs", ScoreValue::Bool(true))?.with_comment("spot on");
+analytics.record_score(&target, &score, user_id);
+```
+
+- `ScoreValue` is `Bool` (thumbs up or down), `Number` or `Category`. `Score::new` rejects a
+  blank name, a blank category and a NaN or infinite number (`ScoreError`).
+  `ScoreTarget::with_trace_id` adds the trace id when the app knows it.
+- The row has `event_type` `FEEDBACK`, the target's `session_id`, `invocation_id`, `user_id` and
+  (when given) `trace_id`, and no `agent`. `content` is
+  `{"name": "<name>", "value": true | 4.5 | "<category>", "data_type": "bool" | "number" | "category", "comment": "<comment>"}`
+  (`comment` only when set and not blank); `attributes` holds `"source": "app"` and `"author": "<author>"`
+  next to the usual `adk` envelope and the plugin's other attributes.
+- `FEEDBACK` content goes through the same pipeline as every other row: a configured
+  `content_formatter`, sensitive-key redaction and `max_content_len` truncation apply to it too,
+  so a formatter that reshapes content changes what `gadk-console` reads.
+- `record_score` never blocks and never fails. It follows the event filters like every other
+  row: an `event_allowlist` that does not list `FEEDBACK` drops every score, and so does
+  `FEEDBACK` in `event_denylist`. A disabled plugin writes nothing, and a score recorded after
+  the plugin closed counts as a shutdown drop (`drop_stats`), so record scores before closing
+  the runner.
+- Scores are append-only: to change one, record another; readers take the latest per
+  invocation, name and source. There is no `FEEDBACK` view.
+
+`gadk-console` lists scores on `/traces/{id}`, adds annotations of its own there, and summarises
+scores per prompt version on `/prompts/{name}` (see its README).
+
 ## Tests and goldens
 
 - Unit tests per module, plus conformance tests in `src/parity_tests/` for the formatter, schema

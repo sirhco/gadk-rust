@@ -41,6 +41,9 @@ const VERSION_MODEL_CAP: usize = 5_000;
 /// The most invocation × version rows the pass-rate mapping returns.
 const MAPPING_CAP: usize = 20_000;
 
+/// The byte cap floor of a DML statement: BigQuery bills every one at least 10 MiB.
+pub(crate) const DML_MIN_BYTES: i64 = 10_485_760;
+
 /// The calls of one model and their summed tokens.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ModelCalls {
@@ -168,8 +171,13 @@ impl UsageSource {
         }
     }
 
+    /// The table as a backquoted SQL path.
+    pub(crate) fn table_path(&self) -> Result<String, SourceError> {
+        self.table.sql_path()
+    }
+
     /// Runs `sql` with `params`, the byte cap and at most `max_rows` rows.
-    async fn run(
+    pub(crate) async fn run(
         &self,
         sql: &str,
         params: Vec<Value>,
@@ -182,6 +190,19 @@ impl UsageSource {
         self.client
             .query(&self.compute_project, sql, &opts)
             .await
+            .map_err(from_bigquery)
+    }
+
+    /// Runs the DML statement `sql` with `params` under the byte cap, raised to
+    /// [`DML_MIN_BYTES`] (BigQuery bills every DML statement at least 10 MiB).
+    pub(crate) async fn run_dml(&self, sql: &str, params: Vec<Value>) -> Result<(), SourceError> {
+        let opts = QueryOptions::new()
+            .with_maximum_bytes_billed(self.max_bytes_billed.max(DML_MIN_BYTES))
+            .with_query_parameters(params);
+        self.client
+            .query(&self.compute_project, sql, &opts)
+            .await
+            .map(|_| ())
             .map_err(from_bigquery)
     }
 
@@ -245,7 +266,7 @@ impl UsageSource {
 
     /// Runs `sql` with `params` plus `@limit` = `cap + 1`: the first `cap` rows and whether more
     /// existed.
-    async fn run_capped(
+    pub(crate) async fn run_capped(
         &self,
         sql: &str,
         mut params: Vec<Value>,
@@ -336,7 +357,7 @@ impl UsageSource {
 }
 
 /// The `@start` and `@end` TIMESTAMP parameters.
-fn window_params(start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<Value> {
+pub(crate) fn window_params(start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<Value> {
     vec![
         param("start", "TIMESTAMP", Some(ts_param(start))),
         param("end", "TIMESTAMP", Some(ts_param(end))),
@@ -344,7 +365,7 @@ fn window_params(start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<Value> {
 }
 
 /// An INT64 cell as a count; 0 when NULL or not a non-negative integer.
-fn count(row: &Map<String, Value>, key: &str) -> u64 {
+pub(crate) fn count(row: &Map<String, Value>, key: &str) -> u64 {
     row.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
@@ -363,14 +384,14 @@ fn model_calls(row: &Map<String, Value>) -> ModelCalls {
 }
 
 /// The `version` cell as a prompt version.
-fn version_of(row: &Map<String, Value>) -> Option<u32> {
+pub(crate) fn version_of(row: &Map<String, Value>) -> Option<u32> {
     row.get("version")
         .and_then(Value::as_u64)
         .and_then(|v| u32::try_from(v).ok())
 }
 
 /// An `ARRAY<STRING>` query parameter.
-fn string_array_param(name: &str, values: &[String]) -> Value {
+pub(crate) fn string_array_param(name: &str, values: &[String]) -> Value {
     let values: Vec<Value> = values.iter().map(|v| json!({ "value": v })).collect();
     json!({
         "name": name,

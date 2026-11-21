@@ -14,21 +14,23 @@
 
 //! Trace routes: `/traces` and `/traces/{id}`.
 
-use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::response::Response;
-use axum::routing::get;
+use axum::response::{IntoResponse, Redirect, Response};
+use axum::routing::{get, post};
+use axum::{Form, Router};
 use chrono::TimeDelta;
 use http::StatusCode;
 use serde::Deserialize;
 
 use super::AppState;
-use super::pages::error::source_error;
-use super::pages::layout::html;
-use super::pages::trace::LogView;
+use super::guard::check_csrf;
+use super::pages::error::{error_page, source_error};
+use super::pages::layout::{Nav, html};
+use super::pages::trace::{LogView, NEEDS_BIGQUERY_SCORES, ScoresView};
 use super::pages::{trace, traces};
 use crate::model::{attach_logs, build_tree, trace_end};
-use crate::traces::{SourceError, TimeRange, TraceId, TraceQuery};
+use crate::scores::{BQ_EDITOR_HINT, NewScore};
+use crate::traces::{RawSpan, SourceError, TimeRange, TraceId, TraceQuery};
 
 /// How long after a trace's last span ends its log entries may still be arriving.
 const STILL_ARRIVING: TimeDelta = TimeDelta::seconds(120);
@@ -37,6 +39,7 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/traces", get(list))
         .route("/traces/{id}", get(detail))
+        .route("/traces/{id}/scores", post(add_score))
 }
 
 /// `/traces` query parameters, as sent by the filter form and the next-page link.
@@ -91,6 +94,7 @@ async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Respon
     let rows = build_tree(&detail.spans);
     let still_arriving =
         trace_end(&detail.spans).is_some_and(|end| (state.now)() - end < STILL_ARRIVING);
+    let scores = trace_scores(&state, &id, &detail.spans).await;
     let logs = detail.logs.map(|set| LogView {
         shown: set.entries.len(),
         attached: attach_logs(&detail.spans, set.entries),
@@ -98,8 +102,104 @@ async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Respon
     });
     html(
         StatusCode::OK,
-        trace::render(&id, &rows, &logs, still_arriving, state.prices.as_deref()),
+        trace::render(
+            &id,
+            &rows,
+            &logs,
+            still_arriving,
+            state.prices.as_deref(),
+            &scores,
+            &state.csrf,
+        ),
     )
+}
+
+/// The Scores section of trace `id`: with the BigQuery source, the scores of the trace and of
+/// the invocations its spans name (`invocation_id` labels) since a day before its first span.
+async fn trace_scores(state: &AppState, id: &TraceId, spans: &[RawSpan]) -> ScoresView {
+    let Some(usage) = &state.usage else {
+        return ScoresView::NeedsBigQuery;
+    };
+    let mut ids: Vec<String> = spans
+        .iter()
+        .filter_map(|s| s.labels.get("invocation_id").cloned())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    let start = spans
+        .iter()
+        .map(|s| s.start)
+        .min()
+        .unwrap_or_else(state.now);
+    match usage.trace_scores(id.as_str(), &ids, start).await {
+        Ok(scores) => ScoresView::Loaded(scores),
+        Err(e) => ScoresView::Failed(e.to_string(), e.hint()),
+    }
+}
+
+/// The add-score form; missing fields are empty strings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct ScoreForm {
+    name: String,
+    kind: String,
+    value: String,
+    comment: String,
+    csrf: String,
+}
+
+/// `POST /traces/{id}/scores`: checks the token, validates the score (400), reads the trace's
+/// identity (404 when it has none in the last 30 days), inserts a `FEEDBACK` row and redirects
+/// to the trace (303). Without the BigQuery source it is a 404 page.
+async fn add_score(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Form(form): Form<ScoreForm>,
+) -> Response {
+    if let Err(resp) = check_csrf(&state, &form.csrf) {
+        return resp;
+    }
+    let Some(id) = TraceId::parse(&id) else {
+        return source_error(&SourceError::NotFound);
+    };
+    let Some(usage) = &state.usage else {
+        return error_page(
+            StatusCode::NOT_FOUND,
+            Nav::Traces,
+            NEEDS_BIGQUERY_SCORES,
+            None,
+        );
+    };
+    let score = match NewScore::from_form(&form.name, &form.kind, &form.value, &form.comment) {
+        Ok(score) => score,
+        Err(text) => return error_page(StatusCode::BAD_REQUEST, Nav::Traces, &text, None),
+    };
+    let root = match usage.trace_root(id.as_str()).await {
+        Ok(Some(root)) => root,
+        Ok(None) => return source_error(&SourceError::NotFound),
+        Err(e) => return source_error(&e),
+    };
+    match usage
+        .insert_score(id.as_str(), &root, &score, &state.author)
+        .await
+    {
+        Ok(()) => Redirect::to(&format!("/traces/{}", id.as_str())).into_response(),
+        Err(e) => insert_failed(&e),
+    }
+}
+
+/// A failed score insert: 502 with the error; a permission failure hints at
+/// `roles/bigquery.dataEditor`.
+fn insert_failed(e: &SourceError) -> Response {
+    let hint = match e {
+        SourceError::BigQuery {
+            status: Some(403),
+            reason,
+            ..
+        } if matches!(reason.as_deref(), None | Some("accessDenied")) => Some(BQ_EDITOR_HINT),
+        _ => e.hint(),
+    };
+    error_page(StatusCode::BAD_GATEWAY, Nav::Traces, &e.to_string(), hint)
 }
 
 #[cfg(test)]
@@ -113,12 +213,18 @@ mod tests {
     use serde_json::{Value, json};
 
     use crate::prices::PriceTable;
+    use crate::traces::BigQueryTable;
+    use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::traces::{
         LogEntry, LogSet, RawSpan, Service, SourceError, TimeRange, TraceDetail, TraceId,
         TracePage, TraceQuery, TraceSource, TraceSummary,
     };
+    use crate::usage::UsageSource;
     use crate::web::AppState;
+    use crate::web::testutil::{AUTHOR, CSRF, post_form};
     use crate::web::testutil::{FakeSource, fixed_now, get, state};
+    use gadk_bigquery::{BigQueryClient, NoAuth};
+    use http::header::LOCATION;
 
     const ID: &str = "0123456789abcdef0123456789abcdef";
     const JSON_OPEN: &str = r#"<script type="application/json" id="trace-data">"#;
@@ -820,5 +926,375 @@ mod tests {
         let (status, body) = trace_page(detail(600, logs(vec![], false))).await;
         assert_eq!(status, StatusCode::OK);
         assert!(!body.contains("<h2>LLM calls</h2>"), "{body}");
+    }
+
+    // ---- scores ----
+
+    const SCORE_FIELDS: [(&str, &str); 7] = [
+        ("timestamp", "TIMESTAMP"),
+        ("source", "STRING"),
+        ("author", "STRING"),
+        ("name", "STRING"),
+        ("data_type", "STRING"),
+        ("value", "STRING"),
+        ("comment", "STRING"),
+    ];
+
+    /// `with_get(Ok(d))` plus the BigQuery usage source over `fake`.
+    fn bq_get(d: TraceDetail, fake: &Arc<FakeHttp>) -> AppState {
+        let (_, mut st) = with_get(Ok(d));
+        st.usage = Some(Arc::new(UsageSource::with_client(
+            BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
+            "billing-proj",
+            BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
+            1_000,
+        )));
+        st
+    }
+
+    /// `detail(600, …)` whose root and LLM spans name invocation `e-1` and whose prompt span
+    /// names `e-2`.
+    fn invocation_detail() -> TraceDetail {
+        let mut d = detail(600, logs(vec![], false));
+        for (span, inv) in d.spans.iter_mut().zip(["e-1", "e-2", "e-1"]) {
+            span.labels.insert("invocation_id".into(), inv.into());
+        }
+        d
+    }
+
+    /// The `Scores` heading through the `Log entries` heading.
+    fn scores_section(page: &str) -> &str {
+        let start = page
+            .find("<h2>Scores</h2>")
+            .unwrap_or_else(|| panic!("no Scores section: {page}"));
+        let len = page[start..]
+            .find("<h2>Log entries</h2>")
+            .expect("log entries");
+        &page[start..start + len]
+    }
+
+    /// A score row of `SCORE_FIELDS` written `secs_ago` seconds before `fixed_now`.
+    fn score_cells(secs_ago: i64, cells: [Value; 6]) -> Vec<Value> {
+        let at = fixed_now() - TimeDelta::seconds(secs_ago);
+        let mut row = vec![json!(at.timestamp_micros().to_string())];
+        row.extend(cells);
+        row
+    }
+
+    #[tokio::test]
+    async fn scores_list_newest_first_with_source_author_and_value() {
+        let fake = FakeHttp::new(vec![reply(
+            &SCORE_FIELDS,
+            vec![
+                score_cells(
+                    120,
+                    [
+                        json!("console"),
+                        json!("chris"),
+                        json!("quality"),
+                        json!("category"),
+                        json!("helpful"),
+                        json!("clear"),
+                    ],
+                ),
+                score_cells(
+                    300,
+                    [
+                        json!("app"),
+                        json!("user-1"),
+                        json!("thumbs"),
+                        json!("bool"),
+                        json!("true"),
+                        Value::Null,
+                    ],
+                ),
+            ],
+            false,
+        )]);
+        let (status, _, page) =
+            get(bq_get(invocation_detail(), &fake), &format!("/traces/{ID}")).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        let scores = scores_section(&page);
+        assert!(
+            scores.contains(r#"<tr><td class="mono">2026-11-16T11:58:00.000Z</td><td>console</td><td>chris</td><td>quality</td><td>helpful</td><td>clear</td></tr><tr><td class="mono">2026-11-16T11:55:00.000Z</td><td>app</td><td>user-1</td><td>thumbs</td><td>thumbs up</td><td></td></tr>"#),
+            "{scores}"
+        );
+        assert_eq!(fake.uris().len(), 1);
+        let body = fake.body(0);
+        assert_eq!(
+            param_value(&body, "trace_id")["parameterValue"]["value"],
+            json!(ID)
+        );
+        assert_eq!(
+            param_value(&body, "ids")["parameterValue"],
+            json!({ "arrayValues": [{ "value": "e-1" }, { "value": "e-2" }] })
+        );
+        assert_eq!(
+            param_value(&body, "start")["parameterValue"]["value"],
+            json!("2026-11-16 11:49:57.000000+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_trace_without_scores_says_so() {
+        let fake = FakeHttp::new(vec![reply(&SCORE_FIELDS, vec![], false)]);
+        let (status, _, page) =
+            get(bq_get(invocation_detail(), &fake), &format!("/traces/{ID}")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            scores_section(&page).contains("No scores for this trace."),
+            "{page}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_score_query_is_a_banner_and_the_trace_still_renders() {
+        let fake = FakeHttp::new(vec![Ok((
+            403,
+            json!({ "error": { "code": 403, "message": "Access Denied", "errors": [{ "reason": "accessDenied" }] } }).to_string(),
+        ))]);
+        let (status, _, page) =
+            get(bq_get(invocation_detail(), &fake), &format!("/traces/{ID}")).await;
+        assert_eq!(status, StatusCode::OK);
+        let scores = scores_section(&page);
+        assert!(
+            scores.contains("Scores could not be loaded: BigQuery: HTTP 403: Access Denied"),
+            "{scores}"
+        );
+        assert!(
+            scores.contains("needs roles/bigquery.dataViewer and roles/bigquery.jobUser"),
+            "{scores}"
+        );
+        assert!(page.contains(r#"<div class="waterfall">"#), "{page}");
+    }
+
+    #[tokio::test]
+    async fn with_the_cloud_trace_source_scores_are_a_note() {
+        let (status, page) = trace_page(detail(600, logs(vec![], false))).await;
+        assert_eq!(status, StatusCode::OK);
+        let scores = scores_section(&page);
+        assert!(
+            scores.contains("Scores need the BigQuery trace source"),
+            "{scores}"
+        );
+    }
+
+    // ---- adding scores ----
+
+    const ORIGIN: &str = "http://127.0.0.1:8765";
+
+    const ROOT_FIELDS: [(&str, &str); 4] = [
+        ("user_id", "STRING"),
+        ("session_id", "STRING"),
+        ("invocation_id", "STRING"),
+        ("app_name", "STRING"),
+    ];
+
+    /// The trace's identity: user `u-1`, session `s-1`, invocation `e-1`, app `shop`.
+    fn root_reply() -> Result<(u16, String), String> {
+        reply(
+            &ROOT_FIELDS,
+            vec![vec![
+                json!("u-1"),
+                json!("s-1"),
+                json!("e-1"),
+                json!("shop"),
+            ]],
+            false,
+        )
+    }
+
+    /// A completed DML reply.
+    fn dml_reply() -> Result<(u16, String), String> {
+        Ok((
+            200,
+            json!({
+                "jobComplete": true,
+                "numDmlAffectedRows": "1",
+                "jobReference": { "projectId": "billing-proj", "jobId": "job_2" }
+            })
+            .to_string(),
+        ))
+    }
+
+    fn denied() -> Result<(u16, String), String> {
+        Ok((
+            403,
+            json!({ "error": { "code": 403, "message": "Access Denied", "errors": [{ "reason": "accessDenied" }] } }).to_string(),
+        ))
+    }
+
+    fn score_path() -> String {
+        format!("/traces/{ID}/scores")
+    }
+
+    #[tokio::test]
+    async fn the_score_form_posts_with_the_token_and_a_confirmation() {
+        let fake = FakeHttp::new(vec![reply(&SCORE_FIELDS, vec![], false)]);
+        let (_, _, page) = get(bq_get(invocation_detail(), &fake), &format!("/traces/{ID}")).await;
+        let scores = scores_section(&page);
+        let open = format!(
+            r#"<form method="post" action="/traces/{ID}/scores" data-confirm="Add this score to the trace?" class="inline"><input type="hidden" name="csrf" value="{CSRF}">"#
+        );
+        assert!(scores.contains(&open), "{scores}");
+        for piece in [
+            r#"<input type="text" name="name" placeholder="score name" required maxlength="100">"#,
+            r#"<select name="kind"><option value="up">thumbs up</option><option value="down">thumbs down</option><option value="number">number</option><option value="category">category</option></select>"#,
+            r#"<input type="text" name="value" placeholder="number or category" maxlength="100">"#,
+            r#"<input type="text" name="comment" placeholder="comment (optional)" maxlength="1000">"#,
+            r#"<button type="submit">Add score</button>"#,
+        ] {
+            assert!(scores.contains(piece), "{piece}: {scores}");
+        }
+        let (_, page) = trace_page(detail(600, logs(vec![], false))).await;
+        assert!(
+            !page.contains("/scores\""),
+            "no form without BigQuery: {page}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_valid_score_reads_the_trace_identity_then_inserts_and_redirects() {
+        let fake = FakeHttp::new(vec![root_reply(), dml_reply()]);
+        let body = format!("name=quality&kind=number&value=3.75&comment=clear&csrf={CSRF}");
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, headers, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        assert_eq!(headers[LOCATION], format!("/traces/{ID}"));
+        assert_eq!(fake.uris().len(), 2);
+
+        let root = fake.body(0);
+        let sql = root["query"].as_str().unwrap();
+        assert!(
+            sql.starts_with("SELECT user_id, session_id, invocation_id,"),
+            "{sql}"
+        );
+        assert_eq!(root["maximumBytesBilled"], json!("1000"));
+        assert_eq!(
+            param_value(&root, "trace_id")["parameterValue"]["value"],
+            json!(ID)
+        );
+
+        let insert = fake.body(1);
+        let sql = insert["query"].as_str().unwrap();
+        assert!(
+            sql.starts_with("INSERT INTO `data-proj.agent_analytics.agent_events`"),
+            "{sql}"
+        );
+        assert_eq!(insert["maximumBytesBilled"], json!("10485760"));
+        for (name, want) in [
+            ("trace_id", ID),
+            ("session_id", "s-1"),
+            ("invocation_id", "e-1"),
+            ("user_id", "u-1"),
+        ] {
+            assert_eq!(
+                param_value(&insert, name)["parameterValue"]["value"],
+                json!(want),
+                "{name}"
+            );
+        }
+        let json_param = |name: &str| -> Value {
+            serde_json::from_str(
+                param_value(&insert, name)["parameterValue"]["value"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            json_param("content"),
+            json!({"name": "quality", "value": 3.75, "data_type": "number", "comment": "clear"})
+        );
+        assert_eq!(
+            json_param("attributes"),
+            json!({"source": "console", "author": AUTHOR, "adk": {"app_name": "shop", "invocation_id": "e-1"}})
+        );
+        for value in ["quality", "clear", AUTHOR, "s-1", "u-1"] {
+            assert!(!sql.contains(value), "{value} is a parameter: {sql}");
+        }
+    }
+
+    #[tokio::test]
+    async fn score_posts_without_the_token_are_403_and_query_nothing() {
+        for csrf in [String::new(), "b".repeat(64)] {
+            let fake = FakeHttp::new(vec![]);
+            let body = format!("name=q&kind=up&csrf={csrf}");
+            let st = bq_get(invocation_detail(), &fake);
+            let (status, _, _) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{csrf:?}");
+            assert!(fake.uris().is_empty());
+        }
+        let fake = FakeHttp::new(vec![]);
+        let body = format!("name=q&kind=up&csrf={CSRF}");
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, _, _) = post_form(st, &score_path(), &body, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "no Origin");
+    }
+
+    #[tokio::test]
+    async fn invalid_scores_are_400_and_query_nothing() {
+        let cases = [
+            ("name=&kind=up", "score name is empty"),
+            (
+                "name=q&kind=maybe",
+                "kind: must be up, down, number or category",
+            ),
+            ("name=q&kind=number&value=abc", "value: not a number"),
+            ("name=q&kind=number&value=inf", "score number is not finite"),
+            ("name=q&kind=category&value=+", "score category is empty"),
+        ];
+        for (form, text) in cases {
+            let fake = FakeHttp::new(vec![]);
+            let body = format!("{form}&csrf={CSRF}");
+            let st = bq_get(invocation_detail(), &fake);
+            let (status, _, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{form}");
+            assert!(page.contains(text), "{form}: {page}");
+            assert!(fake.uris().is_empty(), "{form}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_trace_without_an_identity_is_404_and_inserts_nothing() {
+        let fake = FakeHttp::new(vec![reply(&ROOT_FIELDS, vec![], false)]);
+        let body = format!("name=q&kind=up&csrf={CSRF}");
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, _, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(page.contains("trace not found"), "{page}");
+        assert_eq!(fake.uris().len(), 1, "no insert");
+
+        let fake = FakeHttp::new(vec![]);
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, _, _) = post_form(st, "/traces/not-a-trace/scores", &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(fake.uris().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_refused_insert_is_a_502_with_the_data_editor_hint() {
+        let fake = FakeHttp::new(vec![root_reply(), denied()]);
+        let body = format!("name=q&kind=down&csrf={CSRF}");
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, _, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert!(page.contains("BigQuery: HTTP 403: Access Denied"), "{page}");
+        assert!(
+            page.contains(r#"<p class="hint">needs roles/bigquery.dataEditor on the table and roles/bigquery.jobUser</p>"#),
+            "{page}"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_bigquery_a_score_post_is_404_with_the_note() {
+        let (_, st) = with_get(Ok(detail(600, logs(vec![], false))));
+        let body = format!("name=q&kind=up&csrf={CSRF}");
+        let (status, _, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(
+            page.contains("Scores need the BigQuery trace source"),
+            "{page}"
+        );
     }
 }
