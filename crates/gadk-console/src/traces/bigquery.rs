@@ -434,6 +434,7 @@ fn list_sql(table: &str) -> String {
     AND timestamp < TIMESTAMP_ADD(@end, INTERVAL 1 HOUR)\n\
     AND trace_id IS NOT NULL AND trace_id != ''\n\
     AND REGEXP_CONTAINS(trace_id, r'^[0-9a-fA-F]{{32}}$')\n\
+    AND event_type != 'FEEDBACK'\n\
   GROUP BY trace_id),\n\
 r AS (\n\
   SELECT trace_id, first_ts, last_ts, root.event_type AS event_type, root.agent AS agent,\n\
@@ -458,7 +459,7 @@ fn get_sql(table: &str) -> String {
     format!(
         "SELECT timestamp, event_type, agent, session_id, invocation_id, span_id, parent_span_id,\n\
   content, attributes, latency_ms, status, error_message\n\
-FROM {table} WHERE trace_id = @trace_id\n\
+FROM {table} WHERE trace_id = @trace_id AND event_type != 'FEEDBACK'\n\
 ORDER BY timestamp, event_type LIMIT @limit"
     )
 }
@@ -797,7 +798,8 @@ mod tests {
     use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::traces::{LogEntry, RawSpan, SourceError, TimeRange, TraceQuery, TraceSource};
 
-    /// `list_sql("`p.d.t`")` as the list query was written before the span-family table.
+    /// `list_sql("`p.d.t`")` as the list query was written before the span-family table, plus
+    /// the `FEEDBACK` exclusion (scores are not trace rows).
     const LIST_SQL_BEFORE: &str = r#"WITH t AS (
 SELECT trace_id,
 ARRAY_AGG(STRUCT(timestamp, event_type, agent, session_id,
@@ -813,6 +815,7 @@ WHERE timestamp >= TIMESTAMP_SUB(@start, INTERVAL 1 DAY)
 AND timestamp < TIMESTAMP_ADD(@end, INTERVAL 1 HOUR)
 AND trace_id IS NOT NULL AND trace_id != ''
 AND REGEXP_CONTAINS(trace_id, r'^[0-9a-fA-F]{32}$')
+AND event_type != 'FEEDBACK'
 GROUP BY trace_id),
 r AS (
 SELECT trace_id, first_ts, last_ts, root.event_type AS event_type, root.agent AS agent,
@@ -828,10 +831,23 @@ AND (@name IS NULL OR STARTS_WITH(root_name, @name))
 ORDER BY start DESC, trace_id
 LIMIT @limit OFFSET @offset"#;
 
-    /// The list query is byte-for-byte the one before the span-family table.
+    /// The list query is byte-for-byte the one before the span-family table, plus the
+    /// `FEEDBACK` exclusion.
     #[test]
     fn the_list_sql_is_unchanged() {
         assert_eq!(list_sql("`p.d.t`"), LIST_SQL_BEFORE);
+    }
+
+    /// Opening a trace reads every row of it except the scores.
+    #[test]
+    fn the_get_sql_skips_feedback_rows() {
+        assert_eq!(
+            get_sql("`p.d.t`"),
+            "SELECT timestamp, event_type, agent, session_id, invocation_id, span_id, parent_span_id,\n\
+content, attributes, latency_ms, status, error_message\n\
+FROM `p.d.t` WHERE trace_id = @trace_id AND event_type != 'FEEDBACK'\n\
+ORDER BY timestamp, event_type LIMIT @limit"
+        );
     }
 
     /// The SQL the span-family table generates is the hand-written `ROOT_NAME_SQL` and root-order
