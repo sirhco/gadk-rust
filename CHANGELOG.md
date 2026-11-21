@@ -7,6 +7,25 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-agent`: `PromptUse` and `ReadonlyContext::{record_prompt, clear_recorded_prompt,
+  recorded_prompt}`, a per-invocation record (by agent name) of the prompt version an agent's
+  instruction was rendered from.
+- `gadk-prompts`: `PromptInstruction` records the version it renders (with the selector's label,
+  `latest`, or none for a pinned version) and clears the record on a fallback render. The model
+  request is unchanged.
+- `gadk-agentanalytics`: `LLM_REQUEST` and `LLM_RESPONSE` rows carry `attributes.prompt`
+  (`{"name", "version", "label"}`) when the agent's instruction came from a recorded prompt
+  version.
+- `gadk-console`: `--prices <file>` (`Cli::with_prices`, `PriceTable`, `ModelPrice`,
+  `ConsoleError::Prices`) prices token counts in USD per 1,000,000 tokens; `/traces/{id}` lists
+  each model call's tokens and cost; `/usage` shows calls, tokens and cost by model, agent and
+  prompt version plus the 20 traces with the most tokens; `/prompts/{name}` adds production
+  metrics per version (calls, mean tokens and cost, p50/p95 latency, and eval pass rate with
+  `--reports`). `/usage` and the production metrics need `--traces bigquery://…`; LLM spans from
+  the BigQuery source now carry the `gen_ai.*` usage labels.
+
 ## [0.4.10] - 2026-11-20
 
 ### Added
