@@ -107,6 +107,12 @@ fn full_cli() -> Command {
                 .long("author")
                 .help("Author of the scores added on /traces/{id} (default: $USER, else $USERNAME, else console)"),
         )
+        .arg(
+            Arg::new("datasets")
+                .long("datasets")
+                .value_parser(value_parser!(PathBuf))
+                .help("Directory of eval-set YAML files that /traces/{id} adds runs to (with --traces bigquery://…)"),
+        )
 }
 
 /// Parses the full command line: [`ConsoleConfig`] plus the trace source.
@@ -134,6 +140,9 @@ where
     }
     if let Some(author) = m.get_one::<String>("author") {
         cli = cli.with_author(author.clone());
+    }
+    if let Some(dir) = m.get_one::<PathBuf>("datasets") {
+        cli = cli.with_datasets(dir.clone());
     }
     Ok(cli)
 }
@@ -284,6 +293,7 @@ mod tests {
             ["--bigquery-max-bytes", "5"],
             ["--prices", "prices.yaml"],
             ["--author", "chris"],
+            ["--datasets", "evals"],
         ] {
             let err = parse_args(["gadk-console", "--project", "p", flag[0], flag[1]]).unwrap_err();
             assert_eq!(err.kind(), ErrorKind::UnknownArgument, "{flag:?}");
@@ -298,7 +308,8 @@ mod tests {
             help.contains("--traces")
                 && help.contains("--bigquery-max-bytes")
                 && help.contains("--prices")
-                && help.contains("--author"),
+                && help.contains("--author")
+                && help.contains("--datasets"),
             "{help}"
         );
     }
@@ -331,6 +342,22 @@ mod tests {
             parse_cli(["gadk-console", "--project", "p"])
                 .unwrap()
                 .author,
+            None
+        );
+    }
+
+    #[test]
+    fn parse_cli_reads_the_datasets_directory() {
+        let cli = parse_cli(["gadk-console", "--project", "p", "--datasets", "evals"]).unwrap();
+        assert_eq!(
+            cli,
+            Cli::new(parse_args(["gadk-console", "--project", "p"]).unwrap())
+                .with_datasets(PathBuf::from("evals"))
+        );
+        assert_eq!(
+            parse_cli(["gadk-console", "--project", "p"])
+                .unwrap()
+                .datasets,
             None
         );
     }

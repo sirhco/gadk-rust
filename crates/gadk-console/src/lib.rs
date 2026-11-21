@@ -17,7 +17,7 @@
 
 use std::fmt::Write as _;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gadk_eval_monitor::{MonitorError, ReportStore};
@@ -72,6 +72,9 @@ pub struct Cli {
     /// The author of scores added in the console (`--author`); `None` uses `USER`, else
     /// `USERNAME`, else `console`.
     pub author: Option<String>,
+    /// The directory of eval-set files that traces are added to (`--datasets`); `None` shows
+    /// no "Add to dataset" form.
+    pub datasets: Option<PathBuf>,
 }
 
 impl Cli {
@@ -82,6 +85,7 @@ impl Cli {
             traces: None,
             prices: None,
             author: None,
+            datasets: None,
         }
     }
 
@@ -100,6 +104,12 @@ impl Cli {
     /// Writes `author` as the author of the scores added on `/traces/{id}`.
     pub fn with_author(mut self, author: impl Into<String>) -> Self {
         self.author = Some(author.into());
+        self
+    }
+
+    /// Adds traces as eval cases to the eval-set files in `dir` (BigQuery trace source only).
+    pub fn with_datasets(mut self, dir: PathBuf) -> Self {
+        self.datasets = Some(dir);
         self
     }
 }
@@ -157,6 +167,9 @@ pub enum ConsoleError {
         /// What was wrong with it.
         detail: String,
     },
+    /// The `--datasets` directory does not exist, or its export source could not be built.
+    #[error("datasets: {0}")]
+    Datasets(String),
 }
 
 /// A console bound to its port, not yet serving.
@@ -296,7 +309,7 @@ pub async fn run(
 
 /// Like [`run`], reading traces from the source `cli.traces` names and prices from
 /// `cli.prices` (read before anything is bound); console scores are written by `cli.author`,
-/// else `USER`, else `USERNAME`, else `console`.
+/// else `USER`, else `USERNAME`, else `console`. `cli.datasets` must be an existing directory.
 pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<(), ConsoleError> {
     let author = resolve_author(cli.author, env_var);
     let prices = cli
@@ -305,6 +318,9 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
         .map(PriceTable::load)
         .transpose()?
         .map(Arc::new);
+    if let Some(dir) = &cli.datasets {
+        check_datasets_dir(dir)?;
+    }
     let (source, usage): (Arc<dyn TraceSource>, Option<Arc<UsageSource>>) = match cli.traces {
         None => (
             Arc::new(CloudTraceSource::new(
@@ -343,6 +359,18 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
         .and_then(|()| out.flush())
         .map_err(|e| ConsoleError::Serve(format!("print the URL: {e}")))?;
     bound.serve().await
+}
+
+/// `dir` must be an existing directory.
+fn check_datasets_dir(dir: &Path) -> Result<(), ConsoleError> {
+    match std::fs::metadata(dir) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(ConsoleError::Datasets(format!(
+            "{} is not a directory",
+            dir.display()
+        ))),
+        Err(e) => Err(ConsoleError::Datasets(format!("{}: {e}", dir.display()))),
+    }
 }
 
 /// 32 random bytes, hex-encoded (64 characters).
@@ -428,6 +456,32 @@ mod tests {
             )
         );
         assert!(out.is_empty(), "no URL is printed");
+    }
+
+    #[tokio::test]
+    async fn run_cli_fails_on_a_missing_datasets_directory_before_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("file.yaml");
+        std::fs::write(&file, "x").unwrap();
+        for (path, detail) in [
+            (dir.path().join("missing"), ""),
+            (file, "is not a directory"),
+        ] {
+            let mut out = Vec::new();
+            let err = super::run_cli(
+                super::Cli::new(cfg(None)).with_datasets(path.clone()),
+                &mut out,
+            )
+            .await
+            .unwrap_err();
+            assert!(matches!(err, ConsoleError::Datasets(_)), "{err}");
+            let text = err.to_string();
+            assert!(
+                text.starts_with(&format!("datasets: {}", path.display())) && text.contains(detail),
+                "{text}"
+            );
+            assert!(out.is_empty(), "no URL is printed");
+        }
     }
 
     /// One raw HTTP/1.1 GET of `/` to 127.0.0.1:`port` with the given Host; the response head.
