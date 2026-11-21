@@ -21,6 +21,12 @@
 
 use std::fmt;
 
+use serde_json::{Map, Value};
+
+use crate::event_types::EVENT_FEEDBACK;
+use crate::plugin::{BigQueryAgentAnalyticsPlugin, EventData, Payload};
+use crate::trace::{CallbackCtx, Identity, RowSpan};
+
 /// The value of a [`Score`].
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -168,11 +174,73 @@ impl ScoreTarget {
     }
 }
 
+/// The `content` of a `FEEDBACK` row: `{"name", "value", "data_type", "comment"}`, `comment`
+/// only when the score has one.
+pub(crate) fn feedback_content(score: &Score) -> Value {
+    let value = match &score.value {
+        ScoreValue::Bool(b) => Value::Bool(*b),
+        ScoreValue::Number(n) => Value::from(*n),
+        ScoreValue::Category(c) => Value::from(c.as_str()),
+    };
+    let mut content = Map::new();
+    content.insert("name".to_owned(), Value::from(score.name.as_str()));
+    content.insert("value".to_owned(), value);
+    content.insert("data_type".to_owned(), Value::from(score.value.data_type()));
+    if let Some(comment) = &score.comment {
+        content.insert("comment".to_owned(), Value::from(comment.as_str()));
+    }
+    Value::Object(content)
+}
+
+impl BigQueryAgentAnalyticsPlugin {
+    /// Queues a `FEEDBACK` row scoring `target` with `score`, written by `author` (an end user's
+    /// id, say). Never blocks and never fails: like the callbacks' rows it honours the event
+    /// denylist and allowlist (an allowlist without `FEEDBACK` drops every score), a disabled
+    /// plugin writes nothing, and after the plugin closed the row counts as a shutdown drop.
+    ///
+    /// The row has `event_type` `FEEDBACK`, the target's session, invocation and user ids (no
+    /// agent), its trace id when given, `content` `{"name", "value", "data_type", "comment"}`, and
+    /// `attributes` with `"source": "app"` and `"author"` next to the usual `adk` envelope.
+    pub fn record_score(&self, target: &ScoreTarget, score: &Score, author: &str) {
+        let Some(analytics) = &self.state.analytics else {
+            return;
+        };
+        let id = Identity {
+            agent_name: String::new(),
+            session_id: target.session_id.clone(),
+            invocation_id: target.invocation_id.clone(),
+            user_id: target.user_id.clone(),
+            app_name: target.app_name.clone(),
+            ..Identity::default()
+        };
+        let trace_id = target.trace_id.clone().unwrap_or_default();
+        let content = feedback_content(score);
+        let mut span_fn = || RowSpan {
+            trace_id: trace_id.clone(),
+            ..RowSpan::default()
+        };
+        let mut build = |d: &mut EventData| {
+            d.content = Some(Payload::Json(content.clone()));
+            d.attributes.insert("source".to_owned(), Value::from("app"));
+            d.attributes
+                .insert("author".to_owned(), Value::from(author));
+        };
+        analytics.log_event(
+            &CallbackCtx::default(),
+            &id,
+            EVENT_FEEDBACK,
+            Some(&mut span_fn),
+            Some(&mut build),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use pretty_assertions::assert_eq;
+    use serde_json::json;
 
     use super::*;
 
@@ -246,5 +314,179 @@ mod tests {
             t.trace_id.as_deref(),
             Some("0123456789abcdef0123456789abcdef")
         );
+    }
+
+    #[test]
+    fn feedback_content_per_value_type() {
+        let up = Score::new("thumbs", ScoreValue::Bool(true)).unwrap();
+        assert_eq!(
+            feedback_content(&up),
+            json!({"name": "thumbs", "value": true, "data_type": "bool"})
+        );
+        let rating = Score::new("rating", ScoreValue::Number(4.0))
+            .unwrap()
+            .with_comment("ok");
+        assert_eq!(
+            feedback_content(&rating),
+            json!({"name": "rating", "value": 4.0, "data_type": "number", "comment": "ok"})
+        );
+        let cat = Score::new("quality", ScoreValue::Category("helpful".into())).unwrap();
+        assert_eq!(
+            feedback_content(&cat),
+            json!({"name": "quality", "value": "helpful", "data_type": "category"})
+        );
+    }
+}
+
+#[cfg(test)]
+mod record_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
+
+    use super::*;
+    use crate::config::{Config, DropStats};
+    use crate::context::Context;
+    use crate::parity_tests::plugin_agentanalytics_bigquery_agent_analytics_plugin::support::{
+        TestPlugin, json_object_column, new_test_plugin_with_config, rows_of_type,
+        setup_test_plugin, str_col,
+    };
+    use crate::plugin::{
+        as_bigquery_agent_analytics_plugin, new_bigquery_agent_analytics_plugin_with_config,
+    };
+    use crate::row::Row;
+
+    const TRACE: &str = "0123456789abcdef0123456789abcdef";
+
+    /// One filter case: name, config change, `FEEDBACK` rows written.
+    type FilterCase = (&'static str, fn(&mut Config), usize);
+
+    fn analytics(tp: &TestPlugin) -> BigQueryAgentAnalyticsPlugin {
+        as_bigquery_agent_analytics_plugin(&tp.plugin).unwrap()
+    }
+
+    fn target() -> ScoreTarget {
+        ScoreTarget::invocation("shop", "user-1", "session-1", "e-123")
+    }
+
+    fn thumbs_up() -> Score {
+        Score::new("thumbs", ScoreValue::Bool(true)).unwrap()
+    }
+
+    /// The `FEEDBACK` rows the server received once the plugin closed.
+    async fn feedback_rows(tp: &TestPlugin) -> Vec<Row> {
+        tp.close().await.unwrap();
+        rows_of_type(&tp.rows(), EVENT_FEEDBACK)
+    }
+
+    /// The row whose `content.name` is `name`.
+    fn named<'a>(rows: &'a [Row], name: &str) -> &'a Row {
+        rows.iter()
+            .find(|r| json_object_column(r, "content")["name"] == json!(name))
+            .unwrap_or_else(|| panic!("no {name} row"))
+    }
+
+    #[tokio::test]
+    async fn record_score_writes_one_feedback_row_per_score() {
+        let tp = setup_test_plugin().await;
+        let a = analytics(&tp);
+        a.record_score(&target().with_trace_id(TRACE), &thumbs_up(), "user-1");
+        let rating = Score::new("rating", ScoreValue::Number(4.5))
+            .unwrap()
+            .with_comment("fast");
+        a.record_score(&target(), &rating, "user-1");
+        let quality = Score::new("quality", ScoreValue::Category("helpful".into())).unwrap();
+        a.record_score(&target(), &quality, "reviewer");
+        let rows = feedback_rows(&tp).await;
+        assert_eq!(rows.len(), 3);
+
+        let up = named(&rows, "thumbs");
+        assert_eq!(
+            json_object_column(up, "content"),
+            json!({"name": "thumbs", "value": true, "data_type": "bool"})
+        );
+        assert_eq!(str_col(up, "event_type"), EVENT_FEEDBACK);
+        assert_eq!(str_col(up, "trace_id"), TRACE);
+        assert_eq!(str_col(up, "invocation_id"), "e-123");
+        assert_eq!(str_col(up, "session_id"), "session-1");
+        assert_eq!(str_col(up, "user_id"), "user-1");
+        assert_eq!(str_col(up, "agent"), "");
+        assert_eq!(str_col(up, "status"), "OK");
+        let attrs = json_object_column(up, "attributes");
+        assert_eq!(attrs["source"], json!("app"));
+        assert_eq!(attrs["author"], json!("user-1"));
+        assert_eq!(attrs["adk"]["app_name"], json!("shop"));
+        assert_eq!(attrs["adk"]["invocation_id"], json!("e-123"));
+        assert_eq!(attrs["adk"]["schema_version"], json!("1"));
+
+        let r = named(&rows, "rating");
+        assert_eq!(
+            json_object_column(r, "content"),
+            json!({"name": "rating", "value": 4.5, "data_type": "number", "comment": "fast"})
+        );
+        assert_eq!(str_col(r, "trace_id"), "", "no trace id was given");
+
+        let q = named(&rows, "quality");
+        assert_eq!(
+            json_object_column(q, "content"),
+            json!({"name": "quality", "value": "helpful", "data_type": "category"})
+        );
+        assert_eq!(
+            json_object_column(q, "attributes")["author"],
+            json!("reviewer")
+        );
+    }
+
+    #[tokio::test]
+    async fn record_score_honours_the_event_filters() {
+        let cases: [FilterCase; 3] = [
+            (
+                "denylisted",
+                |c| c.event_denylist = vec![EVENT_FEEDBACK.into()],
+                0,
+            ),
+            (
+                "not allowlisted",
+                |c| c.event_allowlist = vec![crate::event_types::EVENT_LLM_REQUEST.into()],
+                0,
+            ),
+            (
+                "allowlisted",
+                |c| c.event_allowlist = vec![EVENT_FEEDBACK.into()],
+                1,
+            ),
+        ];
+        for (name, mutate, want) in cases {
+            let tp = new_test_plugin_with_config(mutate).await;
+            analytics(&tp).record_score(&target(), &thumbs_up(), "user-1");
+            assert_eq!(feedback_rows(&tp).await.len(), want, "{name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_disabled_plugin_records_nothing() {
+        let p = new_bigquery_agent_analytics_plugin_with_config(
+            &Context::background(),
+            Config {
+                enabled: false,
+                ..Config::default()
+            },
+        )
+        .await
+        .unwrap();
+        let a = as_bigquery_agent_analytics_plugin(&p).unwrap();
+        a.record_score(&target(), &thumbs_up(), "user-1");
+        assert_eq!(a.drop_stats(), DropStats::default());
+    }
+
+    #[tokio::test]
+    async fn a_score_after_close_is_a_shutdown_drop() {
+        let tp = setup_test_plugin().await;
+        tp.close().await.unwrap();
+        let a = analytics(&tp);
+        a.record_score(&target(), &thumbs_up(), "user-1");
+        assert_eq!(a.drop_stats().shutdown_drops, 1);
+        assert!(rows_of_type(&tp.rows(), EVENT_FEEDBACK).is_empty());
     }
 }

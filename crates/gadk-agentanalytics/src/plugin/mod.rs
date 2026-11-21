@@ -205,6 +205,9 @@ pub(crate) struct PluginState {
     pub(crate) views: parking_lot::Mutex<ViewsState>,
     /// The plugin's life context (`cancel()` on it); `None` for the disabled plugin.
     pub(crate) life_ctx: Option<Context>,
+    /// The row writer the callbacks share, for rows written outside a callback
+    /// (`BigQueryAgentAnalyticsPlugin::record_score`); `None` for the disabled plugin.
+    pub(crate) analytics: Option<Arc<AnalyticsPlugin>>,
 }
 
 impl PluginState {
@@ -221,6 +224,7 @@ impl PluginState {
                 ..ViewsState::default()
             }),
             life_ctx: None,
+            analytics: None,
         }
     }
 
@@ -722,6 +726,7 @@ pub(crate) async fn new_plugin(
             ..ViewsState::default()
         }),
         life_ctx: Some(Context::background().with_cancel()),
+        analytics: Some(Arc::clone(&plugin)),
     });
 
     let close = close_fn(CloseResources {
