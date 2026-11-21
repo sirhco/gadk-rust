@@ -31,6 +31,7 @@ mod evals;
 mod model;
 mod prices;
 mod prompts;
+mod scores;
 pub mod traces;
 mod url;
 mod usage;

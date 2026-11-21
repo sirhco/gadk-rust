@@ -168,6 +168,11 @@ impl UsageSource {
         }
     }
 
+    /// The table as a backquoted SQL path.
+    pub(crate) fn table_path(&self) -> Result<String, SourceError> {
+        self.table.sql_path()
+    }
+
     /// Runs `sql` with `params`, the byte cap and at most `max_rows` rows.
     async fn run(
         &self,
@@ -245,7 +250,7 @@ impl UsageSource {
 
     /// Runs `sql` with `params` plus `@limit` = `cap + 1`: the first `cap` rows and whether more
     /// existed.
-    async fn run_capped(
+    pub(crate) async fn run_capped(
         &self,
         sql: &str,
         mut params: Vec<Value>,
@@ -370,7 +375,7 @@ fn version_of(row: &Map<String, Value>) -> Option<u32> {
 }
 
 /// An `ARRAY<STRING>` query parameter.
-fn string_array_param(name: &str, values: &[String]) -> Value {
+pub(crate) fn string_array_param(name: &str, values: &[String]) -> Value {
     let values: Vec<Value> = values.iter().map(|v| json!({ "value": v })).collect();
     json!({
         "name": name,

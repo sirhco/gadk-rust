@@ -25,10 +25,10 @@ use serde::Deserialize;
 use super::AppState;
 use super::pages::error::source_error;
 use super::pages::layout::html;
-use super::pages::trace::LogView;
+use super::pages::trace::{LogView, ScoresView};
 use super::pages::{trace, traces};
 use crate::model::{attach_logs, build_tree, trace_end};
-use crate::traces::{SourceError, TimeRange, TraceId, TraceQuery};
+use crate::traces::{RawSpan, SourceError, TimeRange, TraceId, TraceQuery};
 
 /// How long after a trace's last span ends its log entries may still be arriving.
 const STILL_ARRIVING: TimeDelta = TimeDelta::seconds(120);
@@ -91,6 +91,7 @@ async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Respon
     let rows = build_tree(&detail.spans);
     let still_arriving =
         trace_end(&detail.spans).is_some_and(|end| (state.now)() - end < STILL_ARRIVING);
+    let scores = trace_scores(&state, &id, &detail.spans).await;
     let logs = detail.logs.map(|set| LogView {
         shown: set.entries.len(),
         attached: attach_logs(&detail.spans, set.entries),
@@ -98,8 +99,38 @@ async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Respon
     });
     html(
         StatusCode::OK,
-        trace::render(&id, &rows, &logs, still_arriving, state.prices.as_deref()),
+        trace::render(
+            &id,
+            &rows,
+            &logs,
+            still_arriving,
+            state.prices.as_deref(),
+            &scores,
+        ),
     )
+}
+
+/// The Scores section of trace `id`: with the BigQuery source, the scores of the trace and of
+/// the invocations its spans name (`invocation_id` labels) since a day before its first span.
+async fn trace_scores(state: &AppState, id: &TraceId, spans: &[RawSpan]) -> ScoresView {
+    let Some(usage) = &state.usage else {
+        return ScoresView::NeedsBigQuery;
+    };
+    let mut ids: Vec<String> = spans
+        .iter()
+        .filter_map(|s| s.labels.get("invocation_id").cloned())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    let start = spans
+        .iter()
+        .map(|s| s.start)
+        .min()
+        .unwrap_or_else(state.now);
+    match usage.trace_scores(id.as_str(), &ids, start).await {
+        Ok(scores) => ScoresView::Loaded(scores),
+        Err(e) => ScoresView::Failed(e.to_string(), e.hint()),
+    }
 }
 
 #[cfg(test)]
@@ -113,12 +144,16 @@ mod tests {
     use serde_json::{Value, json};
 
     use crate::prices::PriceTable;
+    use crate::traces::BigQueryTable;
+    use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::traces::{
         LogEntry, LogSet, RawSpan, Service, SourceError, TimeRange, TraceDetail, TraceId,
         TracePage, TraceQuery, TraceSource, TraceSummary,
     };
+    use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{FakeSource, fixed_now, get, state};
+    use gadk_bigquery::{BigQueryClient, NoAuth};
 
     const ID: &str = "0123456789abcdef0123456789abcdef";
     const JSON_OPEN: &str = r#"<script type="application/json" id="trace-data">"#;
@@ -820,5 +855,156 @@ mod tests {
         let (status, body) = trace_page(detail(600, logs(vec![], false))).await;
         assert_eq!(status, StatusCode::OK);
         assert!(!body.contains("<h2>LLM calls</h2>"), "{body}");
+    }
+
+    // ---- scores ----
+
+    const SCORE_FIELDS: [(&str, &str); 7] = [
+        ("timestamp", "TIMESTAMP"),
+        ("source", "STRING"),
+        ("author", "STRING"),
+        ("name", "STRING"),
+        ("data_type", "STRING"),
+        ("value", "STRING"),
+        ("comment", "STRING"),
+    ];
+
+    /// `with_get(Ok(d))` plus the BigQuery usage source over `fake`.
+    fn bq_get(d: TraceDetail, fake: &Arc<FakeHttp>) -> AppState {
+        let (_, mut st) = with_get(Ok(d));
+        st.usage = Some(Arc::new(UsageSource::with_client(
+            BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
+            "billing-proj",
+            BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
+            1_000,
+        )));
+        st
+    }
+
+    /// `detail(600, …)` whose root and LLM spans name invocation `e-1` and whose prompt span
+    /// names `e-2`.
+    fn invocation_detail() -> TraceDetail {
+        let mut d = detail(600, logs(vec![], false));
+        for (span, inv) in d.spans.iter_mut().zip(["e-1", "e-2", "e-1"]) {
+            span.labels.insert("invocation_id".into(), inv.into());
+        }
+        d
+    }
+
+    /// The `Scores` heading through the `Log entries` heading.
+    fn scores_section(page: &str) -> &str {
+        let start = page
+            .find("<h2>Scores</h2>")
+            .unwrap_or_else(|| panic!("no Scores section: {page}"));
+        let len = page[start..]
+            .find("<h2>Log entries</h2>")
+            .expect("log entries");
+        &page[start..start + len]
+    }
+
+    /// A score row of `SCORE_FIELDS` written `secs_ago` seconds before `fixed_now`.
+    fn score_cells(secs_ago: i64, cells: [Value; 6]) -> Vec<Value> {
+        let at = fixed_now() - TimeDelta::seconds(secs_ago);
+        let mut row = vec![json!(at.timestamp_micros().to_string())];
+        row.extend(cells);
+        row
+    }
+
+    #[tokio::test]
+    async fn scores_list_newest_first_with_source_author_and_value() {
+        let fake = FakeHttp::new(vec![reply(
+            &SCORE_FIELDS,
+            vec![
+                score_cells(
+                    120,
+                    [
+                        json!("console"),
+                        json!("chris"),
+                        json!("quality"),
+                        json!("category"),
+                        json!("helpful"),
+                        json!("clear"),
+                    ],
+                ),
+                score_cells(
+                    300,
+                    [
+                        json!("app"),
+                        json!("user-1"),
+                        json!("thumbs"),
+                        json!("bool"),
+                        json!("true"),
+                        Value::Null,
+                    ],
+                ),
+            ],
+            false,
+        )]);
+        let (status, _, page) =
+            get(bq_get(invocation_detail(), &fake), &format!("/traces/{ID}")).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        let scores = scores_section(&page);
+        assert!(
+            scores.contains(r#"<tr><td class="mono">2026-11-16T11:58:00.000Z</td><td>console</td><td>chris</td><td>quality</td><td>helpful</td><td>clear</td></tr><tr><td class="mono">2026-11-16T11:55:00.000Z</td><td>app</td><td>user-1</td><td>thumbs</td><td>thumbs up</td><td></td></tr>"#),
+            "{scores}"
+        );
+        assert_eq!(fake.uris().len(), 1);
+        let body = fake.body(0);
+        assert_eq!(
+            param_value(&body, "trace_id")["parameterValue"]["value"],
+            json!(ID)
+        );
+        assert_eq!(
+            param_value(&body, "ids")["parameterValue"],
+            json!({ "arrayValues": [{ "value": "e-1" }, { "value": "e-2" }] })
+        );
+        assert_eq!(
+            param_value(&body, "start")["parameterValue"]["value"],
+            json!("2026-11-16 11:49:57.000000+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_trace_without_scores_says_so() {
+        let fake = FakeHttp::new(vec![reply(&SCORE_FIELDS, vec![], false)]);
+        let (status, _, page) =
+            get(bq_get(invocation_detail(), &fake), &format!("/traces/{ID}")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            scores_section(&page).contains("No scores for this trace."),
+            "{page}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_score_query_is_a_banner_and_the_trace_still_renders() {
+        let fake = FakeHttp::new(vec![Ok((
+            403,
+            json!({ "error": { "code": 403, "message": "Access Denied", "errors": [{ "reason": "accessDenied" }] } }).to_string(),
+        ))]);
+        let (status, _, page) =
+            get(bq_get(invocation_detail(), &fake), &format!("/traces/{ID}")).await;
+        assert_eq!(status, StatusCode::OK);
+        let scores = scores_section(&page);
+        assert!(
+            scores.contains("Scores could not be loaded: BigQuery: HTTP 403: Access Denied"),
+            "{scores}"
+        );
+        assert!(
+            scores.contains("needs roles/bigquery.dataViewer and roles/bigquery.jobUser"),
+            "{scores}"
+        );
+        assert!(page.contains(r#"<div class="waterfall">"#), "{page}");
+    }
+
+    #[tokio::test]
+    async fn with_the_cloud_trace_source_scores_are_a_note() {
+        let (status, page) = trace_page(detail(600, logs(vec![], false))).await;
+        assert_eq!(status, StatusCode::OK);
+        let scores = scores_section(&page);
+        assert!(
+            scores.contains("Scores need the BigQuery trace source"),
+            "{scores}"
+        );
     }
 }

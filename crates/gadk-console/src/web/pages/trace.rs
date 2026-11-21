@@ -26,11 +26,26 @@ use crate::prices::{
     CostSum, LABEL_MODEL, LABEL_OPERATION, OP_GENERATE_CONTENT, PriceTable, UNKNOWN_MODEL, Usage,
     cost_of, cost_text, thousands,
 };
+use crate::scores::{ScoreRow, TRACE_SCORES_CAP, TraceScores};
 use crate::traces::{LogEntry, RawSpan, SourceError, TraceId};
 use crate::url::percent_encode;
 
 /// Payload texts longer than this many chars render collapsed.
 pub(crate) const PAYLOAD_LIMIT: usize = 4096;
+
+/// The note shown in the Scores section when the trace source is not BigQuery.
+pub(crate) const NEEDS_BIGQUERY_SCORES: &str = "Scores need the BigQuery trace source: start the console with --traces bigquery://<project>.<dataset>.<table>.";
+
+/// The Scores section of a trace page.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ScoresView {
+    /// The trace source is not BigQuery: a note, no query, no form.
+    NeedsBigQuery,
+    /// The query failed: the error text and its hint.
+    Failed(String, Option<&'static str>),
+    /// The trace's scores.
+    Loaded(TraceScores),
+}
 
 /// A trace's log entries, joined to its spans.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -43,14 +58,15 @@ pub(crate) struct LogView {
 }
 
 /// The trace detail page: notes and banners, the waterfall, the span detail pane (filled by
-/// `waterfall.js`), the LLM calls with their tokens and cost, the log entries per span, and the
-/// JSON data block.
+/// `waterfall.js`), the LLM calls with their tokens and cost, the scores, the log entries per
+/// span, and the JSON data block.
 pub(crate) fn render(
     id: &TraceId,
     rows: &[SpanRow],
     logs: &Result<LogView, SourceError>,
     still_arriving: bool,
     prices: Option<&PriceTable>,
+    scores: &ScoresView,
 ) -> Markup {
     let body = html! {
         h1 { "Trace " span class="mono" { (id.as_str()) } }
@@ -85,6 +101,7 @@ pub(crate) fn render(
             }
         }
         (llm_calls(rows, prices))
+        (scores_section(scores))
         @if let Ok(view) = logs {
             (log_sections(rows, view))
         }
@@ -181,6 +198,59 @@ fn llm_calls(rows: &[SpanRow], prices: Option<&PriceTable>) -> Markup {
         }
         @if cost.partial() {
             p class="empty" { (PARTIAL_NOTE) }
+        }
+    }
+}
+
+/// A score's value as shown: `thumbs up` / `thumbs down` for a `bool` score, else the value.
+fn score_value_text(r: &ScoreRow) -> &str {
+    match (r.data_type.as_str(), r.value.as_str()) {
+        ("bool", "true") => "thumbs up",
+        ("bool", "false") => "thumbs down",
+        (_, value) => value,
+    }
+}
+
+/// The Scores section: the needs-BigQuery note, the error banner, or the scores newest first.
+fn scores_section(scores: &ScoresView) -> Markup {
+    html! {
+        h2 { "Scores" }
+        @match scores {
+            ScoresView::NeedsBigQuery => {
+                div class="banner info" { p { (NEEDS_BIGQUERY_SCORES) } }
+            }
+            ScoresView::Failed(text, hint) => {
+                (banner(&format!("Scores could not be loaded: {text}"), *hint))
+            }
+            ScoresView::Loaded(s) => {
+                @if s.rows.is_empty() {
+                    p class="empty" { "No scores for this trace." }
+                } @else {
+                    table {
+                        thead {
+                            tr {
+                                th { "Time" } th { "Source" } th { "Author" } th { "Name" }
+                                th { "Value" } th { "Comment" }
+                            }
+                        }
+                        tbody {
+                            @for r in &s.rows {
+                                tr {
+                                    td class="mono" { (millis(r.timestamp)) }
+                                    td { (r.source) }
+                                    td { (r.author) }
+                                    td { (r.name) }
+                                    td { (score_value_text(r)) }
+                                    td { (r.comment) }
+                                }
+                            }
+                        }
+                    }
+                }
+                @if s.truncated {
+                    p class="empty" { "Showing the newest " (TRACE_SCORES_CAP) " scores." }
+                }
+            }
         }
     }
 }
