@@ -40,6 +40,8 @@ use crate::source::mapping::{EventRow, MAPPED_EVENT_TYPES, RunHeader, build_run}
 use crate::source::{ProductionRun, TranscriptQuery, TranscriptSource};
 use crate::spec::{is_dataset_or_table, is_project_id};
 
+mod export_queries;
+
 const ENDPOINT: &str = "https://bigquery.googleapis.com/bigquery/v2";
 
 /// How long one `jobs.query` / `jobs.getQueryResults` call waits for the job, in ms.
@@ -271,22 +273,30 @@ impl TranscriptSource for BigQueryTranscriptSource {
                 invocation_params(q),
             )
             .await?;
-        let mut headers = Vec::with_capacity(invocations.len());
-        for r in &invocations {
-            headers.push(RunHeader {
-                invocation_id: cell_str(r, "invocation_id").unwrap_or_default(),
-                session_id: cell_str(r, "session_id").unwrap_or_default(),
-                agent: cell_str(r, "agent").unwrap_or_default(),
-                started_at: cell_timestamp(r, "started_at")?,
-            });
-        }
+        let headers = run_headers(&invocations)?;
+        let mut runs = self.build_runs(&columns, headers, q.from).await?;
+        runs.sort_by_key(|r| std::cmp::Reverse(r.started_at));
+        runs.truncate(q.limit);
+        Ok(runs)
+    }
+}
+
+impl BigQueryTranscriptSource {
+    /// The runs of `headers`, in `headers` order, rebuilt from their mapped rows logged from 10
+    /// minutes before `from` on (no query when `headers` is empty).
+    async fn build_runs(
+        &self,
+        columns: &Columns,
+        headers: Vec<RunHeader>,
+        from: DateTime<Utc>,
+    ) -> Result<Vec<ProductionRun>, MonitorError> {
         if headers.is_empty() {
             return Ok(Vec::new());
         }
         let ids: Vec<String> = headers.iter().map(|h| h.invocation_id.clone()).collect();
         let mut rows: HashMap<String, Vec<EventRow>> = HashMap::new();
         for r in self
-            .query(&rows_sql(&self.table, &columns), row_params(&ids, q.from))
+            .query(&rows_sql(&self.table, columns), row_params(&ids, from))
             .await?
         {
             let id = cell_str(&r, "invocation_id").unwrap_or_default();
@@ -303,16 +313,38 @@ impl TranscriptSource for BigQueryTranscriptSource {
                 trace_id: cell_str(&r, "trace_id").filter(|t| !t.is_empty()),
             });
         }
-        let mut runs: Vec<ProductionRun> = headers
+        Ok(headers
             .into_iter()
             .map(|h| {
                 let rows = rows.remove(&h.invocation_id).unwrap_or_default();
                 build_run(h, &rows)
             })
-            .collect();
-        runs.sort_by_key(|r| std::cmp::Reverse(r.started_at));
-        runs.truncate(q.limit);
-        Ok(runs)
+            .collect())
+    }
+}
+
+/// The run headers in the result rows of an invocations query (columns `invocation_id`,
+/// `started_at`, `session_id` and `agent`).
+fn run_headers(rows: &[Map<String, Value>]) -> Result<Vec<RunHeader>, MonitorError> {
+    rows.iter()
+        .map(|r| {
+            Ok(RunHeader {
+                invocation_id: cell_str(r, "invocation_id").unwrap_or_default(),
+                session_id: cell_str(r, "session_id").unwrap_or_default(),
+                agent: cell_str(r, "agent").unwrap_or_default(),
+                started_at: cell_timestamp(r, "started_at")?,
+            })
+        })
+        .collect()
+}
+
+/// The run's agent: `attributes.root_agent_name`, or the `agent` column when the table has no
+/// `attributes`.
+fn agent_expr(columns: &Columns) -> &'static str {
+    if columns.attributes {
+        "ANY_VALUE(JSON_VALUE(attributes, '$.root_agent_name'))"
+    } else {
+        "ANY_VALUE(agent)"
     }
 }
 
@@ -320,11 +352,7 @@ impl TranscriptSource for BigQueryTranscriptSource {
 /// `[@from, @to)`, optionally only those of root agent `@agent` (which needs `attributes`). The
 /// run's agent is `attributes.root_agent_name`, or the `agent` column without `attributes`.
 pub(crate) fn invocations_sql(table: &str, with_agent: bool, columns: &Columns) -> String {
-    let agent_expr = if columns.attributes {
-        "ANY_VALUE(JSON_VALUE(attributes, '$.root_agent_name'))"
-    } else {
-        "ANY_VALUE(agent)"
-    };
+    let agent_expr = agent_expr(columns);
     let agent = if with_agent {
         "\n  AND JSON_VALUE(attributes, '$.root_agent_name') = @agent"
     } else {
@@ -422,15 +450,20 @@ pub(crate) fn invocation_params(q: &TranscriptQuery) -> Vec<Value> {
 }
 
 pub(crate) fn row_params(ids: &[String], from: DateTime<Utc>) -> Vec<Value> {
-    let values: Vec<Value> = ids.iter().map(|id| json!({"value": id})).collect();
     vec![
-        json!({
-            "name": "invocation_ids",
-            "parameterType": {"type": "ARRAY", "arrayType": {"type": "STRING"}},
-            "parameterValue": {"arrayValues": values},
-        }),
+        string_array_param("invocation_ids", ids),
         timestamp_param("from", from),
     ]
+}
+
+/// A named `ARRAY<STRING>` parameter.
+fn string_array_param(name: &str, values: &[String]) -> Value {
+    let values: Vec<Value> = values.iter().map(|v| json!({"value": v})).collect();
+    json!({
+        "name": name,
+        "parameterType": {"type": "ARRAY", "arrayType": {"type": "STRING"}},
+        "parameterValue": {"arrayValues": values},
+    })
 }
 
 /// The `jobs.query` request body.
@@ -511,10 +544,11 @@ mod tests {
 
     use super::*;
 
-    const QUERIES: &str = "https://bigquery.googleapis.com/bigquery/v2/projects/proj/queries";
+    pub(super) const QUERIES: &str =
+        "https://bigquery.googleapis.com/bigquery/v2/projects/proj/queries";
     const TABLE: &str = "https://bigquery.googleapis.com/bigquery/v2/projects/proj/datasets/analytics/tables/agent_events";
 
-    const ALL: Columns = Columns {
+    pub(super) const ALL: Columns = Columns {
         content: true,
         content_parts: true,
         attributes: true,
@@ -522,7 +556,7 @@ mod tests {
     };
 
     /// A `tables.get` reply whose schema has the analytics columns minus `denied`.
-    fn table_reply(denied: &[&str]) -> Exchange {
+    pub(super) fn table_reply(denied: &[&str]) -> Exchange {
         let fields: Vec<Value> = [
             "timestamp",
             "event_type",
@@ -566,7 +600,7 @@ mod tests {
         }
     }
 
-    fn source(http: Arc<dyn HttpClient>) -> BigQueryTranscriptSource {
+    pub(super) fn source(http: Arc<dyn HttpClient>) -> BigQueryTranscriptSource {
         BigQueryTranscriptSource::with_client(
             "proj",
             "analytics",
@@ -578,7 +612,7 @@ mod tests {
     }
 
     /// A completed `jobs.query` / `jobs.getQueryResults` reply with `rows` of `names` columns.
-    fn reply(names: &[&str], rows: &[Vec<Value>], page: Option<&str>) -> String {
+    pub(super) fn reply(names: &[&str], rows: &[Vec<Value>], page: Option<&str>) -> String {
         let fields: Vec<Value> = names.iter().map(|n| json!({"name": n})).collect();
         let rows: Vec<Value> = rows
             .iter()
@@ -596,8 +630,8 @@ mod tests {
         v.to_string()
     }
 
-    const HEAD: [&str; 4] = ["invocation_id", "started_at", "session_id", "agent"];
-    const ROW: [&str; 8] = [
+    pub(super) const HEAD: [&str; 4] = ["invocation_id", "started_at", "session_id", "agent"];
+    pub(super) const ROW: [&str; 8] = [
         "invocation_id",
         "event_type",
         "timestamp",
@@ -609,7 +643,13 @@ mod tests {
     ];
 
     /// A row-query result row: `micros` since the epoch, `content` as JSON text.
-    fn row(id: &str, event_type: &str, micros: i64, content: Value, trace: &str) -> Vec<Value> {
+    pub(super) fn row(
+        id: &str,
+        event_type: &str,
+        micros: i64,
+        content: Value,
+        trace: &str,
+    ) -> Vec<Value> {
         vec![
             json!(id),
             json!(event_type),

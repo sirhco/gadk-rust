@@ -55,8 +55,8 @@ pub mod store;
 
 pub use error::MonitorError;
 pub use export::{
-    CompareOp, ExportContext, ExportOptions, ExportedCase, RunScore, ScoreFilter, TraceInvocation,
-    run_to_case,
+    CompareOp, ExportContext, ExportOptions, ExportSource, ExportedCase, RunScore, ScoreFilter,
+    TraceInvocation, run_to_case,
 };
 pub use gcp::{AdcTokenSource, NoAuth, TokenSource};
 pub use judge::vertex_judge;

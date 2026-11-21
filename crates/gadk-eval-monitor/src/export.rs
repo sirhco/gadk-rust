@@ -13,17 +13,21 @@
 // limitations under the License.
 
 //! Production runs as eval cases: [`run_to_case`] turns a [`ProductionRun`] and its scores into
-//! a `gadk-eval` [`EvalCase`].
+//! a `gadk-eval` [`EvalCase`], and an [`ExportSource`] finds the runs, their session history and
+//! their scores.
 //!
 //! A case's scorers follow the run's scores: a run whose latest scores are positive (a thumbs
 //! up, or a number of at least [`ExportOptions::min_good`]) and none negative becomes a
 //! regression case with the production reply as its `reference` (plus a `tools` trajectory);
 //! every other run becomes an `llm_judge` case graded against a rubric.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, SecondsFormat, Utc};
 use gadk_eval::{EvalCase, ScorerSpec, ToolExpect};
 use serde_json::{Map, Value};
 
+use crate::error::MonitorError;
 use crate::source::ProductionRun;
 
 /// The most characters of the production reply quoted in a case's comments.
@@ -299,6 +303,33 @@ impl TraceInvocation {
             started_at,
         }
     }
+}
+
+/// Where an export reads runs, their session history and their scores.
+/// [`crate::BigQueryTranscriptSource`] implements it.
+#[async_trait::async_trait]
+pub trait ExportSource: Send + Sync {
+    /// The invocations of the traces `traces` that started in the last 30 days, oldest first.
+    async fn trace_invocations(
+        &self,
+        traces: &[String],
+    ) -> Result<Vec<TraceInvocation>, MonitorError>;
+
+    /// The runs of the invocations `ids` that started at or after `from`, oldest first.
+    /// Callers pass the earliest start they know (from [`ExportSource::trace_invocations`] or a
+    /// window query).
+    async fn runs(
+        &self,
+        ids: &[String],
+        from: DateTime<Utc>,
+    ) -> Result<Vec<ProductionRun>, MonitorError>;
+
+    /// For each of `runs`, keyed by invocation id: the up to 50 most recent runs of its session
+    /// that started before it and at most 30 days before it, oldest first.
+    async fn histories(
+        &self,
+        runs: &[ProductionRun],
+    ) -> Result<HashMap<String, Vec<ProductionRun>>, MonitorError>;
 }
 
 /// `run` as a case. `history` holds the session's earlier runs, oldest first (used only with
