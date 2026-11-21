@@ -218,6 +218,7 @@ async fn production_metrics(state: &AppState, name: &str, range: TimeRange) -> P
                         rows: metric_rows(&m, state.prices.as_deref(), &counts),
                         priced: state.prices.is_some(),
                         pass,
+                        truncated: m.truncated,
                     }
                 }
             }
@@ -244,15 +245,24 @@ async fn pass_rates(
     };
     let (ids, capped) = eval_ids(&runs, PASS_RATE_IDS);
     if ids.is_empty() {
-        return (PassColumn::On { capped }, BTreeMap::new());
+        return (
+            PassColumn::On {
+                capped,
+                truncated: false,
+            },
+            BTreeMap::new(),
+        );
     }
     match source
         .versions_for_invocations(name, &ids, start, end)
         .await
     {
         Ok(mapping) => (
-            PassColumn::On { capped },
-            pass_counts(&runs, &ids, &mapping),
+            PassColumn::On {
+                capped,
+                truncated: mapping.truncated,
+            },
+            pass_counts(&runs, &ids, &mapping.pairs),
         ),
         Err(e) => (PassColumn::Failed(e.to_string()), BTreeMap::new()),
     }
@@ -1223,10 +1233,14 @@ mod tests {
     #[tokio::test]
     async fn production_metrics_failure_is_a_banner_with_the_hint() {
         let (_dir, store) = seeded().await;
-        let fake = FakeHttp::new(vec![Ok((
-            403,
-            json!({ "error": { "code": 403, "message": "Access Denied", "errors": [{ "reason": "accessDenied" }] } }).to_string(),
-        ))]);
+        // The stats and cost queries run concurrently: both may be sent.
+        let denied = || {
+            Ok((
+                403,
+                json!({ "error": { "code": 403, "message": "Access Denied", "errors": [{ "reason": "accessDenied" }] } }).to_string(),
+            ))
+        };
+        let fake = FakeHttp::new(vec![denied(), denied()]);
         let (status, _, body) = get(bq_state(&store, &fake, None), "/prompts/greet").await;
         assert_eq!(status, StatusCode::OK, "the rest of the page still renders");
         assert!(body.contains("BigQuery: HTTP 403: Access Denied"), "{body}");
@@ -1288,5 +1302,35 @@ mod tests {
             vec![(1, (1, 1)), (2, (1, 2))],
             "c is past the id cap"
         );
+    }
+
+    #[tokio::test]
+    async fn production_metrics_note_truncated_queries() {
+        let (_dir, store) = seeded().await;
+        let secs = fixed_now().timestamp() - 3_600;
+        let r = report("greet-monitor", secs, &[&[Outcome::Pass]]);
+        let (_rdir, cache, _) = report_cache(&[r], 4).await;
+        let stats = reply(
+            &[("version", "INT64"), ("calls", "INT64")],
+            vec![vec![json!("2"), json!("4")]],
+            true,
+        );
+        let ids = reply(
+            &[("invocation_id", "STRING"), ("version", "INT64")],
+            vec![vec![json!("inv-0"), json!("2")]],
+            true,
+        );
+        let fake = FakeHttp::new(vec![stats, models_reply(), ids]);
+        let (status, _, body) = get(bq_state(&store, &fake, Some(cache)), "/prompts/greet").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(
+            body.contains(super::super::pages::prompt::METRICS_TRUNCATED),
+            "{body}"
+        );
+        assert!(
+            body.contains(super::super::pages::prompt::PASS_RATES_TRUNCATED),
+            "{body}"
+        );
+        assert!(body.contains("100.0% (1/1)"), "{body}");
     }
 }

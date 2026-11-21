@@ -116,6 +116,17 @@ pub(crate) struct VersionMetrics {
     pub(crate) stats: Vec<VersionStats>,
     /// Calls and tokens per version and model, for the cost.
     pub(crate) models: Vec<VersionModel>,
+    /// A query hit its row cap: some versions or version × model rows are left out.
+    pub(crate) truncated: bool,
+}
+
+/// The `(invocation id, version)` pairs of [`UsageSource::versions_for_invocations`].
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InvocationVersions {
+    /// The pairs.
+    pub(crate) pairs: Vec<(String, u32)>,
+    /// The query hit its row cap: some pairs are left out.
+    pub(crate) truncated: bool,
 }
 
 /// Usage queries over the agent-analytics table, run (and billed) in the compute project.
@@ -232,8 +243,23 @@ impl UsageSource {
         Ok(out)
     }
 
+    /// Runs `sql` with `params` plus `@limit` = `cap + 1`: the first `cap` rows and whether more
+    /// existed.
+    async fn run_capped(
+        &self,
+        sql: &str,
+        mut params: Vec<Value>,
+        cap: usize,
+    ) -> Result<(Vec<Map<String, Value>>, bool), SourceError> {
+        params.push(param("limit", "INT64", Some((cap + 1).to_string())));
+        let mut result = self.run(sql, params, (cap + 1) as u32).await?;
+        let truncated = result.rows.len() > cap || result.has_more;
+        result.rows.truncate(cap);
+        Ok((result.rows, truncated))
+    }
+
     /// Per-version metrics of `prompt` in `[start, end)`: one query for counts, means and latency
-    /// percentiles, then one for tokens per version and model (the cost).
+    /// percentiles and one for tokens per version and model (the cost), run concurrently.
     pub(crate) async fn version_metrics(
         &self,
         prompt: &str,
@@ -241,21 +267,18 @@ impl UsageSource {
         end: DateTime<Utc>,
     ) -> Result<VersionMetrics, SourceError> {
         let table = self.table.sql_path()?;
-        let params = |cap: usize| {
+        let params = || {
             let mut p = window_params(start, end);
             p.push(param("prompt", "STRING", Some(prompt.to_owned())));
-            p.push(param("limit", "INT64", Some(cap.to_string())));
             p
         };
-        let result = self
-            .run(
-                &version_stats_sql(&table),
-                params(VERSION_CAP),
-                VERSION_CAP as u32,
-            )
-            .await?;
-        let stats = result
-            .rows
+        let stats_sql = version_stats_sql(&table);
+        let models_sql = version_models_sql(&table);
+        let ((stat_rows, stats_truncated), (model_rows, models_truncated)) = tokio::try_join!(
+            self.run_capped(&stats_sql, params(), VERSION_CAP),
+            self.run_capped(&models_sql, params(), VERSION_MODEL_CAP),
+        )?;
+        let stats = stat_rows
             .iter()
             .filter_map(|row| {
                 Some(VersionStats {
@@ -271,15 +294,7 @@ impl UsageSource {
                 })
             })
             .collect();
-        let result = self
-            .run(
-                &version_models_sql(&table),
-                params(VERSION_MODEL_CAP),
-                VERSION_MODEL_CAP as u32,
-            )
-            .await?;
-        let models = result
-            .rows
+        let models = model_rows
             .iter()
             .filter_map(|row| {
                 Some(VersionModel {
@@ -288,7 +303,11 @@ impl UsageSource {
                 })
             })
             .collect();
-        Ok(VersionMetrics { stats, models })
+        Ok(VersionMetrics {
+            stats,
+            models,
+            truncated: stats_truncated || models_truncated,
+        })
     }
 
     /// The versions of `prompt` each invocation in `ids` used: `(invocation id, version)` pairs
@@ -300,18 +319,19 @@ impl UsageSource {
         ids: &[String],
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<(String, u32)>, SourceError> {
+    ) -> Result<InvocationVersions, SourceError> {
         let sql = invocation_versions_sql(&self.table.sql_path()?);
         let mut params = window_params(start, end);
         params.push(param("prompt", "STRING", Some(prompt.to_owned())));
         params.push(string_array_param("ids", ids));
-        params.push(param("limit", "INT64", Some(MAPPING_CAP.to_string())));
-        let result = self.run(&sql, params, MAPPING_CAP as u32).await?;
-        Ok(result
-            .rows
-            .iter()
-            .filter_map(|row| Some((text(row, "invocation_id")?, version_of(row)?)))
-            .collect())
+        let (rows, truncated) = self.run_capped(&sql, params, MAPPING_CAP).await?;
+        Ok(InvocationVersions {
+            pairs: rows
+                .iter()
+                .filter_map(|row| Some((text(row, "invocation_id")?, version_of(row)?)))
+                .collect(),
+            truncated,
+        })
     }
 }
 
@@ -362,7 +382,7 @@ fn string_array_param(name: &str, values: &[String]) -> Value {
 /// Calls, mean input and output tokens and approximate p50/p95 latency per version of
 /// `@prompt`, newest version first.
 fn version_stats_sql(table: &str) -> String {
-    let cte = calls_cte(table);
+    let cte = responses_cte(table);
     format!(
         r"{cte}
 SELECT prompt_version AS version, COUNT(*) AS calls, AVG(input) AS mean_input,
@@ -408,9 +428,20 @@ LIMIT @limit"
     )
 }
 
+/// The per-call columns of `c` read from the `res` (`LLM_RESPONSE`) row: prompt name and
+/// version, the four token counts (missing values 0, all from `attributes.usage_metadata`, so the
+/// `content` column is never read) and `latency_ms.total_ms`.
+const CALL_COLUMNS: &str = r"JSON_VALUE(res.attributes, '$.prompt.name') AS prompt_name,
+    SAFE_CAST(JSON_VALUE(res.attributes, '$.prompt.version') AS INT64) AS prompt_version,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.prompt_token_count') AS INT64), 0)
+      + IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.tool_use_prompt_token_count') AS INT64), 0) AS input,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.cached_content_token_count') AS INT64), 0) AS cached,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.candidates_token_count') AS INT64), 0) AS output,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.thoughts_token_count') AS INT64), 0) AS reasoning,
+    SAFE_CAST(JSON_VALUE(res.latency_ms, '$.total_ms') AS FLOAT64) AS total_ms";
+
 /// The `req` and `c` CTEs: `c` has one row per `LLM_RESPONSE` row in `[@start, @end)` with its
-/// trace, agent, model, prompt name and version, the four token counts (missing values 0) and
-/// `latency_ms.total_ms`.
+/// trace, agent, model and the [`CALL_COLUMNS`].
 fn calls_cte(table: &str) -> String {
     format!(
         r"WITH req AS (
@@ -421,16 +452,21 @@ fn calls_cte(table: &str) -> String {
 c AS (
   SELECT res.trace_id AS trace_id, res.agent AS agent,
     COALESCE(NULLIF(req.model, ''), NULLIF(JSON_VALUE(res.attributes, '$.model_version'), ''), '(unknown)') AS model,
-    JSON_VALUE(res.attributes, '$.prompt.name') AS prompt_name,
-    SAFE_CAST(JSON_VALUE(res.attributes, '$.prompt.version') AS INT64) AS prompt_version,
-    IFNULL(SAFE_CAST(JSON_VALUE(res.content, '$.usage.prompt') AS INT64), 0)
-      + IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.tool_use_prompt_token_count') AS INT64), 0) AS input,
-    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.cached_content_token_count') AS INT64), 0) AS cached,
-    IFNULL(SAFE_CAST(JSON_VALUE(res.content, '$.usage.completion') AS INT64), 0) AS output,
-    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.thoughts_token_count') AS INT64), 0) AS reasoning,
-    SAFE_CAST(JSON_VALUE(res.latency_ms, '$.total_ms') AS FLOAT64) AS total_ms
+    {CALL_COLUMNS}
   FROM {table} AS res
   LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id
+  WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end)"
+    )
+}
+
+/// The `c` CTE without the model: [`calls_cte`] minus the `LLM_REQUEST` join, for queries that
+/// do not group by model.
+fn responses_cte(table: &str) -> String {
+    format!(
+        r"WITH c AS (
+  SELECT res.trace_id AS trace_id, res.agent AS agent,
+    {CALL_COLUMNS}
+  FROM {table} AS res
   WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end)"
     )
 }
@@ -603,10 +639,10 @@ mod tests {
             "WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end",
             "LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id",
             "COALESCE(NULLIF(req.model, ''), NULLIF(JSON_VALUE(res.attributes, '$.model_version'), ''), '(unknown)') AS model",
-            "IFNULL(SAFE_CAST(JSON_VALUE(res.content, '$.usage.prompt') AS INT64), 0)",
+            "IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.prompt_token_count') AS INT64), 0)",
             "'$.usage_metadata.tool_use_prompt_token_count'",
             "'$.usage_metadata.cached_content_token_count'",
-            "IFNULL(SAFE_CAST(JSON_VALUE(res.content, '$.usage.completion') AS INT64), 0) AS output",
+            "IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.candidates_token_count') AS INT64), 0) AS output",
             "'$.usage_metadata.thoughts_token_count'",
             "CONCAT(prompt_name, '@', CAST(prompt_version AS STRING))",
             "GROUP BY 1, 2, 3",
@@ -614,6 +650,10 @@ mod tests {
         ] {
             assert!(sql.contains(piece), "{piece}: {sql}");
         }
+        assert!(
+            !sql.contains("(content") && !sql.contains("res.content"),
+            "{sql}"
+        );
         assert_eq!(
             param_value(&body, "start")["parameterValue"]["value"],
             json!("2026-11-19 12:00:00.000000+00:00")
@@ -839,9 +879,30 @@ mod tests {
             json!("greet")
         );
         assert_eq!(first["maximumBytesBilled"], json!("1000"));
+        assert!(!m.truncated);
+        assert!(
+            !sql.contains("LLM_REQUEST") && !sql.contains("req."),
+            "the stats query does not join the requests: {sql}"
+        );
+        assert!(
+            !sql.contains("(content") && !sql.contains("res.content"),
+            "{sql}"
+        );
+        assert_eq!(
+            param_value(&first, "limit")["parameterValue"]["value"],
+            json!("1001")
+        );
         let second = fake.body(1);
         let sql = second["query"].as_str().unwrap();
         assert!(sql.contains("GROUP BY 1, 2\nORDER BY 1 DESC, 2"), "{sql}");
+        assert!(
+            sql.contains("LEFT JOIN req"),
+            "the cost query needs the model: {sql}"
+        );
+        assert_eq!(
+            param_value(&second, "limit")["parameterValue"]["value"],
+            json!("5001")
+        );
         assert_eq!(
             param_value(&second, "start")["parameterValue"]["value"],
             json!("2026-11-19 12:00:00.000000+00:00")
@@ -866,7 +927,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             mapping,
-            vec![("inv-0".to_owned(), 2), ("inv-2".to_owned(), 1)]
+            InvocationVersions {
+                pairs: vec![("inv-0".to_owned(), 2), ("inv-2".to_owned(), 1)],
+                truncated: false,
+            }
         );
         let body = fake.body(0);
         let sql = body["query"].as_str().unwrap();
@@ -881,6 +945,10 @@ mod tests {
         }
         assert!(!sql.contains("inv-0"), "ids are a parameter: {sql}");
         assert_eq!(
+            param_value(&body, "limit")["parameterValue"]["value"],
+            json!("20001")
+        );
+        assert_eq!(
             param_value(&body, "ids"),
             json!({
                 "name": "ids",
@@ -888,5 +956,40 @@ mod tests {
                 "parameterValue": { "arrayValues": [{ "value": "inv-0" }, { "value": "inv-2" }] }
             })
         );
+    }
+
+    #[tokio::test]
+    async fn version_metrics_and_mapping_report_truncation_at_their_caps() {
+        let stats = reply(
+            &[("version", "INT64"), ("calls", "INT64")],
+            vec![vec![json!("2"), json!("4")]],
+            true,
+        );
+        let models = reply(
+            &[
+                ("version", "INT64"),
+                ("model", "STRING"),
+                ("calls", "INT64"),
+            ],
+            vec![vec![json!("2"), json!("m"), json!("4")]],
+            false,
+        );
+        let mapping = reply(
+            &[("invocation_id", "STRING"), ("version", "INT64")],
+            vec![vec![json!("inv-0"), json!("2")]],
+            true,
+        );
+        let fake = FakeHttp::new(vec![stats, models, mapping]);
+        let src = source(&fake);
+        let m = src.version_metrics("greet", start(), end()).await.unwrap();
+        assert!(m.truncated);
+        assert_eq!(m.stats.len(), 1);
+        let ids = vec!["inv-0".to_owned()];
+        let v = src
+            .versions_for_invocations("greet", &ids, start(), end())
+            .await
+            .unwrap();
+        assert!(v.truncated);
+        assert_eq!(v.pairs, vec![("inv-0".to_owned(), 2)]);
     }
 }

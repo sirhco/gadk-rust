@@ -51,12 +51,11 @@ async fn usage_page(State(state): State<AppState>, Query(p): Query<UsageParams>)
     };
     let end = (state.now)();
     let start = end - range.duration();
-    let breakdown = match source.breakdown(start, end).await {
-        Ok(b) => b,
-        Err(e) => return source_error_in(Nav::Usage, &e),
-    };
-    let top = match source.top_traces(start, end, TOP_TRACES).await {
-        Ok(t) => t,
+    let (breakdown, top) = match tokio::try_join!(
+        source.breakdown(start, end),
+        source.top_traces(start, end, TOP_TRACES),
+    ) {
+        Ok(both) => both,
         Err(e) => return source_error_in(Nav::Usage, &e),
     };
     html(

@@ -641,7 +641,8 @@ fn spans(rows: &[Row]) -> Vec<RawSpan> {
 /// Trace carry them: the operation, the model (the first `attributes.model`, from the
 /// `LLM_REQUEST` row, else the response's `attributes.model_version`) and, from the last
 /// `LLM_RESPONSE` row, the token usage (`input_tokens` = prompt + tool-use prompt,
-/// `output_tokens` = completion + thoughts, missing values 0).
+/// `output_tokens` = completion + thoughts, missing values 0; prompt and completion from
+/// `attributes.usage_metadata`, else from `content.usage`).
 fn llm_labels(group: &[&Row], labels: &mut BTreeMap<String, String>) {
     labels.insert(LABEL_OPERATION.to_owned(), OP_GENERATE_CONTENT.to_owned());
     let model = group
@@ -662,9 +663,17 @@ fn llm_labels(group: &[&Row], labels: &mut BTreeMap<String, String>) {
     let content = res.content.as_ref();
     let attributes = res.attributes.as_ref();
     let thoughts = count(attributes, "/usage_metadata/thoughts_token_count");
-    let input = count(content, "/usage/prompt")
-        + count(attributes, "/usage_metadata/tool_use_prompt_token_count");
-    let output = count(content, "/usage/completion") + thoughts;
+    // `attributes.usage_metadata` first; rows without it fall back to the `content.usage`
+    // summary the plugin writes from the same counts.
+    let prompt = present(attributes, "/usage_metadata/prompt_token_count")
+        .unwrap_or_else(|| count(content, "/usage/prompt"));
+    let completion = present(attributes, "/usage_metadata/candidates_token_count")
+        .unwrap_or_else(|| count(content, "/usage/completion"));
+    let input = prompt.saturating_add(count(
+        attributes,
+        "/usage_metadata/tool_use_prompt_token_count",
+    ));
+    let output = completion.saturating_add(thoughts);
     let cached = count(attributes, "/usage_metadata/cached_content_token_count");
     for (key, value) in [
         (LABEL_INPUT, input),
@@ -678,9 +687,13 @@ fn llm_labels(group: &[&Row], labels: &mut BTreeMap<String, String>) {
 
 /// A non-negative integer at `pointer` of a JSON cell; 0 when absent.
 fn count(cell: Option<&Value>, pointer: &str) -> u64 {
+    present(cell, pointer).unwrap_or(0)
+}
+
+/// A non-negative integer at `pointer` of a JSON cell, if there is one.
+fn present(cell: Option<&Value>, pointer: &str) -> Option<u64> {
     cell.and_then(|v| v.pointer(pointer))
         .and_then(Value::as_u64)
-        .unwrap_or(0)
 }
 
 #[async_trait::async_trait]
@@ -1568,8 +1581,9 @@ LIMIT @limit OFFSET @offset"#;
                 "LLM_RESPONSE",
                 Some(LLM),
                 Some(AGENT),
+                // `attributes.usage_metadata` wins over this summary.
                 Some(
-                    json!({"response": "hi", "usage": {"prompt": 1000, "completion": 300, "total": 1550}}),
+                    json!({"response": "hi", "usage": {"prompt": 1, "completion": 1, "total": 2}}),
                 ),
                 Some(response_attributes),
                 Some(json!({"total_ms": 900})),
@@ -1581,7 +1595,10 @@ LIMIT @limit OFFSET @offset"#;
                 "LLM_RESPONSE",
                 Some(BARE),
                 Some(AGENT),
-                None,
+                // No `usage_metadata`: the `content.usage` summary is the fallback.
+                Some(
+                    json!({"response": "yo", "usage": {"prompt": 40, "completion": 7, "total": 47}}),
+                ),
                 Some(json!({"model_version": "gemini-3.8-pro-002"})),
                 None,
                 "OK",
@@ -1636,7 +1653,9 @@ LIMIT @limit OFFSET @offset"#;
         );
         let bare = labels(BARE);
         assert_eq!(bare["gen_ai.request.model"], "gemini-3.8-pro-002");
-        assert_eq!(bare["gen_ai.usage.input_tokens"], "0");
+        assert_eq!(bare["gen_ai.usage.input_tokens"], "40");
+        assert_eq!(bare["gen_ai.usage.output_tokens"], "7");
+        assert_eq!(bare["gen_ai.usage.cache_read.input_tokens"], "0");
         assert_eq!(bare["gen_ai.operation.name"], "generate_content");
         let tool = labels(TOOL);
         assert!(!tool.contains_key("gen_ai.operation.name"), "{tool:?}");

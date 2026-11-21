@@ -73,6 +73,13 @@ fn diff_table(lines: &[DiffLine]) -> Markup {
 /// The note shown when the trace source is not BigQuery.
 pub(crate) const NEEDS_BIGQUERY_METRICS: &str = "Production metrics need the BigQuery trace source: start the console with --traces bigquery://<project>.<dataset>.<table>.";
 
+/// The note shown when a metrics query hit its row cap.
+pub(crate) const METRICS_TRUNCATED: &str =
+    "Some versions or costs are left out: a query reached its row limit.";
+/// The note shown when the invocation-to-version mapping hit its row cap.
+pub(crate) const PASS_RATES_TRUNCATED: &str =
+    "Eval pass rates leave out some runs: the version mapping reached its row limit.";
+
 /// The production-metrics section of a prompt page.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ProductionMetrics {
@@ -97,6 +104,8 @@ pub(crate) enum MetricsBody {
         priced: bool,
         /// The eval pass-rate column.
         pass: PassColumn,
+        /// A metrics query hit its row cap: some versions or costs are left out.
+        truncated: bool,
     },
 }
 
@@ -128,6 +137,8 @@ pub(crate) enum PassColumn {
     On {
         /// More than 5,000 invocations were in range.
         capped: bool,
+        /// The invocation-to-version mapping hit its row cap: some runs are left out.
+        truncated: bool,
     },
 }
 
@@ -177,7 +188,7 @@ fn metrics_section(base: &str, m: &ProductionMetrics) -> Markup {
             MetricsBody::Failed(text, hint) => {
                 (banner(text, *hint))
             }
-            MetricsBody::Rows { rows, priced, pass } => {
+            MetricsBody::Rows { rows, priced, pass, truncated } => {
                 @let pass_on = matches!(pass, PassColumn::On { .. });
                 @if rows.is_empty() {
                     p class="empty" {
@@ -215,16 +226,24 @@ fn metrics_section(base: &str, m: &ProductionMetrics) -> Markup {
                         p class="empty" { (PARTIAL_NOTE) }
                     }
                 }
+                @if *truncated {
+                    p class="empty" { (METRICS_TRUNCATED) }
+                }
                 @match pass {
                     PassColumn::Failed(text) => {
                         (banner(&format!("Eval pass rates could not be loaded: {text}"), None))
                     }
-                    PassColumn::On { capped: true } => {
-                        p class="empty" {
-                            "Eval pass rates use the newest 5,000 monitored invocations in the range."
+                    PassColumn::On { capped, truncated } => {
+                        @if *capped {
+                            p class="empty" {
+                                "Eval pass rates use the newest 5,000 monitored invocations in the range."
+                            }
+                        }
+                        @if *truncated {
+                            p class="empty" { (PASS_RATES_TRUNCATED) }
                         }
                     }
-                    _ => {}
+                    PassColumn::Off => {}
                 }
             }
         }
@@ -232,7 +251,8 @@ fn metrics_section(base: &str, m: &ProductionMetrics) -> Markup {
 }
 
 /// The prompt detail page: version history, diff picker, the selected version, the diff,
-/// and the label forms, and, when given, the production metrics after the diff picker. `error` (an `error::banner`) is shown under the heading.
+/// and the label forms, and, when given, the production metrics after the diff picker.
+/// `error` (an `error::banner`) is shown under the heading.
 pub(crate) fn render(
     d: &PromptDetail,
     view: Option<&VersionView>,

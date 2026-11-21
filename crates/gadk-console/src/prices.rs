@@ -221,10 +221,10 @@ impl Usage {
 
 impl AddAssign for Usage {
     fn add_assign(&mut self, other: Self) {
-        self.input += other.input;
-        self.cached += other.cached;
-        self.output += other.output;
-        self.reasoning += other.reasoning;
+        self.input = self.input.saturating_add(other.input);
+        self.cached = self.cached.saturating_add(other.cached);
+        self.output = self.output.saturating_add(other.output);
+        self.reasoning = self.reasoning.saturating_add(other.reasoning);
     }
 }
 

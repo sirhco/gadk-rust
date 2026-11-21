@@ -3,8 +3,10 @@
 `gadk-console`, a local web console for gadk agents. It shows the traces your agents exported
 to Cloud Trace, with each span's Cloud Logging entries attached, and it browses the
 `gadk-prompts` registry: versions, diffs and labels. With `--reports`, it also shows the reports
-of `gadk-eval-monitor` monitors. With a price file (`--prices`) it prices token counts, and with the BigQuery trace source it shows usage and cost by model, agent, prompt version and trace. It runs on your machine, listens on 127.0.0.1 only, and reads
-Google Cloud with your Application Default Credentials.
+of `gadk-eval-monitor` monitors. With a price file (`--prices`) it prices token counts, and with
+the BigQuery trace source it shows usage and cost by model, agent, prompt version and trace. It
+runs on your machine, listens on 127.0.0.1 only, and reads Google Cloud with your Application
+Default Credentials.
 
 ```sh
 cargo install gadk-console
@@ -26,8 +28,8 @@ The console prints its URL and serves until you stop it (Ctrl-C).
 | `--prices <file>` | none | Price file (YAML, USD per 1,000,000 tokens per model). Without it, cost cells show `—`; token counts still show. See [Usage and cost](#usage-and-cost). |
 
 Exit codes: 2 for a usage error (clap's message), 1 when startup fails (a bad store URL, a bad
-report store URL, a bad price file, missing credentials for a `gs://` report store, or a port already in use), with
-a one-line `gadk-console: …` message.
+report store URL, a bad price file, missing credentials for a `gs://` report store, or a port
+already in use), with a one-line `gadk-console: …` message.
 
 ## Prerequisites
 
@@ -118,14 +120,16 @@ The console is for one developer on their own machine:
 `--prices <file>` reads model prices, in USD per 1,000,000 tokens, from a YAML list. There are no
 built-in prices.
 
-    - model: gemini-3.8-flash      # an exact model name
-      input: 0.30
-      output: 2.50
-      cached_input: 0.075          # optional; defaults to input
-    - model: gemini-3.8-*          # a trailing * matches by prefix
-      input: 1.25
-      output: 10.00
-      reasoning: 10.00             # optional; defaults to output
+```yaml
+- model: gemini-3.8-flash      # an exact model name
+  input: 0.30
+  output: 2.50
+  cached_input: 0.075          # optional; defaults to input
+- model: gemini-3.8-*          # a trailing * matches by prefix
+  input: 1.25
+  output: 10.00
+  reasoning: 10.00             # optional; defaults to output
+```
 
 An exact name beats a prefix, and a longer prefix beats a shorter one. A bad file (unreadable,
 not a list, an unknown key, an empty or repeated model, a negative price) stops startup with
@@ -135,9 +139,9 @@ Each model call is four token counts:
 
 | Count | Cloud Trace span label | BigQuery `LLM_RESPONSE` row |
 |---|---|---|
-| input | `gen_ai.usage.input_tokens` | `content.usage.prompt` + `attributes.usage_metadata.tool_use_prompt_token_count` |
+| input | `gen_ai.usage.input_tokens` | `attributes.usage_metadata.prompt_token_count` + `attributes.usage_metadata.tool_use_prompt_token_count` |
 | cached | `gen_ai.usage.cache_read.input_tokens` | `attributes.usage_metadata.cached_content_token_count` |
-| output | `gen_ai.usage.output_tokens` minus reasoning | `content.usage.completion` |
+| output | `gen_ai.usage.output_tokens` minus reasoning | `attributes.usage_metadata.candidates_token_count` |
 | reasoning | `gen_ai.usage.reasoning.output_tokens` | `attributes.usage_metadata.thoughts_token_count` |
 
 Missing values count as 0. The model is `gen_ai.request.model` (Cloud Trace), or the
