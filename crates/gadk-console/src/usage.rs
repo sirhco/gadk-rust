@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Token usage from the agent-analytics BigQuery table: the `/usage` breakdowns.
+//! Token usage from the agent-analytics BigQuery table: the `/usage` breakdowns and the
+//! production metrics of prompt versions.
 //!
 //! Model calls are the `LLM_RESPONSE` rows in the window; each call's model is the
 //! `attributes.model` of the `LLM_REQUEST` row with the same `trace_id` and `span_id`, else the
@@ -22,7 +23,7 @@
 
 use chrono::{DateTime, Utc};
 use gadk_bigquery::{BigQueryClient, QueryOptions, QueryResult};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::prices::{UNKNOWN_MODEL, Usage};
 use crate::traces::{BigQueryTable, SourceError, from_bigquery, param, text, ts_param};
@@ -33,6 +34,12 @@ pub(crate) const BREAKDOWN_CAP: usize = 5_000;
 pub(crate) const TOP_TRACES: usize = 20;
 /// The most trace × model rows the top-traces query returns.
 const TOP_ROWS_CAP: u32 = 10_000;
+/// The most versions the per-version queries return.
+const VERSION_CAP: usize = 1_000;
+/// The most version × model rows the cost query returns.
+const VERSION_MODEL_CAP: usize = 5_000;
+/// The most invocation × version rows the pass-rate mapping returns.
+const MAPPING_CAP: usize = 20_000;
 
 /// The calls of one model and their summed tokens.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +81,41 @@ pub(crate) struct TopTrace {
     pub(crate) total: u64,
     /// The trace's calls per model.
     pub(crate) models: Vec<ModelCalls>,
+}
+
+/// Calls, mean tokens and latency percentiles of one prompt version.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct VersionStats {
+    /// The prompt version.
+    pub(crate) version: u32,
+    /// LLM calls.
+    pub(crate) calls: u64,
+    /// Mean input tokens per call.
+    pub(crate) mean_input: f64,
+    /// Mean output tokens per call.
+    pub(crate) mean_output: f64,
+    /// Median `latency_ms.total_ms` (approximate).
+    pub(crate) p50_ms: Option<f64>,
+    /// 95th percentile of `latency_ms.total_ms` (approximate).
+    pub(crate) p95_ms: Option<f64>,
+}
+
+/// The calls of one prompt version on one model.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct VersionModel {
+    /// The prompt version.
+    pub(crate) version: u32,
+    /// The model and its calls.
+    pub(crate) calls: ModelCalls,
+}
+
+/// The per-version metrics of one prompt.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct VersionMetrics {
+    /// One entry per version, newest first.
+    pub(crate) stats: Vec<VersionStats>,
+    /// Calls and tokens per version and model, for the cost.
+    pub(crate) models: Vec<VersionModel>,
 }
 
 /// Usage queries over the agent-analytics table, run (and billed) in the compute project.
@@ -189,6 +231,88 @@ impl UsageSource {
         }
         Ok(out)
     }
+
+    /// Per-version metrics of `prompt` in `[start, end)`: one query for counts, means and latency
+    /// percentiles, then one for tokens per version and model (the cost).
+    pub(crate) async fn version_metrics(
+        &self,
+        prompt: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<VersionMetrics, SourceError> {
+        let table = self.table.sql_path()?;
+        let params = |cap: usize| {
+            let mut p = window_params(start, end);
+            p.push(param("prompt", "STRING", Some(prompt.to_owned())));
+            p.push(param("limit", "INT64", Some(cap.to_string())));
+            p
+        };
+        let result = self
+            .run(
+                &version_stats_sql(&table),
+                params(VERSION_CAP),
+                VERSION_CAP as u32,
+            )
+            .await?;
+        let stats = result
+            .rows
+            .iter()
+            .filter_map(|row| {
+                Some(VersionStats {
+                    version: version_of(row)?,
+                    calls: count(row, "calls"),
+                    mean_input: row.get("mean_input").and_then(Value::as_f64).unwrap_or(0.0),
+                    mean_output: row
+                        .get("mean_output")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.0),
+                    p50_ms: row.get("p50_ms").and_then(Value::as_f64),
+                    p95_ms: row.get("p95_ms").and_then(Value::as_f64),
+                })
+            })
+            .collect();
+        let result = self
+            .run(
+                &version_models_sql(&table),
+                params(VERSION_MODEL_CAP),
+                VERSION_MODEL_CAP as u32,
+            )
+            .await?;
+        let models = result
+            .rows
+            .iter()
+            .filter_map(|row| {
+                Some(VersionModel {
+                    version: version_of(row)?,
+                    calls: model_calls(row),
+                })
+            })
+            .collect();
+        Ok(VersionMetrics { stats, models })
+    }
+
+    /// The versions of `prompt` each invocation in `ids` used: `(invocation id, version)` pairs
+    /// from its `LLM_REQUEST` rows, read in `[start, end)` widened by one day before and one hour
+    /// after.
+    pub(crate) async fn versions_for_invocations(
+        &self,
+        prompt: &str,
+        ids: &[String],
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<(String, u32)>, SourceError> {
+        let sql = invocation_versions_sql(&self.table.sql_path()?);
+        let mut params = window_params(start, end);
+        params.push(param("prompt", "STRING", Some(prompt.to_owned())));
+        params.push(string_array_param("ids", ids));
+        params.push(param("limit", "INT64", Some(MAPPING_CAP.to_string())));
+        let result = self.run(&sql, params, MAPPING_CAP as u32).await?;
+        Ok(result
+            .rows
+            .iter()
+            .filter_map(|row| Some((text(row, "invocation_id")?, version_of(row)?)))
+            .collect())
+    }
 }
 
 /// The `@start` and `@end` TIMESTAMP parameters.
@@ -216,6 +340,72 @@ fn model_calls(row: &Map<String, Value>) -> ModelCalls {
             reasoning: count(row, "reasoning"),
         },
     }
+}
+
+/// The `version` cell as a prompt version.
+fn version_of(row: &Map<String, Value>) -> Option<u32> {
+    row.get("version")
+        .and_then(Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok())
+}
+
+/// An `ARRAY<STRING>` query parameter.
+fn string_array_param(name: &str, values: &[String]) -> Value {
+    let values: Vec<Value> = values.iter().map(|v| json!({ "value": v })).collect();
+    json!({
+        "name": name,
+        "parameterType": { "type": "ARRAY", "arrayType": { "type": "STRING" } },
+        "parameterValue": { "arrayValues": values },
+    })
+}
+
+/// Calls, mean input and output tokens and approximate p50/p95 latency per version of
+/// `@prompt`, newest version first.
+fn version_stats_sql(table: &str) -> String {
+    let cte = calls_cte(table);
+    format!(
+        r"{cte}
+SELECT prompt_version AS version, COUNT(*) AS calls, AVG(input) AS mean_input,
+  AVG(output) AS mean_output,
+  APPROX_QUANTILES(total_ms, 100)[SAFE_OFFSET(50)] AS p50_ms,
+  APPROX_QUANTILES(total_ms, 100)[SAFE_OFFSET(95)] AS p95_ms
+FROM c
+WHERE prompt_name = @prompt AND prompt_version IS NOT NULL
+GROUP BY 1
+ORDER BY 1 DESC
+LIMIT @limit"
+    )
+}
+
+/// Calls and tokens per version of `@prompt` and model.
+fn version_models_sql(table: &str) -> String {
+    let cte = calls_cte(table);
+    format!(
+        r"{cte}
+SELECT prompt_version AS version, model, COUNT(*) AS calls, SUM(input) AS input,
+  SUM(cached) AS cached, SUM(output) AS output, SUM(reasoning) AS reasoning
+FROM c
+WHERE prompt_name = @prompt AND prompt_version IS NOT NULL
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2
+LIMIT @limit"
+    )
+}
+
+/// The `@prompt` versions recorded on the `LLM_REQUEST` rows of the invocations in `@ids`.
+fn invocation_versions_sql(table: &str) -> String {
+    format!(
+        r"SELECT DISTINCT invocation_id,
+  SAFE_CAST(JSON_VALUE(attributes, '$.prompt.version') AS INT64) AS version
+FROM {table}
+WHERE event_type = 'LLM_REQUEST'
+  AND timestamp >= TIMESTAMP_SUB(@start, INTERVAL 1 DAY)
+  AND timestamp < TIMESTAMP_ADD(@end, INTERVAL 1 HOUR)
+  AND invocation_id IN UNNEST(@ids)
+  AND JSON_VALUE(attributes, '$.prompt.name') = @prompt
+  AND SAFE_CAST(JSON_VALUE(attributes, '$.prompt.version') AS INT64) IS NOT NULL
+LIMIT @limit"
+    )
 }
 
 /// The `req` and `c` CTEs: `c` has one row per `LLM_RESPONSE` row in `[@start, @end)` with its
@@ -560,6 +750,143 @@ mod tests {
                 reason: Some("accessDenied".into()),
                 detail: "Access Denied".into()
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn version_metrics_read_stats_then_cost_cells_for_the_prompt() {
+        let stats = reply(
+            &[
+                ("version", "INT64"),
+                ("calls", "INT64"),
+                ("mean_input", "FLOAT64"),
+                ("mean_output", "FLOAT64"),
+                ("p50_ms", "FLOAT64"),
+                ("p95_ms", "FLOAT64"),
+            ],
+            vec![vec![
+                json!("2"),
+                json!("4"),
+                json!("1250"),
+                json!("300.5"),
+                json!("820"),
+                Value::Null,
+            ]],
+            false,
+        );
+        let models = reply(
+            &[
+                ("version", "INT64"),
+                ("model", "STRING"),
+                ("calls", "INT64"),
+                ("input", "INT64"),
+                ("cached", "INT64"),
+                ("output", "INT64"),
+                ("reasoning", "INT64"),
+            ],
+            vec![vec![
+                json!("2"),
+                json!("gemini-3.8-flash"),
+                json!("4"),
+                json!("5000"),
+                json!("1000"),
+                json!("1202"),
+                json!("0"),
+            ]],
+            false,
+        );
+        let fake = FakeHttp::new(vec![stats, models]);
+        let m = source(&fake)
+            .version_metrics("greet", start(), end())
+            .await
+            .unwrap();
+        assert_eq!(
+            m.stats,
+            vec![VersionStats {
+                version: 2,
+                calls: 4,
+                mean_input: 1250.0,
+                mean_output: 300.5,
+                p50_ms: Some(820.0),
+                p95_ms: None,
+            }]
+        );
+        assert_eq!(
+            m.models,
+            vec![VersionModel {
+                version: 2,
+                calls: ModelCalls {
+                    model: "gemini-3.8-flash".into(),
+                    calls: 4,
+                    usage: usage(5000, 1000, 1202, 0),
+                },
+            }]
+        );
+        let first = fake.body(0);
+        let sql = first["query"].as_str().unwrap();
+        for piece in [
+            "WHERE prompt_name = @prompt AND prompt_version IS NOT NULL",
+            "AVG(input) AS mean_input",
+            "APPROX_QUANTILES(total_ms, 100)[SAFE_OFFSET(50)] AS p50_ms",
+            "APPROX_QUANTILES(total_ms, 100)[SAFE_OFFSET(95)] AS p95_ms",
+            "SAFE_CAST(JSON_VALUE(res.latency_ms, '$.total_ms') AS FLOAT64) AS total_ms",
+            "GROUP BY 1\nORDER BY 1 DESC",
+        ] {
+            assert!(sql.contains(piece), "{piece}: {sql}");
+        }
+        assert_eq!(
+            param_value(&first, "prompt")["parameterValue"]["value"],
+            json!("greet")
+        );
+        assert_eq!(first["maximumBytesBilled"], json!("1000"));
+        let second = fake.body(1);
+        let sql = second["query"].as_str().unwrap();
+        assert!(sql.contains("GROUP BY 1, 2\nORDER BY 1 DESC, 2"), "{sql}");
+        assert_eq!(
+            param_value(&second, "start")["parameterValue"]["value"],
+            json!("2026-11-19 12:00:00.000000+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn versions_for_invocations_maps_ids_with_an_array_parameter() {
+        let fake = FakeHttp::new(vec![reply(
+            &[("invocation_id", "STRING"), ("version", "INT64")],
+            vec![
+                vec![json!("inv-0"), json!("2")],
+                vec![json!("inv-2"), json!("1")],
+                vec![json!("inv-9"), Value::Null],
+            ],
+            false,
+        )]);
+        let ids = vec!["inv-0".to_owned(), "inv-2".to_owned()];
+        let mapping = source(&fake)
+            .versions_for_invocations("greet", &ids, start(), end())
+            .await
+            .unwrap();
+        assert_eq!(
+            mapping,
+            vec![("inv-0".to_owned(), 2), ("inv-2".to_owned(), 1)]
+        );
+        let body = fake.body(0);
+        let sql = body["query"].as_str().unwrap();
+        for piece in [
+            "WHERE event_type = 'LLM_REQUEST'",
+            "AND timestamp >= TIMESTAMP_SUB(@start, INTERVAL 1 DAY)",
+            "AND timestamp < TIMESTAMP_ADD(@end, INTERVAL 1 HOUR)",
+            "AND invocation_id IN UNNEST(@ids)",
+            "AND JSON_VALUE(attributes, '$.prompt.name') = @prompt",
+        ] {
+            assert!(sql.contains(piece), "{piece}: {sql}");
+        }
+        assert!(!sql.contains("inv-0"), "ids are a parameter: {sql}");
+        assert_eq!(
+            param_value(&body, "ids"),
+            json!({
+                "name": "ids",
+                "parameterType": { "type": "ARRAY", "arrayType": { "type": "STRING" } },
+                "parameterValue": { "arrayValues": [{ "value": "inv-0" }, { "value": "inv-2" }] }
+            })
         );
     }
 }

@@ -14,11 +14,15 @@
 
 //! Prompt routes: `/prompts`, `/prompts/{name}` and the label writes.
 
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+
 use axum::Form;
 use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
+use chrono::{DateTime, Utc};
+use gadk_eval_monitor::MonitorError;
 use gadk_prompts::{Label, PromptSnapshot, StoreError};
 use http::StatusCode;
 use maud::{Markup, html};
@@ -28,8 +32,13 @@ use super::AppState;
 use super::guard::check_csrf;
 use super::pages::error::{banner, error_page, store_error, store_status, store_text};
 use super::pages::layout::{self, Nav};
+use super::pages::prompt::{MetricsBody, MetricsRow, PassColumn, ProductionMetrics};
 use super::pages::{prompt, prompts};
+use crate::evals::ReportCache;
+use crate::prices::{CostSum, PriceTable, cost_of};
 use crate::prompts::{diff_view, prompt_detail, prompt_rows, version_view};
+use crate::traces::TimeRange;
+use crate::usage::{UsageSource, VersionMetrics};
 
 const NO_STORE: &str = "No prompt store configured (start with --store)";
 
@@ -59,12 +68,14 @@ async fn list(State(state): State<AppState>) -> Response {
     }
 }
 
-/// `?v=`, `?a=` and `?b=`; empty values count as absent.
+/// `?v=`, `?a=`, `?b=` and `?range=` (the production-metrics range); empty values count as
+/// absent.
 #[derive(Debug, Default, Deserialize)]
 struct DetailQuery {
     v: Option<String>,
     a: Option<String>,
     b: Option<String>,
+    range: Option<String>,
 }
 
 fn bad_request(text: &str) -> Response {
@@ -104,8 +115,28 @@ async fn detail(
         Ok(show) => show,
         Err(resp) => return resp,
     };
+    let range = q
+        .range
+        .as_deref()
+        .and_then(TimeRange::parse)
+        .unwrap_or(TimeRange::Days7);
     match store.load_all().await {
-        Ok(snap) => detail_page(&state, &snap, &name, show, StatusCode::OK, None),
+        Ok(snap) => {
+            let metrics = if prompt_detail(&snap, &name).is_some() {
+                Some(production_metrics(&state, &name, range).await)
+            } else {
+                None
+            };
+            detail_page(
+                &state,
+                &snap,
+                &name,
+                show,
+                StatusCode::OK,
+                None,
+                metrics.as_ref(),
+            )
+        }
         Err(e) => store_error(&e),
     }
 }
@@ -123,6 +154,7 @@ fn parse_show(q: &DetailQuery) -> Result<Show, Response> {
 }
 
 /// Renders the detail page with `status`; an unknown prompt or version is a 404 page.
+/// `metrics`, when given, is the production-metrics section.
 fn detail_page(
     state: &AppState,
     snap: &PromptSnapshot,
@@ -130,6 +162,7 @@ fn detail_page(
     show: Show,
     status: StatusCode,
     error: Option<Markup>,
+    metrics: Option<&ProductionMetrics>,
 ) -> Response {
     let not_found = |what: String| error_page(StatusCode::NOT_FOUND, Nav::Prompts, &what, None);
     let Some(d) = prompt_detail(snap, name) else {
@@ -150,8 +183,180 @@ fn detail_page(
     };
     layout::html(
         status,
-        prompt::render(&d, view.as_ref(), diff.as_ref(), &state.csrf, error),
+        prompt::render(
+            &d,
+            view.as_ref(),
+            diff.as_ref(),
+            &state.csrf,
+            error,
+            metrics,
+        ),
     )
+}
+
+/// The newest monitor reports read for the eval pass-rate column.
+const PASS_RATE_REPORTS: usize = 50;
+/// The most invocations mapped to prompt versions for the pass-rate column.
+const PASS_RATE_IDS: usize = 5_000;
+
+/// One monitored run for the pass-rate column: invocation id, start, passed.
+type EvalRun = (String, DateTime<Utc>, bool);
+
+/// The production-metrics section of prompt `name` over the `range` before now.
+async fn production_metrics(state: &AppState, name: &str, range: TimeRange) -> ProductionMetrics {
+    let body = match &state.usage {
+        None => MetricsBody::NeedsBigQuery,
+        Some(source) => {
+            let end = (state.now)();
+            let start = end - range.duration();
+            match source.version_metrics(name, start, end).await {
+                Err(e) => MetricsBody::Failed(e.to_string(), e.hint()),
+                Ok(m) => {
+                    let (pass, counts) =
+                        pass_rates(state.reports.as_deref(), source, name, start, end).await;
+                    MetricsBody::Rows {
+                        rows: metric_rows(&m, state.prices.as_deref(), &counts),
+                        priced: state.prices.is_some(),
+                        pass,
+                    }
+                }
+            }
+        }
+    };
+    ProductionMetrics { range, body }
+}
+
+/// The pass-rate column and `(passed, runs)` per version: the runs of the newest reports that
+/// started in `[start, end)`, mapped to versions by their invocations' `LLM_REQUEST` rows.
+async fn pass_rates(
+    reports: Option<&ReportCache>,
+    source: &UsageSource,
+    name: &str,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> (PassColumn, BTreeMap<u32, (u64, u64)>) {
+    let Some(reports) = reports else {
+        return (PassColumn::Off, BTreeMap::new());
+    };
+    let runs = match eval_runs(reports, start, end).await {
+        Ok(runs) => runs,
+        Err(e) => return (PassColumn::Failed(e.to_string()), BTreeMap::new()),
+    };
+    let (ids, capped) = eval_ids(&runs, PASS_RATE_IDS);
+    if ids.is_empty() {
+        return (PassColumn::On { capped }, BTreeMap::new());
+    }
+    match source
+        .versions_for_invocations(name, &ids, start, end)
+        .await
+    {
+        Ok(mapping) => (
+            PassColumn::On { capped },
+            pass_counts(&runs, &ids, &mapping),
+        ),
+        Err(e) => (PassColumn::Failed(e.to_string()), BTreeMap::new()),
+    }
+}
+
+/// The runs that started in `[start, end)` of the newest [`PASS_RATE_REPORTS`] reports whose
+/// window overlaps that range, newest first.
+async fn eval_runs(
+    reports: &ReportCache,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> Result<Vec<EvalRun>, MonitorError> {
+    let mut runs = Vec::new();
+    for name in reports.names(PASS_RATE_REPORTS).await? {
+        let Some(report) = reports.find(&name).await? else {
+            continue;
+        };
+        if report.window.from >= end || report.window.to <= start {
+            continue;
+        }
+        for r in &report.runs {
+            if r.run.started_at >= start && r.run.started_at < end {
+                runs.push((r.run.invocation_id.clone(), r.run.started_at, r.passed()));
+            }
+        }
+    }
+    runs.sort_by_key(|r| std::cmp::Reverse(r.1));
+    Ok(runs)
+}
+
+/// The distinct invocation ids of `runs` in order, at most `cap`, and whether more existed.
+fn eval_ids(runs: &[EvalRun], cap: usize) -> (Vec<String>, bool) {
+    let mut seen = HashSet::new();
+    let mut ids = Vec::new();
+    for (id, _, _) in runs {
+        if seen.insert(id.as_str()) {
+            ids.push(id.clone());
+        }
+    }
+    let capped = ids.len() > cap;
+    ids.truncate(cap);
+    (ids, capped)
+}
+
+/// `(passed, runs)` per version: each run whose invocation is in `ids` counts once for every
+/// version that invocation used.
+fn pass_counts(
+    runs: &[EvalRun],
+    ids: &[String],
+    mapping: &[(String, u32)],
+) -> BTreeMap<u32, (u64, u64)> {
+    let kept: HashSet<&str> = ids.iter().map(String::as_str).collect();
+    let mut versions: HashMap<&str, BTreeSet<u32>> = HashMap::new();
+    for (id, version) in mapping {
+        versions.entry(id.as_str()).or_default().insert(*version);
+    }
+    let mut out: BTreeMap<u32, (u64, u64)> = BTreeMap::new();
+    for (id, _, passed) in runs {
+        if !kept.contains(id.as_str()) {
+            continue;
+        }
+        for version in versions.get(id.as_str()).into_iter().flatten() {
+            let entry = out.entry(*version).or_insert((0, 0));
+            entry.1 += 1;
+            if *passed {
+                entry.0 += 1;
+            }
+        }
+    }
+    out
+}
+
+/// The table rows: stats per version, the mean cost per priced call from the version's
+/// per-model tokens, and the pass counts.
+fn metric_rows(
+    m: &VersionMetrics,
+    prices: Option<&PriceTable>,
+    pass: &BTreeMap<u32, (u64, u64)>,
+) -> Vec<MetricsRow> {
+    m.stats
+        .iter()
+        .map(|s| {
+            let mut cost = CostSum::default();
+            let mut priced_calls = 0u64;
+            for vm in m.models.iter().filter(|vm| vm.version == s.version) {
+                let c = cost_of(prices, &vm.calls.model, &vm.calls.usage);
+                if c.is_some() {
+                    priced_calls += vm.calls.calls;
+                }
+                cost.add(c);
+            }
+            MetricsRow {
+                version: s.version,
+                calls: s.calls,
+                mean_input: s.mean_input,
+                mean_output: s.mean_output,
+                mean_cost: (priced_calls > 0).then(|| cost.usd / priced_calls as f64),
+                cost_partial: cost.partial(),
+                p50_ms: s.p50_ms,
+                p95_ms: s.p95_ms,
+                pass: pass.get(&s.version).copied(),
+            }
+        })
+        .collect()
 }
 
 /// After a failed label write: the detail page with the error banner and the status,
@@ -175,6 +380,7 @@ async fn write_failed(state: &AppState, name: &str, e: &StoreError) -> Response 
         Show::Version(None),
         store_status(e),
         Some(error),
+        None,
     )
 }
 
@@ -269,8 +475,17 @@ mod tests {
     use http::header::LOCATION;
     use serde_json::json;
 
+    use crate::evals::ReportCache;
+    use crate::prices::PriceTable;
+    use crate::traces::BigQueryTable;
+    use crate::traces::test_http::{FakeHttp, param_value, reply};
+    use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{CSRF, FakeSource, get, post_form, state};
+    use crate::web::testutil::{fixed_now, report, report_cache, state_with_reports};
+    use gadk_bigquery::{BigQueryClient, NoAuth};
+    use gadk_eval::Outcome;
+    use serde_json::Value;
 
     const ORIGIN: &str = "http://127.0.0.1:8765";
     const NO_STORE: &str = "No prompt store configured (start with --store)";
@@ -747,8 +962,9 @@ mod tests {
             body.contains(r#"<input type="hidden" name="expected" value="">"#),
             "{body}"
         );
-        // The diff picker is the only other form, a GET without the token.
-        assert_eq!(forms.len(), posts.len() + 1, "{body}");
+        // The diff picker and the production-metrics range picker are the only other forms,
+        // GETs without the token.
+        assert_eq!(forms.len(), posts.len() + 2, "{body}");
         assert!(
             body.contains(r#"<form method="get" action="/prompts/greet""#),
             "{body}"
@@ -819,5 +1035,258 @@ mod tests {
             assert!(len <= 1024, "{path}: banner body is {len} bytes");
             assert!(len > 0, "{path}");
         }
+    }
+
+    // ---- production metrics ----
+
+    const PRICES: &str =
+        "- model: gemini-3.8-flash\n  input: 0.30\n  output: 2.50\n  cached_input: 0.075\n";
+
+    fn bq_state(
+        store: &Arc<FileStore>,
+        fake: &Arc<FakeHttp>,
+        reports: Option<Arc<ReportCache>>,
+    ) -> AppState {
+        let store: Arc<dyn PromptStore> = store.clone();
+        let mut st = state_with_reports(Arc::new(FakeSource::new()), Some(store), reports);
+        st.usage = Some(Arc::new(UsageSource::with_client(
+            BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
+            "billing-proj",
+            BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
+            1_000,
+        )));
+        st.prices = Some(Arc::new(PriceTable::from_yaml(PRICES).unwrap()));
+        st
+    }
+
+    fn stats_reply() -> Result<(u16, String), String> {
+        reply(
+            &[
+                ("version", "INT64"),
+                ("calls", "INT64"),
+                ("mean_input", "FLOAT64"),
+                ("mean_output", "FLOAT64"),
+                ("p50_ms", "FLOAT64"),
+                ("p95_ms", "FLOAT64"),
+            ],
+            vec![
+                vec![
+                    json!("2"),
+                    json!("4"),
+                    json!("1250"),
+                    json!("300.5"),
+                    json!("820"),
+                    json!("1900"),
+                ],
+                vec![
+                    json!("1"),
+                    json!("2"),
+                    json!("900"),
+                    json!("200"),
+                    json!("700"),
+                    Value::Null,
+                ],
+            ],
+            false,
+        )
+    }
+
+    fn models_reply() -> Result<(u16, String), String> {
+        reply(
+            &[
+                ("version", "INT64"),
+                ("model", "STRING"),
+                ("calls", "INT64"),
+                ("input", "INT64"),
+                ("cached", "INT64"),
+                ("output", "INT64"),
+                ("reasoning", "INT64"),
+            ],
+            vec![
+                vec![
+                    json!("2"),
+                    json!("gemini-3.8-flash"),
+                    json!("4"),
+                    json!("5000"),
+                    json!("1000"),
+                    json!("1202"),
+                    json!("0"),
+                ],
+                vec![
+                    json!("1"),
+                    json!("gemini-3.8-flash"),
+                    json!("1"),
+                    json!("900"),
+                    json!("0"),
+                    json!("200"),
+                    json!("0"),
+                ],
+                vec![
+                    json!("1"),
+                    json!("other-model"),
+                    json!("1"),
+                    json!("900"),
+                    json!("0"),
+                    json!("200"),
+                    json!("0"),
+                ],
+            ],
+            false,
+        )
+    }
+
+    fn ids_reply() -> Result<(u16, String), String> {
+        reply(
+            &[("invocation_id", "STRING"), ("version", "INT64")],
+            vec![
+                vec![json!("inv-0"), json!("2")],
+                vec![json!("inv-1"), json!("2")],
+                vec![json!("inv-2"), json!("1")],
+            ],
+            false,
+        )
+    }
+
+    #[tokio::test]
+    async fn production_metrics_show_calls_cost_latency_and_pass_rate_per_version() {
+        let (_dir, store) = seeded().await;
+        // One report, generated an hour before now, whose runs started in the 7d range:
+        // inv-0 passes, inv-1 fails, inv-2 passes.
+        let secs = fixed_now().timestamp() - 3_600;
+        let r = report(
+            "greet-monitor",
+            secs,
+            &[&[Outcome::Pass], &[Outcome::Fail], &[Outcome::Pass]],
+        );
+        let (_rdir, cache, _) = report_cache(&[r], 4).await;
+        let fake = FakeHttp::new(vec![stats_reply(), models_reply(), ids_reply()]);
+        let (status, _, body) = get(bq_state(&store, &fake, Some(cache)), "/prompts/greet").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains("<h2>Production metrics</h2>"), "{body}");
+        assert!(body.contains("<th>Eval pass rate</th>"), "{body}");
+        assert!(
+            body.contains(r#"<tr><td><a href="/prompts/greet?v=2">v2</a></td><td class="num">4</td><td class="num">1250.0</td><td class="num">300.5</td><td class="num">$0.001070</td><td class="num">820 ms</td><td class="num">1900 ms</td><td class="num">50.0% (1/2)</td></tr>"#),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"<tr><td><a href="/prompts/greet?v=1">v1</a></td><td class="num">2</td><td class="num">900.0</td><td class="num">200.0</td><td class="num">$0.000770*</td><td class="num">700 ms</td><td class="num">—</td><td class="num">100.0% (1/1)</td></tr>"#),
+            "{body}"
+        );
+        assert!(
+            body.contains("* Costs exclude calls to models without a price."),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"<option value="7d" selected>7d</option>"#),
+            "{body}"
+        );
+
+        assert_eq!(fake.uris().len(), 3);
+        let stats = fake.body(0);
+        assert_eq!(
+            param_value(&stats, "prompt")["parameterValue"]["value"],
+            json!("greet")
+        );
+        assert_eq!(
+            param_value(&stats, "start")["parameterValue"]["value"],
+            json!("2026-11-09 12:00:00.000000+00:00")
+        );
+        assert_eq!(
+            param_value(&stats, "end")["parameterValue"]["value"],
+            json!("2026-11-16 12:00:00.000000+00:00")
+        );
+        assert_eq!(
+            param_value(&fake.body(2), "ids")["parameterValue"],
+            json!({ "arrayValues": [{ "value": "inv-0" }, { "value": "inv-1" }, { "value": "inv-2" }] })
+        );
+    }
+
+    #[tokio::test]
+    async fn production_metrics_take_the_range_and_skip_pass_rates_without_reports() {
+        let (_dir, store) = seeded().await;
+        let fake = FakeHttp::new(vec![stats_reply(), models_reply()]);
+        let (status, _, body) =
+            get(bq_state(&store, &fake, None), "/prompts/greet?range=24h").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(!body.contains("Eval pass rate"), "{body}");
+        assert!(
+            body.contains(r#"<td class="num">1900 ms</td></tr>"#),
+            "{body}"
+        );
+        assert_eq!(fake.uris().len(), 2, "no mapping query without --reports");
+        assert_eq!(
+            param_value(&fake.body(0), "start")["parameterValue"]["value"],
+            json!("2026-11-15 12:00:00.000000+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn production_metrics_failure_is_a_banner_with_the_hint() {
+        let (_dir, store) = seeded().await;
+        let fake = FakeHttp::new(vec![Ok((
+            403,
+            json!({ "error": { "code": 403, "message": "Access Denied", "errors": [{ "reason": "accessDenied" }] } }).to_string(),
+        ))]);
+        let (status, _, body) = get(bq_state(&store, &fake, None), "/prompts/greet").await;
+        assert_eq!(status, StatusCode::OK, "the rest of the page still renders");
+        assert!(body.contains("BigQuery: HTTP 403: Access Denied"), "{body}");
+        assert!(
+            body.contains("needs roles/bigquery.dataViewer and roles/bigquery.jobUser"),
+            "{body}"
+        );
+        assert!(body.contains("<h2>Labels</h2>"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn production_metrics_with_the_cloud_trace_source_are_a_note() {
+        let (_dir, store) = seeded().await;
+        let (status, _, body) = get(st(&store), "/prompts/greet").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            body.contains("Production metrics need the BigQuery trace source"),
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn eval_ids_are_distinct_newest_first_and_capped() {
+        let t = |s: i64| fixed_now() - chrono::TimeDelta::seconds(s);
+        let runs = vec![
+            ("a".to_owned(), t(1), true),
+            ("b".to_owned(), t(2), false),
+            ("a".to_owned(), t(3), true),
+            ("c".to_owned(), t(4), true),
+        ];
+        assert_eq!(
+            super::eval_ids(&runs, 5),
+            (vec!["a".to_owned(), "b".to_owned(), "c".to_owned()], false)
+        );
+        assert_eq!(
+            super::eval_ids(&runs, 2),
+            (vec!["a".to_owned(), "b".to_owned()], true)
+        );
+    }
+
+    #[test]
+    fn pass_counts_count_each_run_for_every_version_it_used() {
+        let now = fixed_now();
+        let runs = vec![
+            ("a".to_owned(), now, true),
+            ("b".to_owned(), now, false),
+            ("c".to_owned(), now, true),
+        ];
+        let ids = vec!["a".to_owned(), "b".to_owned()];
+        let mapping = vec![
+            ("a".to_owned(), 1),
+            ("a".to_owned(), 2),
+            ("b".to_owned(), 2),
+            ("c".to_owned(), 1),
+        ];
+        let counts = super::pass_counts(&runs, &ids, &mapping);
+        assert_eq!(
+            counts.into_iter().collect::<Vec<_>>(),
+            vec![(1, (1, 1)), (2, (1, 2))],
+            "c is past the id cap"
+        );
     }
 }
