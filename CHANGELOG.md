@@ -18,6 +18,8 @@ the public API.
   `--author` (`Cli::with_author`) names their author; `/prompts/{name}` adds a Feedback table
   per version. The trace list and trace detail leave `FEEDBACK` rows out. Scores need
   `--traces bigquery://…`.
+- `gadk`: the `feedback_e2e` example runs a prompt version, analytics rows and scores end to
+  end.
 
 ## [0.4.11] - 2026-11-20
 
