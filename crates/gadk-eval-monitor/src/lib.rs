@@ -44,6 +44,7 @@ mod error;
 mod testutil;
 
 pub mod cli;
+pub mod export;
 pub mod gcp;
 pub mod judge;
 pub mod monitor;
@@ -53,6 +54,10 @@ pub mod spec;
 pub mod store;
 
 pub use error::MonitorError;
+pub use export::{
+    CompareOp, ExportContext, ExportOptions, ExportedCase, RunScore, ScoreFilter, TraceInvocation,
+    run_to_case,
+};
 pub use gcp::{AdcTokenSource, NoAuth, TokenSource};
 pub use judge::vertex_judge;
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
