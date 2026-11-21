@@ -215,14 +215,14 @@ gadk-eval export --source bigquery://my-proj.agent_analytics.agent_events \
 | Option | Meaning |
 |---|---|
 | `--source bigquery://<project>.<dataset>.<table>` | The agent-analytics table: project `[A-Za-z0-9_-]+` (no domain-scoped project), dataset and table `[A-Za-z0-9_]+`. Queries run in that project. |
-| `--out <file>` | The eval-set file. Without `--append` it is created and never overwritten: named `--name` (default: the file stem), with `judge_rubric` = `--rubric`. |
+| `--out <file>` | The eval-set file. Without `--append` it is created and never overwritten: named `--name` (not blank; default: the file stem), with `judge_rubric` = `--rubric`. |
 | `--append` | Add to the set at `--out`; runs whose case id is already in it are skipped. Not with `--name`. |
 | `--trace <id>` | The runs of this trace (32 hex digits) that started in the last 30 days; repeatable. Not with `--since`, `--agent`, `--score` or `--limit`. |
 | `--since <n>h\|<n>d` | Runs that started in this window, 1h to 90d (default `7d`). |
 | `--agent <name>` | Only runs of this root agent. |
 | `--score <filter>` | `name=value`, `name<n`, `name<=n`, `name>n` or `name>=n` on the latest score of that name from any source; repeatable, every filter must hold. `=` compares the value as text (`true`, `4`, `helpful`); the comparisons need a `number` score. |
 | `--limit <n>` | The newest runs to read, 1-1000 (default 50). |
-| `--rubric <text>` | The rubric of `llm_judge` cases (default: the set's `judge_rubric`). |
+| `--rubric <text>` | The rubric (not blank) of `llm_judge` cases (default: the set's `judge_rubric`). |
 | `--min-good <x>` | The lowest `number` score that counts as positive (default 4). |
 | `--no-history` | A case starts with the run's own user message, without the session's earlier ones. |
 | `--tool-args` | `tools` scorers keep each call's arguments (default: names only, since arguments often hold ids and times). |
@@ -244,12 +244,14 @@ logged):
   source, author, comment) and the production reply (its first 2,000 characters).
 
 A run whose own content is incomplete is skipped with its notes. The command prints `added
-inv-<id> (reference|judge) trace <id|none>` or `skipped inv-<id>: <reason>` per run, then `<n>
-cases added to <file>`. An append keeps the file's text byte for byte and needs `cases:` as its
-last top-level key (see the gadk-eval README). Every write goes through a temporary file next
-to the target: a new file is linked into place and never overwrites one, an append renames over
-the old file. Two writers appending to one file at once (two exports, or an export and
-`gadk-console`'s "Add to dataset") can lose one write: the last one wins.
+inv-<id> (reference|judge) trace <id|none>` or `skipped inv-<id>: <reason>` per run (before the
+file is written, so they show even when the write fails), then `<n> cases added to <file>` after
+the write. An append keeps the file's text byte for byte and needs `cases:` as its last
+top-level key (see the gadk-eval README); the file is checked before any query. Every write goes
+through a temporary file next to the target: a new file is linked into place and never
+overwrites one, an append renames over the old file and keeps its permissions. Two writers
+appending to one file at once (two exports, or an export and `gadk-console`'s "Add to dataset")
+can lose one write: the last one wins.
 
 The files hold production text (user messages, replies, and tool arguments with
 `--tool-args`): keep them as private as the table. Nothing is uploaded. Cases are a starting

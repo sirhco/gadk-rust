@@ -184,7 +184,7 @@ fn export_cli() -> Command {
                 .help("eval-set YAML file to create (never overwritten), or to extend with --append"),
         )
         .arg(flag("append", "add the cases to the existing eval set at --out").conflicts_with("name"))
-        .arg(Arg::new("name").long("name").help("name of the new eval set (default: the file stem)"))
+        .arg(Arg::new("name").long("name").value_parser(parse_nonblank).help("name of the new eval set (default: the file stem)"))
         .arg(
             Arg::new("trace")
                 .long("trace")
@@ -211,6 +211,7 @@ fn export_cli() -> Command {
         .arg(
             Arg::new("rubric")
                 .long("rubric")
+                .value_parser(parse_nonblank)
                 .help("rubric of llm_judge cases (default: the eval set's judge_rubric)"),
         )
         .arg(
@@ -263,6 +264,15 @@ fn parse_since(s: &str) -> Result<TimeDelta, String> {
     window
         .filter(|w| *w <= TimeDelta::days(90))
         .ok_or_else(|| format!("expected <n>h or <n>d from 1h to 90d, got {s:?}"))
+}
+
+/// Text that is not empty or whitespace only.
+fn parse_nonblank(s: &str) -> Result<String, String> {
+    if s.trim().is_empty() {
+        Err("expected a non-blank value".to_owned())
+    } else {
+        Ok(s.to_owned())
+    }
 }
 
 /// A finite number.
@@ -435,6 +445,8 @@ async fn export(
     let existing = if m.get_flag("append") {
         let set = EvalSet::load(out).map_err(|e| file_error(out, e))?;
         let text = std::fs::read_to_string(out).map_err(|e| file_error(out, e))?;
+        // Checked before any query: whether the file can take appended cases at all.
+        gadk_eval::append_cases(&text, &[], &|_| Vec::new()).map_err(|e| file_error(out, e))?;
         Some((text, set))
     } else {
         if out.exists() {
@@ -516,6 +528,9 @@ async fn export(
             Err(reason) => lines.push(format!("skipped {id}: {reason}")),
         }
     }
+    for line in &lines {
+        writeln!(stdout, "{line}")?;
+    }
     if !added.is_empty() {
         let name = m.get_one::<String>("name").cloned().unwrap_or_else(|| {
             out.file_stem()
@@ -532,9 +547,6 @@ async fn export(
                 file_error(out, e)
             }
         })?;
-    }
-    for line in &lines {
-        writeln!(stdout, "{line}")?;
     }
     writeln!(stdout, "{} cases added to {}", added.len(), out.display())?;
     Ok(if added.is_empty() { 1 } else { 0 })
@@ -1200,7 +1212,9 @@ mod tests {
     async fn export_usage_errors_exit_2() {
         let dir = tempfile::tempdir().unwrap();
         let out = path_str(&dir.path().join("u.yaml"));
-        let cases: [&[&str]; 10] = [
+        let cases: [&[&str]; 12] = [
+            &["--source", SOURCE, "--out", &out, "--name", " \t"],
+            &["--source", SOURCE, "--out", &out, "--rubric", "  "],
             &["--out", &out],
             &["--source", "proj.analytics.agent_events", "--out", &out],
             &["--source", "bigquery://example.com:p.d.t", "--out", &out],
@@ -1288,6 +1302,84 @@ mod tests {
         assert_eq!(
             stderr,
             "gadk-eval: transcript source: HTTP 403: Access Denied\n"
+        );
+        assert!(!out.exists());
+    }
+
+    #[tokio::test]
+    async fn export_checks_an_appended_file_before_any_source_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let ok = "name: s\ncases:\n  - id: a\n    turns: [hi]\n    expect: [contains: x]\n";
+        let unappendable = [
+            (
+                "name: s\ncases: [{id: a, turns: [hi], expect: [contains: x]}]\n".to_owned(),
+                "`cases:` must be the last top-level key",
+            ),
+            (format!("{ok}...\n"), "`...` document-end marker"),
+            (
+                "cases:\n  - id: a\n    turns: [hi]\n    expect: [contains: x]\nname: s\n"
+                    .to_owned(),
+                "`cases:` must be the last top-level key",
+            ),
+        ];
+        for (text, message) in unappendable {
+            let out = dir.path().join("set.yaml");
+            std::fs::write(&out, &text).unwrap();
+            let fake = Arc::new(two_runs());
+            let (code, stdout, stderr) = export_run(
+                &[
+                    "--source",
+                    SOURCE,
+                    "--out",
+                    &path_str(&out),
+                    "--append",
+                    "--trace",
+                    TRACE,
+                    "--rubric",
+                    "r",
+                ],
+                &fake,
+            )
+            .await;
+            assert_eq!(code, 2, "{text}");
+            assert!(
+                stderr.starts_with(&format!("gadk-eval: {}: ", out.display()))
+                    && stderr.contains(message),
+                "{stderr}"
+            );
+            assert_eq!(stdout, "");
+            assert!(fake.calls().is_empty(), "{text}: {:?}", fake.calls());
+            assert_eq!(std::fs::read_to_string(&out).unwrap(), text);
+        }
+    }
+
+    #[tokio::test]
+    async fn export_prints_each_run_before_a_failed_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("missing-dir").join("set.yaml");
+        let fake = Arc::new(two_runs());
+        let (code, stdout, stderr) = export_run(
+            &[
+                "--source",
+                SOURCE,
+                "--out",
+                &path_str(&out),
+                "--trace",
+                TRACE,
+                "--rubric",
+                "r",
+            ],
+            &fake,
+        )
+        .await;
+        assert_eq!(code, 2);
+        assert_eq!(
+            stdout,
+            format!("added inv-e-1 (reference) trace {TRACE}\nadded inv-e-2 (judge) trace none\n")
+        );
+        assert!(
+            stderr.starts_with(&format!("gadk-eval: {}: ", out.display())),
+            "{stderr}"
         );
         assert!(!out.exists());
     }

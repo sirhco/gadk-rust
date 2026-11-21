@@ -18,7 +18,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gadk_eval::EvalSet;
+use gadk_eval::{EvalSet, append_cases};
 use gadk_eval_monitor::{ExportOptions, ExportSource, cases_text, export_runs, write_set_file};
 
 /// The note shown when a trace cannot be added to a dataset.
@@ -85,8 +85,8 @@ impl Datasets {
     /// Adds the runs of trace `trace` as cases to `<dir>/<dataset>.yaml` and returns how many
     /// were added. The file is created (set name `dataset`, default rubric `rubric`) when
     /// absent, else appended to; judge cases use `rubric`, else the file's `judge_rubric`.
-    /// Runs already in the file are skipped. Requests are serialized from the file read to the
-    /// write.
+    /// Runs already in the file are skipped. An existing file that cannot take appended cases
+    /// is refused before any query. Requests are serialized from the file read to the write.
     pub(crate) async fn add_trace(
         &self,
         trace: &str,
@@ -96,6 +96,20 @@ impl Datasets {
         if !is_dataset_name(dataset) {
             return Err(AddError::BadName);
         }
+        let _write = self.lock.lock().await;
+        let file = format!("{dataset}.yaml");
+        let path = self.dir.join(&file);
+        let file_err = |e: &dyn std::fmt::Display| AddError::File(format!("{file}: {e}"));
+        let existing = match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                let set = EvalSet::from_yaml(&text).map_err(|e| file_err(&e))?;
+                // Checked before any query: whether the file can take appended cases at all.
+                append_cases(&text, &[], &|_| Vec::new()).map_err(|e| file_err(&e))?;
+                Some((text, set))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(file_err(&e)),
+        };
         let source_err = |e: gadk_eval_monitor::MonitorError| AddError::Source(e.to_string());
         let invocations = self
             .source
@@ -105,18 +119,6 @@ impl Datasets {
         if invocations.is_empty() {
             return Err(AddError::NoTrace);
         }
-        let _write = self.lock.lock().await;
-        let file = format!("{dataset}.yaml");
-        let path = self.dir.join(&file);
-        let file_err = |e: &dyn std::fmt::Display| AddError::File(format!("{file}: {e}"));
-        let existing = match std::fs::read_to_string(&path) {
-            Ok(text) => {
-                let set = EvalSet::from_yaml(&text).map_err(|e| file_err(&e))?;
-                Some((text, set))
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(file_err(&e)),
-        };
         let mut opts = ExportOptions::default();
         let judge_rubric = rubric.map(str::to_owned).or_else(|| {
             existing

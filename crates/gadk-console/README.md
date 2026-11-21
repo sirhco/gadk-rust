@@ -28,7 +28,7 @@ The console prints its URL and serves until you stop it (Ctrl-C).
 | `--log-id <id>` | `gadk` | Cloud Logging log id the agents write (`with_cloud_log_name` in `gadk-telemetry`) |
 | `--prices <file>` | none | Price file (YAML, USD per 1,000,000 tokens per model). Without it, cost cells show `—`; token counts still show. See [Usage and cost](#usage-and-cost). |
 | `--author <name>` | `$USER`, else `$USERNAME`, else `console` | Author of the scores you add on `/traces/{id}` (BigQuery source). See [Scores](#scores). |
-| `--datasets <dir>` | none | Directory of eval-set YAML files that `/traces/{id}` adds runs to (BigQuery source). It must exist. See [Datasets](#datasets). |
+| `--datasets <dir>` | none | Directory of eval-set YAML files that `/traces/{id}` adds runs to (BigQuery trace source only; ignored with Cloud Trace). It must exist. See [Datasets](#datasets). |
 
 Exit codes: 2 for a usage error (clap's message), 1 when startup fails (a bad store URL, a bad
 report store URL, a bad price file, a `--datasets` directory that does not exist, missing
@@ -211,14 +211,14 @@ is appended to with its text kept byte for byte, and its `judge_rubric` grades j
 the form has no rubric. Runs already in the file are skipped. The trace page then says how many
 cases were added.
 
-- A bad dataset name, a file that cannot be appended to, or no case added (every reason is
-  listed, such as `needs a rubric` or `already in <dataset>.yaml`) is a 400; an unknown trace a
-  404; a BigQuery error a 502.
+- A bad dataset name, a file that cannot be appended to (checked before any query), or no case
+  added (every reason is listed, such as `needs a rubric` or `already in <dataset>.yaml`) is a
+  400; an unknown trace a 404; a BigQuery error a 502.
 - The queries run in `--project` under `--bigquery-max-bytes`. The table's project must be
   `[A-Za-z0-9_-]+` (a domain-scoped project fails at startup).
 - Adds from this console are serialized, and every write goes through a temporary file next to
   the target: a new file is linked into place (never overwriting one that appeared meanwhile),
-  an append renames over the old file. The lock does not cover other writers: a concurrent
+  an append renames over the old file, keeping its permissions. The lock does not cover other writers: a concurrent
   `gadk-eval export --append` to the same file, or a hand edit, can be lost (the last write
   wins), so do not run both on one file at once.
 - The files hold production text; nothing is uploaded.

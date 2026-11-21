@@ -27,7 +27,7 @@ the public API.
   cases (by trace, or by window, agent and latest-score filters, with the session's earlier user
   messages as turns): positive runs become `reference` (and `tools`) cases, the others
   `llm_judge` cases. Library: the `export` module (`ExportSource`, `run_to_case`, `export_runs`,
-  `cases_text`, `write_set_file`, `ScoreFilter`, `RunScore`, `ExportContext`, `ExportOptions`,
+  `cases_text`, `write_set_file`, `ScoreFilter`, `CompareOp`, `RunScore`, `ExportContext`, `ExportOptions`,
   `ExportedCase`, `TraceInvocation`), `Backends::export_source` (default: not supported) and
   `BigQueryTranscriptSource::{with_billing_project, with_max_bytes_billed}`.
 - `gadk-console`: `--datasets <dir>` (`Cli::with_datasets`, `ConsoleError::Datasets`) adds an

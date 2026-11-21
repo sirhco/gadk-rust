@@ -562,8 +562,8 @@ pub fn cases_text(
 
 /// Writes the eval-set text `text` to `path` through a new temporary file next to it, so
 /// readers never see a partial file. With `create` the temporary file is hard-linked as `path`,
-/// which fails when `path` exists (it is never overwritten); otherwise it is renamed over
-/// `path`. The temporary file is removed either way.
+/// which fails when `path` exists (it is never overwritten); otherwise it takes the permissions
+/// of the existing `path` and is renamed over it. The temporary file is removed either way.
 ///
 /// # Errors
 ///
@@ -583,6 +583,14 @@ pub fn write_set_file(path: &Path, text: &str, create: bool) -> std::io::Result<
         // Best effort: the link result is the one worth reporting.
         let _ = std::fs::remove_file(&tmp);
         return linked;
+    }
+    // The replacement keeps the replaced file's permissions (a private file stays private).
+    if let Ok(meta) = std::fs::metadata(path)
+        && let Err(e) = std::fs::set_permissions(&tmp, meta.permissions())
+    {
+        // Best effort: the permissions error is the one worth reporting.
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
     std::fs::rename(&tmp, path).inspect_err(|_| {
         // Best effort: the rename error is the one worth reporting.
@@ -1056,6 +1064,20 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, ["set.yaml"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_set_file_keeps_the_permissions_of_the_file_it_replaces() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("set.yaml");
+        std::fs::write(&path, "one").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        write_set_file(&path, "two", false).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "two");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{mode:o}");
     }
 
     #[test]

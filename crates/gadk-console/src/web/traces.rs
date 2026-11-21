@@ -1651,6 +1651,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unappendable_dataset_is_400_before_any_query() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("evals.yaml");
+        let ok = "name: s\ncases:\n- id: a\n  turns: [hi]\n  expect: [contains: x]\n";
+        for (text, message) in [
+            (
+                "name: s\ncases: [{id: a, turns: [hi], expect: [contains: x]}]\n".to_owned(),
+                "evals.yaml: eval set: cannot append: `cases:` must be the last top-level key",
+            ),
+            (
+                format!("{ok}...\n"),
+                "evals.yaml: eval set: cannot append: the file has a `...` document-end marker",
+            ),
+            ("name: [\n".to_owned(), "evals.yaml: "),
+        ] {
+            std::fs::write(&path, &text).unwrap();
+            let fake = Arc::new(trace_export());
+            let body = format!("dataset=evals&rubric=r&csrf={CSRF}");
+            let (status, _, page) = post_form(
+                with_datasets(dir.path(), &fake),
+                &dataset_path(),
+                &body,
+                Some(ORIGIN),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{text}: {page}");
+            assert!(page.contains(message), "{page}");
+            assert_eq!(fake.calls.load(Ordering::SeqCst), 0, "{text}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        }
+    }
+
+    #[tokio::test]
     async fn the_dataset_form_offers_the_existing_datasets() {
         let dir = tempfile::tempdir().unwrap();
         for name in [
