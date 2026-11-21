@@ -56,6 +56,11 @@ pub struct BigQueryTranscriptSource {
     /// The quoted table reference, `` `project.dataset.table` ``.
     table: String,
     gcp: GcpHttp,
+    /// The project that runs (and pays for) the queries: the table's project unless
+    /// [`BigQueryTranscriptSource::with_billing_project`] says otherwise.
+    billing: String,
+    /// The `maximumBytesBilled` of every query, when set.
+    max_bytes_billed: Option<i64>,
 }
 
 /// Which optional columns the table has: the payload columns (the analytics plugin can leave
@@ -139,7 +144,25 @@ impl BigQueryTranscriptSource {
             table_id: table.to_owned(),
             table: format!("`{project}.{dataset}.{table}`"),
             gcp: GcpHttp::new(http, auth),
+            billing: project.to_owned(),
+            max_bytes_billed: None,
         })
+    }
+
+    /// Runs the queries as jobs in `project`, which pays for them, instead of the table's
+    /// project; the table read is unchanged.
+    #[must_use]
+    pub fn with_billing_project(mut self, project: &str) -> Self {
+        self.billing = project.to_owned();
+        self
+    }
+
+    /// Caps every query at `bytes` billed (`maximumBytesBilled`): a query that would bill more
+    /// fails instead of running.
+    #[must_use]
+    pub fn with_max_bytes_billed(mut self, bytes: i64) -> Self {
+        self.max_bytes_billed = Some(bytes);
+        self
     }
 
     /// The payload columns of the table (`tables.get`).
@@ -163,10 +186,14 @@ impl BigQueryTranscriptSource {
         params: Vec<Value>,
     ) -> Result<Vec<Map<String, Value>>, MonitorError> {
         let source = |m: String| MonitorError::Source(m);
-        let url = format!("{ENDPOINT}/projects/{}/queries", self.project);
+        let url = format!("{ENDPOINT}/projects/{}/queries", encode(&self.billing));
+        let mut body = query_body(sql, params);
+        if let Some(bytes) = self.max_bytes_billed {
+            body["maximumBytesBilled"] = json!(bytes.to_string());
+        }
         let mut resp = self
             .gcp
-            .json(Method::POST, &url, Some(&query_body(sql, params)))
+            .json(Method::POST, &url, Some(&body))
             .await
             .map_err(source)?;
         let mut rows = Vec::new();
@@ -1089,5 +1116,33 @@ mod tests {
         assert_eq!(cell_json(&row, "sql_null"), None);
         assert_eq!(cell_json(&row, "missing"), None);
         assert_eq!(cell_json(&row, "text"), Some(json!("plain text")));
+    }
+
+    #[tokio::test]
+    async fn billing_project_and_byte_cap_apply_to_every_query() {
+        let q = query(None, 3);
+        let mut body = query_body(
+            &invocations_sql("`proj.analytics.agent_events`", false, &ALL),
+            invocation_params(&q),
+        );
+        body["maximumBytesBilled"] = json!("5000");
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[
+                table_reply(&[]),
+                exchange(
+                    "POST",
+                    "https://bigquery.googleapis.com/bigquery/v2/projects/example.com%3Abill/queries",
+                    &body.to_string(),
+                    200,
+                    &reply(&HEAD, &[], None),
+                ),
+            ],
+        );
+        let billed = source(http)
+            .with_billing_project("example.com:bill")
+            .with_max_bytes_billed(5000);
+        assert!(billed.list(&q).await.unwrap().is_empty());
     }
 }
