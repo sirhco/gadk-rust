@@ -75,7 +75,7 @@ pub(crate) const DETECT_PROJECT_ID: &str = "*detect-project-id*";
 
 /// The event types the filters accept without a warning (the `Event*` constants and the legacy
 /// `EVENT`).
-pub(crate) const KNOWN_EVENT_TYPES: [&str; 29] = [
+pub(crate) const KNOWN_EVENT_TYPES: [&str; 30] = [
     EVENT_USER_MESSAGE_RECEIVED,
     EVENT_INVOCATION_STARTING,
     EVENT_INVOCATION_COMPLETED,
@@ -104,6 +104,7 @@ pub(crate) const KNOWN_EVENT_TYPES: [&str; 29] = [
     EVENT_AGENT_RESPONSE,
     EVENT_NODE_OUTPUT,
     EVENT_NODE_ERROR,
+    EVENT_FEEDBACK,
     LEGACY_EVENT_TYPE,
 ];
 
@@ -990,6 +991,18 @@ mod tests {
                 r#"agentanalytics: unknown event_type "nope" in filter configuration (possible typo)"#,
             ]
         );
+    }
+
+    #[test]
+    fn feedback_is_a_known_filter_entry() {
+        let logger = Arc::new(RecordingLogger::default());
+        validate_event_filter_lists(&Config {
+            event_allowlist: vec![EVENT_FEEDBACK.into()],
+            event_denylist: vec![EVENT_FEEDBACK.into()],
+            logger: Some(logger.clone()),
+            ..Config::default()
+        });
+        assert!(logger.lines().is_empty(), "{:?}", logger.lines());
     }
 
     #[tokio::test]
