@@ -98,7 +98,7 @@ async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Respon
     });
     html(
         StatusCode::OK,
-        trace::render(&id, &rows, &logs, still_arriving),
+        trace::render(&id, &rows, &logs, still_arriving, state.prices.as_deref()),
     )
 }
 
@@ -112,6 +112,7 @@ mod tests {
     use http::StatusCode;
     use serde_json::{Value, json};
 
+    use crate::prices::PriceTable;
     use crate::traces::{
         LogEntry, LogSet, RawSpan, Service, SourceError, TimeRange, TraceDetail, TraceId,
         TracePage, TraceQuery, TraceSource, TraceSummary,
@@ -678,5 +679,146 @@ mod tests {
         ] {
             assert!(!js.contains(banned), "waterfall.js uses {banned}");
         }
+    }
+
+    // ---- LLM calls on /traces/{id} ----
+
+    const LLM_B: &str = "000000000000000d";
+    const COMPACT: &str = "000000000000000e";
+    const PRICES: &str =
+        "- model: gemini-3.8-flash\n  input: 0.30\n  output: 2.50\n  cached_input: 0.075\n";
+
+    fn labelled(mut s: RawSpan, labels: &[(&str, &str)]) -> RawSpan {
+        s.labels = labels
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        s
+    }
+
+    /// Cloud Trace spans: two `generate_content` calls and a compaction span that also carries
+    /// usage labels.
+    fn llm_spans() -> Vec<RawSpan> {
+        let t0 = fixed_now() - TimeDelta::seconds(600);
+        vec![
+            span(ROOT, None, "invoke_agent weather_bot", t0, 3000),
+            labelled(
+                span(
+                    LLM,
+                    Some(ROOT),
+                    "generate_content gemini-3.8-flash",
+                    t0 + TimeDelta::seconds(1),
+                    500,
+                ),
+                &[
+                    ("gen_ai.operation.name", "generate_content"),
+                    ("gen_ai.request.model", "gemini-3.8-flash"),
+                    ("gen_ai.usage.input_tokens", "1200"),
+                    ("gen_ai.usage.output_tokens", "350"),
+                    ("gen_ai.usage.cache_read.input_tokens", "200"),
+                    ("gen_ai.usage.reasoning.output_tokens", "50"),
+                ],
+            ),
+            labelled(
+                span(
+                    LLM_B,
+                    Some(ROOT),
+                    "generate_content other-model",
+                    t0 + TimeDelta::seconds(2),
+                    300,
+                ),
+                &[
+                    ("gen_ai.operation.name", "generate_content"),
+                    ("gen_ai.request.model", "other-model"),
+                    ("gen_ai.usage.input_tokens", "100"),
+                    ("gen_ai.usage.output_tokens", "20"),
+                ],
+            ),
+            labelled(
+                span(
+                    COMPACT,
+                    Some(ROOT),
+                    "compact_events",
+                    t0 + TimeDelta::milliseconds(2500),
+                    100,
+                ),
+                &[
+                    ("gen_ai.operation.name", "compact_events"),
+                    ("gen_ai.usage.input_tokens", "999"),
+                    ("gen_ai.usage.output_tokens", "99"),
+                ],
+            ),
+        ]
+    }
+
+    async fn llm_page(prices: Option<&str>) -> String {
+        let (_, mut st) = with_get(Ok(TraceDetail {
+            trace_id: TraceId::parse(ID).unwrap(),
+            spans: llm_spans(),
+            logs: logs(vec![], false),
+        }));
+        st.prices = prices.map(|p| Arc::new(PriceTable::from_yaml(p).unwrap()));
+        let (status, _, body) = get(st, &format!("/traces/{ID}")).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
+    }
+
+    /// The `LLM calls` heading through the end of its table.
+    fn calls_section(page: &str) -> &str {
+        let start = page
+            .find("<h2>LLM calls</h2>")
+            .unwrap_or_else(|| panic!("no LLM calls section: {page}"));
+        let len = page[start..].find("</table>").expect("table end");
+        &page[start..start + len]
+    }
+
+    #[tokio::test]
+    async fn llm_calls_list_tokens_and_cost_per_call_and_in_total() {
+        let page = llm_page(Some(PRICES)).await;
+        let calls = calls_section(&page);
+        assert!(
+            calls.contains(r#"<tr><td>generate_content gemini-3.8-flash</td><td>gemini-3.8-flash</td><td class="num">1,200</td><td class="num">200</td><td class="num">300</td><td class="num">50</td><td class="num">$0.001190</td></tr>"#),
+            "{calls}"
+        );
+        assert!(
+            calls.contains(r#"<tr><td>generate_content other-model</td><td>other-model</td><td class="num">100</td><td class="num">0</td><td class="num">20</td><td class="num">0</td><td class="num">—</td></tr>"#),
+            "{calls}"
+        );
+        assert!(
+            calls.contains(r#"<tr class="total"><td>Total</td><td>2 calls</td><td class="num">1,300</td><td class="num">200</td><td class="num">320</td><td class="num">50</td><td class="num">$0.001190*</td></tr>"#),
+            "{calls}"
+        );
+        assert!(
+            !calls.contains("compact_events"),
+            "compaction is not a call: {calls}"
+        );
+        assert!(
+            page.contains("* Costs exclude calls to models without a price."),
+            "{page}"
+        );
+        assert!(!page.contains("No price file"), "{page}");
+    }
+
+    #[tokio::test]
+    async fn without_prices_llm_calls_show_tokens_and_dashes() {
+        let page = llm_page(None).await;
+        let calls = calls_section(&page);
+        assert!(
+            calls.contains(r#"<td class="num">1,200</td><td class="num">200</td><td class="num">300</td><td class="num">50</td><td class="num">—</td></tr>"#),
+            "{calls}"
+        );
+        assert!(
+            calls.contains(r#"<tr class="total"><td>Total</td><td>2 calls</td><td class="num">1,300</td><td class="num">200</td><td class="num">320</td><td class="num">50</td><td class="num">—</td></tr>"#),
+            "{calls}"
+        );
+        assert!(page.contains("No price file"), "{page}");
+        assert!(!page.contains("* Costs exclude"), "{page}");
+    }
+
+    #[tokio::test]
+    async fn traces_without_llm_calls_have_no_llm_section() {
+        let (status, body) = trace_page(detail(600, logs(vec![], false))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body.contains("<h2>LLM calls</h2>"), "{body}");
     }
 }

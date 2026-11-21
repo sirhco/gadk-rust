@@ -14,6 +14,7 @@
 
 //! HTML pages rendered with maud.
 
+pub(crate) mod cost;
 pub(crate) mod error;
 pub(crate) mod eval_report;
 pub(crate) mod evals;

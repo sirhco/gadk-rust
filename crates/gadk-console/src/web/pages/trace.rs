@@ -18,10 +18,15 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use maud::{Markup, PreEscaped, html};
 use serde_json::{Value, json};
 
+use super::cost::{NO_PRICES, PARTIAL_NOTE, token_cells};
 use super::error::banner;
 use super::layout::{Nav, page};
 use crate::model::{AttachedLogs, SpanRow, prompt_link};
-use crate::traces::{LogEntry, SourceError, TraceId};
+use crate::prices::{
+    CostSum, LABEL_MODEL, LABEL_OPERATION, OP_GENERATE_CONTENT, PriceTable, UNKNOWN_MODEL, Usage,
+    cost_of, cost_text, thousands,
+};
+use crate::traces::{LogEntry, RawSpan, SourceError, TraceId};
 use crate::url::percent_encode;
 
 /// Payload texts longer than this many chars render collapsed.
@@ -38,12 +43,14 @@ pub(crate) struct LogView {
 }
 
 /// The trace detail page: notes and banners, the waterfall, the span detail pane (filled by
-/// `waterfall.js`), the log entries per span, and the JSON data block.
+/// `waterfall.js`), the LLM calls with their tokens and cost, the log entries per span, and the
+/// JSON data block.
 pub(crate) fn render(
     id: &TraceId,
     rows: &[SpanRow],
     logs: &Result<LogView, SourceError>,
     still_arriving: bool,
+    prices: Option<&PriceTable>,
 ) -> Markup {
     let body = html! {
         h1 { "Trace " span class="mono" { (id.as_str()) } }
@@ -60,7 +67,7 @@ pub(crate) fn render(
                 @if view.truncated {
                     div class="banner warn" {
                         p {
-                            "Showing the first " (thousands(view.shown))
+                            "Showing the first " (thousands(view.shown as u64))
                             " log entries; the trace has more."
                         }
                     }
@@ -77,6 +84,7 @@ pub(crate) fn render(
                 p class="empty" { "Select a span to see its labels and log entries." }
             }
         }
+        (llm_calls(rows, prices))
         @if let Ok(view) = logs {
             (log_sections(rows, view))
         }
@@ -109,17 +117,72 @@ fn span_row(row: &SpanRow, has_children: bool) -> Markup {
     }
 }
 
-/// `n` with a comma between each group of three digits ("1,000").
-fn thousands(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
+/// The trace's model calls (spans whose `gen_ai.operation.name` is `generate_content`, in tree
+/// order; compaction spans are not calls) with model, tokens and cost, then the totals; nothing
+/// when the trace has none.
+fn llm_calls(rows: &[SpanRow], prices: Option<&PriceTable>) -> Markup {
+    let calls: Vec<(&RawSpan, String, Usage, Option<f64>)> = rows
+        .iter()
+        .map(|r| &r.span)
+        .filter(|s| {
+            s.labels
+                .get(LABEL_OPERATION)
+                .is_some_and(|op| op == OP_GENERATE_CONTENT)
+        })
+        .map(|s| {
+            let model = s
+                .labels
+                .get(LABEL_MODEL)
+                .filter(|m| !m.is_empty())
+                .cloned()
+                .unwrap_or_else(|| UNKNOWN_MODEL.to_owned());
+            let usage = Usage::from_labels(&s.labels);
+            let cost = cost_of(prices, &model, &usage);
+            (s, model, usage, cost)
+        })
+        .collect();
+    if calls.is_empty() {
+        return html! {};
     }
-    out
+    let mut total = Usage::default();
+    let mut cost = CostSum::default();
+    for (_, _, usage, c) in &calls {
+        total += *usage;
+        cost.add(*c);
+    }
+    html! {
+        h2 { "LLM calls" }
+        @if prices.is_none() {
+            p class="empty" { (NO_PRICES) }
+        }
+        table {
+            thead {
+                tr {
+                    th { "Span" } th { "Model" } th { "Input" } th { "Cached" } th { "Output" }
+                    th { "Reasoning" } th { "Cost" }
+                }
+            }
+            tbody {
+                @for (span, model, usage, c) in &calls {
+                    tr {
+                        td { (span.name) }
+                        td { (model) }
+                        (token_cells(usage))
+                        td class="num" { (cost_text(*c)) }
+                    }
+                }
+                tr class="total" {
+                    td { "Total" }
+                    td { (calls.len()) " calls" }
+                    (token_cells(&total))
+                    td class="num" { (cost.text()) }
+                }
+            }
+        }
+        @if cost.partial() {
+            p class="empty" { (PARTIAL_NOTE) }
+        }
+    }
 }
 
 /// Log entries grouped under their span (tree order), then the unattached ones.

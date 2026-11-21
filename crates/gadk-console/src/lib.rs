@@ -17,6 +17,7 @@
 
 use std::fmt::Write as _;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use gadk_eval_monitor::{MonitorError, ReportStore};
@@ -27,12 +28,14 @@ use crate::traces::{BigQueryTable, BigQueryTraceSource, CloudTraceSource, TraceS
 mod cli;
 mod evals;
 mod model;
+mod prices;
 mod prompts;
 pub mod traces;
 mod url;
 mod web;
 
 pub use cli::{parse_args, parse_cli};
+pub use prices::{ModelPrice, PriceTable};
 
 /// Console settings (from the command line).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +127,14 @@ pub enum ConsoleError {
     #[error("serve: {0}")]
     /// The server failed while serving or printing its URL.
     Serve(String),
+    /// The price file could not be read or parsed.
+    #[error("price file {}: {detail}", path.display())]
+    Prices {
+        /// The price file.
+        path: PathBuf,
+        /// What was wrong with it.
+        detail: String,
+    },
 }
 
 /// A console bound to its port, not yet serving.
@@ -196,6 +207,7 @@ pub async fn bind_with_source(
         csrf: Arc::from(csrf_token()),
         port: addr.port(),
         now: chrono::Utc::now,
+        prices: None,
     };
     Ok(Bound {
         listener,

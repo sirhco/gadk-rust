@@ -1651,6 +1651,7 @@ dependencies = [
  "rand 0.10.3",
  "reqwest",
  "serde",
+ "serde-saphyr",
  "serde_json",
  "similar",
  "tempfile",

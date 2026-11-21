@@ -38,9 +38,10 @@ pub(crate) struct AppState {
     pub source: Arc<dyn TraceSource>,
     pub store: Option<Arc<dyn gadk_prompts::PromptStore>>,
     pub reports: Option<Arc<crate::evals::ReportCache>>,
-    pub csrf: Arc<str>,                             // 64 hex chars
-    pub port: u16,                                  // the bound port
-    pub now: fn() -> chrono::DateTime<chrono::Utc>, // Utc::now in production; fixed in tests
+    pub csrf: Arc<str>,                                 // 64 hex chars
+    pub port: u16,                                      // the bound port
+    pub now: fn() -> chrono::DateTime<chrono::Utc>,     // Utc::now in production; fixed in tests
+    pub prices: Option<Arc<crate::prices::PriceTable>>, // the --prices file, if any
 }
 
 const CONSOLE_CSS: &str = include_str!("assets/console.css");
