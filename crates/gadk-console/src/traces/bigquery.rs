@@ -28,6 +28,11 @@ use super::{
     TraceSource, TraceSummary,
 };
 
+use crate::prices::{
+    LABEL_CACHED, LABEL_INPUT, LABEL_MODEL, LABEL_OPERATION, LABEL_OUTPUT, LABEL_REASONING,
+    OP_GENERATE_CONTENT,
+};
+
 /// The URL form `--traces` accepts.
 const URL_FORM: &str = "bigquery://<project>.<dataset>.<table>";
 
@@ -512,6 +517,10 @@ impl Row {
         self.attributes.as_ref()?.get("model")?.as_str()
     }
 
+    fn model_version(&self) -> Option<&str> {
+        self.attributes.as_ref()?.get("model_version")?.as_str()
+    }
+
     fn tool(&self) -> Option<&str> {
         self.content.as_ref()?.get("tool")?.as_str()
     }
@@ -613,6 +622,9 @@ fn spans(rows: &[Row]) -> Vec<RawSpan> {
                     labels.insert(key.to_owned(), value);
                 }
             }
+            if group.iter().any(|r| r.event_type.starts_with("LLM_")) {
+                llm_labels(group, &mut labels);
+            }
             RawSpan {
                 span_id: id.to_owned(),
                 parent_id: first_some(|r| r.parent.as_deref()),
@@ -623,6 +635,65 @@ fn spans(rows: &[Row]) -> Vec<RawSpan> {
             }
         })
         .collect()
+}
+
+/// The model-call labels of an LLM span, named and counted as the model-call spans in Cloud
+/// Trace carry them: the operation, the model (the first `attributes.model`, from the
+/// `LLM_REQUEST` row, else the response's `attributes.model_version`) and, from the last
+/// `LLM_RESPONSE` row, the token usage (`input_tokens` = prompt + tool-use prompt,
+/// `output_tokens` = completion + thoughts, missing values 0; prompt and completion from
+/// `attributes.usage_metadata`, else from `content.usage`).
+fn llm_labels(group: &[&Row], labels: &mut BTreeMap<String, String>) {
+    labels.insert(LABEL_OPERATION.to_owned(), OP_GENERATE_CONTENT.to_owned());
+    let model = group
+        .iter()
+        .find_map(|r| r.model().filter(|m| !m.is_empty()))
+        .or_else(|| {
+            group
+                .iter()
+                .rev()
+                .find_map(|r| r.model_version().filter(|m| !m.is_empty()))
+        });
+    if let Some(model) = model {
+        labels.insert(LABEL_MODEL.to_owned(), model.to_owned());
+    }
+    let Some(res) = group.iter().rev().find(|r| r.event_type == "LLM_RESPONSE") else {
+        return;
+    };
+    let content = res.content.as_ref();
+    let attributes = res.attributes.as_ref();
+    let thoughts = count(attributes, "/usage_metadata/thoughts_token_count");
+    // `attributes.usage_metadata` first; rows without it fall back to the `content.usage`
+    // summary the plugin writes from the same counts.
+    let prompt = present(attributes, "/usage_metadata/prompt_token_count")
+        .unwrap_or_else(|| count(content, "/usage/prompt"));
+    let completion = present(attributes, "/usage_metadata/candidates_token_count")
+        .unwrap_or_else(|| count(content, "/usage/completion"));
+    let input = prompt.saturating_add(count(
+        attributes,
+        "/usage_metadata/tool_use_prompt_token_count",
+    ));
+    let output = completion.saturating_add(thoughts);
+    let cached = count(attributes, "/usage_metadata/cached_content_token_count");
+    for (key, value) in [
+        (LABEL_INPUT, input),
+        (LABEL_OUTPUT, output),
+        (LABEL_CACHED, cached),
+        (LABEL_REASONING, thoughts),
+    ] {
+        labels.insert(key.to_owned(), value.to_string());
+    }
+}
+
+/// A non-negative integer at `pointer` of a JSON cell; 0 when absent.
+fn count(cell: Option<&Value>, pointer: &str) -> u64 {
+    present(cell, pointer).unwrap_or(0)
+}
+
+/// A non-negative integer at `pointer` of a JSON cell, if there is one.
+fn present(cell: Option<&Value>, pointer: &str) -> Option<u64> {
+    cell.and_then(|v| v.pointer(pointer))
+        .and_then(Value::as_u64)
 }
 
 #[async_trait::async_trait]
@@ -722,7 +793,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::traces::test_http::FakeHttp;
+    use crate::prices::Usage;
+    use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::traces::{LogEntry, RawSpan, SourceError, TimeRange, TraceQuery, TraceSource};
 
     /// `list_sql("`p.d.t`")` as the list query was written before the span-family table.
@@ -791,32 +863,6 @@ LIMIT @limit OFFSET @offset"#;
         t.timestamp_micros().to_string()
     }
 
-    /// A completed `jobs.query` reply with `fields` (name, type) and `rows` (one JSON per cell).
-    fn reply(
-        fields: &[(&str, &str)],
-        rows: Vec<Vec<Value>>,
-        page_token: bool,
-    ) -> Result<(u16, String), String> {
-        let schema: Vec<Value> = fields
-            .iter()
-            .map(|(n, t)| json!({ "name": n, "type": t, "mode": "NULLABLE" }))
-            .collect();
-        let rows: Vec<Value> = rows
-            .into_iter()
-            .map(|cells| json!({ "f": cells.into_iter().map(|v| json!({ "v": v })).collect::<Vec<_>>() }))
-            .collect();
-        let mut body = json!({
-            "jobComplete": true,
-            "jobReference": { "projectId": "billing-proj", "jobId": "job_1" },
-            "schema": { "fields": schema },
-            "rows": rows,
-        });
-        if page_token {
-            body["pageToken"] = json!("next");
-        }
-        Ok((200, body.to_string()))
-    }
-
     fn source(fake: &Arc<FakeHttp>) -> BigQueryTraceSource {
         let client = BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth));
         let mut s = BigQueryTraceSource::with_client(
@@ -856,16 +902,6 @@ LIMIT @limit OFFSET @offset"#;
             Value::Null,
             Value::Null,
         ]
-    }
-
-    fn param_value(body: &Value, name: &str) -> Value {
-        body["queryParameters"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|p| p["name"] == json!(name))
-            .unwrap_or_else(|| panic!("no parameter {name}: {body}"))
-            .clone()
     }
 
     #[tokio::test]
@@ -1509,5 +1545,120 @@ LIMIT @limit OFFSET @offset"#;
                 }
             );
         }
+    }
+
+    /// R10: LLM spans carry the Cloud Trace model-call labels, computed from the rows `get`
+    /// already reads; other spans do not.
+    #[tokio::test]
+    async fn get_puts_model_call_labels_on_llm_spans() {
+        const TOOL: &str = "dddddddddddddddd";
+        const BARE: &str = "eeeeeeeeeeeeeeee";
+        let response_attributes = json!({
+            "model_version": "gemini-3.8-flash-001",
+            "usage_metadata": {
+                "prompt_token_count": 1000,
+                "candidates_token_count": 300,
+                "total_token_count": 1550,
+                "thoughts_token_count": 50,
+                "cached_content_token_count": 200,
+                "tool_use_prompt_token_count": 200
+            }
+        });
+        let rows = vec![
+            ev(
+                0,
+                "LLM_REQUEST",
+                Some(LLM),
+                Some(AGENT),
+                None,
+                Some(json!({"model": "gemini-3.8-flash"})),
+                None,
+                "OK",
+                None,
+            ),
+            ev(
+                5,
+                "LLM_RESPONSE",
+                Some(LLM),
+                Some(AGENT),
+                // `attributes.usage_metadata` wins over this summary.
+                Some(
+                    json!({"response": "hi", "usage": {"prompt": 1, "completion": 1, "total": 2}}),
+                ),
+                Some(response_attributes),
+                Some(json!({"total_ms": 900})),
+                "OK",
+                None,
+            ),
+            ev(
+                6,
+                "LLM_RESPONSE",
+                Some(BARE),
+                Some(AGENT),
+                // No `usage_metadata`: the `content.usage` summary is the fallback.
+                Some(
+                    json!({"response": "yo", "usage": {"prompt": 40, "completion": 7, "total": 47}}),
+                ),
+                Some(json!({"model_version": "gemini-3.8-pro-002"})),
+                None,
+                "OK",
+                None,
+            ),
+            ev(
+                7,
+                "TOOL_STARTING",
+                Some(TOOL),
+                Some(AGENT),
+                Some(json!({"tool": "get_weather"})),
+                None,
+                None,
+                "OK",
+                None,
+            ),
+        ];
+        let fake = FakeHttp::new(vec![reply(&GET_FIELDS, rows, false)]);
+        let detail = source(&fake)
+            .get(&TraceId::parse(ID).unwrap())
+            .await
+            .unwrap();
+        let labels = |id: &str| {
+            detail
+                .spans
+                .iter()
+                .find(|s| s.span_id == id)
+                .unwrap_or_else(|| panic!("span {id}"))
+                .labels
+                .clone()
+        };
+        let llm = labels(LLM);
+        for (key, want) in [
+            ("gen_ai.operation.name", "generate_content"),
+            ("gen_ai.request.model", "gemini-3.8-flash"),
+            ("gen_ai.usage.input_tokens", "1200"),
+            ("gen_ai.usage.output_tokens", "350"),
+            ("gen_ai.usage.cache_read.input_tokens", "200"),
+            ("gen_ai.usage.reasoning.output_tokens", "50"),
+        ] {
+            assert_eq!(llm.get(key).map(String::as_str), Some(want), "{key}");
+        }
+        assert_eq!(
+            Usage::from_labels(&llm),
+            Usage {
+                input: 1200,
+                cached: 200,
+                output: 300,
+                reasoning: 50
+            },
+            "the BigQuery row mapping of R6"
+        );
+        let bare = labels(BARE);
+        assert_eq!(bare["gen_ai.request.model"], "gemini-3.8-pro-002");
+        assert_eq!(bare["gen_ai.usage.input_tokens"], "40");
+        assert_eq!(bare["gen_ai.usage.output_tokens"], "7");
+        assert_eq!(bare["gen_ai.usage.cache_read.input_tokens"], "0");
+        assert_eq!(bare["gen_ai.operation.name"], "generate_content");
+        let tool = labels(TOOL);
+        assert!(!tool.contains_key("gen_ai.operation.name"), "{tool:?}");
+        assert!(!tool.contains_key("gen_ai.usage.input_tokens"), "{tool:?}");
     }
 }

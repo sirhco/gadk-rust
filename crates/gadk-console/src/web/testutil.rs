@@ -90,6 +90,8 @@ pub(crate) fn state_with_reports(
         csrf: Arc::from(CSRF),
         port: PORT,
         now: fixed_now,
+        prices: None,
+        usage: None,
     }
 }
 

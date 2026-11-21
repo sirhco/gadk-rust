@@ -21,7 +21,7 @@ use bytes::Bytes;
 use futures::StreamExt as _;
 use gadk_model::{BodyStream, HttpClient, ModelError};
 use http::{HeaderMap, Method, StatusCode};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// One request the fake client saw.
 pub(crate) struct Seen {
@@ -91,4 +91,42 @@ impl HttpClient for FakeHttp {
             Err(detail) => Err(ModelError::Transport(detail.into())),
         }
     }
+}
+
+/// A completed `jobs.query` reply with `fields` (name, type) and `rows` (one JSON per cell);
+/// `page_token` adds a `pageToken` (more rows exist).
+pub(crate) fn reply(
+    fields: &[(&str, &str)],
+    rows: Vec<Vec<Value>>,
+    page_token: bool,
+) -> Result<(u16, String), String> {
+    let schema: Vec<Value> = fields
+        .iter()
+        .map(|(n, t)| json!({ "name": n, "type": t, "mode": "NULLABLE" }))
+        .collect();
+    let rows: Vec<Value> = rows
+        .into_iter()
+        .map(|cells| json!({ "f": cells.into_iter().map(|v| json!({ "v": v })).collect::<Vec<_>>() }))
+        .collect();
+    let mut body = json!({
+        "jobComplete": true,
+        "jobReference": { "projectId": "billing-proj", "jobId": "job_1" },
+        "schema": { "fields": schema },
+        "rows": rows,
+    });
+    if page_token {
+        body["pageToken"] = json!("next");
+    }
+    Ok((200, body.to_string()))
+}
+
+/// The query parameter `name` of a `jobs.query` request body.
+pub(crate) fn param_value(body: &Value, name: &str) -> Value {
+    body["queryParameters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == json!(name))
+        .unwrap_or_else(|| panic!("no parameter {name}: {body}"))
+        .clone()
 }

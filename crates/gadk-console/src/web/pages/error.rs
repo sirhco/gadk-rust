@@ -50,16 +50,14 @@ pub(crate) fn error_page(status: StatusCode, nav: Nav, text: &str, hint: Option<
 
 /// NotFound → 404 "trace not found"; other variants → 502 with e.to_string() and e.hint().
 pub(crate) fn source_error(e: &SourceError) -> Response {
+    source_error_in(Nav::Traces, e)
+}
+
+/// [`source_error`] under the navigation entry `nav`.
+pub(crate) fn source_error_in(nav: Nav, e: &SourceError) -> Response {
     match e {
-        SourceError::NotFound => {
-            error_page(StatusCode::NOT_FOUND, Nav::Traces, "trace not found", None)
-        }
-        _ => error_page(
-            StatusCode::BAD_GATEWAY,
-            Nav::Traces,
-            &e.to_string(),
-            e.hint(),
-        ),
+        SourceError::NotFound => error_page(StatusCode::NOT_FOUND, nav, "trace not found", None),
+        _ => error_page(StatusCode::BAD_GATEWAY, nav, &e.to_string(), e.hint()),
     }
 }
 

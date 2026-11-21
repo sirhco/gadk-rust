@@ -111,6 +111,25 @@ Behavior, SQL, schemas, request bytes and error texts follow ADK's BigQuery Agen
 plugin, so tables and rows written by this crate match those written by ADK. The few accepted
 differences are annotated in the source with plain `//` notes.
 
+## Prompt versions
+
+When an agent's instruction comes from a `gadk-prompts` `PromptInstruction`, the `LLM_REQUEST` and
+`LLM_RESPONSE` rows of its model calls carry `attributes.prompt`:
+`{"name": "<prompt>", "version": <n>, "label": "<label>"}`. `label` is the selector's label,
+`latest`, or absent for a version selected by number. Rows of calls without a recorded prompt,
+and rows written before this attribute existed, have no `prompt` key. For example, calls and
+tokens per prompt version:
+
+    SELECT JSON_VALUE(attributes, '$.prompt.name') AS prompt,
+      JSON_VALUE(attributes, '$.prompt.version') AS version, COUNT(*) AS calls,
+      SUM(CAST(JSON_VALUE(content, '$.usage.prompt') AS INT64)) AS input_tokens
+    FROM `my-project.agent_analytics.agent_events`
+    WHERE event_type = 'LLM_RESPONSE'
+      AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+    GROUP BY 1, 2
+
+`gadk-console` shows these per version on `/prompts/{name}` (see its README).
+
 ## Tests and goldens
 
 - Unit tests per module, plus conformance tests in `src/parity_tests/` for the formatter, schema

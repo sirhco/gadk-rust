@@ -32,5 +32,17 @@ let provider = registry
 - Feature `testsuite`: `gadk_prompts::testsuite::run`, the `PromptStore` contract tests, for
   other store implementations.
 
+## Prompt metrics
+
+Each render records the version it used in the invocation's context
+(`ReadonlyContext::record_prompt`, keyed by the agent's name): a resolved version records
+`PromptUse { name, version, label }`, with `label` the selector's label, `latest` for
+`Selector::Latest`, or none for `Selector::Version`; a fallback render clears the agent's record.
+When an agent renders two `PromptInstruction`s (instruction and global instruction), the last
+render before the model call wins. The request sent to the model is unchanged. The
+`gadk-agentanalytics` plugin writes the record into its model rows as `attributes.prompt`, and
+`gadk-console` shows calls, tokens, cost, latency and eval pass rate per version on
+`/prompts/{name}`.
+
 Other stores: `gadk-prompts-firestore` (Google Cloud Firestore). Command-line management:
 `gadk-prompts-cli`.

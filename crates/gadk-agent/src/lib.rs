@@ -54,7 +54,7 @@ pub use agent::{
 pub use callback::*;
 pub use context::{
     ActivationId, CancelCause, CancelGuard, Context, ContextBuilder, ContextDelta, Identity,
-    InvocationContext, ReadonlyContext, SharedCauseError,
+    InvocationContext, PromptUse, ReadonlyContext, SharedCauseError,
 };
 pub use error::{AgentError, EventStream, SharedToolError, ToolError};
 #[doc(hidden)]

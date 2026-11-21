@@ -934,6 +934,20 @@ pub(crate) fn llm_response_attributes(res: &LlmResponse) -> Map<String, Value> {
     attrs
 }
 
+/// The `prompt` attribute of model rows: the prompt version recorded for the callback's agent
+/// (`{"name", "version", "label"}`, `label` omitted when the record has none); `None` without an
+/// ADK context or a record.
+pub(crate) fn prompt_attribute(ctx: &CallbackCtx) -> Option<Value> {
+    let used = ctx.adk.as_ref()?.recorded_prompt()?;
+    let mut prompt = Map::new();
+    prompt.insert("name".to_owned(), Value::from(used.name));
+    prompt.insert("version".to_owned(), Value::from(used.version));
+    if let Some(label) = used.label {
+        prompt.insert("label".to_owned(), Value::from(label));
+    }
+    Some(Value::Object(prompt))
+}
+
 /// `"none"` without cached tokens, `"implicit"` with them (ADK responses carry no explicit
 /// context-cache metadata).
 pub(crate) fn cache_type(u: Option<&GenerateContentResponseUsageMetadata>) -> String {
@@ -2101,6 +2115,26 @@ mod tests {
         processor.release_row_uploads(&mut row);
         assert!(
             processor.try_reserve_upload_bytes(crate::config::DEFAULT_MAX_PENDING_UPLOAD_BYTES)
+        );
+    }
+
+    /// R4: the prompt attribute is the recorded prompt of the callback's agent, `label` omitted
+    /// when unset; none without an ADK context or a record.
+    #[test]
+    fn prompt_attribute_is_the_recorded_prompt() {
+        assert_eq!(prompt_attribute(&CallbackCtx::background()), None);
+        let ctx = Context::builder().build();
+        let cb = CallbackCtx::from_context(&ctx);
+        assert_eq!(prompt_attribute(&cb), None);
+        ctx.record_prompt(gadk_agent::PromptUse::new("triage", 3).with_label("production"));
+        assert_eq!(
+            prompt_attribute(&cb),
+            Some(json!({"name": "triage", "version": 3, "label": "production"}))
+        );
+        ctx.record_prompt(gadk_agent::PromptUse::new("triage", 4));
+        assert_eq!(
+            prompt_attribute(&cb),
+            Some(json!({"name": "triage", "version": 4}))
         );
     }
 }

@@ -32,15 +32,18 @@ mod prompts;
 #[cfg(test)]
 pub(crate) mod testutil;
 mod traces;
+mod usage;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub source: Arc<dyn TraceSource>,
     pub store: Option<Arc<dyn gadk_prompts::PromptStore>>,
     pub reports: Option<Arc<crate::evals::ReportCache>>,
-    pub csrf: Arc<str>,                             // 64 hex chars
-    pub port: u16,                                  // the bound port
-    pub now: fn() -> chrono::DateTime<chrono::Utc>, // Utc::now in production; fixed in tests
+    pub csrf: Arc<str>,                                 // 64 hex chars
+    pub port: u16,                                      // the bound port
+    pub now: fn() -> chrono::DateTime<chrono::Utc>,     // Utc::now in production; fixed in tests
+    pub prices: Option<Arc<crate::prices::PriceTable>>, // the --prices file, if any
+    pub usage: Option<Arc<crate::usage::UsageSource>>,  // Some with --traces bigquery://… only
 }
 
 const CONSOLE_CSS: &str = include_str!("assets/console.css");
@@ -48,8 +51,9 @@ const WATERFALL_JS: &str = include_str!("assets/waterfall.js");
 
 /// GET / → 303 /traces; GET /assets/console.css and /assets/waterfall.js (include_str!, with
 /// text/css and text/javascript; charset=utf-8 content types); merges traces::routes(),
-/// prompts::routes() and evals::routes(); wraps everything in guard::layer (Host 421, POST Origin
-/// 403) and adds the CSP header to every response; unknown paths → error page 404.
+/// prompts::routes(), evals::routes() and usage::routes(); wraps everything in guard::layer
+/// (Host 421, POST Origin 403) and adds the CSP header to every response; unknown paths → error
+/// page 404.
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(root))
@@ -58,6 +62,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .merge(traces::routes())
         .merge(prompts::routes())
         .merge(evals::routes())
+        .merge(usage::routes())
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(state.clone(), guard::check))
         .layer(middleware::map_response(guard::csp))

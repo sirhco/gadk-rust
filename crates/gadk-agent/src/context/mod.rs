@@ -23,6 +23,7 @@ pub mod context;
 pub mod delta;
 pub mod identity;
 pub mod invocation;
+pub mod prompt_use;
 pub mod readonly;
 
 // Glob re-exports of every child (the crate imports through `crate::context::*`). The allows
@@ -41,5 +42,7 @@ pub use delta::*;
 pub use identity::*;
 #[allow(unused_imports)]
 pub use invocation::*;
+#[allow(unused_imports)]
+pub use prompt_use::*;
 #[allow(unused_imports)]
 pub use readonly::*;
