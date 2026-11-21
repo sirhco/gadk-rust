@@ -41,6 +41,9 @@ const VERSION_MODEL_CAP: usize = 5_000;
 /// The most invocation × version rows the pass-rate mapping returns.
 const MAPPING_CAP: usize = 20_000;
 
+/// The byte cap floor of a DML statement: BigQuery bills every one at least 10 MiB.
+pub(crate) const DML_MIN_BYTES: i64 = 10_485_760;
+
 /// The calls of one model and their summed tokens.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ModelCalls {
@@ -174,7 +177,7 @@ impl UsageSource {
     }
 
     /// Runs `sql` with `params`, the byte cap and at most `max_rows` rows.
-    async fn run(
+    pub(crate) async fn run(
         &self,
         sql: &str,
         params: Vec<Value>,
@@ -187,6 +190,19 @@ impl UsageSource {
         self.client
             .query(&self.compute_project, sql, &opts)
             .await
+            .map_err(from_bigquery)
+    }
+
+    /// Runs the DML statement `sql` with `params` under the byte cap, raised to
+    /// [`DML_MIN_BYTES`] (BigQuery bills every DML statement at least 10 MiB).
+    pub(crate) async fn run_dml(&self, sql: &str, params: Vec<Value>) -> Result<(), SourceError> {
+        let opts = QueryOptions::new()
+            .with_maximum_bytes_billed(self.max_bytes_billed.max(DML_MIN_BYTES))
+            .with_query_parameters(params);
+        self.client
+            .query(&self.compute_project, sql, &opts)
+            .await
+            .map(|_| ())
             .map_err(from_bigquery)
     }
 

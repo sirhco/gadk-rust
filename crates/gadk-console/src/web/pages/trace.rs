@@ -67,6 +67,7 @@ pub(crate) fn render(
     still_arriving: bool,
     prices: Option<&PriceTable>,
     scores: &ScoresView,
+    csrf: &str,
 ) -> Markup {
     let body = html! {
         h1 { "Trace " span class="mono" { (id.as_str()) } }
@@ -101,7 +102,7 @@ pub(crate) fn render(
             }
         }
         (llm_calls(rows, prices))
-        (scores_section(scores))
+        (scores_section(id, scores, csrf))
         @if let Ok(view) = logs {
             (log_sections(rows, view))
         }
@@ -211,8 +212,33 @@ fn score_value_text(r: &ScoreRow) -> &str {
     }
 }
 
-/// The Scores section: the needs-BigQuery note, the error banner, or the scores newest first.
-fn scores_section(scores: &ScoresView) -> Markup {
+/// The form that adds a score to trace `id` (`POST /traces/{id}/scores`, confirmed first).
+fn score_form(id: &TraceId, csrf: &str) -> Markup {
+    html! {
+        form method="post" action={ "/traces/" (id.as_str()) "/scores" }
+            data-confirm="Add this score to the trace?" class="inline" {
+            input type="hidden" name="csrf" value=(csrf);
+            input type="text" name="name" placeholder="score name" required maxlength="100";
+            " "
+            select name="kind" {
+                option value="up" { "thumbs up" }
+                option value="down" { "thumbs down" }
+                option value="number" { "number" }
+                option value="category" { "category" }
+            }
+            " "
+            input type="text" name="value" placeholder="number or category" maxlength="100";
+            " "
+            input type="text" name="comment" placeholder="comment (optional)" maxlength="1000";
+            " "
+            button type="submit" { "Add score" }
+        }
+    }
+}
+
+/// The Scores section: the needs-BigQuery note, or the scores newest first (or the error
+/// banner) and the form that adds one.
+fn scores_section(id: &TraceId, scores: &ScoresView, csrf: &str) -> Markup {
     html! {
         h2 { "Scores" }
         @match scores {
@@ -251,6 +277,9 @@ fn scores_section(scores: &ScoresView) -> Markup {
                     p class="empty" { "Showing the newest " (TRACE_SCORES_CAP) " scores." }
                 }
             }
+        }
+        @if !matches!(scores, ScoresView::NeedsBigQuery) {
+            (score_form(id, csrf))
         }
     }
 }

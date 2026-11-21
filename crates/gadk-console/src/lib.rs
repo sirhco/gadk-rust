@@ -208,6 +208,23 @@ pub(crate) struct Extras {
     pub(crate) prices: Option<Arc<PriceTable>>,
     /// The usage queries (BigQuery trace source only).
     pub(crate) usage: Option<Arc<UsageSource>>,
+    /// The author of console scores; `None` is [`default_author`] over the environment.
+    pub(crate) author: Option<String>,
+}
+
+/// The author of console scores without `--author`: the first non-empty of the `USER` and
+/// `USERNAME` variables (read with `lookup`), else `console`.
+pub(crate) fn default_author(lookup: impl Fn(&str) -> Option<String>) -> String {
+    ["USER", "USERNAME"]
+        .into_iter()
+        .filter_map(lookup)
+        .find(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "console".to_owned())
+}
+
+/// Reads an environment variable (`None` when unset or not Unicode).
+fn env_var(key: &str) -> Option<String> {
+    std::env::var(key).ok()
 }
 
 /// [`bind_with_source`] plus `extras`.
@@ -249,6 +266,7 @@ pub(crate) async fn bind_full(
         now: chrono::Utc::now,
         prices: extras.prices,
         usage: extras.usage,
+        author: extras.author.unwrap_or_else(|| default_author(env_var)),
     };
     Ok(Bound {
         listener,
@@ -266,8 +284,10 @@ pub async fn run(
 }
 
 /// Like [`run`], reading traces from the source `cli.traces` names and prices from
-/// `cli.prices` (read before anything is bound).
+/// `cli.prices` (read before anything is bound); console scores are written by `cli.author`,
+/// else `USER`, else `USERNAME`, else `console`.
 pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<(), ConsoleError> {
+    let author = cli.author.unwrap_or_else(|| default_author(env_var));
     let prices = cli
         .prices
         .as_deref()
@@ -298,7 +318,16 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
             ))),
         ),
     };
-    let bound = bind_full(cli.config, source, Extras { prices, usage }).await?;
+    let bound = bind_full(
+        cli.config,
+        source,
+        Extras {
+            prices,
+            usage,
+            author: Some(author),
+        },
+    )
+    .await?;
     writeln!(out, "http://127.0.0.1:{}/", bound.local_addr().port())
         .and_then(|()| out.flush())
         .map_err(|e| ConsoleError::Serve(format!("print the URL: {e}")))?;
@@ -329,6 +358,23 @@ mod tests {
             port: 0,
             log_id: "gadk".into(),
         }
+    }
+
+    #[test]
+    fn default_author_is_user_then_username_then_console() {
+        use super::default_author;
+        let env = |user: Option<&'static str>, username: Option<&'static str>| {
+            move |key: &str| match key {
+                "USER" => user.map(str::to_owned),
+                "USERNAME" => username.map(str::to_owned),
+                _ => None,
+            }
+        };
+        assert_eq!(default_author(env(Some("chris"), Some("other"))), "chris");
+        assert_eq!(default_author(env(None, Some("olson"))), "olson");
+        assert_eq!(default_author(env(Some(""), Some("olson"))), "olson");
+        assert_eq!(default_author(env(Some(" "), Some(""))), "console");
+        assert_eq!(default_author(env(None, None)), "console");
     }
 
     #[tokio::test]

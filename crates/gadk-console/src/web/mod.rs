@@ -44,6 +44,7 @@ pub(crate) struct AppState {
     pub now: fn() -> chrono::DateTime<chrono::Utc>,     // Utc::now in production; fixed in tests
     pub prices: Option<Arc<crate::prices::PriceTable>>, // the --prices file, if any
     pub usage: Option<Arc<crate::usage::UsageSource>>,  // Some with --traces bigquery://… only
+    pub author: String,                                 // the author of console scores
 }
 
 const CONSOLE_CSS: &str = include_str!("assets/console.css");
