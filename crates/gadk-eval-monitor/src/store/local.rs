@@ -28,6 +28,13 @@ impl LocalStore {
         Self { dir: dir.into() }
     }
 
+    /// The store in the subdirectory `name` of this one.
+    pub(super) fn child(&self, name: &str) -> Self {
+        Self {
+            dir: self.dir.join(name),
+        }
+    }
+
     fn store_err(&self, e: std::io::Error) -> MonitorError {
         MonitorError::Store(format!("{}: {e}", self.dir.display()))
     }

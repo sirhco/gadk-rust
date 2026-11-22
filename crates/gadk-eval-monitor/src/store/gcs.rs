@@ -45,6 +45,15 @@ impl GcsStore {
         }
     }
 
+    /// The store under the object prefix `<prefix><name>/`.
+    pub(super) fn child(&self, name: &str) -> Self {
+        Self {
+            bucket: self.bucket.clone(),
+            prefix: format!("{}{name}/", self.prefix),
+            gcp: self.gcp.clone(),
+        }
+    }
+
     /// Uploads `body` as `name` unless the object exists (`ifGenerationMatch=0`); `false` when it
     /// does.
     pub(super) async fn create(&self, name: &str, body: &str) -> Result<bool, MonitorError> {
@@ -139,7 +148,7 @@ mod tests {
 
     use crate::gcp::NoAuth;
     use crate::store::ReportStore;
-    use crate::store::tests::report;
+    use crate::store::tests::{experiment, report};
     use crate::testutil::{exchange, replay};
 
     const OBJECTS: &str = "https://storage.googleapis.com/storage/v1/b/evals/o";
@@ -328,6 +337,150 @@ mod tests {
         assert_eq!(
             store.find("support-20270115T080000Z.json").await.unwrap(),
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn put_experiment_takes_the_next_free_name_under_experiments() {
+        let r = experiment("exp-e2e", 1_800_000_000);
+        let json = r.to_json().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[
+                exchange(
+                    "POST",
+                    &format!(
+                        "{UPLOADS}?uploadType=media\
+                         &name=monitors%2Fexperiments%2Fexp-e2e-20270115T080000Z.json\
+                         &ifGenerationMatch=0"
+                    ),
+                    &json,
+                    412,
+                    r#"{"error":{"code":412,"message":"At least one of the pre-conditions you specified did not hold."}}"#,
+                ),
+                exchange(
+                    "POST",
+                    &format!(
+                        "{UPLOADS}?uploadType=media\
+                         &name=monitors%2Fexperiments%2Fexp-e2e-20270115T080000Z-2.json\
+                         &ifGenerationMatch=0"
+                    ),
+                    &json,
+                    200,
+                    r#"{"name":"monitors/experiments/exp-e2e-20270115T080000Z-2.json","generation":"1"}"#,
+                ),
+            ],
+        );
+        let store =
+            ReportStore::gcs_with_client("gs://evals/monitors/", http, Arc::new(NoAuth)).unwrap();
+        assert_eq!(
+            store.put_experiment(&r).await.unwrap(),
+            "exp-e2e-20270115T080000Z-2.json"
+        );
+    }
+
+    #[tokio::test]
+    async fn experiments_without_a_prefix_are_under_experiments() {
+        let r = experiment("exp-e2e", 1_800_000_000);
+        let json = r.to_json().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[
+                exchange(
+                    "POST",
+                    &format!(
+                        "{UPLOADS}?uploadType=media\
+                         &name=experiments%2Fexp-e2e-20270115T080000Z.json&ifGenerationMatch=0"
+                    ),
+                    &json,
+                    200,
+                    r#"{"name":"experiments/exp-e2e-20270115T080000Z.json","generation":"1"}"#,
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=experiments%2F&delimiter=%2F"),
+                    "",
+                    200,
+                    r#"{"items":[{"name":"experiments/exp-e2e-20270115T080000Z.json"},{"name":"experiments/exp-e2e-20270115T090000Z.json"},{"name":"experiments/readme.txt"}]}"#,
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}/experiments%2Fexp-e2e-20270115T080000Z.json?alt=media"),
+                    "",
+                    200,
+                    &json,
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}/experiments%2Fexp-e2e-20270115T100000Z.json?alt=media"),
+                    "",
+                    404,
+                    r#"{"error":{"code":404,"message":"No such object"}}"#,
+                ),
+            ],
+        );
+        let store = ReportStore::gcs_with_client("gs://evals", http, Arc::new(NoAuth)).unwrap();
+        assert_eq!(
+            store.put_experiment(&r).await.unwrap(),
+            "exp-e2e-20270115T080000Z.json"
+        );
+        assert_eq!(
+            store.experiment_names(10).await.unwrap(),
+            [
+                "exp-e2e-20270115T090000Z.json",
+                "exp-e2e-20270115T080000Z.json"
+            ]
+        );
+        assert_eq!(
+            store
+                .find_experiment("exp-e2e-20270115T080000Z.json")
+                .await
+                .unwrap(),
+            Some(r)
+        );
+        assert_eq!(
+            store
+                .find_experiment("exp-e2e-20270115T100000Z.json")
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn report_names_skip_the_experiments_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        // The delimiter listing returns experiments/ as a prefix, not as objects.
+        let http = replay(
+            dir.path(),
+            &[
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=monitors%2F&delimiter=%2F"),
+                    "",
+                    200,
+                    r#"{"items":[{"name":"monitors/support-20270115T080000Z.json"}],"prefixes":["monitors/experiments/"]}"#,
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=monitors%2Fexperiments%2F&delimiter=%2F"),
+                    "",
+                    200,
+                    r#"{"items":[{"name":"monitors/experiments/exp-e2e-20270115T090000Z.json"}]}"#,
+                ),
+            ],
+        );
+        let store =
+            ReportStore::gcs_with_client("gs://evals/monitors", http, Arc::new(NoAuth)).unwrap();
+        assert_eq!(
+            store.names(10).await.unwrap(),
+            ["support-20270115T080000Z.json"]
+        );
+        assert_eq!(
+            store.experiment_names(10).await.unwrap(),
+            ["exp-e2e-20270115T090000Z.json"]
         );
     }
 }
