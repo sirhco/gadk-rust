@@ -20,6 +20,7 @@ use gadk_eval_monitor::{CaseVerdicts, ExperimentReport, VariantStats, Verdict};
 use maud::{Markup, html};
 
 use super::cost::{NO_PRICES, PARTIAL_NOTE};
+use super::eval_report::outcome_chip;
 use super::layout::{Nav, page};
 use crate::evals::percent;
 use crate::experiments::experiment_href;
@@ -169,11 +170,11 @@ fn ms(v: Option<u64>) -> String {
 /// A verdict chip that opens variant `v`'s runs of `case`: each run's last reply, run error and
 /// score rationales.
 fn verdict_cell(x: &ExperimentReport, v: usize, case: &str, verdict: Verdict) -> Markup {
-    let (class, label) = match verdict {
-        Verdict::Pass => ("chip chip-pass", "pass"),
-        Verdict::Fail => ("chip chip-fail", "fail"),
-        _ => ("chip chip-error", "error"),
-    };
+    let (class, label) = outcome_chip(match verdict {
+        Verdict::Pass => Outcome::Pass,
+        Verdict::Fail => Outcome::Fail,
+        _ => Outcome::Error,
+    });
     let runs: Vec<&CaseRun> = x
         .report
         .variants
@@ -210,11 +211,7 @@ fn verdict_cell(x: &ExperimentReport, v: usize, case: &str, verdict: Verdict) ->
 }
 
 fn outcome(o: Outcome) -> &'static str {
-    match o {
-        Outcome::Pass => "pass",
-        Outcome::Fail => "fail",
-        Outcome::Error => "error",
-    }
+    outcome_chip(o).1
 }
 
 #[cfg(test)]

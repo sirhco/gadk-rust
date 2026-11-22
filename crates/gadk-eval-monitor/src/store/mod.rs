@@ -131,7 +131,7 @@ impl Backend {
         )))
     }
 
-    /// The newest `limit` report names in the store (by [`name_key`]), newest first.
+    /// The newest `limit` stored names in the store (by [`name_key`]), newest first.
     async fn newest(&self, limit: usize) -> Result<Vec<String>, MonitorError> {
         let mut keyed: Vec<((String, u32), String)> = self
             .names()

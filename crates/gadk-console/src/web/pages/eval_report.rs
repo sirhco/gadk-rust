@@ -112,12 +112,17 @@ fn run(m: &MonitoredRun) -> Markup {
     }
 }
 
-fn chip(s: &ScoreResult) -> Markup {
-    let (class, label) = match s.outcome {
+/// The chip CSS classes and label shared by every outcome rendering.
+pub(super) fn outcome_chip(o: Outcome) -> (&'static str, &'static str) {
+    match o {
         Outcome::Pass => ("chip chip-pass", "pass"),
         Outcome::Fail => ("chip chip-fail", "fail"),
         Outcome::Error => ("chip chip-error", "error"),
-    };
+    }
+}
+
+fn chip(s: &ScoreResult) -> Markup {
+    let (class, label) = outcome_chip(s.outcome);
     html! { span class=(class) title=(s.kind) { (s.kind) ": " (label) } }
 }
 
