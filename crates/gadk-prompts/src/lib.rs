@@ -35,6 +35,7 @@ mod metrics;
 mod model;
 mod provider;
 mod registry;
+mod rollout;
 mod snapshot;
 mod store;
 
@@ -44,6 +45,7 @@ pub use model::{
 };
 pub use provider::PromptInstruction;
 pub use registry::{DEFAULT_REFRESH_INTERVAL, PromptRegistry, PromptRegistryBuilder};
+pub use rollout::{Rollout, RolloutSnapshot};
 pub use snapshot::{PromptEntry, PromptSnapshot};
 pub use store::{PromptStore, StoreError};
 

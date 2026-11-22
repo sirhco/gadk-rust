@@ -20,10 +20,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use gadk_prompts::{
-    FileStore, Label, NewVersion, PromptSnapshot, PromptStore, PromptVersion, StoreError,
+    FileStore, Label, NewVersion, PromptSnapshot, PromptStore, PromptVersion, Rollout, StoreError,
 };
 
-/// Implements only the required methods, so `create_version_reporting` is the trait default.
+/// Implements only the required methods, so `create_version_reporting` and the rollout methods
+/// are the trait defaults.
 struct DefaultsOnly(FileStore);
 
 #[async_trait]
@@ -70,4 +71,31 @@ async fn store_contract_file_store() {
         async move { store }
     })
     .await;
+}
+
+#[tokio::test]
+async fn rollout_defaults_on_a_store_without_rollout_support() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = DefaultsOnly(FileStore::new(dir.path()));
+    s.create_version(NewVersion {
+        name: "p".into(),
+        template: "a".into(),
+        config: None,
+        author: String::new(),
+        message: String::new(),
+    })
+    .await
+    .unwrap();
+    let prod = Label::production();
+    s.set_label("p", &prod, 1, None).await.unwrap();
+    assert!(s.load_rollouts().await.unwrap().is_empty());
+    let (snap, rollouts) = s.load_all_with_rollouts().await.unwrap();
+    assert_eq!(snap, s.load_all().await.unwrap());
+    assert!(rollouts.is_empty());
+    let unsupported = Err(StoreError::Invalid(
+        "rollouts are not supported by this store".into(),
+    ));
+    let r = Rollout::new(1, 10).unwrap();
+    assert_eq!(s.set_rollout("p", &prod, Some(r)).await, unsupported);
+    assert_eq!(s.set_rollout("p", &prod, None).await, unsupported);
 }
