@@ -7,6 +7,9 @@ Cloud Trace ([Cloud Trace source](#cloud-trace-source)), scores each one against
 monitor spec, writes a JSON report to a local directory or `gs://`, and fails below a pass-rate
 threshold, so it runs from CI or a scheduler.
 
+It also runs experiments: one eval set against several variants of an agent, stored next to the
+monitor reports and compared in `gadk-console` ([Experiments](#experiments)).
+
 The command-line tool is the `gadk-eval` binary of this crate (the `gadk-eval` crate is the
 library it builds on):
 
@@ -257,6 +260,85 @@ The files hold production text (user messages, replies, and tool arguments with
 `--tool-args`): keep them as private as the table. Nothing is uploaded. Cases are a starting
 point to review and edit: a user message with several parts is its logged summary, and the reply
 of a run that transferred to a sub-agent includes the sub-agent's text.
+
+## Experiments
+
+An experiment runs one [`gadk-eval`](../gadk-eval/README.md) eval set against two or more
+variants of an agent (prompt versions, models, or anything your `build` closure changes) and
+keeps the result for a side-by-side comparison on `gadk-console`'s Experiments pages.
+
+```rust
+// Inside an async fn returning Result<_, Box<dyn std::error::Error>>; `judge`, `registry` and
+// `build_agent` are yours, as in the gadk-eval README.
+use gadk_eval::{EvalSet, Evaluator, Variant};
+use gadk_eval_monitor::{ReportStore, run_experiment};
+use gadk_prompts::{Label, Selector};
+
+let set = EvalSet::load("evals/support.yaml")?;
+let variants = [
+    Variant::prompt("prod", Selector::Label(Label::production())),
+    Variant::prompt("v8", Selector::Version(8)),
+];
+let report = run_experiment("support-v8", &Evaluator::new(judge), &set, &variants, |v| {
+    build_agent(&registry, v.selector().cloned().unwrap_or(Selector::Latest))
+})
+.await?;
+print!("{}", report.summary());
+let stored = ReportStore::open("gs://my-bucket/monitors")?
+    .put_experiment(&report)
+    .await?;
+println!("stored {stored}");
+```
+
+`run_experiment(name, &evaluator, &set, &variants, build)` calls `Evaluator::run_measured` and
+returns an `ExperimentReport`: the name, the set's name, `generated_at` (when the runs
+finished), each variant's name and prompt selector as text (`v8`, `production`, `latest`;
+none for `Variant::new`), the `EvalReport` and each run's `RunMetrics` (duration and tokens per model).
+The name must be `[A-Za-z0-9_-]{1,64}`: an invalid name fails before `build` is called, and it
+and empty or repeated variant names are a `MonitorError::Spec` whose message starts
+`experiment: `. `summary()` prints one row per variant: runs, pass rate, mean judge score,
+errors, p50 and p95 duration, and input and output tokens; `variant_stats()` returns the same
+numbers and `case_verdicts()` each case's verdict per variant. `to_json` and `from_json` round
+trip a report.
+
+A run passes when it has no run error and every score passes, errors when it has a run error or
+an `error` score, and fails otherwise. The pass rate is passed / (passed + failed) runs (`-` when
+there are none): it counts whole runs, unlike the per-score rate of `EvalReport::summary` and
+the monitor reports. A case's verdict for a variant is `error` when any of its runs errored,
+`pass` when all passed, else `fail`; the variants disagree on a case when its verdicts differ.
+Duration percentiles (nearest rank) cover only runs without a run error. Mean judge score
+averages the scores of non-error results that have one.
+
+`ReportStore::put_experiment` stores the report under `experiments/` in the same store as the
+monitor reports, as `<name>-<YYYYMMDDTHHMMSSZ>.json` (`-2`, `-3`, … when taken, never
+overwriting; a local `experiments` directory is created when missing) and returns that stored
+name. `experiment_names(limit)` lists stored names newest first and `find_experiment(name)`
+reads one (`None` when absent). Monitor report listings (`names`, `list`, `gadk-eval report`)
+never include experiments.
+
+```text
+gs://my-bucket/monitors/
+  support-bot-prod-20261117T080000Z.json      a monitor report
+  experiments/
+    support-v8-20261121T101500Z.json          an experiment report
+    support-v8-20261121T101500Z-2.json        the same experiment name, same second
+```
+
+`examples/experiment.rs` runs a two-variant experiment end to end: it creates versions 1 and 2
+of the prompt `exp-assistant` in a file prompt store, runs a three-case set (`contains` and
+`llm_judge` scorers) on `gemini-3.8-flash` (Vertex AI, location `us`) as agent and judge, stores
+the report as `exp-e2e-<timestamp>.json`, and prints its summary and stored name:
+
+```sh
+GOOGLE_CLOUD_PROJECT=my-proj GADK_EXPERIMENT_PROMPTS=/tmp/exp-prompts \
+  GADK_EXPERIMENT_OUT=/tmp/exp-reports cargo run -p gadk-eval-monitor --example experiment
+gadk-console --project my-proj --reports /tmp/exp-reports --prices prices.yaml
+# http://127.0.0.1:8765/experiments
+```
+
+An experiment calls the agent's model for every turn of `cases × runs_per_case × variants`
+runs, plus one judge call per `reference` and `llm_judge` scorer per run. Each report holds every
+transcript, so split very large sets into several experiments.
 
 ## Library
 

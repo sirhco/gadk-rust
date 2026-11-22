@@ -3,7 +3,8 @@
 `gadk-console`, a local web console for gadk agents. It shows the traces your agents exported
 to Cloud Trace, with each span's Cloud Logging entries attached, and it browses the
 `gadk-prompts` registry: versions, diffs and labels. With `--reports`, it also shows the reports
-of `gadk-eval-monitor` monitors. With a price file (`--prices`) it prices token counts. With
+of `gadk-eval-monitor` monitors and compares the variants of its experiments. With a price file
+(`--prices`) it prices token counts. With
 the BigQuery trace source it also shows usage and cost by model, agent, prompt version and
 trace, lists and adds scores, and, with `--datasets`, adds a trace's runs to an eval set. It
 runs on your machine, listens on 127.0.0.1 only, and reads Google Cloud with your Application
@@ -23,7 +24,7 @@ The console prints its URL and serves until you stop it (Ctrl-C).
 |---|---|---|
 | `--project <p>` | required | GCP project whose traces and logs are read |
 | `--store <url>` | none | Prompt store: `file://<dir>` or `firestore://<project>/<database>[/<root>]`. Without it the prompt pages say "no store configured" and the label routes return 404. |
-| `--reports <url>` | none | Monitor report store: `file://<dir>`, a directory, or `gs://<bucket>[/<prefix>]` (the `--out` of `gadk-eval monitor`, or the `<url>` of `gadk-eval report`). Without it the Evals pages answer 404 "no report store configured". |
+| `--reports <url>` | none | Monitor report store: `file://<dir>`, a directory, or `gs://<bucket>[/<prefix>]` (the `--out` of `gadk-eval monitor`, or the `<url>` of `gadk-eval report`). Experiments are read from its `experiments/`. Without it the Evals and Experiments pages answer 404 "no report store configured". |
 | `--port <n>` | `8765` | Port on 127.0.0.1; `0` picks a free one (the printed URL shows it) |
 | `--log-id <id>` | `gadk` | Cloud Logging log id the agents write (`with_cloud_log_name` in `gadk-telemetry`) |
 | `--prices <file>` | none | Price file (YAML, USD per 1,000,000 tokens per model). Without it, cost cells show `—`; token counts still show. See [Usage and cost](#usage-and-cost). |
@@ -67,6 +68,8 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/prompts/{name}` | All versions (newest first) with their labels; `?v=<n>` shows a version's template and config, `?a=<n>&b=<m>` diffs two versions. Forms set, move and remove labels, conditional on the label not having changed since the page was rendered (a stale page gets 409). "Production metrics" (BigQuery source, `?range=`, default `7d`): calls, mean tokens and cost, p50/p95 latency and, with `--reports`, eval pass rate per version, then a Feedback table of the scores per version. |
 | `/evals` | The newest 100 monitor reports: a card per monitor (latest pass rate, errors, and a pass-rate trend over its listed reports), then a table of reports. `?spec=<name>` shows only that monitor's newest 100. Reports are read once and kept in memory (up to 256), so the first load of a `gs://` store can take a while. |
 | `/evals/{report}` | One report: window, source, runs, pass rate and errors, then one row per run with a chip per scorer. Expanding a run shows each score's outcome, judge score and rationale, the run error, notes on incomplete transcripts, and the transcript with tool calls; runs that recorded a trace id link to `/traces/{id}`. |
+| `/experiments` | The newest 100 experiments in the `--reports` store (its `experiments/`), newest first: name (linking to the comparison), eval set, when it was generated, and each variant's name and pass rate. Experiments are read once and kept in memory (up to 256). |
+| `/experiments/{report}` | One experiment, with a column per variant (the first is the baseline): runs, pass rate and its difference from the baseline in percentage points, mean judge score, errors, p50 and p95 duration, input, output, cached and reasoning tokens, and cost. Then the cases where the variants disagree, each with every variant's verdict and, expanded, every run's last reply, run error and score rationales; `?cases=all` lists every case. See [Experiments](#experiments). |
 | `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`): totals, then LLM calls, tokens and cost by model, by agent and by prompt version, and the 20 traces with the most tokens. |
 
 ## Evals
@@ -74,6 +77,30 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 The Evals pages are read-only views of the JSON reports `gadk-eval monitor --out <url>` writes
 (see the [`gadk-eval-monitor` README](../gadk-eval-monitor/README.md)); start the console with the
 same URL as `--reports`. Nothing on these pages runs a monitor or changes the store.
+
+## Experiments
+
+The Experiments pages are read-only views of the experiment reports that
+`ReportStore::put_experiment` writes under `experiments/` in the `--reports` store (see
+[Experiments](../gadk-eval-monitor/README.md#experiments) in the `gadk-eval-monitor` README).
+Nothing on these pages runs an experiment or changes the store.
+
+- A run passes when it has no run error and every score passes, errors when it has a run error
+  or an `error` score, and fails otherwise. The pass rate is passed / (passed + failed) runs,
+  `—` when there are none; it counts whole runs, unlike the per-score rate of the Evals pages.
+  The first variant is the baseline: the other columns show their pass-rate difference from it
+  in percentage points (`+5.0 pp`, `−12.5 pp`).
+- A case's verdict for a variant is `error` when any of its runs errored, `pass` when all of
+  them passed, else `fail`. A case is a disagreement when its verdicts differ across variants.
+- Duration percentiles (nearest rank) cover the runs without a run error. Token totals add up
+  every model call of every run.
+- Cost needs `--prices` and uses the formula of [Usage and cost](#usage-and-cost) on each model
+  of each run. The model is the response's `model_version`, which can carry a dated suffix
+  (`gemini-3.8-flash-001`), so price models by prefix (`model: gemini-3.8-flash*`). A total
+  marked `*` leaves out models without a price; without `--prices`, or when no model has a
+  price, cost shows `—`.
+- An invalid report name answers 400, an unknown one 404, and a stored file that does not parse
+  502 (on its page and on `/experiments`).
 
 ## Security model
 
@@ -231,6 +258,8 @@ cases were added.
   control.
 - The report cache keeps up to 256 full reports (transcripts included) in memory, so memory use
   grows with transcript size.
+- The experiment cache keeps up to 256 parsed experiments (every run's transcript included) in
+  memory; split very large eval sets into several experiments.
 
 ## Live test
 
