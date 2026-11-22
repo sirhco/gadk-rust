@@ -15,16 +15,19 @@
 //! Test helpers for the web layer: a scripted trace source, a fixed state, and in-process
 //! requests through the full router (guards and CSP included).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use chrono::{DateTime, TimeZone, Utc};
-use gadk_eval::{Outcome, RunTranscript, ScoreResult, TurnRecord};
+use gadk_eval::{
+    CaseRun, EvalReport, MeasuredReport, Outcome, RunMetrics, RunTranscript, ScoreResult,
+    TokenCounts, TurnRecord, Variant, VariantReport,
+};
 use gadk_eval_monitor::{
-    ExportContext, ExportSource, MonitorError, MonitorReport, MonitoredRun, ProductionRun,
-    ReportStore, ScoreFilter, TraceInvocation, TranscriptQuery, Window,
+    ExperimentReport, ExportContext, ExportSource, MonitorError, MonitorReport, MonitoredRun,
+    ProductionRun, ReportStore, ScoreFilter, TraceInvocation, TranscriptQuery, Window,
 };
 use gadk_prompts::PromptStore;
 use http::header::{CONTENT_TYPE, HOST, ORIGIN};
@@ -33,6 +36,7 @@ use tower::ServiceExt;
 
 use super::{AppState, router};
 use crate::evals::ReportCache;
+use crate::experiments::ExperimentCache;
 use crate::traces::{SourceError, TraceDetail, TraceId, TracePage, TraceQuery, TraceSource};
 
 /// The port every test state claims to be bound to.
@@ -166,6 +170,7 @@ pub(crate) fn state_with_reports(
         source,
         store,
         reports,
+        experiments: None,
         csrf: Arc::from(CSRF),
         port: PORT,
         now: fixed_now,
@@ -173,6 +178,14 @@ pub(crate) fn state_with_reports(
         usage: None,
         author: AUTHOR.to_owned(),
         datasets: None,
+    }
+}
+
+/// [`state`] with an experiment cache (and no monitor-report cache).
+pub(crate) fn state_with_experiments(experiments: Arc<ExperimentCache>) -> AppState {
+    AppState {
+        experiments: Some(experiments),
+        ..state(Arc::new(FakeSource::new()), None)
     }
 }
 
@@ -245,6 +258,89 @@ pub(crate) async fn report_cache(
     }
     let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
     (dir, Arc::new(ReportCache::new(store, cap)), names)
+}
+
+/// One run of [`experiment`]: the case id and its score outcomes.
+pub(crate) type ExpRun<'a> = (&'a str, &'a [Outcome]);
+/// One variant of [`experiment`]: its name and its runs.
+pub(crate) type ExpVariant<'a> = (&'a str, &'a [ExpRun<'a>]);
+
+/// The model every run of [`experiment`] calls.
+pub(crate) const EXP_MODEL: &str = "gemini-3.8-flash";
+
+/// An experiment `name` over the eval set `set`, generated at `at(secs)`, with one variant per
+/// entry of `variants` (`(variant name, runs)`, built with `Variant::new`, so no prompt). Each run
+/// is `(case id, outcomes)`: run numbers count from 1 per case; the transcript is one turn `hi` →
+/// `"{variant} reply to {case}"` without error; one `contains` score per outcome with rationale
+/// `r{j}` and no score. The `i`-th run of a variant (from 0) took `100 × (i + 1)` ms and called
+/// [`EXP_MODEL`] with 1,000 input, 200 cached, 300 output and 50 reasoning tokens.
+pub(crate) fn experiment(name: &str, secs: i64, variants: &[ExpVariant<'_>]) -> ExperimentReport {
+    let mut reports = Vec::new();
+    let mut metrics = Vec::new();
+    for (variant, runs) in variants {
+        let mut case_runs: Vec<CaseRun> = Vec::new();
+        let mut variant_metrics = Vec::new();
+        for (i, (case, outcomes)) in runs.iter().enumerate() {
+            let run = 1 + case_runs.iter().filter(|r| r.case == *case).count() as u32;
+            case_runs.push(CaseRun {
+                case: (*case).to_owned(),
+                run,
+                transcript: RunTranscript {
+                    turns: vec![TurnRecord {
+                        user: "hi".to_owned(),
+                        reply: format!("{variant} reply to {case}"),
+                        calls: Vec::new(),
+                    }],
+                    error: None,
+                },
+                scores: outcomes
+                    .iter()
+                    .enumerate()
+                    .map(|(j, outcome)| ScoreResult {
+                        kind: "contains".to_owned(),
+                        outcome: *outcome,
+                        score: None,
+                        rationale: format!("r{j}"),
+                    })
+                    .collect(),
+            });
+            variant_metrics.push(RunMetrics::new(
+                100 * (i as u64 + 1),
+                BTreeMap::from([(EXP_MODEL.to_owned(), TokenCounts::new(1_000, 200, 300, 50))]),
+            ));
+        }
+        reports.push(VariantReport {
+            name: (*variant).to_owned(),
+            runs: case_runs,
+        });
+        metrics.push(variant_metrics);
+    }
+    let built: Vec<Variant> = variants.iter().map(|(v, _)| Variant::new(*v)).collect();
+    let measured = MeasuredReport::new(
+        EvalReport {
+            set: "set".to_owned(),
+            variants: reports,
+        },
+        metrics,
+    );
+    ExperimentReport::new(name, at(secs), &built, measured)
+}
+
+/// A temp-dir report store holding `experiments` (stored in order with
+/// `ReportStore::put_experiment`) behind an experiment cache of `cap` entries; returns the dir
+/// guard, the cache and the stored names.
+pub(crate) async fn experiment_cache(
+    experiments: &[ExperimentReport],
+    cap: usize,
+) -> (tempfile::TempDir, Arc<ExperimentCache>, Vec<String>) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+    let mut names = Vec::new();
+    for x in experiments {
+        names.push(store.put_experiment(x).await.unwrap());
+    }
+    let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+    (dir, Arc::new(ExperimentCache::new(store, cap)), names)
 }
 
 /// The `Host` value the guard accepts for `PORT`.

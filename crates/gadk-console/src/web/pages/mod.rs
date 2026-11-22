@@ -18,6 +18,7 @@ pub(crate) mod cost;
 pub(crate) mod error;
 pub(crate) mod eval_report;
 pub(crate) mod evals;
+pub(crate) mod experiments;
 pub(crate) mod layout;
 pub(crate) mod prompt;
 pub(crate) mod prompts;

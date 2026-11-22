@@ -15,36 +15,27 @@
 //! Monitor reports for the Evals pages: a cache of parsed reports, report-name helpers and the
 //! per-monitor grouping the list page draws.
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::Arc;
 
 use gadk_eval_monitor::{MonitorError, MonitorReport, ReportStore};
 
+use crate::cache::ParsedCache;
 use crate::url::percent_encode;
 
-/// How many parsed reports the console keeps.
+/// How many parsed reports the console keeps (per page family: monitor reports, experiments).
 pub(crate) const CACHE_CAP: usize = 256;
 
-/// The report store plus a cache of parsed reports. Stored reports are never rewritten, so a
-/// cached report never goes stale; the cache keeps the `cap` most recently inserted.
+/// The report store plus a cache of the `cap` most recently read parsed reports.
 pub(crate) struct ReportCache {
     store: ReportStore,
-    cap: usize,
-    inner: Mutex<Entries>,
-}
-
-#[derive(Default)]
-struct Entries {
-    map: HashMap<String, Arc<MonitorReport>>,
-    order: VecDeque<String>,
+    cache: ParsedCache<MonitorReport>,
 }
 
 impl ReportCache {
     pub(crate) fn new(store: ReportStore, cap: usize) -> Self {
         Self {
             store,
-            cap,
-            inner: Mutex::new(Entries::default()),
+            cache: ParsedCache::new(cap),
         }
     }
 
@@ -59,29 +50,7 @@ impl ReportCache {
         &self,
         name: &str,
     ) -> Result<Option<Arc<MonitorReport>>, MonitorError> {
-        let hit = self.lock().map.get(name).cloned();
-        if let Some(report) = hit {
-            return Ok(Some(report));
-        }
-        let Some(report) = self.store.find(name).await? else {
-            return Ok(None);
-        };
-        let report = Arc::new(report);
-        let mut entries = self.lock();
-        if !entries.map.contains_key(name) {
-            entries.map.insert(name.to_owned(), report.clone());
-            entries.order.push_back(name.to_owned());
-            while entries.order.len() > self.cap {
-                if let Some(old) = entries.order.pop_front() {
-                    entries.map.remove(&old);
-                }
-            }
-        }
-        Ok(Some(report))
-    }
-
-    fn lock(&self) -> MutexGuard<'_, Entries> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+        self.cache.find(name, || self.store.find(name)).await
     }
 }
 

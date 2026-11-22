@@ -24,12 +24,15 @@ use gadk_eval_monitor::{BigQueryTranscriptSource, MonitorError, ReportStore};
 
 use crate::datasets::Datasets;
 use crate::evals::{CACHE_CAP, ReportCache};
+use crate::experiments::ExperimentCache;
 use crate::traces::{BigQueryTable, BigQueryTraceSource, CloudTraceSource, TraceSource};
 use crate::usage::UsageSource;
 
+mod cache;
 mod cli;
 mod datasets;
 mod evals;
+mod experiments;
 mod model;
 mod prices;
 mod prompts;
@@ -195,8 +198,8 @@ impl Bound {
     }
 }
 
-/// Opens the prompt store and the report store (if any), binds `127.0.0.1:<port>`, builds the
-/// router.
+/// Opens the prompt store and the report store (if any, once for the Evals and once for the
+/// Experiments pages), binds `127.0.0.1:<port>`, builds the router.
 ///
 /// A `gs://` report store needs Application Default Credentials here; the trace source builds its
 /// credentials on the first GCP call.
@@ -266,17 +269,25 @@ pub(crate) async fn bind_full(
         .as_deref()
         .map(gadk_prompts_cli::open_store)
         .transpose()?;
-    let reports = cfg
-        .reports
-        .as_deref()
-        .map(|url| ReportStore::open(url).map(|s| Arc::new(ReportCache::new(s, CACHE_CAP))))
-        .transpose()
-        .map_err(|e| {
+    // `ReportStore` is not `Clone`: the Evals and Experiments caches each open the URL.
+    let open_reports = |url: &str| {
+        ReportStore::open(url).map_err(|e| {
             ConsoleError::Reports(match e {
                 MonitorError::Store(text) => text,
                 other => other.to_string(),
             })
-        })?;
+        })
+    };
+    let (reports, experiments) = match cfg.reports.as_deref() {
+        Some(url) => (
+            Some(Arc::new(ReportCache::new(open_reports(url)?, CACHE_CAP))),
+            Some(Arc::new(ExperimentCache::new(
+                open_reports(url)?,
+                CACHE_CAP,
+            ))),
+        ),
+        None => (None, None),
+    };
     let bind_err = |e: std::io::Error| ConsoleError::Bind {
         port: cfg.port,
         detail: e.to_string(),
@@ -289,6 +300,7 @@ pub(crate) async fn bind_full(
         source,
         store,
         reports,
+        experiments,
         csrf: Arc::from(csrf_token()),
         port: addr.port(),
         now: chrono::Utc::now,
@@ -571,6 +583,29 @@ mod tests {
         let mut c = cfg(None);
         c.reports = Some(format!("file://{}", dir.path().display()));
         assert!(bind(c).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_reports_url_serves_the_experiments_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = cfg(None);
+        c.reports = Some(format!("file://{}", dir.path().display()));
+        let bound = bind(c).await.unwrap();
+        let port = bound.local_addr().port();
+        let server = tokio::spawn(bound.serve());
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        let req = format!(
+            "GET /experiments HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let mut out = Vec::new();
+        stream.read_to_end(&mut out).await.unwrap();
+        let resp = String::from_utf8_lossy(&out);
+        assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
+        assert!(resp.contains("No experiments yet"), "{resp}");
+        server.abort();
     }
 
     /// A writer that forwards every write to a channel.
