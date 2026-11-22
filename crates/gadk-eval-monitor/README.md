@@ -21,6 +21,7 @@ gadk-eval report gs://my-bucket/monitors
 gadk-eval report gs://my-bucket/monitors support-bot-prod-20261117T080000Z.json
 gadk-eval export --source bigquery://my-proj.agent_analytics.agent_events \
   --out evals/regressions.yaml --since 1d --score 'thumbs=true' --rubric "Answers correctly."
+gadk-eval experiment experiments/answer-style.yaml --out gs://my-bucket/monitors
 ```
 
 ## Monitor spec
@@ -185,16 +186,17 @@ Limits:
 | `gadk-eval monitor <spec.yaml> [--out <url>] [--limit N]` | Runs the monitor, prints its summary and, with `--out`, stores the report. `--limit` (1-1000) overrides the spec. |
 | `gadk-eval report <url> [<name>] [--limit N]` | Lists the newest stored reports (name, spec, time, runs, pass rate, runs with errors; default 20), or prints one report's summary. |
 | `gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [options]` | Writes production runs as eval-set cases to a new file, or `--append`s them; see [Exporting runs as eval cases](#exporting-runs-as-eval-cases). |
+| `gadk-eval experiment <spec.yaml> [--out <url>]` | Runs an experiment from an experiment spec (one Gemini agent on Vertex AI per variant), stores it under `experiments/` of `<url>` when `--out` is given, then prints its summary and, with `--out`, `stored report <name>`; see [Experiment spec](#experiment-spec). |
 
 `<url>` is a directory, `file://<dir>` or `gs://<bucket>[/<prefix>]`; other schemes (such as
 `s3://`) are rejected. Reports are named
 `<spec>-<YYYYMMDDTHHMMSSZ>.json`, with `-2`, `-3`, … added when the name is taken.
 
-| Exit | `monitor` | `report` | `export` |
-|---|---|---|---|
-| 0 | success | success | at least one case was added |
-| 1 | `min_pass_rate` is set and either the pass rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0) | — | no case was added (nothing is written) |
-| 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, or a usage error | a store error, an unknown or invalid report name, or a usage error | the file exists (without `--append`) or cannot be read, appended to or written, a query fails, or a usage error |
+| Exit | `monitor` | `report` | `export` | `experiment` |
+|---|---|---|---|---|
+| 0 | success | success | at least one case was added | the experiment ran (whatever its case results) and, with `--out`, was stored |
+| 1 | `min_pass_rate` is set and either the pass rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0) | — | no case was added (nothing is written) | — |
+| 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, or a usage error | a store error, an unknown or invalid report name, or a usage error | the file exists (without `--append`) or cannot be read, appended to or written, a query fails, or a usage error | the spec is invalid, the eval set cannot be read or is invalid, the prompt store or a variant's prompt version cannot be loaded, a model or the judge cannot be built, the experiment fails, the report cannot be stored, or a usage error |
 
 A judge call that fails or times out is an error result for that scorer, not exit 2.
 
@@ -292,14 +294,26 @@ println!("stored {stored}");
 
 `run_experiment(name, &evaluator, &set, &variants, build)` calls `Evaluator::run_measured` and
 returns an `ExperimentReport`: the name, the set's name, `generated_at` (when the runs
-finished), each variant's name and prompt selector as text (`v8`, `production`, `latest`;
-none for `Variant::new`), the `EvalReport` and each run's `RunMetrics` (duration and tokens per model).
+finished), each variant's name, prompt selector as text (`v8`, `production`, `latest`;
+none for `Variant::new`) and model (`Variant::with_model`; none when unset), the `EvalReport`
+and each run's `RunMetrics` (duration and tokens per model).
 The name must be `[A-Za-z0-9_-]{1,64}`: an invalid name fails before `build` is called, and it
 and empty or repeated variant names are a `MonitorError::Spec` whose message starts
 `experiment: `. `summary()` prints one row per variant: runs, pass rate, mean judge score,
-errors, p50 and p95 duration, and input and output tokens; `variant_stats()` returns the same
-numbers and `case_verdicts()` each case's verdict per variant. `to_json` and `from_json` round
-trip a report.
+errors, p50 and p95 duration, and input and output tokens, with a `model` column after
+`variant` when any variant has a model (`—` for one without); `variant_stats()` returns the
+same numbers and `case_verdicts()` each case's verdict per variant. `to_json` and `from_json`
+round trip a report.
+
+To compare models, give each variant one and read it in `build`:
+
+```rust
+let variants = [
+    Variant::prompt("flash", Selector::Version(8)).with_model("gemini-3.8-flash"),
+    Variant::prompt("hydrogen", Selector::Version(8)).with_model("gemini-4-hydrogen"),
+];
+// In `build`: `v.model()` names the model to build the agent with.
+```
 
 A run passes when it has no run error and every score passes, errors when it has a run error or
 an `error` score, and fails otherwise. The pass rate is passed / (passed + failed) runs (`-` when
@@ -316,6 +330,10 @@ name. `experiment_names(limit)` lists stored names newest first and `find_experi
 reads one (`None` when absent). Monitor report listings (`names`, `list`, `gadk-eval report`)
 never include experiments.
 
+A report's `model` keys are written only when set, so a report without models has the same
+shape as one written by 0.5.1. Reading tolerates missing fields: a stored experiment without
+`variants` or `metrics`, or with run metrics missing token counts, loads with them empty or 0.
+
 ```text
 gs://my-bucket/monitors/
   support-bot-prod-20261117T080000Z.json      a monitor report
@@ -326,8 +344,9 @@ gs://my-bucket/monitors/
 
 `examples/experiment.rs` runs a two-variant experiment end to end: it creates versions 1 and 2
 of the prompt `exp-assistant` in a file prompt store, runs a three-case set (`contains` and
-`llm_judge` scorers) on `gemini-3.8-flash` (Vertex AI, location `us`) as agent and judge, stores
-the report as `exp-e2e-<timestamp>.json`, and prints its summary and stored name:
+`llm_judge` scorers) on `gemini-3.8-flash` (Vertex AI, location `us`) as agent and judge (each
+variant records the model, so the summary and the console show it), stores the report as
+`exp-e2e-<timestamp>.json`, and prints its summary and stored name:
 
 ```sh
 GOOGLE_CLOUD_PROJECT=my-proj GADK_EXPERIMENT_PROMPTS=/tmp/exp-prompts \
@@ -339,6 +358,59 @@ gadk-console --project my-proj --reports /tmp/exp-reports --prices prices.yaml
 An experiment calls the agent's model for every turn of `cases × runs_per_case × variants`
 runs, plus one judge call per `reference` and `llm_judge` scorer per run. Each report holds every
 transcript, so split very large sets into several experiments.
+
+### Experiment spec
+
+`gadk-eval experiment <spec.yaml> [--out <url>]` runs an experiment without Rust code: one
+Gemini LLM agent (no tools or sub-agents) on Vertex AI, whose model and prompt version change
+per variant. For tools, sub-agents or other models, call `run_experiment` from Rust.
+
+```yaml
+name: answer-style                 # [A-Za-z0-9_-]{1,64}; names the stored report
+set: sets/smoke.yaml               # eval-set file, relative to this spec file's directory
+project: my-proj                   # Vertex AI project of the agents (and default of the judge)
+location: us                       # default us
+runs: 1                            # runs per case, 1-20, default 1
+prompts: file://prompts            # prompt store: file://<dir> (a relative dir is relative to
+                                   #   this file's directory) or firestore://<project>/<database>[/<root>];
+                                   #   required with agent.prompt, not allowed without it
+model: gemini-3.8-flash            # default model of variants without one
+judge:                             # optional; keys model, project, location only
+  model: gemini-3.8-flash          #   project and location default to the ones above
+agent:
+  name: assistant                  # [A-Za-z_][A-Za-z0-9_]{0,63}, not `user`
+  description: Answers questions.  # optional
+  prompt: exp-assistant            # exactly one of `prompt` (a prompt name) or `instruction` (text)
+variants:                          # 2-10, unique names [A-Za-z0-9_-]{1,64}
+  - name: flash-v1
+    model: gemini-3.8-flash        # optional when the top-level `model` is set
+    prompt: { version: 1 }         # only with agent.prompt: { version: <n> } or { label: <l> };
+                                   #   without it the variant uses the latest version
+  - name: hydrogen-v1
+    model: gemini-4-hydrogen
+    prompt: { version: 1 }
+```
+
+Without `judge`, the first variant's model judges, in `project` and `location`. Every
+variant records its model (and, with `agent.prompt`, its prompt selector) in the report, so
+`summary()` and the console show a model column.
+
+The command loads the spec and the eval set, opens the prompt store and checks that every
+variant's prompt version exists, opens the `--out` store, builds the judge and one model per
+distinct variant model, runs the experiment, stores the report (with `--out`), and then prints
+the summary and `stored report <name>`. Storing comes before printing, so a failed write to
+stdout still leaves the report stored. Any failure before or during the run exits 2 with one
+`gadk-eval: <error>` line on stderr and runs nothing more; spec errors read
+`gadk-eval: monitor spec: experiment spec: <detail>` and name the offending key, and model build
+errors `gadk-eval: judge: building <model> on Vertex AI: <detail>`. The exit code does not
+depend on the case results: compare the variants in the summary or in `gadk-console`.
+
+`ExperimentSpec::load(path)` and `ExperimentSpec::from_yaml(text)` are the library side: they
+return the validated spec with defaults filled in (`ExperimentAgent`, whose `instruction` is an
+`AgentInstruction::Text` or `AgentInstruction::Prompt`, and `gadk_eval::Variant`s that each
+carry their model). A custom `cli::Backends` implements `model(project, location, name)` to
+supply the agents' models; the default refuses with `models are not supported by these
+backends`.
 
 ## Library
 
@@ -375,6 +447,9 @@ written to as you would the analytics table.
   BigQuery Job User on the project that runs the queries (the source project).
 - Cloud Trace User on the trace project (only with a `cloud_trace` source).
 - Vertex AI User on the judge project (only with `llm_judge` scorers).
+- Vertex AI User on the experiment spec's `project` (`gadk-eval experiment`: the agents and,
+  by default, the judge), and read access to a `firestore://` prompt store when the spec uses
+  one.
 - Storage Object Admin on the bucket for `gs://` output (`report` needs only Storage Object
   Viewer).
 

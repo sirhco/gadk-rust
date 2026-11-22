@@ -7,6 +7,34 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval`: `Variant::with_model` and `Variant::model` give a variant an optional model name
+  for the `build` closure; the evaluator does not read it.
+- `gadk-eval-monitor`: experiment reports record each variant's model
+  (`ExperimentVariant::model`, `ExperimentVariant::with_model`, copied from `Variant::model` by
+  `ExperimentReport::new`; written only when set), and `summary()` adds a `model` column when
+  any variant has one.
+- `gadk-eval-monitor`: `gadk-eval experiment <spec.yaml> [--out <url>]` runs an experiment on
+  one Gemini LLM agent (Vertex AI) described by a YAML experiment spec: eval set, project and
+  location, runs per case, an inline instruction or a prompt from a `file://` or `firestore://`
+  prompt store, the judge, and 2-10 variants with their model and prompt version. It exits 0
+  when the experiment ran and 2 on any error. New public API: `ExperimentSpec`,
+  `ExperimentAgent`, `AgentInstruction` (module `experiment_spec`) and `Backends::model` (a
+  default body that refuses; `CloudBackends` builds Gemini on Vertex AI). `gadk-eval-monitor`
+  now depends on `gadk-engine`, `gadk-prompts` and `gadk-prompts-cli`.
+- `gadk-console`: the experiment comparison page shows a Model row when any variant records a
+  model.
+
+### Fixed
+
+- `gadk-eval`, `gadk-eval-monitor`: `TokenCounts` and `RunMetrics` deserialize with missing
+  fields defaulting, and `ExperimentReport` with missing `variants` or `metrics` as empty, so
+  stored experiments with absent fields still load.
+- `gadk-console`: the monitor-report and experiment caches also evict their oldest entries
+  while they hold more than 20,000 runs in all (the newest entry always stays), so a few very
+  large reports no longer keep unbounded memory.
+
 ## [0.5.1] - 2026-11-21
 
 ### Added

@@ -36,6 +36,13 @@ assert!(report.all_passed());
 `build` is called once per variant. A variant whose `build` fails gets error results; the other
 variants still run.
 
+A `Variant` is a name plus two optional settings for your `build` closure: a prompt-registry
+`Selector` (`Variant::prompt(name, selector)`, read with `selector()`) and a model name
+(`with_model`, read with `model()`), for example
+`Variant::prompt("v7", Selector::Version(7)).with_model("gemini-4-hydrogen")`. `Variant::new`
+and `Variant::prompt` set no model. The evaluator itself reads neither setting; `build` decides
+what they mean, and `gadk-eval-monitor` experiments record both in their reports.
+
 ## Eval set format
 
 ```yaml
@@ -141,6 +148,9 @@ inputs, and `metrics[v][i]` is the `RunMetrics` of `report.variants[v].runs[i]`.
 
 A variant whose `build` failed gets zero metrics (`RunMetrics::default()`) for each of its runs.
 `gadk-eval-monitor`'s experiments store these metrics and compare variants with them.
+
+`RunMetrics` and `TokenCounts` deserialize with any missing field defaulting (0, or no
+models), so stored metrics stay readable when a field is absent.
 
 ## Live test
 

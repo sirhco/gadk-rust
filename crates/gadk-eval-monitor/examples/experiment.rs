@@ -19,8 +19,11 @@
 //! with different instructions; loads a three-case eval set (`contains` and `llm_judge`
 //! scorers); runs it with `run_experiment("exp-e2e", …)` on `gemini-3.8-flash` (Vertex AI,
 //! location `us`) as both agent and judge, with variant `v1` on prompt version 1 and `v2` on
-//! version 2; stores the result with `ReportStore::put_experiment`; and prints the summary and
-//! the stored name.
+//! version 2 (each recording the model with `Variant::with_model`); stores the result with
+//! `ReportStore::put_experiment`; and prints the summary and the stored name.
+//!
+//! Without Rust code, `gadk-eval experiment <spec.yaml>` runs the same kind of experiment from
+//! a YAML spec (see the crate README).
 //!
 //! `GOOGLE_CLOUD_PROJECT=<project> GADK_EXPERIMENT_PROMPTS=<dir> GADK_EXPERIMENT_OUT=<url> \
 //!   cargo run -p gadk-eval-monitor --example experiment`
@@ -120,9 +123,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )
     .await?;
     let set = EvalSet::from_yaml(SET)?;
+    // Both variants use MODEL; recording it puts a Model row on the console's comparison page.
     let variants = [
-        Variant::prompt("v1", Selector::Version(1)),
-        Variant::prompt("v2", Selector::Version(2)),
+        Variant::prompt("v1", Selector::Version(1)).with_model(MODEL),
+        Variant::prompt("v2", Selector::Version(2)).with_model(MODEL),
     ];
     // The agent's model also judges the `llm_judge` scorers.
     let evaluator = Evaluator::new(model.clone());
