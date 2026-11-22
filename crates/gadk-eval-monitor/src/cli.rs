@@ -20,6 +20,7 @@
 //! gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [--append]
 //!     [--name N] [--trace ID]... [--since <n>h|<n>d] [--agent A] [--score F]... [--limit N]
 //!     [--rubric T] [--min-good X] [--no-history] [--tool-args]
+//! gadk-eval experiment <spec.yaml> [--out <url>]
 //! ```
 //!
 //! `monitor` exits 0 on success, 1 when the spec's `min_pass_rate` is set and either the pass
@@ -27,19 +28,29 @@
 //! listed, the judge cannot be built or the report cannot be stored. `report` exits 0, or 2 on a
 //! store error or an unknown or invalid report name. `export` exits 0 when it added at least one
 //! case, 1 when it added none (and wrote nothing), and 2 when the eval-set file cannot be read,
-//! extended or written or the source fails. Usage errors exit 2.
+//! extended or written or the source fails. `experiment` runs an
+//! [`ExperimentSpec`], stores the report first when `--out` is given, then
+//! prints its summary; it exits 0 when the experiment ran (whatever the case results), and 2 on
+//! an invalid spec, an unreadable or invalid eval set, a prompt store or prompt version error, a
+//! model or judge build error, an experiment error or a store error. Usage errors exit 2.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::{DateTime, TimeDelta, Utc};
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
-use gadk_eval::EvalSet;
+use gadk_agent::Agent;
+use gadk_engine::llm::{LlmAgentConfig, agent as llm_agent};
+use gadk_eval::{EvalSet, Evaluator, Variant};
 use gadk_model::Llm;
+use gadk_prompts::{PromptRegistry, Selector, StoreError};
 
 use crate::error::MonitorError;
+use crate::experiment::run_experiment;
+use crate::experiment_spec::{AgentInstruction, ExperimentSpec};
 use crate::export::{
     ExportOptions, ExportSource, ScoreFilter, cases_text, export_runs, write_set_file,
 };
@@ -49,7 +60,8 @@ use crate::source::bigquery::BigQueryTranscriptSource;
 use crate::source::cloud_trace::CloudTraceTranscriptSource;
 use crate::source::{TranscriptQuery, TranscriptSource};
 use crate::spec::{
-    JudgeSpec, MAX_LIMIT, MonitorSpec, SourceSpec, amount, is_dataset_or_table, is_project_id,
+    DEFAULT_JUDGE_TIMEOUT, JudgeSpec, MAX_LIMIT, MonitorSpec, SourceSpec, amount,
+    is_dataset_or_table, is_project_id,
 };
 use crate::store::ReportStore;
 
@@ -82,6 +94,20 @@ pub trait Backends: Send + Sync {
         let _ = (project, dataset, table);
         Err(MonitorError::Source(
             "export is not supported by these backends".into(),
+        ))
+    }
+
+    /// A model `name` on Vertex AI in `project` / `location` for the `experiment` command's
+    /// agents. The default refuses; [`CloudBackends`] builds a Gemini model.
+    async fn model(
+        &self,
+        project: &str,
+        location: &str,
+        name: &str,
+    ) -> Result<Arc<dyn Llm>, MonitorError> {
+        let _ = (project, location, name);
+        Err(MonitorError::Judge(
+            "models are not supported by these backends".into(),
         ))
     }
 }
@@ -122,6 +148,22 @@ impl Backends for CloudBackends {
             project, dataset, table,
         )?))
     }
+
+    async fn model(
+        &self,
+        project: &str,
+        location: &str,
+        name: &str,
+    ) -> Result<Arc<dyn Llm>, MonitorError> {
+        // The same Gemini-on-Vertex-AI build as the judge's, with the same error text.
+        vertex_judge(&JudgeSpec {
+            model: name.to_owned(),
+            project: project.to_owned(),
+            location: location.to_owned(),
+            timeout: DEFAULT_JUDGE_TIMEOUT,
+        })
+        .await
+    }
 }
 
 fn limit_arg() -> Arg {
@@ -161,6 +203,20 @@ fn cli() -> Command {
                 .arg(limit_arg().help("reports to list (default 20)")),
         )
         .subcommand(export_cli())
+        .subcommand(
+            Command::new("experiment")
+                .about("Run an experiment spec: an eval set against each variant of an agent")
+                .arg(
+                    Arg::new("spec")
+                        .required(true)
+                        .help("experiment spec YAML file"),
+                )
+                .arg(
+                    Arg::new("out")
+                        .long("out")
+                        .help("store the report: <dir>, file://<dir> or gs://<bucket>[/<prefix>]"),
+                ),
+        )
 }
 
 fn export_cli() -> Command {
@@ -319,6 +375,11 @@ pub async fn run(
             report(url, name, limit(m), stdout).await.map(|()| 0)
         }
         Some(("export", m)) => export(m, limit(m), backends, stdout).await,
+        Some(("experiment", m)) => {
+            let spec = m.get_one::<String>("spec").map_or("", String::as_str);
+            let out = m.get_one::<String>("out").map(String::as_str);
+            experiment(spec, out, backends, stdout).await
+        }
         _ => Ok(2),
     };
     match result {
@@ -552,6 +613,124 @@ async fn export(
     Ok(if added.is_empty() { 1 } else { 0 })
 }
 
+/// An error reading the eval set `path` of an experiment spec.
+fn set_error(path: &Path, e: impl std::fmt::Display) -> MonitorError {
+    MonitorError::Spec(format!("experiment spec: set {}: {e}", path.display()))
+}
+
+/// An error opening or loading an experiment spec's prompt store.
+fn prompts_error(e: StoreError) -> MonitorError {
+    MonitorError::Spec(format!("experiment spec: prompts: {e}"))
+}
+
+/// `experiment`: 0 once the experiment ran and, with `--out`, was stored; errors map to 2.
+async fn experiment(
+    spec_path: &str,
+    out: Option<&str>,
+    backends: &dyn Backends,
+    stdout: &mut dyn Write,
+) -> Result<i32, MonitorError> {
+    let spec = ExperimentSpec::load(spec_path)?;
+    let text = std::fs::read_to_string(&spec.set).map_err(|e| set_error(&spec.set, e))?;
+    let set = EvalSet::from_yaml(&text).map_err(|e| set_error(&spec.set, e))?;
+    let registry = match (&spec.agent.instruction, spec.prompts.as_deref()) {
+        (AgentInstruction::Prompt(_), Some(url)) => {
+            let store = gadk_prompts_cli::open_store(url).map_err(prompts_error)?;
+            // Loaded once: every run of the experiment sees the same prompt versions.
+            let registry = PromptRegistry::builder(store)
+                .refresh_interval(Duration::ZERO)
+                .load()
+                .await
+                .map_err(prompts_error)?;
+            Some(registry)
+        }
+        _ => None,
+    };
+    let result = run_spec(&spec, &set, registry.as_ref(), out, backends, stdout).await;
+    // Closed on every path once loaded, whatever `run_spec` returned.
+    if let Some(registry) = &registry {
+        registry.close();
+    }
+    result
+}
+
+/// The `experiment` command after the spec, eval set and prompt registry are loaded.
+async fn run_spec(
+    spec: &ExperimentSpec,
+    set: &EvalSet,
+    registry: Option<&PromptRegistry>,
+    out: Option<&str>,
+    backends: &dyn Backends,
+    stdout: &mut dyn Write,
+) -> Result<i32, MonitorError> {
+    // Every variant's prompt version must exist before any model is built or run.
+    if let (AgentInstruction::Prompt(prompt), Some(registry)) = (&spec.agent.instruction, registry)
+    {
+        for (i, v) in spec.variants.iter().enumerate() {
+            let selector = v.selector().cloned().unwrap_or(Selector::Latest);
+            registry.get(prompt, &selector).map_err(|e| {
+                MonitorError::Spec(format!("experiment spec: variants[{}].prompt: {e}", i + 1))
+            })?;
+        }
+    }
+    // Opened before the run, so a bad URL fails before any model call.
+    let store = out.map(ReportStore::open).transpose()?;
+    let judge = backends.judge(&spec.judge).await?;
+    let mut models: HashMap<&str, Arc<dyn Llm>> = HashMap::new();
+    for name in spec.variants.iter().filter_map(Variant::model) {
+        if !models.contains_key(name) {
+            let model = backends.model(&spec.project, &spec.location, name).await?;
+            models.insert(name, model);
+        }
+    }
+    let evaluator = Evaluator::new(judge).runs_per_case(spec.runs);
+    let report = run_experiment(&spec.name, &evaluator, set, &spec.variants, |v| {
+        build_agent(spec, registry, &models, v)
+    })
+    .await?;
+    // Store before printing, so a failing stdout (a closed pipe) does not lose the report.
+    let stored = match store {
+        Some(store) => Some(store.put_experiment(&report).await?),
+        None => None,
+    };
+    write!(stdout, "{}", report.summary())?;
+    if let Some(name) = stored {
+        writeln!(stdout, "stored report {name}")?;
+    }
+    Ok(0)
+}
+
+/// The LLM agent of `spec` for variant `v`: the variant's model and the agent's instruction
+/// (the text, or the prompt version the variant's selector picks).
+fn build_agent(
+    spec: &ExperimentSpec,
+    registry: Option<&PromptRegistry>,
+    models: &HashMap<&str, Arc<dyn Llm>>,
+    v: &Variant,
+) -> Result<Arc<dyn Agent>, String> {
+    let model = v
+        .model()
+        .and_then(|m| models.get(m))
+        .cloned()
+        .ok_or_else(|| format!("variant {}: no model", v.name()))?;
+    let mut cfg = LlmAgentConfig {
+        name: spec.agent.name.clone(),
+        description: spec.agent.description.clone(),
+        model: Some(model),
+        ..Default::default()
+    };
+    match &spec.agent.instruction {
+        AgentInstruction::Text(text) => cfg.instruction = text.clone(),
+        AgentInstruction::Prompt(prompt) => {
+            let registry =
+                registry.ok_or_else(|| "no prompt store for `agent.prompt`".to_owned())?;
+            let selector = v.selector().cloned().unwrap_or(Selector::Latest);
+            cfg.instruction_provider = Some(registry.instruction(prompt, selector).into_provider());
+        }
+    }
+    llm_agent::new(cfg).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -610,7 +789,7 @@ mod tests {
     }
 
     /// Runs the CLI: `(exit code, stdout, stderr)`.
-    async fn cli_run(args: &[&str], backends: &Fake) -> (i32, String, String) {
+    async fn cli_run(args: &[&str], backends: &dyn Backends) -> (i32, String, String) {
         let mut out = Vec::new();
         let mut err = Vec::new();
         let mut argv = vec!["gadk-eval".to_owned()];
@@ -1398,5 +1577,376 @@ mod tests {
             stderr,
             "gadk-eval: transcript source: export is not supported by these backends\n"
         );
+    }
+
+    // ---- experiment ----
+
+    mod experiment_command {
+        use std::any::Any;
+
+        use futures::StreamExt as _;
+        use futures::stream::BoxStream;
+        use gadk_genai::{Content, ROLE_MODEL};
+        use gadk_model::{LlmRequest, LlmResponse, ModelError};
+        use gadk_prompts::{FileStore, NewVersion, PromptStore as _};
+
+        use crate::experiment::ExperimentReport;
+
+        use super::*;
+
+        /// A model named `name` whose every reply is `<name>: <system instruction>`.
+        struct Echo(String);
+
+        impl Llm for Echo {
+            fn name(&self) -> &str {
+                &self.0
+            }
+
+            fn generate_content(
+                &self,
+                req: LlmRequest,
+                _stream: bool,
+            ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
+                let instruction = req
+                    .config
+                    .and_then(|c| c.system_instruction)
+                    .map(|c| {
+                        c.parts
+                            .iter()
+                            .map(|p| p.text.as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                let text = format!("{}: {instruction}", self.0);
+                let model = self.0.clone();
+                futures::stream::once(async move {
+                    Ok(LlmResponse {
+                        content: Some(Content::from_text(&text, ROLE_MODEL)),
+                        model_version: model,
+                        ..Default::default()
+                    })
+                })
+                .boxed()
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+
+        /// Backends for `experiment`: [`Echo`] models (or the error `fail_model`) and a judge
+        /// that always passes, recording each judge and model built.
+        #[derive(Default)]
+        struct Lab {
+            calls: Mutex<Vec<String>>,
+            fail_model: Option<String>,
+        }
+
+        impl Lab {
+            fn calls(&self) -> Vec<String> {
+                self.calls.lock().unwrap().clone()
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl Backends for Lab {
+            fn source(
+                &self,
+                _spec: &SourceSpec,
+            ) -> Result<Arc<dyn TranscriptSource>, MonitorError> {
+                Err(MonitorError::Source("no monitor source".into()))
+            }
+
+            async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError> {
+                self.calls.lock().unwrap().push(format!(
+                    "judge {} {}/{}",
+                    spec.model, spec.project, spec.location
+                ));
+                Ok(FakeJudge::new(&[VERDICT; 10]))
+            }
+
+            async fn model(
+                &self,
+                project: &str,
+                location: &str,
+                name: &str,
+            ) -> Result<Arc<dyn Llm>, MonitorError> {
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push(format!("model {project}/{location}/{name}"));
+                match &self.fail_model {
+                    Some(e) => Err(MonitorError::Judge(format!(
+                        "building {name} on Vertex AI: {e}"
+                    ))),
+                    None => Ok(Arc::new(Echo(name.to_owned()))),
+                }
+            }
+        }
+
+        /// One case whose reply must contain `concise`.
+        const SMOKE: &str = "name: smoke\ncases:\n  - id: brief\n    turns: [\"Say something.\"]\n    expect: [contains: concise]\n";
+
+        /// A prompt agent with variants on versions 1 and 2 of `exp-assistant`, on two models.
+        const PROMPT_AGENT: &str = "prompts: file://prompts\n\
+            agent: { name: assistant, prompt: exp-assistant }\n\
+            variants:\n\
+            \x20 - { name: flash-v1, model: m-flash, prompt: { version: 1 } }\n\
+            \x20 - { name: hydro-v2, model: m-hydro, prompt: { version: 2 } }\n";
+
+        /// An instruction agent with two variants on one model, two runs per case and a judge.
+        const TEXT_AGENT: &str = "model: m-flash\nruns: 2\njudge: { model: m-judge }\n\
+            agent: { name: assistant, instruction: Be concise. }\n\
+            variants: [{ name: a }, { name: b }]\n";
+
+        /// Writes `sets/smoke.yaml` and `exp.yaml` (`name: exp`, `set: sets/smoke.yaml`,
+        /// `project: p`, then `body`) in `dir`; returns the spec path.
+        fn experiment_file(dir: &Path, body: &str) -> String {
+            std::fs::create_dir_all(dir.join("sets")).unwrap();
+            std::fs::write(dir.join("sets/smoke.yaml"), SMOKE).unwrap();
+            let p = dir.join("exp.yaml");
+            std::fs::write(
+                &p,
+                format!("name: exp\nset: sets/smoke.yaml\nproject: p\n{body}"),
+            )
+            .unwrap();
+            p.display().to_string()
+        }
+
+        /// A file prompt store in `dir` with versions 1 (`Be concise.`) and 2 (`Be precise.`)
+        /// of `exp-assistant`.
+        async fn two_versions(dir: &Path) {
+            let store = FileStore::new(dir);
+            for template in ["Be concise.", "Be precise."] {
+                store
+                    .create_version(NewVersion {
+                        name: "exp-assistant".into(),
+                        template: template.into(),
+                        config: None,
+                        author: "test".into(),
+                        message: "variant".into(),
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
+
+        #[tokio::test]
+        async fn runs_every_variant_and_stores_the_report() {
+            let dir = tempfile::tempdir().unwrap();
+            two_versions(&dir.path().join("prompts")).await;
+            let spec = experiment_file(dir.path(), PROMPT_AGENT);
+            let out = dir.path().join("reports");
+            let lab = Lab::default();
+            let (code, stdout, stderr) = cli_run(
+                &["experiment", &spec, "--out", &out.display().to_string()],
+                &lab,
+            )
+            .await;
+            // 0 although hydro-v2's case fails: the experiment ran.
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert!(
+                stdout.starts_with("experiment: exp\neval set: smoke\n"),
+                "{stdout}"
+            );
+            for text in [
+                "flash-v1",
+                "m-flash",
+                "hydro-v2",
+                "m-hydro",
+                "1/1 (100%)",
+                "0/1 (0%)",
+            ] {
+                assert!(stdout.contains(text), "{text}: {stdout}");
+            }
+            let last = stdout.lines().last().unwrap();
+            let name = last.strip_prefix("stored report ").unwrap();
+            assert!(
+                name.starts_with("exp-") && name.ends_with(".json"),
+                "{last}"
+            );
+            let json = std::fs::read_to_string(out.join("experiments").join(name)).unwrap();
+            let report = ExperimentReport::from_json(&json).unwrap();
+            let variants: Vec<(&str, Option<&str>, Option<&str>)> = report
+                .variants
+                .iter()
+                .map(|v| (v.name.as_str(), v.prompt.as_deref(), v.model.as_deref()))
+                .collect();
+            assert_eq!(
+                variants,
+                [
+                    ("flash-v1", Some("v1"), Some("m-flash")),
+                    ("hydro-v2", Some("v2"), Some("m-hydro")),
+                ]
+            );
+            let replies: Vec<&str> = report
+                .report
+                .variants
+                .iter()
+                .map(|v| v.runs[0].transcript.turns[0].reply.as_str())
+                .collect();
+            assert!(
+                replies[0].starts_with("m-flash: ") && replies[0].contains("Be concise."),
+                "{replies:?}"
+            );
+            assert!(
+                replies[1].starts_with("m-hydro: ") && replies[1].contains("Be precise."),
+                "{replies:?}"
+            );
+            // Without `judge`, the first variant's model judges in the experiment's project and
+            // location; each model is built once.
+            assert_eq!(
+                lab.calls(),
+                [
+                    "judge m-flash p/us",
+                    "model p/us/m-flash",
+                    "model p/us/m-hydro"
+                ]
+            );
+        }
+
+        #[tokio::test]
+        async fn an_instruction_agent_prints_the_summary_without_storing() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = experiment_file(dir.path(), TEXT_AGENT);
+            let lab = Lab::default();
+            let (code, stdout, stderr) = cli_run(&["experiment", &spec], &lab).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            // Two runs per case, both passing, for each variant.
+            assert_eq!(stdout.matches("2/2 (100%)").count(), 2, "{stdout}");
+            assert!(!stdout.contains("stored report"), "{stdout}");
+            assert_eq!(lab.calls(), ["judge m-judge p/us", "model p/us/m-flash"]);
+        }
+
+        #[tokio::test]
+        async fn the_report_is_stored_even_when_stdout_fails() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = experiment_file(dir.path(), TEXT_AGENT);
+            let out = dir.path().join("reports");
+            let argv = [
+                "gadk-eval",
+                "experiment",
+                &spec,
+                "--out",
+                &out.display().to_string(),
+            ]
+            .map(str::to_owned)
+            .to_vec();
+            let mut err = Vec::new();
+            let code = run(argv, &Lab::default(), &mut BrokenPipe, &mut err).await;
+            assert_eq!(code, 2, "{}", String::from_utf8_lossy(&err));
+            assert_eq!(
+                std::fs::read_dir(out.join("experiments")).unwrap().count(),
+                1
+            );
+        }
+
+        #[tokio::test]
+        async fn spec_and_set_errors_exit_2() {
+            let dir = tempfile::tempdir().unwrap();
+            let lab = Lab::default();
+            let (code, _, stderr) = cli_run(&["experiment"], &lab).await;
+            assert_eq!(code, 2, "{stderr}");
+            let missing = dir.path().join("missing.yaml").display().to_string();
+            let (code, _, stderr) = cli_run(&["experiment", &missing], &lab).await;
+            assert_eq!(code, 2);
+            assert!(
+                stderr.starts_with("gadk-eval: monitor spec: experiment spec: reading "),
+                "{stderr}"
+            );
+            let spec = experiment_file(dir.path(), &TEXT_AGENT.replace("runs: 2", "runs: 0"));
+            let (code, _, stderr) = cli_run(&["experiment", &spec], &lab).await;
+            assert_eq!(code, 2);
+            assert_eq!(
+                stderr,
+                "gadk-eval: monitor spec: experiment spec: `runs` must be an integer from 1 to 20\n"
+            );
+            let spec = experiment_file(dir.path(), TEXT_AGENT);
+            let set = dir.path().join("sets/smoke.yaml");
+            let prefix = format!(
+                "gadk-eval: monitor spec: experiment spec: set {}: ",
+                set.display()
+            );
+            std::fs::remove_file(&set).unwrap();
+            let (code, _, stderr) = cli_run(&["experiment", &spec], &lab).await;
+            assert_eq!(code, 2);
+            assert!(stderr.starts_with(&prefix), "{stderr}");
+            std::fs::write(&set, "name: [").unwrap();
+            let (code, _, stderr) = cli_run(&["experiment", &spec], &lab).await;
+            assert_eq!(code, 2);
+            assert!(stderr.starts_with(&prefix), "{stderr}");
+            assert!(lab.calls().is_empty(), "{:?}", lab.calls());
+        }
+
+        #[tokio::test]
+        async fn prompt_errors_exit_2_before_any_model_is_built() {
+            let dir = tempfile::tempdir().unwrap();
+            two_versions(&dir.path().join("prompts")).await;
+            let lab = Lab::default();
+            let spec = experiment_file(
+                dir.path(),
+                &PROMPT_AGENT.replace("version: 2", "version: 3"),
+            );
+            let (code, _, stderr) = cli_run(&["experiment", &spec], &lab).await;
+            assert_eq!(code, 2);
+            assert!(
+                stderr
+                    .starts_with("gadk-eval: monitor spec: experiment spec: variants[2].prompt: "),
+                "{stderr}"
+            );
+            // The prompt store directory is a file: the registry cannot load.
+            let blocker = dir.path().join("a-file");
+            std::fs::write(&blocker, "x").unwrap();
+            let spec = experiment_file(
+                dir.path(),
+                &PROMPT_AGENT.replace("file://prompts", "file://a-file"),
+            );
+            let (code, _, stderr) = cli_run(&["experiment", &spec], &lab).await;
+            assert_eq!(code, 2);
+            assert!(
+                stderr.starts_with("gadk-eval: monitor spec: experiment spec: prompts: "),
+                "{stderr}"
+            );
+            assert!(lab.calls().is_empty(), "{:?}", lab.calls());
+        }
+
+        #[tokio::test]
+        async fn model_and_store_errors_exit_2() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = experiment_file(dir.path(), TEXT_AGENT);
+            let lab = Lab {
+                fail_model: Some("no Application Default Credentials".into()),
+                ..Default::default()
+            };
+            let (code, _, stderr) = cli_run(&["experiment", &spec], &lab).await;
+            assert_eq!(code, 2);
+            assert_eq!(
+                stderr,
+                "gadk-eval: judge: building m-flash on Vertex AI: no Application Default Credentials\n"
+            );
+            let blocker = dir.path().join("a-file");
+            std::fs::write(&blocker, "x").unwrap();
+            let out = blocker.join("sub").display().to_string();
+            let (code, _, stderr) =
+                cli_run(&["experiment", &spec, "--out", &out], &Lab::default()).await;
+            assert_eq!(code, 2);
+            assert!(stderr.starts_with("gadk-eval: report store: "), "{stderr}");
+        }
+
+        #[tokio::test]
+        async fn backends_without_models_refuse_experiment() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = experiment_file(dir.path(), TEXT_AGENT);
+            let (code, _, stderr) = cli_run(&["experiment", &spec], &Fake::new(Vec::new())).await;
+            assert_eq!(code, 2);
+            assert_eq!(
+                stderr,
+                "gadk-eval: judge: models are not supported by these backends\n"
+            );
+            let (code, stdout, _) = cli_run(&["--help"], &Fake::new(Vec::new())).await;
+            assert_eq!(code, 0);
+            assert!(stdout.contains("experiment"), "{stdout}");
+        }
     }
 }

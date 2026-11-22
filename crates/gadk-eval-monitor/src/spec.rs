@@ -158,8 +158,7 @@ impl MonitorSpec {
     ///
     /// [`MonitorError::Spec`] naming the offending field.
     pub fn from_yaml(yaml: &str) -> Result<Self, MonitorError> {
-        let doc: Value = serde_saphyr::from_str(yaml)
-            .map_err(|e| MonitorError::Spec(format!("invalid YAML: {e}")))?;
+        let doc = yaml_value(yaml).map_err(MonitorError::Spec)?;
         parse(&doc).map_err(MonitorError::Spec)
     }
 
@@ -193,7 +192,17 @@ pub(crate) fn is_monitor_name(s: &str) -> bool {
     is_project_id(s) && s.len() <= 64
 }
 
-fn check_keys(m: &Map<String, Value>, field: &str, allowed: &[&str]) -> Result<(), String> {
+/// The YAML document `yaml` as a JSON value, or `Err("invalid YAML: …")`.
+pub(crate) fn yaml_value(yaml: &str) -> Result<Value, String> {
+    serde_saphyr::from_str(yaml).map_err(|e| format!("invalid YAML: {e}"))
+}
+
+/// `Err` naming the first key of `m` not in `allowed`, prefixed with `field`.
+pub(crate) fn check_keys(
+    m: &Map<String, Value>,
+    field: &str,
+    allowed: &[&str],
+) -> Result<(), String> {
     match m.keys().find(|k| !allowed.contains(&k.as_str())) {
         Some(k) => Err(format!(
             "{field}unknown key `{k}` (expected one of: {})",
@@ -204,7 +213,7 @@ fn check_keys(m: &Map<String, Value>, field: &str, allowed: &[&str]) -> Result<(
 }
 
 /// The string at `key` when it passes `valid`, else `Err(message)`.
-fn string_field(
+pub(crate) fn string_field(
     m: &Map<String, Value>,
     key: &str,
     valid: impl Fn(&str) -> bool,
@@ -218,7 +227,7 @@ fn string_field(
 }
 
 /// The string at `key`, which must be present and pass `valid`, else `Err(message)`.
-fn required(
+pub(crate) fn required(
     m: &Map<String, Value>,
     key: &str,
     valid: impl Fn(&str) -> bool,
@@ -366,7 +375,8 @@ fn parse_cloud_trace(v: &Value) -> Result<SourceSpec, String> {
     Ok(SourceSpec::CloudTrace { project })
 }
 
-fn parse_judge(v: &Value, source_project: &str) -> Result<JudgeSpec, String> {
+/// The `judge` mapping `v`, with `project` defaulting to `source_project`.
+pub(crate) fn parse_judge(v: &Value, source_project: &str) -> Result<JudgeSpec, String> {
     let m = v.as_object().ok_or("`judge` must be a mapping")?;
     check_keys(m, "`judge`: ", &["model", "project", "location", "timeout"])?;
     let model = required(

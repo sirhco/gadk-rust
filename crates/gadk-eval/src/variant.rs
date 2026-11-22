@@ -21,12 +21,14 @@ use gadk_prompts::Selector;
 use crate::error::EvalError;
 
 /// One configuration of the agent under test, passed to the `build` closure of
-/// [`crate::Evaluator::run`]. Typically it names a prompt-registry [`Selector`]; the closure may
-/// also use the name for other swaps (model, tools, …).
+/// [`crate::Evaluator::run`]. Typically it names a prompt-registry [`Selector`], a model, or both;
+/// the closure may also use the name for other swaps (tools, …). The evaluator itself reads only
+/// the name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variant {
     name: String,
     selector: Option<Selector>,
+    model: Option<String>,
 }
 
 impl Variant {
@@ -35,6 +37,7 @@ impl Variant {
         Variant {
             name: name.into(),
             selector: None,
+            model: None,
         }
     }
 
@@ -43,6 +46,7 @@ impl Variant {
         Variant {
             name: name.into(),
             selector: Some(selector),
+            model: None,
         }
     }
 
@@ -54,6 +58,17 @@ impl Variant {
     /// The prompt selector, if any.
     pub fn selector(&self) -> Option<&Selector> {
         self.selector.as_ref()
+    }
+
+    /// This variant with its agent's model set to `model` (the `build` closure reads it).
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
+    }
+
+    /// The model this variant asks for, if any.
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
     }
 }
 
@@ -90,6 +105,24 @@ mod tests {
         assert_eq!(v.name(), "prod");
         assert_eq!(v.selector(), Some(&Selector::Label(Label::production())));
         assert_eq!(Variant::new("plain").selector(), None);
+    }
+
+    #[test]
+    fn model_is_none_until_with_model_sets_it() {
+        assert_eq!(Variant::new("plain").model(), None);
+        assert_eq!(Variant::prompt("v2", Selector::Version(2)).model(), None);
+        let v = Variant::prompt("v2", Selector::Version(2)).with_model("gemini-3.8-flash");
+        assert_eq!(v.name(), "v2");
+        assert_eq!(v.selector(), Some(&Selector::Version(2)));
+        assert_eq!(v.model(), Some("gemini-3.8-flash"));
+        let plain = Variant::new("plain").with_model("a").with_model("b");
+        assert_eq!(plain.model(), Some("b"));
+        assert_eq!(plain.selector(), None);
+        assert_ne!(
+            Variant::new("x").with_model("m"),
+            Variant::new("x"),
+            "the model takes part in equality"
+        );
     }
 
     #[test]

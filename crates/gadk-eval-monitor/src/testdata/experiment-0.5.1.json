@@ -1,0 +1,114 @@
+{
+  "name": "exp-051",
+  "set": "smoke",
+  "generated_at": "2023-11-14T22:13:20Z",
+  "variants": [
+    {
+      "name": "baseline",
+      "prompt": null
+    },
+    {
+      "name": "v2",
+      "prompt": "v2"
+    }
+  ],
+  "report": {
+    "set": "smoke",
+    "variants": [
+      {
+        "name": "baseline",
+        "runs": [
+          {
+            "case": "greet",
+            "run": 1,
+            "transcript": {
+              "turns": [
+                {
+                  "user": "hi",
+                  "reply": "hello",
+                  "calls": []
+                }
+              ],
+              "error": null
+            },
+            "scores": [
+              {
+                "kind": "contains",
+                "outcome": "pass",
+                "score": null,
+                "rationale": ""
+              },
+              {
+                "kind": "llm_judge",
+                "outcome": "pass",
+                "score": 4,
+                "rationale": "polite"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "v2",
+        "runs": [
+          {
+            "case": "greet",
+            "run": 1,
+            "transcript": {
+              "turns": [
+                {
+                  "user": "hi",
+                  "reply": "hello",
+                  "calls": []
+                }
+              ],
+              "error": null
+            },
+            "scores": [
+              {
+                "kind": "contains",
+                "outcome": "fail",
+                "score": null,
+                "rationale": ""
+              },
+              {
+                "kind": "llm_judge",
+                "outcome": "fail",
+                "score": 2,
+                "rationale": "curt"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "metrics": [
+    [
+      {
+        "duration_ms": 1200,
+        "models": {
+          "gemini-3.8-flash": {
+            "input": 12,
+            "cached": 0,
+            "output": 5,
+            "reasoning": 1
+          }
+        }
+      }
+    ],
+    [
+      {
+        "duration_ms": 900,
+        "models": {
+          "gemini-3.8-flash": {
+            "input": 10,
+            "cached": 2,
+            "output": 4,
+            "reasoning": 0
+          }
+        }
+      }
+    ]
+  ]
+}

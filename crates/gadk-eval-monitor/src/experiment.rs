@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::MonitorError;
 use crate::spec::is_monitor_name;
 
-/// One variant of an experiment: its name and the prompt selector it used, if any.
+/// One variant of an experiment: its name and the prompt selector and model it used, if any.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExperimentVariant {
@@ -37,15 +37,26 @@ pub struct ExperimentVariant {
     /// The prompt selector's text (`"v2"`, `"production"`, `"latest"`), or `None` for a variant
     /// without one.
     pub prompt: Option<String>,
+    /// The model the variant asked for ([`Variant::model`]), or `None` for a variant without
+    /// one. Left out of the JSON when `None`, so reports without models keep the 0.5.1 shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 impl ExperimentVariant {
-    /// A variant description from its parts.
+    /// A variant description from its parts, without a model.
     pub fn new(name: impl Into<String>, prompt: Option<String>) -> Self {
         ExperimentVariant {
             name: name.into(),
             prompt,
+            model: None,
         }
+    }
+
+    /// This variant description with its model set to `model`.
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
     }
 }
 
@@ -59,11 +70,15 @@ pub struct ExperimentReport {
     pub set: String,
     /// When the runs finished.
     pub generated_at: DateTime<Utc>,
-    /// The variants, in the order given; the first is the baseline.
+    /// The variants, in the order given; the first is the baseline. Empty when the JSON has
+    /// no `variants`.
+    #[serde(default)]
     pub variants: Vec<ExperimentVariant>,
     /// Every run's transcript and scores.
     pub report: EvalReport,
-    /// `metrics[v][i]` belongs to `report.variants[v].runs[i]`.
+    /// `metrics[v][i]` belongs to `report.variants[v].runs[i]`. Empty when the JSON has no
+    /// `metrics`.
+    #[serde(default)]
     pub metrics: Vec<Vec<RunMetrics>>,
 }
 
@@ -148,7 +163,8 @@ fn nearest_rank(sorted: &[u64], pct: usize) -> Option<u64> {
 
 impl ExperimentReport {
     /// A report named `name` from the runs of `variants`, which must be the variants passed to
-    /// [`Evaluator::run_measured`] for `measured`.
+    /// [`Evaluator::run_measured`] for `measured`. Each variant's prompt selector and model are
+    /// kept in [`ExperimentReport::variants`].
     pub fn new(
         name: impl Into<String>,
         generated_at: DateTime<Utc>,
@@ -161,7 +177,10 @@ impl ExperimentReport {
             generated_at,
             variants: variants
                 .iter()
-                .map(|v| ExperimentVariant::new(v.name(), v.selector().map(|s| s.to_string())))
+                .map(|v| ExperimentVariant {
+                    model: v.model().map(str::to_owned),
+                    ..ExperimentVariant::new(v.name(), v.selector().map(|s| s.to_string()))
+                })
                 .collect(),
             report: measured.report,
             metrics: measured.metrics,
@@ -277,21 +296,30 @@ impl ExperimentReport {
     }
 
     /// A text table with one row per variant: runs, pass rate (passed / (passed + failed)
-    /// runs), mean judge score, errors, p50 and p95 duration, input and output tokens.
+    /// runs), mean judge score, errors, p50 and p95 duration, input and output tokens. When any
+    /// variant has a model, a `model` column follows `variant` (`—` for a variant without one).
     pub fn summary(&self) -> String {
-        let mut rows: Vec<[String; 9]> = vec![[
-            "variant".into(),
-            "runs".into(),
-            "pass rate".into(),
-            "mean score".into(),
-            "errors".into(),
-            "p50".into(),
-            "p95".into(),
-            "input tokens".into(),
-            "output tokens".into(),
-        ]];
+        let with_models = self.variants.iter().any(|v| v.model.is_some());
+        let mut header: Vec<String> = vec!["variant".into()];
+        if with_models {
+            header.push("model".into());
+        }
+        header.extend(
+            [
+                "runs",
+                "pass rate",
+                "mean score",
+                "errors",
+                "p50",
+                "p95",
+                "input tokens",
+                "output tokens",
+            ]
+            .map(String::from),
+        );
+        let mut rows: Vec<Vec<String>> = vec![header];
         let ms = |d: Option<u64>| d.map_or_else(|| "-".to_owned(), |d| format!("{d}ms"));
-        for s in self.variant_stats() {
+        for (i, s) in self.variant_stats().into_iter().enumerate() {
             let graded = s.passed + s.failed;
             let rate = match s.pass_rate() {
                 None => "-".to_owned(),
@@ -300,8 +328,12 @@ impl ExperimentReport {
             let mean = s
                 .mean_score
                 .map_or_else(|| "-".to_owned(), |m| format!("{m:.2}"));
-            rows.push([
-                s.name.clone(),
+            let mut row = vec![s.name.clone()];
+            if with_models {
+                let model = self.variants.get(i).and_then(|v| v.model.as_deref());
+                row.push(model.unwrap_or("—").to_owned());
+            }
+            row.extend([
                 s.runs.to_string(),
                 rate,
                 mean,
@@ -311,8 +343,9 @@ impl ExperimentReport {
                 s.tokens.input.to_string(),
                 s.tokens.output.to_string(),
             ]);
+            rows.push(row);
         }
-        let mut widths = [0usize; 9];
+        let mut widths = vec![0usize; rows[0].len()];
         for r in &rows {
             for (w, c) in widths.iter_mut().zip(r) {
                 *w = (*w).max(c.chars().count());
@@ -322,8 +355,8 @@ impl ExperimentReport {
         for r in &rows {
             let line: Vec<String> = r
                 .iter()
-                .zip(widths)
-                .map(|(c, w)| format!("{c:<w$}"))
+                .zip(&widths)
+                .map(|(c, &w)| format!("{c:<w$}"))
                 .collect();
             out.push_str(line.join("  ").trim_end());
             out.push('\n');
@@ -648,6 +681,125 @@ v2       4     3/3 (100%)  4.00        1       600ms  1000ms  100           50
             ExperimentReport::from_json("{\"name\": 1}"),
             Err(MonitorError::Io(_))
         ));
+    }
+
+    /// An experiment report as 0.5.1 wrote it (`to_json`, before variants had models):
+    /// variants `baseline` (no prompt) and `v2` (prompt version 2), one case, one run each.
+    const REPORT_0_5_1: &str = include_str!("testdata/experiment-0.5.1.json");
+
+    #[test]
+    fn new_copies_each_variant_model() {
+        let base = report();
+        let r = ExperimentReport::new(
+            "exp",
+            at(1_700_000_000),
+            &[
+                Variant::new("v1").with_model("gemini-3.8-flash"),
+                Variant::prompt("v2", Selector::Version(2)),
+            ],
+            MeasuredReport::new(base.report, base.metrics),
+        );
+        assert_eq!(
+            r.variants,
+            [
+                ExperimentVariant::new("v1", None).with_model("gemini-3.8-flash"),
+                ExperimentVariant::new("v2", Some("v2".into())),
+            ]
+        );
+        assert_eq!(r.variants[0].model.as_deref(), Some("gemini-3.8-flash"));
+        assert_eq!(r.variants[1].model, None);
+    }
+
+    #[test]
+    fn model_is_written_only_when_set() {
+        let mut r = report();
+        r.variants[1] = r.variants[1].clone().with_model("gemini-4-hydrogen");
+        let json: serde_json::Value = serde_json::from_str(&r.to_json().unwrap()).unwrap();
+        assert_eq!(
+            json["variants"],
+            serde_json::json!([
+                {"name": "v1", "prompt": null},
+                {"name": "v2", "prompt": "v2", "model": "gemini-4-hydrogen"},
+            ])
+        );
+        let back = ExperimentReport::from_json(&r.to_json().unwrap()).unwrap();
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn a_0_5_1_report_loads_and_re_serializes_exactly() {
+        let r = ExperimentReport::from_json(REPORT_0_5_1).unwrap();
+        assert_eq!(r.name, "exp-051");
+        assert_eq!(r.set, "smoke");
+        assert_eq!(
+            r.variants,
+            [
+                ExperimentVariant::new("baseline", None),
+                ExperimentVariant::new("v2", Some("v2".into())),
+            ]
+        );
+        assert_eq!(r.metrics.len(), 2);
+        assert_eq!(
+            r.metrics[0][0].models["gemini-3.8-flash"],
+            TokenCounts::new(12, 0, 5, 1)
+        );
+        // Compared as text, not as `serde_json::Value`: `to_json` is deterministic (struct
+        // field order, sorted model maps, pretty printing), so equal text proves the new code
+        // writes the 0.5.1 bytes — same key order, `"prompt": null` kept, no `model` key.
+        assert_eq!(r.to_json().unwrap(), REPORT_0_5_1.trim_end_matches('\n'));
+    }
+
+    #[test]
+    fn missing_metrics_and_variants_default_to_empty() {
+        let mut json: serde_json::Value = serde_json::from_str(REPORT_0_5_1).unwrap();
+        let full = ExperimentReport::from_json(REPORT_0_5_1).unwrap();
+        json.as_object_mut().unwrap().remove("metrics");
+        let r = ExperimentReport::from_json(&json.to_string()).unwrap();
+        assert!(r.metrics.is_empty());
+        assert_eq!(r.report, full.report);
+        assert_eq!(r.variants, full.variants);
+        // Without metrics every run counts with default metrics.
+        let s = r.variant_stats();
+        assert_eq!(
+            (s[0].p50_ms, s[0].tokens),
+            (Some(0), TokenCounts::default())
+        );
+        json.as_object_mut().unwrap().remove("variants");
+        let r = ExperimentReport::from_json(&json.to_string()).unwrap();
+        assert!(r.variants.is_empty());
+        assert_eq!(r.report, full.report);
+    }
+
+    #[test]
+    fn summary_without_models_matches_0_5_1() {
+        // The text 0.5.1's `summary()` printed for this report.
+        let want = "\
+experiment: exp-051
+eval set: smoke
+
+variant   runs  pass rate   mean score  errors  p50     p95     input tokens  output tokens
+baseline  1     1/1 (100%)  4.00        0       1200ms  1200ms  12            5
+v2        1     0/1 (0%)    2.00        0       900ms   900ms   10            4
+";
+        assert_eq!(
+            ExperimentReport::from_json(REPORT_0_5_1).unwrap().summary(),
+            want
+        );
+    }
+
+    #[test]
+    fn summary_table_with_models() {
+        let mut r = report();
+        r.variants[1] = r.variants[1].clone().with_model("gemini-4-hydrogen");
+        let want = "\
+experiment: exp
+eval set: support
+
+variant  model              runs  pass rate   mean score  errors  p50    p95     input tokens  output tokens
+v1       —                  4     2/3 (67%)   3.00        1       200ms  300ms   31            13
+v2       gemini-4-hydrogen  4     3/3 (100%)  4.00        1       600ms  1000ms  100           50
+";
+        assert_eq!(r.summary(), want);
     }
 
     const SET: &str = r#"

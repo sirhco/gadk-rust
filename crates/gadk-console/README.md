@@ -66,10 +66,10 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/traces/{id}` | The span waterfall (tree order, indented by depth). Selecting a span shows its labels and the log entries whose `spanId` matches it; entries matching no span are listed as "unattached". A `render_prompt …` span with `prompt.name` and `prompt.version` links to that prompt version. A trace that ended less than 2 minutes ago notes that logs may still be arriving. Model calls (spans whose `gen_ai.operation.name` is `generate_content`) are listed with their tokens and cost, plus totals. With the BigQuery source a Scores section lists the trace's scores and a form adds one ([Scores](#scores)). With `--datasets`, an "Add to dataset" form adds its runs to an eval set ([Datasets](#datasets)). |
 | `/prompts` | Every prompt in the store: latest version, labels and when the latest version was created. |
 | `/prompts/{name}` | All versions (newest first) with their labels; `?v=<n>` shows a version's template and config, `?a=<n>&b=<m>` diffs two versions. Forms set, move and remove labels, conditional on the label not having changed since the page was rendered (a stale page gets 409). "Production metrics" (BigQuery source, `?range=`, default `7d`): calls, mean tokens and cost, p50/p95 latency and, with `--reports`, eval pass rate per version, then a Feedback table of the scores per version. |
-| `/evals` | The newest 100 monitor reports: a card per monitor (latest pass rate, errors, and a pass-rate trend over its listed reports), then a table of reports. `?spec=<name>` shows only that monitor's newest 100. Reports are read once and kept in memory (up to 256), so the first load of a `gs://` store can take a while. |
+| `/evals` | The newest 100 monitor reports: a card per monitor (latest pass rate, errors, and a pass-rate trend over its listed reports), then a table of reports. `?spec=<name>` shows only that monitor's newest 100. Reports are read once and kept in memory (up to 256, and at most 20,000 runs in all), so the first load of a `gs://` store can take a while. |
 | `/evals/{report}` | One report: window, source, runs, pass rate and errors, then one row per run with a chip per scorer. Expanding a run shows each score's outcome, judge score and rationale, the run error, notes on incomplete transcripts, and the transcript with tool calls; runs that recorded a trace id link to `/traces/{id}`. |
-| `/experiments` | The newest 100 experiments in the `--reports` store (its `experiments/`), newest first: name (linking to the comparison), eval set, when it was generated, and each variant's name and pass rate. Experiments are read once and kept in memory (up to 256). |
-| `/experiments/{report}` | One experiment, with a column per variant (the first is the baseline): runs, pass rate and its difference from the baseline in percentage points, mean judge score, errors, p50 and p95 duration, input, output, cached and reasoning tokens, and cost. Then the cases where the variants disagree, each with every variant's verdict and, expanded, every run's last reply, run error and score rationales; `?cases=all` lists every case. See [Experiments](#experiments). |
+| `/experiments` | The newest 100 experiments in the `--reports` store (its `experiments/`), newest first: name (linking to the comparison), eval set, when it was generated, and each variant's name and pass rate. Experiments are read once and kept in memory (up to 256, and at most 20,000 runs in all). |
+| `/experiments/{report}` | One experiment, with a column per variant (the first is the baseline): prompt, model (only when a variant records one), runs, pass rate and its difference from the baseline in percentage points, mean judge score, errors, p50 and p95 duration, input, output, cached and reasoning tokens, and cost. Then the cases where the variants disagree, each with every variant's verdict and, expanded, every run's last reply, run error and score rationales; `?cases=all` lists every case. See [Experiments](#experiments). |
 | `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`): totals, then LLM calls, tokens and cost by model, by agent and by prompt version, and the 20 traces with the most tokens. |
 
 ## Evals
@@ -81,10 +81,14 @@ same URL as `--reports`. Nothing on these pages runs a monitor or changes the st
 ## Experiments
 
 The Experiments pages are read-only views of the experiment reports that
-`ReportStore::put_experiment` writes under `experiments/` in the `--reports` store (see
+`ReportStore::put_experiment` (and `gadk-eval experiment --out <url>`) writes under
+`experiments/` in the `--reports` store (see
 [Experiments](../gadk-eval-monitor/README.md#experiments) in the `gadk-eval-monitor` README).
 Nothing on these pages runs an experiment or changes the store.
 
+- The Prompt row shows each variant's prompt selector (`v2`, a label, `latest`) and, when any
+  variant records a model (`Variant::with_model`, or every variant of `gadk-eval experiment`),
+  a Model row follows with each variant's model; `—` marks a variant without one.
 - A run passes when it has no run error and every score passes, errors when it has a run error
   or an `error` score, and fails otherwise. The pass rate is passed / (passed + failed) runs,
   `—` when there are none; it counts whole runs, unlike the per-score rate of the Evals pages.
@@ -256,10 +260,13 @@ cases were added.
 - Log entries: at most 1,000 per trace; the page says when the list is truncated.
 - Log bodies and attributes longer than 4,096 characters are collapsed, with an "expand"
   control.
-- The report cache keeps up to 256 full reports (transcripts included) in memory, so memory use
-  grows with transcript size.
+- The report cache keeps up to 256 full reports (transcripts included) in memory and at most
+  20,000 runs in all, evicting the oldest reports first; the newest report always stays, so one
+  larger report still renders (it is read again after eviction). Memory use grows with
+  transcript size.
 - The experiment cache keeps up to 256 parsed experiments (every run's transcript included) in
-  memory; split very large eval sets into several experiments.
+  memory and at most 20,000 case runs over all variants, with the same eviction; split very
+  large eval sets into several experiments.
 
 ## Live test
 

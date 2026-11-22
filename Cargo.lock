@@ -1740,6 +1740,7 @@ dependencies = [
  "gadk-model",
  "gadk-platform",
  "gadk-prompts",
+ "gadk-prompts-cli",
  "google-cloud-auth",
  "http",
  "regex",

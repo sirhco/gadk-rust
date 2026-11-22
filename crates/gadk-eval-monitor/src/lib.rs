@@ -21,8 +21,11 @@
 //! keeps in a local directory or a `gs://` bucket. The `gadk-eval` binary ([`cli`]) runs all of
 //! it.
 //!
-//! [`run_experiment`] runs one eval set against two or more variants of an agent and returns an
-//! [`ExperimentReport`] that compares them run by run, with each run's duration and tokens.
+//! [`run_experiment`] runs one eval set against two or more variants of an agent (prompt
+//! versions, models, or anything the `build` closure changes) and returns an
+//! [`ExperimentReport`] that compares them run by run, with each run's duration and tokens. An
+//! [`ExperimentSpec`] describes an experiment on one Gemini LLM agent in YAML, and
+//! `gadk-eval experiment <spec.yaml> [--out <url>]` ([`cli`]) runs it without Rust code.
 //!
 //! ```no_run
 //! # async fn demo() -> Result<(), gadk_eval_monitor::MonitorError> {
@@ -48,6 +51,7 @@ mod testutil;
 
 pub mod cli;
 pub mod experiment;
+pub mod experiment_spec;
 pub mod export;
 pub mod gcp;
 pub mod judge;
@@ -61,6 +65,7 @@ pub use error::MonitorError;
 pub use experiment::{
     CaseVerdicts, ExperimentReport, ExperimentVariant, VariantStats, Verdict, run_experiment,
 };
+pub use experiment_spec::{AgentInstruction, ExperimentAgent, ExperimentSpec};
 pub use export::{
     CompareOp, ExportContext, ExportOptions, ExportSource, ExportedCase, RunScore, ScoreFilter,
     TraceInvocation, cases_text, export_runs, run_to_case, write_set_file,
