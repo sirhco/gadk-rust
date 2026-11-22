@@ -476,10 +476,10 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-session -> gadk-memory creates a cycle" in e for e in errs), errs)
 
-    def test_eval_monitor_edges_are_exactly_cloudtrace_eval_gemini_model_platform(self):
+    def test_eval_monitor_edges_are_exactly_agent_cloudtrace_eval_gemini_model_platform(self):
         self.assertEqual(cwd.ALLOWED["gadk-eval-monitor"],
-                         {"gadk-cloudtrace", "gadk-eval", "gadk-gemini", "gadk-model",
-                          "gadk-platform"})
+                         {"gadk-agent", "gadk-cloudtrace", "gadk-eval", "gadk-gemini",
+                          "gadk-model", "gadk-platform"})
         # Only the console (its Evals pages) depends on it; the façade does not.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-eval-monitor" in deps],
                          ["gadk-console"])
@@ -547,6 +547,11 @@ class EdgeTest(unittest.TestCase):
         self.edit("gadk-eval-monitor", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-eval-monitor -> gadk-engine is not allowed" in e for e in errs), errs)
+
+    def test_eval_monitor_missing_agent_edge_is_rejected(self):
+        self.edit("gadk-eval-monitor", "gadk-agent = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-eval-monitor -> gadk-agent is missing" in e for e in errs), errs)
 
     def test_eval_monitor_missing_eval_edge_is_rejected(self):
         self.edit("gadk-eval-monitor", "gadk-eval = { workspace = true }\n", "")
