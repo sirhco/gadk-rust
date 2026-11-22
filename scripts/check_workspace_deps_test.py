@@ -33,7 +33,7 @@ class EdgeTest(unittest.TestCase):
     def test_agent_dev_dependency_on_engine_is_rejected(self):
         self.edit("gadk-agent", "[dev-dependencies]\n", "[dev-dependencies]\ngadk-engine = { workspace = true }\n")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics, gadk-prompts, gadk-eval and gadk-bigquery may depend on gadk-engine" in e for e in errs), errs)
+        self.assertTrue(any("only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics, gadk-prompts, gadk-eval, gadk-bigquery and gadk-eval-monitor may depend on gadk-engine" in e for e in errs), errs)
 
     def test_tools_dev_dependency_on_engine_is_allowed(self):
         text = (self.repo / "crates/gadk-tools/Cargo.toml").read_text()
@@ -476,14 +476,16 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-session -> gadk-memory creates a cycle" in e for e in errs), errs)
 
-    def test_eval_monitor_edges_are_exactly_agent_cloudtrace_eval_gemini_model_platform(self):
+    def test_eval_monitor_edges_are_exactly_agent_cloudtrace_engine_eval_gemini_model_platform_prompts_prompts_cli(self):
         self.assertEqual(cwd.ALLOWED["gadk-eval-monitor"],
-                         {"gadk-agent", "gadk-cloudtrace", "gadk-eval", "gadk-gemini",
-                          "gadk-model", "gadk-platform"})
+                         {"gadk-agent", "gadk-cloudtrace", "gadk-engine", "gadk-eval",
+                          "gadk-gemini", "gadk-model", "gadk-platform", "gadk-prompts",
+                          "gadk-prompts-cli"})
         # Only the console (its Evals pages) depends on it; the façade does not.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-eval-monitor" in deps],
                          ["gadk-console"])
-        self.assertNotIn("gadk-eval-monitor", cwd.ENGINE_DEPENDENTS)
+        # The `experiment` command builds LlmAgents, so it may depend on the engine.
+        self.assertIn("gadk-eval-monitor", cwd.ENGINE_DEPENDENTS)
 
     def test_console_may_depend_on_cloudtrace_eval_eval_monitor_and_bigquery(self):
         self.assertEqual(cwd.ALLOWED["gadk-console"],
@@ -543,28 +545,24 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-eval-monitor -> gadk-cloudtrace is missing" in e for e in errs), errs)
 
-    def test_eval_monitor_normal_dependency_on_engine_is_rejected(self):
-        self.edit("gadk-eval-monitor", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
-        errs = cwd.check(self.repo)
-        self.assertTrue(any("gadk-eval-monitor -> gadk-engine is not allowed" in e for e in errs), errs)
-
     def test_eval_monitor_missing_agent_edge_is_rejected(self):
         self.edit("gadk-eval-monitor", "gadk-agent = { workspace = true }\n", "")
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-eval-monitor -> gadk-agent is missing" in e for e in errs), errs)
 
-    def test_eval_monitor_may_dev_depend_on_engine_only(self):
-        # experiments: the experiment example builds an LlmAgent, so the engine is a
-        # dev-dependency; a normal engine edge stays rejected.
-        self.assertEqual(cwd.ENGINE_DEV_DEPENDENTS, ("gadk-eval-monitor",))
-        self.assertNotIn("gadk-eval-monitor", cwd.ENGINE_DEPENDENTS)
-        dev = (self.repo / "crates/gadk-eval-monitor/Cargo.toml").read_text().split("[dev-dependencies]\n", 1)[1]
-        self.assertIn("gadk-engine = { workspace = true }\n", dev)
-        self.assertIn("gadk-prompts = { workspace = true }\n", dev)
+    def test_no_crate_is_an_engine_dev_dependent_only(self):
+        # gadk-eval-monitor's engine and prompts edges are normal dependencies now.
+        self.assertEqual(cwd.ENGINE_DEV_DEPENDENTS, ())
+        normal, dev = (self.repo / "crates/gadk-eval-monitor/Cargo.toml").read_text().split("[dev-dependencies]\n", 1)
+        for dep in ("gadk-engine", "gadk-prompts", "gadk-prompts-cli"):
+            self.assertIn(f"{dep} = {{ workspace = true }}\n", normal)
+            self.assertNotIn(f"{dep} = ", dev)
         self.assertEqual(cwd.check(self.repo), [])
-        self.edit("gadk-eval-monitor", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
+
+    def test_eval_monitor_missing_prompts_cli_edge_is_rejected(self):
+        self.edit("gadk-eval-monitor", "gadk-prompts-cli = { workspace = true }\n", "")
         errs = cwd.check(self.repo)
-        self.assertTrue(any("gadk-eval-monitor -> gadk-engine is not allowed" in e for e in errs), errs)
+        self.assertTrue(any("gadk-eval-monitor -> gadk-prompts-cli is missing" in e for e in errs), errs)
 
     def test_eval_monitor_missing_eval_edge_is_rejected(self):
         self.edit("gadk-eval-monitor", "gadk-eval = { workspace = true }\n", "")

@@ -48,6 +48,7 @@ mod testutil;
 
 pub mod cli;
 pub mod experiment;
+pub mod experiment_spec;
 pub mod export;
 pub mod gcp;
 pub mod judge;
@@ -61,6 +62,7 @@ pub use error::MonitorError;
 pub use experiment::{
     CaseVerdicts, ExperimentReport, ExperimentVariant, VariantStats, Verdict, run_experiment,
 };
+pub use experiment_spec::{AgentInstruction, ExperimentAgent, ExperimentSpec};
 pub use export::{
     CompareOp, ExportContext, ExportOptions, ExportSource, ExportedCase, RunScore, ScoreFilter,
     TraceInvocation, cases_text, export_runs, run_to_case, write_set_file,

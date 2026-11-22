@@ -20,10 +20,13 @@ doc = false
 [dependencies]
 gadk-agent = { workspace = true }
 gadk-cloudtrace = { workspace = true }
+gadk-engine = { workspace = true }
 gadk-eval = { workspace = true }
 gadk-gemini = { workspace = true }
 gadk-model = { workspace = true, features = ["gcp-auth"] }
 gadk-platform = { workspace = true }
+gadk-prompts = { workspace = true }
+gadk-prompts-cli = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
@@ -40,10 +43,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-# The experiment example builds an LlmAgent whose instruction is a prompt version.
-gadk-engine = { workspace = true }
 gadk-genai = { workspace = true }
 gadk-httprr = { workspace = true }
 gadk-model = { workspace = true, features = ["test-util"] }
-gadk-prompts = { workspace = true }
 tempfile = { workspace = true }
