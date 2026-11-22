@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The prompt detail page: versions, diff and label forms.
+//! The prompt detail page: versions, diff, label and rollout forms.
 
 use chrono::SecondsFormat;
 use maud::{Markup, html};
@@ -335,7 +335,8 @@ fn metrics_section(base: &str, m: &ProductionMetrics) -> Markup {
 }
 
 /// The prompt detail page: version history, diff picker, the selected version, the diff,
-/// and the label forms, and, when given, the production metrics after the diff picker.
+/// and the label and rollout forms, and, when given, the production metrics after the diff
+/// picker.
 /// `error` (an `error::banner`) is shown under the heading.
 pub(crate) fn render(
     d: &PromptDetail,
@@ -371,7 +372,10 @@ pub(crate) fn render(
                 @for v in &d.versions {
                     tr {
                         td { a href={ (base) "?v=" (v.version) } { "v" (v.version) } }
-                        td { @for l in &v.labels { span class="chip" { (l) } } }
+                        td {
+                            @for l in &v.labels { span class="chip" { (l) } }
+                            @for (l, p) in &v.rollouts { span class="chip" { (l) " " (p) "%" } }
+                        }
                         td class="mono" {
                             (v.created_at.to_rfc3339_opts(SecondsFormat::Secs, true))
                         }
@@ -420,14 +424,36 @@ pub(crate) fn render(
             p class="empty" { "No labels." }
         } @else {
             table {
+                thead {
+                    tr { th { "Label" } th { "Version" } th { "Rollout" } th colspan="3" {} }
+                }
                 tbody {
                     @for (label, current) in &d.labels {
+                        @let rollout = d.rollouts.iter().find(|(l, _, _)| l == label);
+                        @let rollout_action = format!("{labels_action}/{label}/rollout");
+                        // Moving or removing the label ends its rollout; the confirmation says so.
+                        @let ends = if rollout.is_some() { " This ends its rollout." } else { "" };
+                        // Start a rollout of the newest version the label is not already at.
+                        @let start = d
+                            .versions
+                            .iter()
+                            .map(|v| v.version)
+                            .filter(|v| v != current)
+                            .max()
+                            .unwrap_or(d.latest);
                         tr {
                             td { span class="chip" { (label) } }
                             td class="num" { "v" (current) }
                             td {
+                                @if let Some((_, v, p)) = rollout {
+                                    "v" (v) " at " (p) "%"
+                                } @else {
+                                    "—"
+                                }
+                            }
+                            td {
                                 form method="post" action=(labels_action)
-                                    data-confirm={ "Move label " (label) "?" } class="inline" {
+                                    data-confirm={ "Move label " (label) "?" (ends) } class="inline" {
                                     (csrf_field(csrf))
                                     input type="hidden" name="label" value=(label);
                                     input type="hidden" name="expected" value=(current);
@@ -438,9 +464,51 @@ pub(crate) fn render(
                             }
                             td {
                                 form method="post" action={ (labels_action) "/" (label) "/delete" }
-                                    data-confirm={ "Remove label " (label) "?" } class="inline" {
+                                    data-confirm={ "Remove label " (label) "?" (ends) } class="inline" {
                                     (csrf_field(csrf))
                                     button type="submit" { "Remove" }
+                                }
+                            }
+                            td {
+                                @if let Some((_, v, p)) = rollout {
+                                    form method="post" action=(rollout_action)
+                                        data-confirm={ "Change the rollout of " (label) "?" }
+                                        class="inline" {
+                                        (csrf_field(csrf))
+                                        input type="hidden" name="version" value=(v);
+                                        input type="number" name="percent" value=(p) min="1"
+                                            max="99" required;
+                                        "% "
+                                        button type="submit" { "Set percent" }
+                                    }
+                                    " "
+                                    form method="post" action={ (rollout_action) "/promote" }
+                                        data-confirm={ "Promote v" (v) " to " (label) "?" }
+                                        class="inline" {
+                                        (csrf_field(csrf))
+                                        input type="hidden" name="version" value=(v);
+                                        input type="hidden" name="expected" value=(current);
+                                        button type="submit" { "Promote" }
+                                    }
+                                    " "
+                                    form method="post" action={ (rollout_action) "/delete" }
+                                        data-confirm={ "Abort the rollout of " (label) "?" }
+                                        class="inline" {
+                                        (csrf_field(csrf))
+                                        button type="submit" { "Abort" }
+                                    }
+                                } @else {
+                                    form method="post" action=(rollout_action)
+                                        data-confirm={ "Start a rollout on " (label) "?" }
+                                        class="inline" {
+                                        (csrf_field(csrf))
+                                        select name="version" { (version_options(d, start)) }
+                                        " to "
+                                        input type="number" name="percent" placeholder="percent"
+                                            min="1" max="99" required;
+                                        "% "
+                                        button type="submit" { "Start rollout" }
+                                    }
                                 }
                             }
                         }

@@ -20,14 +20,15 @@ use gadk_engine::llm::InstructionProvider;
 use tracing::Instrument;
 
 use crate::model::Selector;
-use crate::registry::PromptRegistry;
+use crate::registry::{PromptRegistry, resolve_for};
 use crate::store::StoreError;
 
 /// A prompt bound to a selector, rendered on every call against the registry's current
 /// snapshot (so a label moved mid-session applies from the next model call) with session-state
-/// templating (`{var}`, `{var?}`, `{artifact.x}`). Each render records a `render_prompt <name>`
-/// span with `prompt.name`, `prompt.version`, `prompt.label`, `prompt.hash` and
-/// `prompt.fallback` (never the text), and records the version it used in the invocation's
+/// templating (`{var}`, `{var?}`, `{artifact.x}`). A label's rollout is applied per session
+/// (see [`PromptRegistry::get_for`]). Each render records a `render_prompt <name>` span with
+/// `prompt.name`, `prompt.version`, `prompt.label`, `prompt.hash`, `prompt.fallback` and
+/// `prompt.rollout` (never the text), and records the version it used in the invocation's
 /// context (see [`render`](Self::render)).
 #[derive(Clone)]
 pub struct PromptInstruction {
@@ -80,7 +81,11 @@ impl PromptInstruction {
 
     /// Resolves and renders the prompt for `ctx`.
     ///
-    /// A resolved version is recorded for `ctx`'s agent with
+    /// The version is resolved with [`PromptRegistry::get_for`] keyed by `ctx`'s session id, so
+    /// a session stays on one side of a label's rollout; the span's `prompt.rollout` is true
+    /// when the rollout version was served.
+    ///
+    /// The version served is recorded for `ctx`'s agent with
     /// [`ReadonlyContext::record_prompt`] as `PromptUse { name, version, label }`, where `label`
     /// is the selector's label, `latest` for [`Selector::Latest`], or none for
     /// [`Selector::Version`] (the span's `prompt.label`); a fallback render clears the agent's
@@ -98,8 +103,18 @@ impl PromptInstruction {
             Selector::Latest => "latest".to_owned(),
             Selector::Version(_) => String::new(),
         };
-        let (text, version, hash, fallback) = match self.registry.get(&self.name, &self.sel) {
-            Ok(v) => {
+        let resolved = {
+            let loaded = self.registry.inner.loaded.load();
+            resolve_for(
+                &loaded.0,
+                &loaded.1,
+                &self.name,
+                &self.sel,
+                ctx.session_id(),
+            )
+        };
+        let (text, version, hash, fallback, rollout) = match resolved {
+            Ok((v, rollout)) => {
                 let mut used = PromptUse::new(self.name.clone(), v.version);
                 if !label.is_empty() {
                     used = used.with_label(label.clone());
@@ -110,12 +125,13 @@ impl PromptInstruction {
                     i64::from(v.version),
                     v.meta.hash.clone(),
                     false,
+                    rollout,
                 )
             }
             Err(e @ StoreError::NotFound { .. }) => match &self.fallback {
                 Some(fb) => {
                     ctx.clear_recorded_prompt();
-                    (fb.clone(), 0, String::new(), true)
+                    (fb.clone(), 0, String::new(), true, false)
                 }
                 None => return Err(self.err(e)),
             },
@@ -129,6 +145,7 @@ impl PromptInstruction {
             prompt.label = %label,
             prompt.hash = %hash,
             prompt.fallback = fallback,
+            prompt.rollout = rollout,
         );
         gadk_engine::llm::inject_session_state(ctx, &text)
             .instrument(span)

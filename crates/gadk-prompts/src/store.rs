@@ -17,7 +17,11 @@
 use async_trait::async_trait;
 
 use crate::model::{Label, NewVersion, PromptVersion};
+use crate::rollout::{Rollout, RolloutSnapshot};
 use crate::snapshot::PromptSnapshot;
+
+/// The `Invalid` message of [`PromptStore::set_rollout`] on a store without rollout support.
+pub(crate) const UNSUPPORTED: &str = "rollouts are not supported by this store";
 
 /// A store or lookup failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -76,6 +80,13 @@ fn conflict_message(expected: Option<u32>, actual: Option<u32>) -> String {
 
 /// Where prompts are kept. Implementations must make `create_version`, `set_label` and
 /// `remove_label` atomic with respect to each other.
+///
+/// A store that supports rollouts overrides [`set_rollout`](Self::set_rollout),
+/// [`load_rollouts`](Self::load_rollouts) and
+/// [`load_all_with_rollouts`](Self::load_all_with_rollouts), makes `set_rollout` atomic with the
+/// other writes, removes a label's rollout in the same write whenever `set_label` or
+/// `remove_label` succeeds on that label (also when `set_label` keeps its version), and keeps
+/// every rollout in `create_version`.
 #[async_trait]
 pub trait PromptStore: Send + Sync {
     /// Every prompt with all its versions and labels.
@@ -112,6 +123,43 @@ pub trait PromptStore: Send + Sync {
     ) -> Result<(), StoreError>;
     /// Removes `label`. Unknown name or label: `NotFound`.
     async fn remove_label(&self, name: &str, label: &Label) -> Result<(), StoreError>;
+    /// Every rollout, by prompt name and label.
+    ///
+    /// The default implementation returns no rollouts (a store without rollout support).
+    async fn load_rollouts(&self) -> Result<RolloutSnapshot, StoreError> {
+        Ok(RolloutSnapshot::default())
+    }
+    /// Every prompt and every rollout, read together so the rollouts match the prompts.
+    ///
+    /// The default implementation calls [`load_all`](Self::load_all), then
+    /// [`load_rollouts`](Self::load_rollouts). Stores that support rollouts should override it
+    /// to read both in one pass.
+    async fn load_all_with_rollouts(
+        &self,
+    ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
+        let prompts = self.load_all().await?;
+        let rollouts = self.load_rollouts().await?;
+        Ok((prompts, rollouts))
+    }
+    /// Starts, replaces (`Some`) or removes (`None`) the rollout on `label` of prompt `name`.
+    ///
+    /// `Some(r)`: `Invalid` when `r` is outside [`Rollout::new`]'s bounds; `NotFound` with an
+    /// empty selector for an unknown prompt, with the label as selector for an unknown label,
+    /// and with selector `v<N>` when `r.version` is not a version of the prompt; `Invalid` when
+    /// `r.version` is the label's version. `None`: `NotFound` for an unknown prompt or label, and
+    /// `Ok` when the label has no rollout.
+    ///
+    /// The default implementation returns
+    /// `Invalid("rollouts are not supported by this store")`.
+    async fn set_rollout(
+        &self,
+        name: &str,
+        label: &Label,
+        rollout: Option<Rollout>,
+    ) -> Result<(), StoreError> {
+        let _ = (name, label, rollout);
+        Err(StoreError::Invalid(UNSUPPORTED.to_owned()))
+    }
 }
 
 #[cfg(test)]

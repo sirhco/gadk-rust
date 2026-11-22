@@ -63,6 +63,19 @@ async fn store_contract_firestore() {
     .await;
 }
 
+#[tokio::test]
+async fn store_contract_firestore_rollouts() {
+    let fakes = std::sync::Mutex::new(Vec::new());
+    gadk_prompts::testsuite::run_rollouts(|| {
+        let fake = fake_firestore::start();
+        let store: Arc<dyn PromptStore> =
+            Arc::new(FirestoreStore::new(config(fake.server.url(), Some("envs/test"))).unwrap());
+        fakes.lock().unwrap().push(fake);
+        async move { store }
+    })
+    .await;
+}
+
 #[test]
 fn encodes_doc_ids() {
     assert_eq!(encode_doc_id("a/b"), "a%2Fb");
@@ -467,4 +480,61 @@ async fn load_all_never_reuses_the_cache_without_a_create_time() {
         s.load_all().await.unwrap().prompts["p"].versions[&1].template,
         "new"
     );
+}
+
+#[tokio::test]
+async fn a_prompt_document_that_fails_to_decode_rolls_back_the_transaction() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), None)).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    {
+        let mut st = fake.state.lock().unwrap();
+        let (fields, _) = st
+            .docs
+            .iter_mut()
+            .find(|(name, _)| name.ends_with("/prompts/p"))
+            .unwrap()
+            .1;
+        fields["latest_version"] = serde_json::json!({"stringValue": "not a number"});
+    }
+    drain(&fake);
+    assert!(matches!(
+        s.create_version(nv("p", "b")).await,
+        Err(StoreError::Decode(_))
+    ));
+    let ops: Vec<String> = drain(&fake).into_iter().map(|(op, _)| op).collect();
+    assert!(ops.iter().any(|op| op == "rollback"), "{ops:?}");
+    assert!(ops.iter().all(|op| op != "commit"), "{ops:?}");
+    assert!(matches!(
+        s.set_label("p", &Label::production(), 1, None).await,
+        Err(StoreError::Decode(_))
+    ));
+    let ops: Vec<String> = drain(&fake).into_iter().map(|(op, _)| op).collect();
+    assert!(ops.iter().any(|op| op == "rollback"), "{ops:?}");
+    assert!(ops.iter().all(|op| op != "commit"), "{ops:?}");
+}
+
+#[tokio::test]
+async fn a_latest_version_document_that_fails_to_decode_rolls_back_the_transaction() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), None)).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    {
+        let mut st = fake.state.lock().unwrap();
+        let (fields, _) = st
+            .docs
+            .iter_mut()
+            .find(|(name, _)| name.ends_with("/prompts/p/versions/1"))
+            .unwrap()
+            .1;
+        fields["version"] = serde_json::json!({"stringValue": "not a number"});
+    }
+    drain(&fake);
+    assert!(matches!(
+        s.create_version(nv("p", "b")).await,
+        Err(StoreError::Decode(_))
+    ));
+    let ops: Vec<String> = drain(&fake).into_iter().map(|(op, _)| op).collect();
+    assert!(ops.iter().any(|op| op == "rollback"), "{ops:?}");
+    assert!(ops.iter().all(|op| op != "commit"), "{ops:?}");
 }

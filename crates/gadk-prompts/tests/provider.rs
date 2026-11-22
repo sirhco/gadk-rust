@@ -230,6 +230,7 @@ async fn render_span_is_child_of_invoke_agent_without_text() {
     assert_eq!(attr(render, "prompt.label"), Some(&json!("production")));
     assert_eq!(attr(render, "prompt.hash"), Some(&json!(hash)));
     assert_eq!(attr(render, "prompt.fallback"), Some(&json!(false)));
+    assert_eq!(attr(render, "prompt.rollout"), Some(&json!(false)));
     for (_, v) in &render.attributes {
         assert!(!v.to_string().contains("SECRET"), "template leaked: {v}");
     }
@@ -250,6 +251,7 @@ async fn render_span_is_child_of_invoke_agent_without_text() {
         .find(|s| s.name == "render_prompt nope")
         .expect("fallback span");
     assert_eq!(attr(fb, "prompt.fallback"), Some(&json!(true)));
+    assert_eq!(attr(fb, "prompt.rollout"), Some(&json!(false)));
     assert_eq!(attr(fb, "prompt.version"), Some(&json!(0)));
 
     // not found without fallback: no span
@@ -313,4 +315,68 @@ async fn render_records_the_prompt_version_it_used() {
         None,
         "a fallback render clears the record"
     );
+}
+
+/// R10: a render serves the label's rollout by session id, records the served version with the
+/// selector's label, and marks the span with `prompt.rollout`.
+#[tokio::test(flavor = "current_thread")]
+async fn render_serves_the_rollout_by_session_id() {
+    use gadk_agent::{InvocationContext, PromptUse};
+    use gadk_prompts::Rollout;
+    use gadk_session::{CreateRequest, InMemorySessionService, SessionService};
+
+    let dir = tempfile::tempdir().unwrap();
+    let (store, r) = registry_with(
+        dir.path(),
+        &[("p", "v1"), ("p", "v2"), ("p", "v3"), ("p", "v4")],
+    )
+    .await;
+    let prod = Label::production();
+    store.set_label("p", &prod, 3, None).await.unwrap();
+    store
+        .set_rollout("p", &prod, Some(Rollout::new(4, 50).unwrap()))
+        .await
+        .unwrap();
+    r.refresh().await.unwrap();
+    let sel = Selector::Label(prod);
+
+    // Session ids known to land on each side of the 50% split.
+    let ids: Vec<String> = (0..100).map(|i| format!("session-{i}")).collect();
+    let side = |want: u32| {
+        ids.iter()
+            .find(|id| r.get_for("p", &sel, id).unwrap().version == want)
+            .unwrap()
+            .clone()
+    };
+    let svc = InMemorySessionService::new();
+    for (id, want, rolled) in [(side(4), 4, true), (side(3), 3, false)] {
+        let session = svc
+            .create(CreateRequest {
+                app_name: "app".into(),
+                user_id: "user".into(),
+                session_id: Some(id.clone()),
+                state: None,
+            })
+            .await
+            .unwrap();
+        let ic = InvocationContext::builder()
+            .session(session)
+            .build_invocation();
+        assert_eq!(ic.session_id(), id);
+        let (text, spans) =
+            capture_spans(async { r.instruction("p", sel.clone()).render(&ic).await }).await;
+        assert_eq!(text.unwrap(), format!("v{want}"), "{id}");
+        assert_eq!(
+            ic.recorded_prompt(),
+            Some(PromptUse::new("p", want).with_label("production")),
+            "{id}"
+        );
+        let span = spans
+            .iter()
+            .find(|s| s.name == "render_prompt p")
+            .expect("render span");
+        assert_eq!(attr(span, "prompt.version"), Some(&json!(want)), "{id}");
+        assert_eq!(attr(span, "prompt.rollout"), Some(&json!(rolled)), "{id}");
+    }
+    assert_eq!(r.get("p", &sel).unwrap().version, 3, "get ignores rollouts");
 }

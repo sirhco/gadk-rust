@@ -13,7 +13,8 @@
 // limitations under the License.
 
 //! Contract tests every [`PromptStore`] must pass. Enabled by the `testsuite` feature; call
-//! [`run`] from a store's tests with a factory that builds a fresh, empty store.
+//! [`run`] from a store's tests with a factory that builds a fresh, empty store, and also
+//! [`run_rollouts`] when the store supports rollouts.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -21,6 +22,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::model::{Label, NewVersion, Selector, content_hash};
+use crate::rollout::{Rollout, RolloutSnapshot};
 use crate::store::{PromptStore, StoreError};
 
 macro_rules! check {
@@ -55,6 +57,16 @@ where
     remove_label(factory().await).await;
     invalid_input(factory().await).await;
     nested_names(factory().await).await;
+}
+
+/// Runs the rollout scenario against a fresh store from `factory` (for stores that support
+/// rollouts); panics with `prompts testsuite/rollouts: <message>` on the first failure.
+pub async fn run_rollouts<F, Fut>(factory: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Arc<dyn PromptStore>>,
+{
+    rollouts(factory().await).await;
 }
 
 async fn versions_and_noop(s: Arc<dyn PromptStore>) {
@@ -242,5 +254,163 @@ async fn nested_names(s: Arc<dyn PromptStore>) {
         names == vec!["team", "team/a", "team/b"],
         c,
         "names {names:?}"
+    );
+}
+
+/// A rollout built without [`Rollout::new`]'s checks, to hand invalid values to a store.
+fn raw(version: u32, percent: u8) -> Rollout {
+    Rollout { version, percent }
+}
+
+async fn rollouts(s: Arc<dyn PromptStore>) {
+    let c = "rollouts";
+    for t in ["a", "b", "c"] {
+        s.create_version(new("p", t)).await.unwrap();
+    }
+    let (prod, staging) = (Label::production(), Label::staging());
+    s.set_label("p", &prod, 1, None).await.unwrap();
+    let not_found = |name: &str, selector: &str| {
+        Err(StoreError::NotFound {
+            name: name.into(),
+            selector: selector.into(),
+        })
+    };
+
+    // Errors (R4).
+    for bad in [raw(2, 0), raw(2, 100), raw(0, 10)] {
+        let r = s.set_rollout("p", &prod, Some(bad)).await;
+        check!(
+            matches!(r, Err(StoreError::Invalid(_))),
+            c,
+            "out of bounds {bad:?}: {r:?}"
+        );
+    }
+    let r = s.set_rollout("nope", &prod, Some(raw(2, 10))).await;
+    check!(r == not_found("nope", ""), c, "unknown prompt {r:?}");
+    let r = s.set_rollout("p", &staging, Some(raw(2, 10))).await;
+    check!(r == not_found("p", "staging"), c, "unknown label {r:?}");
+    let r = s.set_rollout("p", &prod, Some(raw(9, 10))).await;
+    check!(r == not_found("p", "v9"), c, "unknown version {r:?}");
+    let r = s.set_rollout("p", &prod, Some(raw(1, 10))).await;
+    check!(
+        matches!(r, Err(StoreError::Invalid(_))),
+        c,
+        "label's own version {r:?}"
+    );
+    let r = s.set_rollout("nope", &prod, None).await;
+    check!(
+        r == not_found("nope", ""),
+        c,
+        "remove, unknown prompt {r:?}"
+    );
+    let r = s.set_rollout("p", &staging, None).await;
+    check!(
+        r == not_found("p", "staging"),
+        c,
+        "remove, unknown label {r:?}"
+    );
+    let r = s.set_rollout("p", &prod, None).await;
+    check!(r == Ok(()), c, "remove without a rollout {r:?}");
+    let got = s.load_rollouts().await.unwrap();
+    check!(got.is_empty(), c, "after errors: {got:?}");
+
+    // Start and replace.
+    s.set_rollout("p", &prod, Some(raw(2, 10))).await.unwrap();
+    let got = s.load_rollouts().await.unwrap();
+    check!(
+        got.get("p", &prod) == Some(&raw(2, 10)),
+        c,
+        "started: {got:?}"
+    );
+    s.set_rollout("p", &prod, Some(raw(3, 50))).await.unwrap();
+
+    // Round trip through both loads, with a second prompt and a second label.
+    s.create_version(new("q", "x")).await.unwrap();
+    s.create_version(new("q", "y")).await.unwrap();
+    s.set_label("q", &staging, 2, None).await.unwrap();
+    s.set_rollout("q", &staging, Some(raw(1, 99)))
+        .await
+        .unwrap();
+    let mut want = RolloutSnapshot::default();
+    want.insert("p", prod.clone(), raw(3, 50));
+    want.insert("q", staging.clone(), raw(1, 99));
+    let (snap, got) = s.load_all_with_rollouts().await.unwrap();
+    check!(got == want, c, "load_all_with_rollouts: {got:?}");
+    check!(
+        snap == s.load_all().await.unwrap(),
+        c,
+        "load_all_with_rollouts prompts differ from load_all"
+    );
+    check!(
+        snap.prompts["p"].labels.get(&prod) == Some(&1),
+        c,
+        "a rollout moved the label: {:?}",
+        snap.prompts["p"].labels
+    );
+    let got = s.load_rollouts().await.unwrap();
+    check!(got == want, c, "load_rollouts: {got:?}");
+
+    // create_version keeps every rollout (R5).
+    s.create_version(new("p", "d")).await.unwrap();
+    let got = s.load_rollouts().await.unwrap();
+    check!(got == want, c, "after create_version: {got:?}");
+
+    // None removes it.
+    s.set_rollout("p", &prod, None).await.unwrap();
+    let got = s.load_rollouts().await.unwrap();
+    check!(
+        got.get("p", &prod).is_none() && got.get("q", &staging) == Some(&raw(1, 99)),
+        c,
+        "after remove: {got:?}"
+    );
+
+    // set_label clears that label's rollout when it keeps the version (R5) ...
+    s.set_rollout("p", &prod, Some(raw(2, 10))).await.unwrap();
+    s.set_label("p", &prod, 1, None).await.unwrap();
+    let got = s.load_rollouts().await.unwrap();
+    check!(
+        got.get("p", &prod).is_none(),
+        c,
+        "after set_label to the same version: {got:?}"
+    );
+    // ... and when it moves the label, leaving other labels' rollouts alone.
+    s.set_label("p", &staging, 1, None).await.unwrap();
+    s.set_rollout("p", &staging, Some(raw(4, 20)))
+        .await
+        .unwrap();
+    s.set_rollout("p", &prod, Some(raw(2, 10))).await.unwrap();
+    s.set_label("p", &prod, 3, Some(Some(1))).await.unwrap();
+    let got = s.load_rollouts().await.unwrap();
+    check!(
+        got.get("p", &prod).is_none() && got.get("p", &staging) == Some(&raw(4, 20)),
+        c,
+        "after set_label to another version: {got:?}"
+    );
+
+    // remove_label clears it, and setting the label again does not bring it back (R5).
+    s.remove_label("p", &staging).await.unwrap();
+    let got = s.load_rollouts().await.unwrap();
+    check!(
+        got.get("p", &staging).is_none(),
+        c,
+        "after remove_label: {got:?}"
+    );
+    s.set_label("p", &staging, 1, None).await.unwrap();
+    let got = s.load_rollouts().await.unwrap();
+    check!(
+        got.get("p", &staging).is_none(),
+        c,
+        "after setting the removed label again: {got:?}"
+    );
+    let (snap, got) = s.load_all_with_rollouts().await.unwrap();
+    want = RolloutSnapshot::default();
+    want.insert("q", staging.clone(), raw(1, 99));
+    check!(got == want, c, "final rollouts: {got:?}");
+    check!(
+        snap.prompts["p"].labels.get(&prod) == Some(&3)
+            && snap.prompts["p"].labels.get(&staging) == Some(&1),
+        c,
+        "final labels {:?}",
+        snap.prompts["p"].labels
     );
 }

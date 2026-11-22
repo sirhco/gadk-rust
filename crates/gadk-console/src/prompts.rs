@@ -15,7 +15,7 @@
 //! Prompt-registry views: the prompt list, version history and version diffs.
 
 use chrono::{DateTime, Utc};
-use gadk_prompts::{PromptSnapshot, PromptVersion, Selector};
+use gadk_prompts::{PromptSnapshot, PromptVersion, RolloutSnapshot, Selector};
 use similar::{ChangeTag, TextDiff};
 
 /// One line of the prompt list.
@@ -53,13 +53,15 @@ pub(crate) fn prompt_rows(s: &PromptSnapshot) -> Vec<PromptRow> {
 pub(crate) struct VersionRow {
     pub version: u32,
     pub labels: Vec<String>,
+    /// `(label, percent)` of each rollout serving this version.
+    pub rollouts: Vec<(String, u8)>,
     pub created_at: DateTime<Utc>,
     pub author: String,
     pub message: String,
     pub hash: String,
 }
 
-/// A prompt's version history and labels.
+/// A prompt's version history, labels and rollouts.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PromptDetail {
     pub name: String,
@@ -67,16 +69,32 @@ pub(crate) struct PromptDetail {
     /// Newest first.
     pub versions: Vec<VersionRow>,
     pub labels: Vec<(String, u32)>,
+    /// `(label, rollout version, percent)` of each label with a rollout, sorted by label.
+    pub rollouts: Vec<(String, u32, u8)>,
 }
 
-/// `None` when the prompt is unknown or has no versions.
-pub(crate) fn prompt_detail(s: &PromptSnapshot, name: &str) -> Option<PromptDetail> {
+/// `None` when the prompt is unknown or has no versions. `rollouts` gives each label's
+/// rollout.
+pub(crate) fn prompt_detail(
+    s: &PromptSnapshot,
+    rollouts: &RolloutSnapshot,
+    name: &str,
+) -> Option<PromptDetail> {
     let entry = s.prompts.get(name)?;
     let latest = *entry.versions.keys().next_back()?;
     let labels: Vec<(String, u32)> = entry
         .labels
         .iter()
         .map(|(l, n)| (l.as_str().to_owned(), *n))
+        .collect();
+    let rollouts: Vec<(String, u32, u8)> = entry
+        .labels
+        .keys()
+        .filter_map(|l| {
+            rollouts
+                .get(name, l)
+                .map(|r| (l.as_str().to_owned(), r.version, r.percent))
+        })
         .collect();
     let versions = entry
         .versions
@@ -89,6 +107,11 @@ pub(crate) fn prompt_detail(s: &PromptSnapshot, name: &str) -> Option<PromptDeta
                 .filter(|(_, target)| target == n)
                 .map(|(l, _)| l.clone())
                 .collect(),
+            rollouts: rollouts
+                .iter()
+                .filter(|(_, target, _)| target == n)
+                .map(|(l, _, p)| (l.clone(), *p))
+                .collect(),
             created_at: v.meta.created_at,
             author: v.meta.author.clone(),
             message: v.meta.message.clone(),
@@ -100,6 +123,7 @@ pub(crate) fn prompt_detail(s: &PromptSnapshot, name: &str) -> Option<PromptDeta
         latest,
         versions,
         labels,
+        rollouts,
     })
 }
 
@@ -191,7 +215,7 @@ mod tests {
     use std::sync::Arc;
 
     use chrono::TimeZone;
-    use gadk_prompts::{Label, PromptEntry, PromptVersion, VersionMeta};
+    use gadk_prompts::{Label, PromptEntry, PromptVersion, Rollout, VersionMeta};
     use serde_json::json;
 
     use super::*;
@@ -289,7 +313,7 @@ mod tests {
 
     #[test]
     fn detail_lists_versions_newest_first_with_their_labels() {
-        let d = prompt_detail(&snapshot(), "zeta").unwrap();
+        let d = prompt_detail(&snapshot(), &RolloutSnapshot::default(), "zeta").unwrap();
         assert_eq!(d.name, "zeta");
         assert_eq!(d.latest, 3);
         assert_eq!(
@@ -303,6 +327,7 @@ mod tests {
             VersionRow {
                 version: 3,
                 labels: vec!["production".into()],
+                rollouts: vec![],
                 created_at: at(3),
                 author: "author3".into(),
                 message: "message3".into(),
@@ -311,12 +336,37 @@ mod tests {
         );
         assert_eq!(d.versions[1].labels, vec!["staging".to_string()]);
         assert!(d.versions[2].labels.is_empty());
+        assert!(d.rollouts.is_empty());
+    }
+
+    #[test]
+    fn detail_lists_rollouts_and_marks_their_versions() {
+        let mut rollouts = RolloutSnapshot::default();
+        rollouts.insert("zeta", Label::production(), Rollout::new(1, 10).unwrap());
+        rollouts.insert("zeta", Label::staging(), Rollout::new(1, 50).unwrap());
+        // A rollout of another prompt is ignored.
+        rollouts.insert("alpha", Label::production(), Rollout::new(1, 20).unwrap());
+        let d = prompt_detail(&snapshot(), &rollouts, "zeta").unwrap();
+        assert_eq!(
+            d.rollouts,
+            vec![
+                ("production".to_string(), 1, 10),
+                ("staging".to_string(), 1, 50)
+            ]
+        );
+        assert_eq!(
+            d.versions[2].rollouts,
+            vec![("production".to_string(), 10), ("staging".to_string(), 50)]
+        );
+        assert!(d.versions[0].rollouts.is_empty());
+        assert!(d.versions[1].rollouts.is_empty());
     }
 
     #[test]
     fn detail_unknown_name_and_empty_prompt_are_none() {
-        assert_eq!(prompt_detail(&snapshot(), "nope"), None);
-        assert_eq!(prompt_detail(&snapshot(), "empty"), None);
+        let none = RolloutSnapshot::default();
+        assert_eq!(prompt_detail(&snapshot(), &none, "nope"), None);
+        assert_eq!(prompt_detail(&snapshot(), &none, "empty"), None);
     }
 
     #[test]

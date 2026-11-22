@@ -14,7 +14,7 @@
 
 //! Prompts in YAML files: `<root>/<name>.yaml`, `/` in a name being a subdirectory.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -23,6 +23,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{Label, NewVersion, PromptVersion, VersionMeta, content_hash, validate_name};
+use crate::rollout::{Rollout, RolloutSnapshot};
 use crate::snapshot::{PromptEntry, PromptSnapshot};
 use crate::store::{PromptStore, StoreError};
 
@@ -33,9 +34,12 @@ const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 struct PromptFile {
     name: String,
     #[serde(default)]
-    labels: std::collections::BTreeMap<Label, u32>,
+    labels: BTreeMap<Label, u32>,
     #[serde(default)]
     versions: Vec<PromptVersion>,
+    /// Each label's rollout; omitted from the file when there are none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    rollouts: BTreeMap<Label, Rollout>,
 }
 
 impl PromptFile {
@@ -56,6 +60,9 @@ impl PromptFile {
 /// removed by hand (the timeout error names it). For many concurrent writers prefer a
 /// transactional store.
 ///
+/// Each label's rollout is kept in the prompt's file under `rollouts` (no key when there are
+/// none).
+///
 /// `load_all` re-parses only files whose (mtime, length, inode) changed since the previous call.
 /// Every write renames a new file into place, so on unix the inode changes even when a rewrite
 /// keeps the length within one mtime tick; elsewhere the inode is taken as 0 and the check falls
@@ -63,11 +70,11 @@ impl PromptFile {
 #[derive(Debug)]
 pub struct FileStore {
     root: PathBuf,
-    /// (file key, parsed file) per path, from the previous `load_all`.
+    /// (file key, parsed file) per path, from the previous load.
     cache: Mutex<HashMap<PathBuf, (FileKey, PromptFile)>>,
 }
 
-/// What identifies an unchanged file between two `load_all` calls: (mtime, length, inode).
+/// What identifies an unchanged file between two loads: (mtime, length, inode).
 type FileKey = (SystemTime, u64, u64);
 
 #[cfg(unix)]
@@ -211,6 +218,18 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
 #[async_trait]
 impl PromptStore for FileStore {
     async fn load_all(&self) -> Result<PromptSnapshot, StoreError> {
+        self.load_all_with_rollouts().await.map(|(snap, _)| snap)
+    }
+
+    async fn load_rollouts(&self) -> Result<RolloutSnapshot, StoreError> {
+        self.load_all_with_rollouts()
+            .await
+            .map(|(_, rollouts)| rollouts)
+    }
+
+    async fn load_all_with_rollouts(
+        &self,
+    ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
         let mut files = Vec::new();
         walk(&self.root, &mut files).map_err(|e| io(&self.root, e))?;
         let mut cache = self
@@ -219,6 +238,7 @@ impl PromptStore for FileStore {
             .map_err(|_| StoreError::Io("cache poisoned".into()))?;
         let mut next = HashMap::new();
         let mut snap = PromptSnapshot::default();
+        let mut rollouts = RolloutSnapshot::default();
         for path in files {
             let Some(name) = name_of(&self.root, &path) else {
                 continue;
@@ -236,11 +256,14 @@ impl PromptStore for FileStore {
                     None => continue,
                 },
             };
+            for (label, rollout) in &doc.rollouts {
+                rollouts.insert(name.clone(), label.clone(), *rollout);
+            }
             snap.prompts.insert(name, doc.entry());
             next.insert(path, (key, doc));
         }
         *cache = next;
-        Ok(snap)
+        Ok((snap, rollouts))
     }
 
     async fn create_version(&self, new: NewVersion) -> Result<PromptVersion, StoreError> {
@@ -310,6 +333,7 @@ impl PromptStore for FileStore {
                     actual,
                 });
             }
+            doc.rollouts.remove(&label);
             doc.labels.insert(label, version);
             Ok((Some(doc), ()))
         })
@@ -329,6 +353,55 @@ impl PromptStore for FileStore {
                     selector: label.to_string(),
                 });
             }
+            doc.rollouts.remove(&label);
+            Ok((Some(doc), ()))
+        })
+        .await
+    }
+
+    async fn set_rollout(
+        &self,
+        name: &str,
+        label: &Label,
+        rollout: Option<Rollout>,
+    ) -> Result<(), StoreError> {
+        if let Some(r) = rollout {
+            Rollout::new(r.version, r.percent)?;
+        }
+        let (name_s, label) = (name.to_owned(), label.clone());
+        self.locked(name, move |_, current| {
+            let mut doc = current.ok_or_else(|| StoreError::NotFound {
+                name: name_s.clone(),
+                selector: String::new(),
+            })?;
+            let Some(&at) = doc.labels.get(&label) else {
+                return Err(StoreError::NotFound {
+                    name: name_s,
+                    selector: label.to_string(),
+                });
+            };
+            match rollout {
+                None => {
+                    if doc.rollouts.remove(&label).is_none() {
+                        return Ok((None, ()));
+                    }
+                }
+                Some(r) => {
+                    if !doc.versions.iter().any(|v| v.version == r.version) {
+                        return Err(StoreError::NotFound {
+                            name: name_s,
+                            selector: format!("v{}", r.version),
+                        });
+                    }
+                    if r.version == at {
+                        return Err(StoreError::Invalid(format!(
+                            "rollout version v{} is already the version of label {label}",
+                            r.version
+                        )));
+                    }
+                    doc.rollouts.insert(label, r);
+                }
+            }
             Ok((Some(doc), ()))
         })
         .await
@@ -341,6 +414,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::rollout::Rollout;
 
     fn nv(t: &str) -> NewVersion {
         NewVersion {
@@ -451,6 +525,72 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["x.v1", "x.v2"]);
         assert!(dir.path().join("x.v1.yaml").is_file());
+    }
+
+    #[tokio::test]
+    async fn file_store_label_move_without_rollouts_writes_no_rollouts_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = FileStore::new(dir.path());
+        s.create_version(nv("a")).await.unwrap();
+        s.create_version(nv("b")).await.unwrap();
+        let prod = Label::production();
+        s.set_label("p", &prod, 1, None).await.unwrap();
+        s.set_label("p", &prod, 2, Some(Some(1))).await.unwrap();
+        let text = std::fs::read_to_string(dir.path().join("p.yaml")).unwrap();
+        assert!(!text.contains("rollouts"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn file_store_rollout_is_written_and_cleared_with_its_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = FileStore::new(dir.path());
+        s.create_version(nv("a")).await.unwrap();
+        s.create_version(nv("b")).await.unwrap();
+        let prod = Label::production();
+        s.set_label("p", &prod, 1, None).await.unwrap();
+        s.set_rollout("p", &prod, Some(Rollout::new(2, 10).unwrap()))
+            .await
+            .unwrap();
+        let path = dir.path().join("p.yaml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("rollouts:\n  production:\n    version: 2\n    percent: 10\n"),
+            "{text}"
+        );
+        s.set_label("p", &prod, 1, None).await.unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("rollouts"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn file_store_reads_rollouts_and_rejects_percent_100() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = FileStore::new(dir.path());
+        s.create_version(nv("a")).await.unwrap();
+        s.create_version(nv("b")).await.unwrap();
+        let prod = Label::production();
+        s.set_label("p", &prod, 1, None).await.unwrap();
+        let path = dir.path().join("p.yaml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let with = |percent: u32| {
+            format!("{text}rollouts:\n  production:\n    version: 2\n    percent: {percent}\n")
+        };
+        std::fs::write(&path, with(10)).unwrap();
+        let (snap, rollouts) = s.load_all_with_rollouts().await.unwrap();
+        assert_eq!(snap.prompts["p"].labels.get(&prod), Some(&1));
+        assert_eq!(
+            rollouts.get("p", &prod),
+            Some(&Rollout::new(2, 10).unwrap())
+        );
+        std::fs::write(&path, with(100)).unwrap();
+        match s.load_all().await {
+            Err(StoreError::Decode(msg)) => assert!(msg.contains("p.yaml"), "{msg}"),
+            other => panic!("{other:?}"),
+        }
+        match FileStore::new(dir.path()).load_rollouts().await {
+            Err(StoreError::Decode(msg)) => assert!(msg.contains("percent"), "{msg}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[tokio::test]

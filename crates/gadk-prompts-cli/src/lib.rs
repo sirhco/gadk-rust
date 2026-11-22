@@ -21,7 +21,7 @@ pub use store_url::open_store;
 
 use std::io::{Read, Write};
 
-use clap::{Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, ArgGroup, Command};
 use gadk_prompts::StoreError;
 
 fn cli() -> Command {
@@ -66,6 +66,41 @@ fn cli() -> Command {
                 .about("Remove a label")
                 .arg(name())
                 .arg(label()),
+        )
+        .subcommand(
+            Command::new("rollout")
+                .about("Start, change, promote or abort a label's rollout")
+                .arg(name())
+                .arg(
+                    Arg::new("version")
+                        .requires("percent")
+                        .conflicts_with_all(["promote", "abort"])
+                        .help("rollout version (with --percent)"),
+                )
+                .arg(label())
+                .arg(
+                    Arg::new("percent")
+                        .long("percent")
+                        .requires("version")
+                        .help("percent of sessions served the rollout version, 1-99"),
+                )
+                .arg(
+                    Arg::new("promote")
+                        .long("promote")
+                        .action(ArgAction::SetTrue)
+                        .help("move the label to its rollout version"),
+                )
+                .arg(
+                    Arg::new("abort")
+                        .long("abort")
+                        .action(ArgAction::SetTrue)
+                        .help("remove the label's rollout"),
+                )
+                .group(
+                    ArgGroup::new("mode")
+                        .args(["percent", "promote", "abort"])
+                        .required(true),
+                ),
         )
         .subcommand(
             Command::new("list")
@@ -147,7 +182,8 @@ mod tests {
 
     use async_trait::async_trait;
     use gadk_prompts::{
-        FileStore, Label, NewVersion, PromptSnapshot, PromptStore, PromptVersion, StoreError,
+        FileStore, Label, NewVersion, PromptSnapshot, PromptStore, PromptVersion, Rollout,
+        RolloutSnapshot, Selector, StoreError,
     };
 
     /// A store that counts `load_all` calls.
@@ -208,5 +244,92 @@ mod tests {
         assert_eq!(push(&store, "hello").await, "p v1 (unchanged)\n");
         assert_eq!(push(&store, "bye").await, "p v2\n");
         assert_eq!(loads.load(Ordering::SeqCst), 0);
+    }
+
+    /// A store where another writer moves `production` to v3 right after every
+    /// `load_all_with_rollouts` read, i.e. between `rollout --promote`'s read and its write.
+    struct MovedAfterRead(FileStore);
+
+    #[async_trait]
+    impl PromptStore for MovedAfterRead {
+        async fn load_all(&self) -> Result<PromptSnapshot, StoreError> {
+            self.0.load_all().await
+        }
+        async fn create_version(&self, new: NewVersion) -> Result<PromptVersion, StoreError> {
+            self.0.create_version(new).await
+        }
+        async fn set_label(
+            &self,
+            name: &str,
+            label: &Label,
+            version: u32,
+            expected: Option<Option<u32>>,
+        ) -> Result<(), StoreError> {
+            self.0.set_label(name, label, version, expected).await
+        }
+        async fn remove_label(&self, name: &str, label: &Label) -> Result<(), StoreError> {
+            self.0.remove_label(name, label).await
+        }
+        async fn load_all_with_rollouts(
+            &self,
+        ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
+            let read = self.0.load_all_with_rollouts().await?;
+            self.0.set_label("p", &Label::production(), 3, None).await?;
+            Ok(read)
+        }
+    }
+
+    #[tokio::test]
+    async fn promote_is_compare_and_set_on_the_label_version_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let fs = FileStore::new(dir.path());
+        for t in ["one", "two", "three"] {
+            fs.create_version(NewVersion {
+                name: "p".into(),
+                template: t.into(),
+                config: None,
+                author: "me".into(),
+                message: String::new(),
+            })
+            .await
+            .unwrap();
+        }
+        let prod = Label::production();
+        fs.set_label("p", &prod, 1, None).await.unwrap();
+        fs.set_rollout("p", &prod, Some(Rollout::new(2, 10).unwrap()))
+            .await
+            .unwrap();
+        let store = MovedAfterRead(fs);
+        let m = super::cli()
+            .try_get_matches_from([
+                "gadk-prompts",
+                "rollout",
+                "p",
+                "--label",
+                "production",
+                "--promote",
+            ])
+            .unwrap();
+        let mut out = Vec::new();
+        let err = super::commands::dispatch(&store, &m, &mut "".as_bytes(), &mut out)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                StoreError::Conflict {
+                    expected: Some(1),
+                    actual: Some(3)
+                }
+            ),
+            "{err:?}"
+        );
+        assert_eq!(super::code(&err), 3);
+        assert!(out.is_empty());
+        let snap = store.0.load_all().await.unwrap();
+        assert_eq!(
+            snap.resolve("p", &Selector::Label(prod)).unwrap().version,
+            3
+        );
     }
 }

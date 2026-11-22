@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use gadk_prompts::{Label, PromptVersion, StoreError, VersionMeta};
+use gadk_prompts::{Label, PromptVersion, Rollout, StoreError, VersionMeta};
 use serde_json::{Map, Value, json};
 
 pub(crate) fn s(v: &str) -> Value {
@@ -53,23 +53,43 @@ pub(crate) fn get_u32(fields: &Map<String, Value>, k: &str) -> Result<u32, Store
     s.parse().map_err(|e| decode(format!("field {k}: {e}")))
 }
 
-/// Fields of a prompt document.
-pub(crate) fn prompt_fields(name: &str, latest: u32, labels: &BTreeMap<Label, u32>) -> Value {
+/// `(latest_version, labels, rollouts)` of a prompt document.
+pub(crate) type PromptState = (u32, BTreeMap<Label, u32>, BTreeMap<Label, Rollout>);
+
+/// Fields of a prompt document. `rollouts` maps each label to `{version, percent}` and is
+/// omitted when there are none, so a prompt without rollouts is written as before.
+pub(crate) fn prompt_fields(
+    name: &str,
+    latest: u32,
+    labels: &BTreeMap<Label, u32>,
+    rollouts: &BTreeMap<Label, Rollout>,
+) -> Value {
     let lf: Map<String, Value> = labels
         .iter()
         .map(|(l, v)| (l.as_str().to_owned(), i(*v)))
         .collect();
-    json!({
+    let mut fields = json!({
         "name": s(name),
         "latest_version": i(latest),
         "labels": { "mapValue": { "fields": lf } },
-    })
+    });
+    if !rollouts.is_empty() {
+        let rf: Map<String, Value> = rollouts
+            .iter()
+            .map(|(l, r)| {
+                let f = json!({ "version": i(r.version), "percent": i(u32::from(r.percent)) });
+                let rollout = json!({ "mapValue": { "fields": f } });
+                (l.as_str().to_owned(), rollout)
+            })
+            .collect();
+        fields["rollouts"] = json!({ "mapValue": { "fields": rf } });
+    }
+    fields
 }
 
-/// `(latest_version, labels)` of a prompt document's fields.
-pub(crate) fn read_prompt(
-    fields: &Map<String, Value>,
-) -> Result<(u32, BTreeMap<Label, u32>), StoreError> {
+/// `(latest_version, labels, rollouts)` of a prompt document's fields. A document without
+/// `rollouts` has none; a rollout outside [`Rollout::new`]'s bounds is a `Decode` error.
+pub(crate) fn read_prompt(fields: &Map<String, Value>) -> Result<PromptState, StoreError> {
     let latest = get_u32(fields, "latest_version")?;
     let mut labels = BTreeMap::new();
     if let Some(lf) = fields
@@ -81,7 +101,27 @@ pub(crate) fn read_prompt(
             labels.insert(Label::new(k).map_err(decode)?, get_u32(lf, k)?);
         }
     }
-    Ok((latest, labels))
+    let mut rollouts = BTreeMap::new();
+    if let Some(rf) = fields
+        .get("rollouts")
+        .and_then(|v| v.pointer("/mapValue/fields"))
+        .and_then(Value::as_object)
+    {
+        for (k, v) in rf {
+            let label = Label::new(k).map_err(decode)?;
+            let f = v
+                .pointer("/mapValue/fields")
+                .and_then(Value::as_object)
+                .ok_or_else(|| decode(format!("rollouts.{k}: want mapValue")))?;
+            let version = get_u32(f, "version")?;
+            let percent = u8::try_from(get_u32(f, "percent")?)
+                .map_err(|e| decode(format!("rollouts.{k}.percent: {e}")))?;
+            let rollout =
+                Rollout::new(version, percent).map_err(|e| decode(format!("rollouts.{k}: {e}")))?;
+            rollouts.insert(label, rollout);
+        }
+    }
+    Ok((latest, labels, rollouts))
 }
 
 pub(crate) fn version_fields(v: &PromptVersion) -> Value {
@@ -165,7 +205,72 @@ mod tests {
     fn prompt_round_trips_through_fields() {
         let mut labels = BTreeMap::new();
         labels.insert(Label::production(), 2);
-        let f = prompt_fields("p", 4, &labels);
-        assert_eq!(read_prompt(f.as_object().unwrap()).unwrap(), (4, labels));
+        let f = prompt_fields("p", 4, &labels, &BTreeMap::new());
+        assert_eq!(
+            read_prompt(f.as_object().unwrap()).unwrap(),
+            (4, labels, BTreeMap::new())
+        );
+    }
+
+    #[test]
+    fn prompt_fields_without_rollouts_has_no_rollouts_key() {
+        let mut labels = BTreeMap::new();
+        labels.insert(Label::production(), 2);
+        let f = prompt_fields("p", 4, &labels, &BTreeMap::new());
+        assert!(f.get("rollouts").is_none(), "{f}");
+    }
+
+    #[test]
+    fn read_prompt_of_a_document_without_rollouts_gives_empty_rollouts() {
+        // A prompt document as written before rollouts existed.
+        let old = json!({
+            "name": {"stringValue": "p"},
+            "latest_version": {"integerValue": "4"},
+            "labels": {"mapValue": {"fields": {"production": {"integerValue": "2"}}}},
+        });
+        let (latest, labels, rollouts) = read_prompt(old.as_object().unwrap()).unwrap();
+        assert_eq!((latest, labels.get(&Label::production())), (4, Some(&2)));
+        assert!(rollouts.is_empty(), "{rollouts:?}");
+    }
+
+    #[test]
+    fn prompt_with_rollouts_round_trips_through_fields() {
+        let (prod, staging) = (Label::production(), Label::staging());
+        let labels = BTreeMap::from([(prod.clone(), 2), (staging.clone(), 3)]);
+        let rollouts = BTreeMap::from([
+            (prod.clone(), Rollout::new(4, 10).unwrap()),
+            (staging.clone(), Rollout::new(1, 99).unwrap()),
+        ]);
+        let f = prompt_fields("p", 4, &labels, &rollouts);
+        assert_eq!(
+            f["rollouts"]["mapValue"]["fields"]["production"],
+            json!({"mapValue": {"fields": {
+                "version": {"integerValue": "4"},
+                "percent": {"integerValue": "10"},
+            }}})
+        );
+        assert_eq!(
+            read_prompt(f.as_object().unwrap()).unwrap(),
+            (4, labels, rollouts)
+        );
+    }
+
+    #[test]
+    fn read_prompt_rejects_an_out_of_range_rollout() {
+        for percent in ["0", "100", "300"] {
+            let doc = json!({
+                "name": {"stringValue": "p"},
+                "latest_version": {"integerValue": "4"},
+                "labels": {"mapValue": {"fields": {"production": {"integerValue": "2"}}}},
+                "rollouts": {"mapValue": {"fields": {"production": {"mapValue": {"fields": {
+                    "version": {"integerValue": "4"},
+                    "percent": {"integerValue": percent},
+                }}}}}},
+            });
+            match read_prompt(doc.as_object().unwrap()) {
+                Err(StoreError::Decode(msg)) => assert!(msg.contains("production"), "{msg}"),
+                other => panic!("percent {percent}: {other:?}"),
+            }
+        }
     }
 }

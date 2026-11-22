@@ -7,6 +7,37 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-prompts`: prompt rollouts. A label can serve a second version to a percentage of
+  sessions (`Rollout`, `RolloutSnapshot`), each session pinned to one side by a hash of the
+  prompt name, label and session id. `PromptStore` gains `load_rollouts`,
+  `load_all_with_rollouts` and `set_rollout`, with default bodies (no rollouts; `set_rollout`
+  answers `Invalid("rollouts are not supported by this store")`). `FileStore` supports them
+  (a `rollouts` key in the prompt file, absent when there are none). `PromptRegistry` loads
+  prompts and rollouts together and adds `rollouts()` and `get_for(name, &selector, key)`;
+  `PromptInstruction` renders with the session id as the key, records the version it served in
+  `PromptUse` and sets `prompt.rollout` on the `render_prompt` span. `testsuite::run_rollouts`
+  is the rollout contract suite for other stores.
+- `gadk-prompts-firestore`: `FirestoreStore` supports rollouts (a `rollouts` field on the prompt
+  document, absent when there are none; no extra reads).
+- `gadk-prompts-cli`: `gadk-prompts rollout <name> --label <l> <version> --percent <p>` starts
+  or changes a rollout, `--promote` moves the label to the rollout version (compare-and-set on
+  the label version it read) and `--abort` removes it. `list` shows a label with a rollout as
+  `production=v3(v4@10%)` and `show --label` adds a `rollout: v<n> at <p>%` line.
+- `gadk-console`: `/prompts/{name}` shows each label's rollout in a Rollout column and a chip on
+  the rollout version, with forms to start a rollout, change its percent, promote and abort
+  (`POST /prompts/{name}/labels/{label}/rollout`, `…/rollout/promote`, `…/rollout/delete`).
+- `gadk`: the `rollout_e2e` example serves a prompt with a 50% rollout over several sessions
+  through the analytics plugin.
+
+### Changed
+
+- `gadk-prompts`, `gadk-prompts-firestore`: `set_label` and `remove_label` also remove the
+  label's rollout in the same write (`create_version` keeps rollouts). A writer from gadk 0.5.2
+  or older drops a prompt's rollouts when it rewrites that prompt, so upgrade every writer
+  before starting rollouts.
+
 ## [0.5.2] - 2026-11-22
 
 ### Added
