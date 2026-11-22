@@ -27,8 +27,9 @@ use crate::experiments::experiment_href;
 use crate::prices::{CostSum, PriceTable, runs_cost, thousands};
 
 /// The experiment stored as `name`: its header, a comparison table with one column per variant
-/// (the first is the baseline), then the cases where the variants disagree (every case when
-/// `all`), each verdict opening the variant's runs of that case.
+/// (the first is the baseline; a Model row when any variant records a model), then the cases
+/// where the variants disagree (every case when `all`), each verdict opening the variant's runs
+/// of that case.
 pub(crate) fn render(
     name: &str,
     x: &ExperimentReport,
@@ -71,6 +72,16 @@ pub(crate) fn render(
                     @for i in 0..stats.len() {
                         td class="mono" {
                             (x.variants.get(i).and_then(|v| v.prompt.as_deref()).unwrap_or("—"))
+                        }
+                    }
+                }
+                @if x.variants.iter().any(|v| v.model.is_some()) {
+                    tr {
+                        th { "Model" }
+                        @for i in 0..stats.len() {
+                            td class="mono" {
+                                (x.variants.get(i).and_then(|v| v.model.as_deref()).unwrap_or("—"))
+                            }
                         }
                     }
                 }
@@ -293,6 +304,33 @@ mod tests {
         }
         assert!(!out.contains(NO_PRICES), "{out}");
         assert!(!out.contains(PARTIAL_NOTE), "{out}");
+    }
+
+    #[test]
+    fn a_model_row_shows_when_any_variant_has_a_model() {
+        let out = render(NAME, &three(), false, None).into_string();
+        assert!(!out.contains("<th>Model</th>"), "{out}");
+
+        let mut x = three();
+        x.variants[0].model = Some("gemini-3.8-flash".to_owned());
+        x.variants[2].model = Some("gemini-4-hydrogen".to_owned());
+        let out = render(NAME, &x, false, None).into_string();
+        assert!(
+            out.contains(concat!(
+                r#"<tr><th>Prompt</th><td class="mono">—</td><td class="mono">—</td><td class="mono">—</td></tr>"#,
+                r#"<tr><th>Model</th><td class="mono">gemini-3.8-flash</td><td class="mono">—</td><td class="mono">gemini-4-hydrogen</td></tr>"#,
+                r#"<tr><th>Runs</th>"#,
+            )),
+            "{out}"
+        );
+
+        x.variants[1].model = Some("<i>m</i>".to_owned());
+        let out = render(NAME, &x, false, None).into_string();
+        assert!(!out.contains("<i>m</i>"), "{out}");
+        assert!(
+            out.contains(r#"<td class="mono">&lt;i&gt;m&lt;/i&gt;</td>"#),
+            "{out}"
+        );
     }
 
     #[test]

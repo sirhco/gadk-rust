@@ -18,21 +18,27 @@ use std::sync::Arc;
 
 use gadk_eval_monitor::{ExperimentReport, MonitorError, ReportStore};
 
-use crate::cache::ParsedCache;
+use crate::cache::{MAX_RUNS, ParsedCache};
 use crate::url::percent_encode;
 
 /// The report store (its `experiments/` part) plus a cache of the `cap` most recently read
-/// parsed experiments.
+/// parsed experiments, holding at most [`MAX_RUNS`] runs in all (the newest experiment always
+/// stays).
 pub(crate) struct ExperimentCache {
     store: ReportStore,
     cache: ParsedCache<ExperimentReport>,
+}
+
+/// An experiment's weight in the cache: the case runs of all its variants.
+pub(crate) fn experiment_runs(x: &ExperimentReport) -> usize {
+    x.report.variants.iter().map(|v| v.runs.len()).sum()
 }
 
 impl ExperimentCache {
     pub(crate) fn new(store: ReportStore, cap: usize) -> Self {
         Self {
             store,
-            cache: ParsedCache::new(cap),
+            cache: ParsedCache::new(cap, MAX_RUNS, experiment_runs),
         }
     }
 
@@ -64,7 +70,7 @@ mod tests {
 
     use gadk_eval::Outcome;
 
-    use super::experiment_href;
+    use super::{experiment_href, experiment_runs};
     use crate::evals::CACHE_CAP;
     use crate::web::testutil::{experiment, experiment_cache};
 
@@ -136,5 +142,19 @@ mod tests {
             .await
             .unwrap();
         assert!(cache.names(10).await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn experiment_weight_is_the_runs_of_every_variant() {
+        let x = experiment(
+            "a",
+            1_800_000_000,
+            &[
+                ("v1", &[("c1", &[Outcome::Pass]), ("c1", &[Outcome::Fail])]),
+                ("v2", &[("c1", &[Outcome::Pass])]),
+                ("v3", &[]),
+            ],
+        );
+        assert_eq!(experiment_runs(&x), 3);
     }
 }

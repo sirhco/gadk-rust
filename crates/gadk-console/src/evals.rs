@@ -19,23 +19,30 @@ use std::sync::Arc;
 
 use gadk_eval_monitor::{MonitorError, MonitorReport, ReportStore};
 
-use crate::cache::ParsedCache;
+use crate::cache::{MAX_RUNS, ParsedCache};
 use crate::url::percent_encode;
 
-/// How many parsed reports the console keeps (per page family: monitor reports, experiments).
+/// How many parsed reports the console keeps (per page family: monitor reports, experiments),
+/// within [`MAX_RUNS`] runs.
 pub(crate) const CACHE_CAP: usize = 256;
 
-/// The report store plus a cache of the `cap` most recently read parsed reports.
+/// The report store plus a cache of the `cap` most recently read parsed reports, holding at
+/// most [`MAX_RUNS`] runs in all (the newest report always stays).
 pub(crate) struct ReportCache {
     store: ReportStore,
     cache: ParsedCache<MonitorReport>,
+}
+
+/// A monitor report's weight in the cache: its run count.
+pub(crate) fn report_runs(r: &MonitorReport) -> usize {
+    r.runs.len()
 }
 
 impl ReportCache {
     pub(crate) fn new(store: ReportStore, cap: usize) -> Self {
         Self {
             store,
-            cache: ParsedCache::new(cap),
+            cache: ParsedCache::new(cap, MAX_RUNS, report_runs),
         }
     }
 
@@ -136,7 +143,7 @@ mod tests {
     use gadk_eval::Outcome;
     use gadk_eval_monitor::ReportStore;
 
-    use super::{CACHE_CAP, group, percent, report_href, spec_href, spec_of};
+    use super::{CACHE_CAP, group, percent, report_href, report_runs, spec_href, spec_of};
     use crate::web::testutil::{report, report_cache};
 
     #[test]
@@ -255,5 +262,18 @@ mod tests {
     async fn invalid_names_are_errors() {
         let (_dir, cache, _) = report_cache(&[], CACHE_CAP).await;
         assert!(cache.find("../x").await.is_err());
+    }
+
+    #[test]
+    fn report_weight_is_its_run_count() {
+        assert_eq!(report_runs(&report("a", 1_800_000_000, &[])), 0);
+        assert_eq!(
+            report_runs(&report(
+                "a",
+                1_800_000_000,
+                &[&[Outcome::Pass], &[Outcome::Fail, Outcome::Pass], &[]]
+            )),
+            3
+        );
     }
 }
