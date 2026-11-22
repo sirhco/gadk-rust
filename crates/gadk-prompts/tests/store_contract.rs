@@ -99,3 +99,15 @@ async fn rollout_defaults_on_a_store_without_rollout_support() {
     assert_eq!(s.set_rollout("p", &prod, Some(r)).await, unsupported);
     assert_eq!(s.set_rollout("p", &prod, None).await, unsupported);
 }
+
+#[tokio::test]
+async fn store_contract_file_store_rollouts() {
+    let dirs = std::sync::Mutex::new(Vec::new());
+    gadk_prompts::testsuite::run_rollouts(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let store: Arc<dyn PromptStore> = Arc::new(FileStore::new(dir.path()));
+        dirs.lock().unwrap().push(dir); // keep alive for the whole run
+        async move { store }
+    })
+    .await;
+}
