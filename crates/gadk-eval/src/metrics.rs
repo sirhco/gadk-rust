@@ -27,6 +27,7 @@ pub(crate) const UNKNOWN_MODEL: &str = "unknown";
 /// Token counts of one or more model calls.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TokenCounts {
     /// Prompt tokens, tool-use prompt tokens included.
     pub input: u64,
@@ -75,6 +76,7 @@ impl std::ops::AddAssign for TokenCounts {
 /// What one run cost: its duration and its token counts per model.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RunMetrics {
     /// Milliseconds from just before the run's runner and session were created until the run
     /// completed, failed or timed out (0 for a variant whose build failed).
@@ -172,5 +174,28 @@ mod tests {
             r#"{"duration_ms":1234,"models":{"gemini-3.8-flash":{"input":1,"cached":0,"output":2,"reasoning":3}}}"#
         );
         assert_eq!(serde_json::from_str::<RunMetrics>(&json).unwrap(), m);
+    }
+
+    #[test]
+    fn missing_fields_default_to_zero_and_empty() {
+        assert_eq!(
+            serde_json::from_str::<TokenCounts>("{}").unwrap(),
+            TokenCounts::default()
+        );
+        assert_eq!(
+            serde_json::from_str::<TokenCounts>(r#"{"input":5,"output":2}"#).unwrap(),
+            TokenCounts::new(5, 0, 2, 0)
+        );
+        assert_eq!(
+            serde_json::from_str::<RunMetrics>("{}").unwrap(),
+            RunMetrics::default()
+        );
+        assert_eq!(
+            serde_json::from_str::<RunMetrics>(r#"{"models":{"m":{"input":3}}}"#).unwrap(),
+            RunMetrics::new(
+                0,
+                BTreeMap::from([("m".to_owned(), TokenCounts::new(3, 0, 0, 0))])
+            )
+        );
     }
 }
