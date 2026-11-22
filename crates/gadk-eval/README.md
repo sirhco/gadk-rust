@@ -124,6 +124,24 @@ prod     overall    2/4 (50%)   3.00        0
 Pass rate is passes / (passes + failures); mean score averages the judge scores. `write_json`
 writes every variant, case and run with its transcript (turns, replies, tool calls) and scores.
 
+## Run metrics
+
+`Evaluator::run_measured(&set, &variants, build)` runs exactly like `run` and also measures each
+run. It returns a `MeasuredReport`: `report` is the `EvalReport` that `run` returns for the same
+inputs, and `metrics[v][i]` is the `RunMetrics` of `report.variants[v].runs[i]`.
+
+- `duration_ms`: from just before the run's runner and session are created until the run
+  completes, fails or times out (a timed-out run lasts at least `run_timeout`).
+- `models`: `TokenCounts` per model, keyed by the responses' `model_version` (`unknown` when
+  empty) and summed over every model call of the run: `input` = `prompt_token_count` +
+  `tool_use_prompt_token_count`, `cached` = `cached_content_token_count`, `output` =
+  `candidates_token_count`, `reasoning` = `thoughts_token_count`. Negative counts are 0, only
+  final (non-partial) responses count, and a response without usage metadata adds nothing.
+  `RunMetrics::total()` sums the models.
+
+A variant whose `build` failed gets zero metrics (`RunMetrics::default()`) for each of its runs.
+`gadk-eval-monitor`'s experiments store these metrics and compare variants with them.
+
 ## Live test
 
 ```sh

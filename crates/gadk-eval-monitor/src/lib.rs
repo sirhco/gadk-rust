@@ -21,6 +21,9 @@
 //! keeps in a local directory or a `gs://` bucket. The `gadk-eval` binary ([`cli`]) runs all of
 //! it.
 //!
+//! [`run_experiment`] runs one eval set against two or more variants of an agent and returns an
+//! [`ExperimentReport`] that compares them run by run, with each run's duration and tokens.
+//!
 //! ```no_run
 //! # async fn demo() -> Result<(), gadk_eval_monitor::MonitorError> {
 //! use gadk_eval_monitor::{
@@ -44,6 +47,7 @@ mod error;
 mod testutil;
 
 pub mod cli;
+pub mod experiment;
 pub mod export;
 pub mod gcp;
 pub mod judge;
@@ -54,6 +58,9 @@ pub mod spec;
 pub mod store;
 
 pub use error::MonitorError;
+pub use experiment::{
+    CaseVerdicts, ExperimentReport, ExperimentVariant, VariantStats, Verdict, run_experiment,
+};
 pub use export::{
     CompareOp, ExportContext, ExportOptions, ExportSource, ExportedCase, RunScore, ScoreFilter,
     TraceInvocation, cases_text, export_runs, run_to_case, write_set_file,

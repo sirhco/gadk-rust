@@ -7,6 +7,22 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval`: `Evaluator::run_measured` returns a `MeasuredReport`, the `EvalReport` of `run`
+  plus each run's `RunMetrics`: its duration in milliseconds and its `TokenCounts` per model
+  (from the responses' usage metadata).
+- `gadk-eval-monitor`: experiments. `run_experiment` runs one eval set against several variants
+  and returns an `ExperimentReport` (`summary`, `variant_stats`, `case_verdicts`, `to_json`,
+  `from_json`; `ExperimentVariant`, `VariantStats`, `CaseVerdicts`, `Verdict`), and
+  `ReportStore::{put_experiment, experiment_names, find_experiment}` keep experiments under
+  `experiments/` in the report store. The `experiment` example compares two prompt versions on
+  Gemini end to end.
+- `gadk-console`: `/experiments` lists the stored experiments and `/experiments/{report}`
+  compares their variants (pass rate and its difference from the baseline, judge score, errors,
+  p50/p95 duration, tokens, and cost with `--prices`) and lists the cases where they disagree
+  (`?cases=all` for every case); the nav bar gains "Experiments".
+
 ## [0.5.0] - 2026-11-21
 
 ### Added

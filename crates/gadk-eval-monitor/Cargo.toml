@@ -18,6 +18,7 @@ path = "src/bin/gadk-eval.rs"
 doc = false
 
 [dependencies]
+gadk-agent = { workspace = true }
 gadk-cloudtrace = { workspace = true }
 gadk-eval = { workspace = true }
 gadk-gemini = { workspace = true }
@@ -39,7 +40,10 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# The experiment example builds an LlmAgent whose instruction is a prompt version.
+gadk-engine = { workspace = true }
 gadk-genai = { workspace = true }
 gadk-httprr = { workspace = true }
 gadk-model = { workspace = true, features = ["test-util"] }
+gadk-prompts = { workspace = true }
 tempfile = { workspace = true }

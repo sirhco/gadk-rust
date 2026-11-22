@@ -122,6 +122,7 @@ impl Reply {
 }
 
 /// Authenticated requests to Google Cloud REST APIs.
+#[derive(Clone)]
 pub(crate) struct GcpHttp {
     http: Arc<dyn HttpClient>,
     auth: Arc<dyn TokenSource>,

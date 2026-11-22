@@ -88,10 +88,14 @@
   `gadk-platform`, `gadk-prompts` and `gadk-session` (the eleventh crate that may depend on
   `gadk-engine`); the façade depends on it optionally (feature `eval`), and `gadk-console` (its
   Evals pages) depends on it.
-- eval-monitor: `gadk-eval-monitor` (production eval monitors and the `gadk-eval` binary) depends
-  on exactly `gadk-cloudtrace` (the Cloud Trace transcript source), `gadk-eval`, `gadk-gemini`
-  (the Vertex AI judge), `gadk-model` (HTTP seam, `gcp-auth`) and `gadk-platform`; it never
-  depends on `gadk-engine` directly, and only `gadk-console` (its Evals pages) depends on it.
+- eval-monitor: `gadk-eval-monitor` (production eval monitors, experiments and the `gadk-eval`
+  binary) depends on exactly `gadk-agent` (the agent type of `run_experiment`'s build closure),
+  `gadk-cloudtrace` (the Cloud Trace transcript source), `gadk-eval`, `gadk-gemini` (the Vertex
+  AI judge), `gadk-model` (HTTP seam, `gcp-auth`) and `gadk-platform`; it never depends on
+  `gadk-engine` directly, and only `gadk-console` (its Evals pages) depends on it.
+- experiments: `gadk-eval-monitor` may dev-depend on `gadk-engine` (ENGINE_DEV_DEPENDENTS: its
+  `experiment` example builds an `LlmAgent`) but never depend on it, so a normal `gadk-engine`
+  edge is still rejected; its `gadk-prompts` dev-dependency needs no exception.
 - cloudtrace: `gadk-cloudtrace` (the Cloud Trace v1 read client) depends on exactly `gadk-model`
   (HTTP seam, `gcp-auth`); `gadk-console` (its trace reads) and `gadk-eval-monitor` (the Cloud
   Trace transcript source) depend on it.
@@ -149,8 +153,8 @@ ALLOWED = {
                      "gadk-eval", "gadk-eval-monitor", "gadk-bigquery"},
     "gadk-eval": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
                   "gadk-prompts", "gadk-session"},
-    "gadk-eval-monitor": {"gadk-cloudtrace", "gadk-eval", "gadk-gemini", "gadk-model",
-                          "gadk-platform"},
+    "gadk-eval-monitor": {"gadk-agent", "gadk-cloudtrace", "gadk-eval", "gadk-gemini",
+                          "gadk-model", "gadk-platform"},
     "gadk": {"gadk-genai", "gadk-platform", "gadk-model", "gadk-session", "gadk-gemini",
              "gadk-agent", "gadk-engine", "gadk-tools", "gadk-auth", "gadk-mcp", "gadk-artifact",
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
@@ -170,6 +174,7 @@ FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
                      "gadk-agentregistry", "gadk-telemetry", "gadk-configurable",
                      "gadk-agentanalytics", "gadk-prompts", "gadk-eval", "gadk-bigquery")  # the only crates that may depend on gadk-engine
+ENGINE_DEV_DEPENDENTS = ("gadk-eval-monitor",)  # may dev-depend (never depend) on gadk-engine
 TOOLS_DEPENDENT = "gadk"  # the only crate that may depend on gadk-tools
 OPENAI_DEPENDENT = "gadk"  # the only crate that may depend on gadk-openai (3b)
 LICENSE_OVERRIDES = {
@@ -229,8 +234,8 @@ def check(repo):
         for d in sorted(x for x in data.get("dev-dependencies", {}) if x.startswith("gadk")):
             if d == name:
                 continue
-            if d == "gadk-engine" and name not in ENGINE_DEPENDENTS:
-                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics, gadk-prompts, gadk-eval and gadk-bigquery may depend on gadk-engine (dev-dependency)")
+            if d == "gadk-engine" and name not in ENGINE_DEPENDENTS + ENGINE_DEV_DEPENDENTS:
+                errs.append(f"{rel}: only gadk, gadk-tools, gadk-server, gadk-a2a, gadk-launcher, gadk-agentregistry, gadk-telemetry, gadk-configurable, gadk-agentanalytics, gadk-prompts, gadk-eval and gadk-bigquery may depend on gadk-engine (dev-dependency; gadk-eval-monitor: dev-dependency only)")
             elif d == "gadk-tools" and name != TOOLS_DEPENDENT:
                 errs.append(f"{rel}: only {TOOLS_DEPENDENT} may depend on gadk-tools (dev-dependency)")
             elif d == "gadk-openai" and name != OPENAI_DEPENDENT:

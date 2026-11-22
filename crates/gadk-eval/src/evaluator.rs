@@ -22,9 +22,10 @@ use gadk_agent::Agent;
 use gadk_model::Llm;
 
 use crate::error::EvalError;
+use crate::metrics::{MeasuredReport, RunMetrics};
 use crate::report::{CaseRun, EvalReport, VariantReport};
 use crate::result::RunTranscript;
-use crate::run::run_case;
+use crate::run::run_case_measured;
 use crate::score::judge::Judge;
 use crate::score::score_scorers;
 use crate::spec::EvalSet;
@@ -109,6 +110,37 @@ impl Evaluator {
         F: Fn(&Variant) -> Result<Arc<dyn Agent>, E>,
         E: std::fmt::Display,
     {
+        Ok(self.run_inner(set, variants, build).await?.report)
+    }
+
+    /// [`Evaluator::run`], plus every run's duration and token counts per model.
+    ///
+    /// The report is the one [`Evaluator::run`] returns for the same inputs; `metrics[v][i]`
+    /// belongs to `report.variants[v].runs[i]`. The runs of a variant whose build failed get
+    /// [`RunMetrics::default`]. Fails as [`Evaluator::run`] does.
+    pub async fn run_measured<F, E>(
+        &self,
+        set: &EvalSet,
+        variants: &[Variant],
+        build: F,
+    ) -> Result<MeasuredReport, EvalError>
+    where
+        F: Fn(&Variant) -> Result<Arc<dyn Agent>, E>,
+        E: std::fmt::Display,
+    {
+        self.run_inner(set, variants, build).await
+    }
+
+    async fn run_inner<F, E>(
+        &self,
+        set: &EvalSet,
+        variants: &[Variant],
+        build: F,
+    ) -> Result<MeasuredReport, EvalError>
+    where
+        F: Fn(&Variant) -> Result<Arc<dyn Agent>, E>,
+        E: std::fmt::Display,
+    {
         check_variants(variants)?;
         let agents: Vec<Result<Arc<dyn Agent>, String>> = variants
             .iter()
@@ -124,15 +156,18 @@ impl Evaluator {
             }
         }
         let (agents, judge, timeout) = (&agents, &judge, self.run_timeout);
-        let mut done: Vec<((usize, usize, u32), CaseRun)> = futures::stream::iter(jobs)
+        let mut done: Vec<((usize, usize, u32), CaseRun, RunMetrics)> = futures::stream::iter(jobs)
             .map(|(vi, ci, run)| async move {
                 let case = &set.cases[ci];
-                let transcript = match &agents[vi] {
-                    Ok(agent) => run_case(agent.clone(), case, timeout).await,
-                    Err(e) => RunTranscript {
-                        turns: Vec::new(),
-                        error: Some(e.clone()),
-                    },
+                let (transcript, metrics) = match &agents[vi] {
+                    Ok(agent) => run_case_measured(agent.clone(), case, timeout).await,
+                    Err(e) => (
+                        RunTranscript {
+                            turns: Vec::new(),
+                            error: Some(e.clone()),
+                        },
+                        RunMetrics::default(),
+                    ),
                 };
                 let scores = score_scorers(judge, &case.expect, &transcript).await;
                 (
@@ -143,12 +178,13 @@ impl Evaluator {
                         transcript,
                         scores,
                     },
+                    metrics,
                 )
             })
             .buffer_unordered(self.concurrency)
             .collect()
             .await;
-        done.sort_by_key(|(key, _)| *key);
+        done.sort_by_key(|(key, _, _)| *key);
         let mut report = EvalReport {
             set: set.name.clone(),
             variants: variants
@@ -159,10 +195,12 @@ impl Evaluator {
                 })
                 .collect(),
         };
-        for ((vi, _, _), run) in done {
+        let mut metrics: Vec<Vec<RunMetrics>> = vec![Vec::new(); variants.len()];
+        for ((vi, _, _), run, m) in done {
             report.variants[vi].runs.push(run);
+            metrics[vi].push(m);
         }
-        Ok(report)
+        Ok(MeasuredReport::new(report, metrics))
     }
 }
 
