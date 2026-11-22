@@ -40,8 +40,6 @@ the public API.
 
 ## [0.5.2] - 2026-11-22
 
-## [0.5.2] - 2026-11-22
-
 ### Added
 
 - `gadk-eval`: `Variant::with_model` and `Variant::model` give a variant an optional model name
