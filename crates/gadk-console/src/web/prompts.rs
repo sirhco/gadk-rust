@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Prompt routes: `/prompts`, `/prompts/{name}` and the label writes.
+//! Prompt routes: `/prompts`, `/prompts/{name}` and the label and rollout writes.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -23,7 +23,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use chrono::{DateTime, Utc};
 use gadk_eval_monitor::MonitorError;
-use gadk_prompts::{Label, PromptSnapshot, StoreError};
+use gadk_prompts::{Label, PromptSnapshot, Rollout, RolloutSnapshot, StoreError};
 use http::StatusCode;
 use maud::{Markup, html};
 use serde::Deserialize;
@@ -48,6 +48,18 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/prompts/{name}", get(detail))
         .route("/prompts/{name}/labels", post(set_label))
         .route("/prompts/{name}/labels/{label}/delete", post(delete_label))
+        .route(
+            "/prompts/{name}/labels/{label}/rollout",
+            post(start_rollout),
+        )
+        .route(
+            "/prompts/{name}/labels/{label}/rollout/promote",
+            post(promote_rollout),
+        )
+        .route(
+            "/prompts/{name}/labels/{label}/rollout/delete",
+            post(abort_rollout),
+        )
 }
 
 fn no_store_404() -> Response {
@@ -120,16 +132,16 @@ async fn detail(
         .as_deref()
         .and_then(TimeRange::parse)
         .unwrap_or(TimeRange::Days7);
-    match store.load_all().await {
-        Ok(snap) => {
-            let metrics = if prompt_detail(&snap, &name).is_some() {
+    match store.load_all_with_rollouts().await {
+        Ok((snap, rollouts)) => {
+            let metrics = if prompt_detail(&snap, &rollouts, &name).is_some() {
                 Some(production_metrics(&state, &name, range).await)
             } else {
                 None
             };
             detail_page(
                 &state,
-                &snap,
+                (&snap, &rollouts),
                 &name,
                 show,
                 StatusCode::OK,
@@ -153,11 +165,11 @@ fn parse_show(q: &DetailQuery) -> Result<Show, Response> {
     }
 }
 
-/// Renders the detail page with `status`; an unknown prompt or version is a 404 page.
-/// `metrics`, when given, is the production-metrics section.
+/// Renders the detail page of the loaded prompts and rollouts with `status`; an unknown
+/// prompt or version is a 404 page. `metrics`, when given, is the production-metrics section.
 fn detail_page(
     state: &AppState,
-    snap: &PromptSnapshot,
+    (snap, rollouts): (&PromptSnapshot, &RolloutSnapshot),
     name: &str,
     show: Show,
     status: StatusCode,
@@ -165,7 +177,7 @@ fn detail_page(
     metrics: Option<&ProductionMetrics>,
 ) -> Response {
     let not_found = |what: String| error_page(StatusCode::NOT_FOUND, Nav::Prompts, &what, None);
-    let Some(d) = prompt_detail(snap, name) else {
+    let Some(d) = prompt_detail(snap, rollouts, name) else {
         return not_found(format!("prompt {name:?} not found"));
     };
     let (view, diff) = match show {
@@ -377,23 +389,23 @@ fn metric_rows(
         .collect()
 }
 
-/// After a failed label write: the detail page with the error banner and the status,
-/// or the plain error page when the prompt itself cannot be shown. An `Http` body in the
-/// banner is cut to an excerpt of at most 1,024 bytes.
+/// After a failed label or rollout write: the detail page with the error banner and the
+/// status, or the plain error page when the prompt itself cannot be shown. An `Http` body in
+/// the banner is cut to an excerpt of at most 1,024 bytes.
 async fn write_failed(state: &AppState, name: &str, e: &StoreError) -> Response {
     let Some(store) = &state.store else {
         return no_store_404();
     };
-    let Ok(snap) = store.load_all().await else {
+    let Ok((snap, rollouts)) = store.load_all_with_rollouts().await else {
         return store_error(e);
     };
-    if prompt_detail(&snap, name).is_none() {
+    if prompt_detail(&snap, &rollouts, name).is_none() {
         return store_error(e);
     }
     let error = banner(&store_text(e), None);
     detail_page(
         state,
-        &snap,
+        (&snap, &rollouts),
         name,
         Show::Version(None),
         store_status(e),
@@ -483,12 +495,121 @@ async fn delete_label(
     }
 }
 
+/// The redirect back to the prompt page after a write, or [`write_failed`].
+async fn write_result(state: &AppState, name: &str, result: Result<(), StoreError>) -> Response {
+    match result {
+        Ok(()) => written(name),
+        Err(e) => write_failed(state, name, &e).await,
+    }
+}
+
+/// Form field `key` as a number; anything else is `Invalid`.
+fn number<T: std::str::FromStr>(key: &str, raw: &str) -> Result<T, StoreError> {
+    raw.parse()
+        .map_err(|_| StoreError::Invalid(format!("{key} {raw:?}: not a number")))
+}
+
+/// The start-or-change rollout form; missing fields are empty strings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct RolloutForm {
+    version: String,
+    percent: String,
+    csrf: String,
+}
+
+/// `version` and `percent` as a [`Rollout`].
+fn rollout_args(form: &RolloutForm) -> Result<Rollout, StoreError> {
+    let version = number("version", &form.version)?;
+    let percent: u32 = number("percent", &form.percent)?;
+    let percent = u8::try_from(percent).map_err(|_| {
+        StoreError::Invalid(format!(
+            "rollout percent must be between 1 and 99, got {percent}"
+        ))
+    })?;
+    Rollout::new(version, percent)
+}
+
+async fn start_rollout(
+    State(state): State<AppState>,
+    Path((name, label)): Path<(String, String)>,
+    Form(form): Form<RolloutForm>,
+) -> Response {
+    if let Err(resp) = check_csrf(&state, &form.csrf) {
+        return resp;
+    }
+    let Some(store) = &state.store else {
+        return no_store_404();
+    };
+    let result = match Label::new(&label).and_then(|l| Ok((l, rollout_args(&form)?))) {
+        Ok((label, rollout)) => store.set_rollout(&name, &label, Some(rollout)).await,
+        Err(e) => Err(e),
+    };
+    write_result(&state, &name, result).await
+}
+
+/// The promote form: the rollout version and the label version the page showed.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct PromoteForm {
+    version: String,
+    expected: String,
+    csrf: String,
+}
+
+/// Moves the label to the rollout version if it still points at `expected`; the store
+/// removes the rollout with the move.
+async fn promote_rollout(
+    State(state): State<AppState>,
+    Path((name, label)): Path<(String, String)>,
+    Form(form): Form<PromoteForm>,
+) -> Response {
+    if let Err(resp) = check_csrf(&state, &form.csrf) {
+        return resp;
+    }
+    let Some(store) = &state.store else {
+        return no_store_404();
+    };
+    let args = Label::new(&label).and_then(|l| {
+        let version: u32 = number("version", &form.version)?;
+        let expected: u32 = number("expected", &form.expected)?;
+        Ok((l, version, expected))
+    });
+    let result = match args {
+        Ok((label, version, expected)) => {
+            store
+                .set_label(&name, &label, version, Some(Some(expected)))
+                .await
+        }
+        Err(e) => Err(e),
+    };
+    write_result(&state, &name, result).await
+}
+
+async fn abort_rollout(
+    State(state): State<AppState>,
+    Path((name, label)): Path<(String, String)>,
+    Form(form): Form<DeleteForm>,
+) -> Response {
+    if let Err(resp) = check_csrf(&state, &form.csrf) {
+        return resp;
+    }
+    let Some(store) = &state.store else {
+        return no_store_404();
+    };
+    let result = match Label::new(&label) {
+        Ok(label) => store.set_rollout(&name, &label, None).await,
+        Err(e) => Err(e),
+    };
+    write_result(&state, &name, result).await
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    use gadk_prompts::{FileStore, Label, NewVersion, PromptStore};
+    use gadk_prompts::{FileStore, Label, NewVersion, PromptStore, Rollout};
     use http::StatusCode;
     use http::header::LOCATION;
     use serde_json::json;
@@ -626,6 +747,23 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+        for (path, body) in [
+            (
+                "/prompts/greet/labels/production/rollout",
+                format!("version=2&percent=10&csrf={CSRF}"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/promote",
+                format!("version=2&expected=1&csrf={CSRF}"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/delete",
+                format!("csrf={CSRF}"),
+            ),
+        ] {
+            let (status, _, _) = post_form(no_store(), path, &body, Some(ORIGIN)).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        }
     }
 
     #[tokio::test]
@@ -907,7 +1045,7 @@ mod tests {
 
     #[tokio::test]
     async fn wrong_or_missing_csrf_is_403_and_changes_nothing() {
-        let (_dir, store) = seeded().await;
+        let (_dir, store) = seeded_with_rollout().await;
         let wrong = "b".repeat(64);
         let cases = [
             (
@@ -923,6 +1061,22 @@ mod tests {
                 format!("csrf={wrong}"),
             ),
             ("/prompts/greet/labels/staging/delete", String::new()),
+            (
+                "/prompts/greet/labels/staging/rollout",
+                format!("version=1&percent=10&csrf={wrong}"),
+            ),
+            (
+                "/prompts/greet/labels/staging/rollout",
+                "version=1&percent=10".to_owned(),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/promote",
+                format!("version=2&expected=1&csrf={wrong}"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/delete",
+                String::new(),
+            ),
         ];
         for (path, body) in cases {
             let (status, _, html) = post_form(st(&store), path, &body, Some(ORIGIN)).await;
@@ -932,6 +1086,8 @@ mod tests {
         let now = labels(&store, "greet").await;
         assert_eq!(now.len(), 2);
         assert_eq!((now["production"], now["staging"]), (1, 2));
+        assert_eq!(rollout(&store, "greet", "production").await, Some((2, 10)));
+        assert_eq!(rollout(&store, "greet", "staging").await, None);
     }
 
     #[tokio::test]
@@ -948,7 +1104,7 @@ mod tests {
 
     #[tokio::test]
     async fn every_post_form_carries_csrf_and_a_confirmation() {
-        let (_dir, store) = seeded().await;
+        let (_dir, store) = seeded_with_rollout().await;
         let (_, _, body) = get(st(&store), "/prompts/greet").await;
         let forms: Vec<&str> = body
             .split("<form ")
@@ -959,8 +1115,10 @@ mod tests {
             .iter()
             .filter(|f| f.starts_with(r#"method="post""#))
             .collect();
-        // production and staging each have a move and a delete form, plus the new-label form.
-        assert_eq!(posts.len(), 5, "{body}");
+        // production and staging each have a move and a delete form; production (with a
+        // rollout) has the percent, Promote and Abort forms, staging the Start rollout form;
+        // plus the new-label form.
+        assert_eq!(posts.len(), 9, "{body}");
         let hidden = format!(r#"<input type="hidden" name="csrf" value="{CSRF}">"#);
         for f in &posts {
             assert!(f.contains(&hidden), "{f}");
@@ -970,6 +1128,29 @@ mod tests {
             body.contains(r#"action="/prompts/greet/labels/staging/delete" data-confirm="Remove label staging?""#),
             "{body}"
         );
+        for (action, confirm) in [
+            (
+                "/prompts/greet/labels/production/rollout",
+                "Change the rollout of production?",
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/promote",
+                "Promote v2 to production?",
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/delete",
+                "Abort the rollout of production?",
+            ),
+            (
+                "/prompts/greet/labels/staging/rollout",
+                "Start a rollout on staging?",
+            ),
+        ] {
+            assert!(
+                body.contains(&format!(r#"action="{action}" data-confirm="{confirm}""#)),
+                "{action}: {body}"
+            );
+        }
         // The move form for production carries its current version as `expected`.
         assert!(
             body.contains(r#"<input type="hidden" name="label" value="production"><input type="hidden" name="expected" value="1">"#),
@@ -989,7 +1170,296 @@ mod tests {
         );
     }
 
-    /// Loads from a `FileStore`; every label write fails with a large `StoreError::Http`.
+    // ---- rollouts ----
+
+    /// `seeded()` plus a rollout of v2 to 10% of `greet`'s `production` (at v1).
+    async fn seeded_with_rollout() -> (tempfile::TempDir, Arc<FileStore>) {
+        let (dir, store) = seeded().await;
+        store
+            .set_rollout(
+                "greet",
+                &Label::production(),
+                Some(Rollout::new(2, 10).unwrap()),
+            )
+            .await
+            .unwrap();
+        (dir, store)
+    }
+
+    async fn rollout(store: &FileStore, name: &str, label: &str) -> Option<(u32, u8)> {
+        let rollouts = store.load_rollouts().await.unwrap();
+        rollouts
+            .get(name, &Label::new(label).unwrap())
+            .map(|r| (r.version, r.percent))
+    }
+
+    fn rollout_body(version: &str, percent: &str) -> String {
+        format!("version={version}&percent={percent}&csrf={CSRF}")
+    }
+
+    fn promote_body(version: &str, expected: &str) -> String {
+        format!("version={version}&expected={expected}&csrf={CSRF}")
+    }
+
+    #[tokio::test]
+    async fn start_and_change_a_rollout() {
+        let (_dir, store) = seeded().await;
+        let (status, headers, _) = post_form(
+            st(&store),
+            "/prompts/greet/labels/production/rollout",
+            &rollout_body("2", "10"),
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        assert_eq!(headers[LOCATION], "/prompts/greet");
+        assert_eq!(rollout(&store, "greet", "production").await, Some((2, 10)));
+
+        let (status, headers, _) = post_form(
+            st(&store),
+            "/prompts/greet/labels/production/rollout",
+            &rollout_body("2", "50"),
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        assert_eq!(headers[LOCATION], "/prompts/greet");
+        assert_eq!(rollout(&store, "greet", "production").await, Some((2, 50)));
+        // The label itself does not move.
+        assert_eq!(labels(&store, "greet").await["production"], 1);
+    }
+
+    #[tokio::test]
+    async fn rollout_page_shows_column_forms_and_chip() {
+        let (_dir, store) = seeded_with_rollout().await;
+        let (status, _, body) = get(st(&store), "/prompts/greet").await;
+        assert_eq!(status, StatusCode::OK);
+        // The Rollout column: production has one, staging none.
+        assert!(
+            body.contains(r#"<td class="num">v1</td><td>v2 at 10%</td>"#),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"<td class="num">v2</td><td>—</td>"#),
+            "{body}"
+        );
+        // The chip on the rollout version.
+        assert!(
+            body.contains(r#"<span class="chip">production 10%</span>"#),
+            "{body}"
+        );
+        // production: the percent, Promote and Abort forms.
+        assert!(
+            body.contains(&format!(
+                r#"<form method="post" action="/prompts/greet/labels/production/rollout" data-confirm="Change the rollout of production?" class="inline"><input type="hidden" name="csrf" value="{CSRF}"><input type="hidden" name="version" value="2"><input type="number" name="percent" value="10" min="1" max="99" required>"#
+            )),
+            "{body}"
+        );
+        assert!(
+            body.contains(&format!(
+                r#"<form method="post" action="/prompts/greet/labels/production/rollout/promote" data-confirm="Promote v2 to production?" class="inline"><input type="hidden" name="csrf" value="{CSRF}"><input type="hidden" name="version" value="2"><input type="hidden" name="expected" value="1">"#
+            )),
+            "{body}"
+        );
+        assert!(
+            body.contains(&format!(
+                r#"<form method="post" action="/prompts/greet/labels/production/rollout/delete" data-confirm="Abort the rollout of production?" class="inline"><input type="hidden" name="csrf" value="{CSRF}"><button type="submit">Abort</button></form>"#
+            )),
+            "{body}"
+        );
+        // staging: the Start rollout form.
+        assert!(
+            body.contains(&format!(
+                r#"<form method="post" action="/prompts/greet/labels/staging/rollout" data-confirm="Start a rollout on staging?" class="inline"><input type="hidden" name="csrf" value="{CSRF}"><select name="version">"#
+            )),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"<input type="number" name="percent" placeholder="percent" min="1" max="99" required>"#),
+            "{body}"
+        );
+        assert!(
+            !body.contains("/prompts/greet/labels/staging/rollout/promote"),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_rollout_input_is_400_and_unknown_targets_404() {
+        let (_dir, store) = seeded().await;
+        for (path, form) in [
+            (
+                "/prompts/greet/labels/production/rollout",
+                rollout_body("2", "0"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout",
+                rollout_body("2", "100"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout",
+                rollout_body("2", "300"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout",
+                rollout_body("2", "ten"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout",
+                rollout_body("two", "10"),
+            ),
+            // The label's own version.
+            (
+                "/prompts/greet/labels/production/rollout",
+                rollout_body("1", "10"),
+            ),
+            ("/prompts/greet/labels/Bad/rollout", rollout_body("2", "10")),
+            (
+                "/prompts/greet/labels/production/rollout/promote",
+                promote_body("two", "1"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/promote",
+                promote_body("2", ""),
+            ),
+            (
+                "/prompts/greet/labels/Bad/rollout/delete",
+                format!("csrf={CSRF}"),
+            ),
+        ] {
+            let (status, _, html) = post_form(st(&store), path, &form, Some(ORIGIN)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{path} {form}");
+            assert!(html.contains("<h1>greet</h1>"), "{html}");
+            assert!(
+                html.contains(r#"<div class="banner error"><p>invalid: "#),
+                "{path} {form}: {html}"
+            );
+        }
+        assert_eq!(rollout(&store, "greet", "production").await, None);
+        assert_eq!(labels(&store, "greet").await["production"], 1);
+
+        for (path, form, want) in [
+            (
+                "/prompts/greet/labels/production/rollout",
+                rollout_body("9", "10"),
+                "not found: greet@v9",
+            ),
+            (
+                "/prompts/greet/labels/canary/rollout",
+                rollout_body("2", "10"),
+                "not found: greet@canary",
+            ),
+            (
+                "/prompts/greet/labels/canary/rollout/delete",
+                format!("csrf={CSRF}"),
+                "not found: greet@canary",
+            ),
+        ] {
+            let (status, _, html) = post_form(st(&store), path, &form, Some(ORIGIN)).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+            assert!(html.contains("<h1>greet</h1>"), "{html}");
+            assert!(html.contains(want), "{path}: {html}");
+        }
+        let (status, _, html) = post_form(
+            st(&store),
+            "/prompts/nope/labels/production/rollout",
+            &rollout_body("2", "10"),
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(html.contains("not found: nope"), "{html}");
+    }
+
+    #[tokio::test]
+    async fn promote_moves_the_label_and_ends_the_rollout() {
+        let (_dir, store) = seeded_with_rollout().await;
+        let (status, headers, _) = post_form(
+            st(&store),
+            "/prompts/greet/labels/production/rollout/promote",
+            &promote_body("2", "1"),
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        assert_eq!(headers[LOCATION], "/prompts/greet");
+        assert_eq!(labels(&store, "greet").await["production"], 2);
+        assert_eq!(rollout(&store, "greet", "production").await, None);
+    }
+
+    #[tokio::test]
+    async fn promote_with_a_stale_expected_is_409_and_keeps_the_rollout() {
+        let (_dir, store) = seeded_with_rollout().await;
+        // `expected` says v2, but production is at v1.
+        let (status, _, body) = post_form(
+            st(&store),
+            "/prompts/greet/labels/production/rollout/promote",
+            &promote_body("2", "2"),
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(body.contains("<h1>greet</h1>"), "{body}");
+        assert!(
+            body.contains(
+                r#"<div class="banner error"><p>conflict: expected v2, found v1</p></div>"#
+            ),
+            "{body}"
+        );
+        assert_eq!(labels(&store, "greet").await["production"], 1);
+        assert_eq!(rollout(&store, "greet", "production").await, Some((2, 10)));
+    }
+
+    #[tokio::test]
+    async fn abort_removes_the_rollout() {
+        let (_dir, store) = seeded_with_rollout().await;
+        for _ in 0..2 {
+            // Aborting again is not an error: there is no rollout to remove.
+            let (status, headers, _) = post_form(
+                st(&store),
+                "/prompts/greet/labels/production/rollout/delete",
+                &format!("csrf={CSRF}"),
+                Some(ORIGIN),
+            )
+            .await;
+            assert_eq!(status, StatusCode::SEE_OTHER);
+            assert_eq!(headers[LOCATION], "/prompts/greet");
+            assert_eq!(rollout(&store, "greet", "production").await, None);
+        }
+        assert_eq!(labels(&store, "greet").await["production"], 1);
+    }
+
+    #[tokio::test]
+    async fn error_pages_keep_the_rollout_column() {
+        let (_dir, store) = seeded_with_rollout().await;
+        for (path, form, want) in [
+            (
+                "/prompts/greet/labels/staging/rollout",
+                rollout_body("1", "100"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "/prompts/greet/labels",
+                set_body("staging", "1", "1"),
+                StatusCode::CONFLICT,
+            ),
+        ] {
+            let (status, _, html) = post_form(st(&store), path, &form, Some(ORIGIN)).await;
+            assert_eq!(status, want, "{path}");
+            assert!(html.contains(r#"<div class="banner error">"#), "{html}");
+            assert!(
+                html.contains(r#"<td class="num">v1</td><td>v2 at 10%</td>"#),
+                "{path}: {html}"
+            );
+            assert!(
+                html.contains(r#"<span class="chip">production 10%</span>"#),
+                "{path}: {html}"
+            );
+        }
+    }
+
+    /// Loads from a `FileStore`; every label and rollout write fails with a large
+    /// `StoreError::Http`.
     struct HttpFailStore {
         inner: Arc<FileStore>,
         body: String,
@@ -1028,6 +1498,25 @@ mod tests {
                 body: self.body.clone(),
             })
         }
+        async fn load_all_with_rollouts(
+            &self,
+        ) -> Result<
+            (gadk_prompts::PromptSnapshot, gadk_prompts::RolloutSnapshot),
+            gadk_prompts::StoreError,
+        > {
+            self.inner.load_all_with_rollouts().await
+        }
+        async fn set_rollout(
+            &self,
+            _name: &str,
+            _label: &Label,
+            _rollout: Option<Rollout>,
+        ) -> Result<(), gadk_prompts::StoreError> {
+            Err(gadk_prompts::StoreError::Http {
+                status: 500,
+                body: self.body.clone(),
+            })
+        }
     }
 
     #[tokio::test]
@@ -1041,6 +1530,18 @@ mod tests {
             ("/prompts/greet/labels", set_body("canary", "1", "")),
             (
                 "/prompts/greet/labels/staging/delete",
+                format!("csrf={CSRF}"),
+            ),
+            (
+                "/prompts/greet/labels/staging/rollout",
+                rollout_body("1", "10"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/promote",
+                promote_body("2", "1"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/delete",
                 format!("csrf={CSRF}"),
             ),
         ] {
