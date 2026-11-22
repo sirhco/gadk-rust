@@ -139,6 +139,10 @@ name = "feedback_e2e"
 required-features = ["gemini", "agentanalytics", "prompts"]
 
 [[example]]
+name = "rollout_e2e"
+required-features = ["gemini", "agentanalytics", "prompts"]
+
+[[example]]
 name = "launcher"
 required-features = ["gemini", "launcher"]
 
