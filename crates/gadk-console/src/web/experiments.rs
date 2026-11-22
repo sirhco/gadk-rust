@@ -12,30 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Experiments routes: `/experiments`.
+//! Experiments routes: `/experiments` and `/experiments/{report}`.
 
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::routing::get;
-use gadk_eval_monitor::{ExperimentReport, MonitorError};
+use gadk_eval_monitor::{ExperimentReport, MonitorError, ReportStore};
 use http::StatusCode;
+use serde::Deserialize;
 
 use super::AppState;
 use super::evals::{LIST_LIMIT, NO_REPORTS};
 use super::pages::error::error_page;
-use super::pages::experiments;
 use super::pages::layout::{self, Nav};
+use super::pages::{experiment, experiments};
 use crate::experiments::ExperimentCache;
 
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/experiments", get(list))
+    Router::new()
+        .route("/experiments", get(list))
+        .route("/experiments/{report}", get(report))
+}
+
+/// `?cases=all` lists every case; anything else lists the disagreements only.
+#[derive(Debug, Default, Deserialize)]
+struct ReportQuery {
+    cases: Option<String>,
 }
 
 fn not_found(text: &str) -> Response {
     error_page(StatusCode::NOT_FOUND, Nav::Experiments, text, None)
+}
+
+fn bad_request(text: &str) -> Response {
+    error_page(StatusCode::BAD_REQUEST, Nav::Experiments, text, None)
 }
 
 fn bad_gateway(e: &MonitorError) -> Response {
@@ -72,6 +85,28 @@ async fn load(
     Ok(out)
 }
 
+async fn report(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(q): Query<ReportQuery>,
+) -> Response {
+    let Some(cache) = &state.experiments else {
+        return not_found(NO_REPORTS);
+    };
+    if !ReportStore::is_report_name(&name) {
+        return bad_request("invalid experiment name");
+    }
+    let all = q.cases.as_deref() == Some("all");
+    match cache.find(&name).await {
+        Ok(Some(x)) => layout::html(
+            StatusCode::OK,
+            experiment::render(&name, &x, all, state.prices.as_deref()),
+        ),
+        Ok(None) => not_found("experiment not found"),
+        Err(e) => bad_gateway(&e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -83,6 +118,7 @@ mod tests {
 
     use super::super::evals::{LIST_LIMIT, NO_REPORTS};
     use crate::evals::CACHE_CAP;
+    use crate::prices::PriceTable;
     use crate::web::AppState;
     use crate::web::guard::CSP;
     use crate::web::testutil::{
@@ -200,5 +236,125 @@ mod tests {
             body.contains(r#"<a class="active" href="/experiments">Experiments</a>"#),
             "{body}"
         );
+    }
+
+    #[tokio::test]
+    async fn without_a_report_store_the_experiment_pages_are_404() {
+        for path in [
+            "/experiments/a-20270115T080000Z.json",
+            "/experiments/a-20270115T080000Z.json?cases=all",
+            "/experiments/x",
+        ] {
+            let (status, headers, body) = get(state(Arc::new(FakeSource::new()), None), path).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+            assert_eq!(headers[CONTENT_SECURITY_POLICY], CSP);
+            assert!(body.contains(NO_REPORTS), "{path}: {body}");
+            assert!(
+                body.contains(r#"<a class="active" href="/experiments">Experiments</a>"#),
+                "{body}"
+            );
+        }
+    }
+
+    /// `v1` passes `c1` and `c2`; `v2` passes `c1` and fails `c2`.
+    fn two() -> ExperimentReport {
+        experiment(
+            "exp",
+            1_800_000_000,
+            &[
+                ("v1", &[("c1", &[Outcome::Pass]), ("c2", &[Outcome::Pass])]),
+                ("v2", &[("c1", &[Outcome::Pass]), ("c2", &[Outcome::Fail])]),
+            ],
+        )
+    }
+
+    #[tokio::test]
+    async fn the_experiment_page_lists_disagreements_then_every_case() {
+        let (_dir, st, names) = with(&[two()]).await;
+        assert_eq!(names, ["exp-20270115T080000Z.json"]);
+        let (status, headers, body) =
+            get(st.clone(), "/experiments/exp-20270115T080000Z.json").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers[CONTENT_SECURITY_POLICY], CSP);
+        assert!(body.contains("<th>v1 (baseline)</th><th>v2</th>"), "{body}");
+        assert!(
+            body.contains("<td class=\"num\">\u{2212}50.0 pp</td>"),
+            "{body}"
+        );
+        assert!(body.contains(r#"<td class="mono">c2</td>"#), "{body}");
+        assert!(!body.contains(r#"<td class="mono">c1</td>"#), "{body}");
+
+        for query in ["?cases=all", "?cases=all&x=1"] {
+            let path = format!("/experiments/exp-20270115T080000Z.json{query}");
+            let (status, _, body) = get(st.clone(), &path).await;
+            assert_eq!(status, StatusCode::OK, "{path}");
+            assert!(
+                body.contains(r#"<td class="mono">c1</td>"#),
+                "{path}: {body}"
+            );
+            assert!(
+                body.contains(r#"<td class="mono">c2</td>"#),
+                "{path}: {body}"
+            );
+        }
+        let (_, _, body) = get(st, "/experiments/exp-20270115T080000Z.json?cases=other").await;
+        assert!(!body.contains(r#"<td class="mono">c1</td>"#), "{body}");
+    }
+
+    #[tokio::test]
+    async fn the_experiment_page_prices_runs_with_the_price_file() {
+        let (_dir, mut st, names) = with(&[two()]).await;
+        let path = format!("/experiments/{}", names[0]);
+        let (_, _, body) = get(st.clone(), &path).await;
+        assert!(
+            body.contains(r#"<tr><th>Cost</th><td class="num">—</td><td class="num">—</td></tr>"#),
+            "{body}"
+        );
+        st.prices = Some(Arc::new(
+            PriceTable::from_yaml(
+                "- model: gemini-3.8-flash\n  input: 0.30\n  output: 2.50\n  cached_input: 0.075\n",
+            )
+            .unwrap(),
+        ));
+        let (_, _, body) = get(st, &path).await;
+        assert!(
+            body.contains(r#"<tr><th>Cost</th><td class="num">$0.002260</td><td class="num">$0.002260</td></tr>"#),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_names_are_400_and_unknown_experiments_404() {
+        let (_dir, st, _) = with(&[two()]).await;
+        for path in [
+            "/experiments/x",
+            "/experiments/exp.json",
+            "/experiments/%2E%2E%2Fetc",
+        ] {
+            let (status, headers, body) = get(st.clone(), path).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+            assert_eq!(headers[CONTENT_SECURITY_POLICY], CSP);
+            assert!(body.contains("invalid experiment name"), "{path}: {body}");
+        }
+        let (status, _, body) = get(st, "/experiments/exp-20270115T090000Z.json").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(body.contains("experiment not found"), "{body}");
+        assert!(
+            body.contains(r#"<a class="active" href="/experiments">Experiments</a>"#),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_experiment_fails_its_page_and_the_list_with_502() {
+        let (dir, st, _) = with(&[]).await;
+        let sub = dir.path().join("experiments");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a-20270115T080000Z.json"), "{").unwrap();
+        for path in ["/experiments/a-20270115T080000Z.json", "/experiments"] {
+            let (status, _, body) = get(st.clone(), path).await;
+            assert_eq!(status, StatusCode::BAD_GATEWAY, "{path}");
+            assert!(body.contains("report store: "), "{path}: {body}");
+        }
     }
 }

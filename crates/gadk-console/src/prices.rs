@@ -22,6 +22,7 @@ use std::collections::BTreeMap;
 use std::ops::AddAssign;
 use std::path::Path;
 
+use gadk_eval::{RunMetrics, TokenCounts};
 use serde::Deserialize;
 
 use crate::ConsoleError;
@@ -231,6 +232,26 @@ impl AddAssign for Usage {
 /// The cost of `usage` on `model`; `None` without a price file or a price for the model.
 pub(crate) fn cost_of(prices: Option<&PriceTable>, model: &str, usage: &Usage) -> Option<f64> {
     prices?.price_for(model).map(|p| usage.cost(p))
+}
+
+/// The usage of an eval run's token counts for one model: the four counts copied as they are
+/// (eval runs count output without reasoning already).
+pub(crate) fn usage_of(t: &TokenCounts) -> Usage {
+    Usage {
+        input: t.input,
+        cached: t.cached,
+        output: t.output,
+        reasoning: t.reasoning,
+    }
+}
+
+/// The cost of eval runs: every model of every run in `runs`, priced with [`cost_of`].
+pub(crate) fn runs_cost(prices: Option<&PriceTable>, runs: &[RunMetrics]) -> CostSum {
+    let mut sum = CostSum::default();
+    for (model, t) in runs.iter().flat_map(|r| r.models.iter()) {
+        sum.add(cost_of(prices, model, &usage_of(t)));
+    }
+    sum
 }
 
 /// A cost as `$0.001190` (six decimals), or `—` when there is none.
@@ -485,6 +506,43 @@ mod tests {
         ] {
             assert_eq!(thousands(n), want);
         }
+    }
+
+    #[test]
+    fn usage_of_copies_the_counts() {
+        assert_eq!(
+            usage_of(&TokenCounts::new(1200, 200, 300, 50)),
+            Usage {
+                input: 1200,
+                cached: 200,
+                output: 300,
+                reasoning: 50
+            }
+        );
+    }
+
+    #[test]
+    fn runs_cost_prices_every_model_of_every_run() {
+        let t = PriceTable::from_yaml(PRICES).unwrap();
+        let counts = TokenCounts::new(1200, 200, 300, 50);
+        let run = |models: &[&str]| {
+            RunMetrics::new(
+                10,
+                models.iter().map(|m| ((*m).to_owned(), counts)).collect(),
+            )
+        };
+        // $0.001190 per priced model call (see `cost_of_and_texts`).
+        let all = runs_cost(
+            Some(&t),
+            &[run(&["gemini-3.8-flash"]), run(&["gemini-3.8-flash"])],
+        );
+        assert_eq!(all.text(), "$0.002380");
+        let partial = runs_cost(Some(&t), &[run(&["gemini-3.8-flash", "claude"])]);
+        assert_eq!(partial.text(), "$0.001190*");
+        assert!(partial.partial());
+        assert_eq!(runs_cost(Some(&t), &[run(&["claude"])]).text(), "—");
+        assert_eq!(runs_cost(None, &[run(&["gemini-3.8-flash"])]).text(), "—");
+        assert_eq!(runs_cost(Some(&t), &[]).text(), "—");
     }
 
     #[test]

@@ -230,3 +230,9 @@ p.filter { color: var(--muted); }
 /* Experiments */
 
 .variant-rate { display: inline-block; margin-right: 12px; white-space: nowrap; }
+table.exp-compare th { color: var(--muted); }
+table.exp-compare thead th { color: inherit; font-weight: 600; text-align: right; }
+.exp-verdict summary { cursor: pointer; }
+.exp-verdict[open] { min-width: 280px; }
+.exp-verdict .eval-run-body { padding: 4px 0 0; border-top: none; }
+ul.rationales { margin: 0 0 8px; padding-left: 18px; font-size: 12px; }
