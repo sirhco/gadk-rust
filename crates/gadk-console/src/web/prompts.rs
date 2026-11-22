@@ -1124,11 +1124,21 @@ mod tests {
             assert!(f.contains(&hidden), "{f}");
             assert!(f.contains("data-confirm=\""), "{f}");
         }
-        assert!(
-            body.contains(r#"action="/prompts/greet/labels/staging/delete" data-confirm="Remove label staging?""#),
-            "{body}"
-        );
         for (action, confirm) in [
+            // Moving or removing a label ends its rollout; only production has one.
+            (
+                "/prompts/greet/labels",
+                "Move label production? This ends its rollout.",
+            ),
+            (
+                "/prompts/greet/labels/production/delete",
+                "Remove label production? This ends its rollout.",
+            ),
+            ("/prompts/greet/labels", "Move label staging?"),
+            (
+                "/prompts/greet/labels/staging/delete",
+                "Remove label staging?",
+            ),
             (
                 "/prompts/greet/labels/production/rollout",
                 "Change the rollout of production?",
@@ -1272,6 +1282,11 @@ mod tests {
             body.contains(&format!(
                 r#"<form method="post" action="/prompts/greet/labels/staging/rollout" data-confirm="Start a rollout on staging?" class="inline"><input type="hidden" name="csrf" value="{CSRF}"><select name="version">"#
             )),
+            "{body}"
+        );
+        // staging is at the latest version (v2), so the Start rollout form preselects v1.
+        assert!(
+            body.contains(r#"<select name="version"><option value="2">v2</option><option value="1" selected>v1</option></select> to "#),
             "{body}"
         );
         assert!(

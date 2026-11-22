@@ -431,6 +431,16 @@ pub(crate) fn render(
                     @for (label, current) in &d.labels {
                         @let rollout = d.rollouts.iter().find(|(l, _, _)| l == label);
                         @let rollout_action = format!("{labels_action}/{label}/rollout");
+                        // Moving or removing the label ends its rollout; the confirmation says so.
+                        @let ends = if rollout.is_some() { " This ends its rollout." } else { "" };
+                        // Start a rollout of the newest version the label is not already at.
+                        @let start = d
+                            .versions
+                            .iter()
+                            .map(|v| v.version)
+                            .filter(|v| v != current)
+                            .max()
+                            .unwrap_or(d.latest);
                         tr {
                             td { span class="chip" { (label) } }
                             td class="num" { "v" (current) }
@@ -443,7 +453,7 @@ pub(crate) fn render(
                             }
                             td {
                                 form method="post" action=(labels_action)
-                                    data-confirm={ "Move label " (label) "?" } class="inline" {
+                                    data-confirm={ "Move label " (label) "?" (ends) } class="inline" {
                                     (csrf_field(csrf))
                                     input type="hidden" name="label" value=(label);
                                     input type="hidden" name="expected" value=(current);
@@ -454,7 +464,7 @@ pub(crate) fn render(
                             }
                             td {
                                 form method="post" action={ (labels_action) "/" (label) "/delete" }
-                                    data-confirm={ "Remove label " (label) "?" } class="inline" {
+                                    data-confirm={ "Remove label " (label) "?" (ends) } class="inline" {
                                     (csrf_field(csrf))
                                     button type="submit" { "Remove" }
                                 }
@@ -492,7 +502,7 @@ pub(crate) fn render(
                                         data-confirm={ "Start a rollout on " (label) "?" }
                                         class="inline" {
                                         (csrf_field(csrf))
-                                        select name="version" { (version_options(d, d.latest)) }
+                                        select name="version" { (version_options(d, start)) }
                                         " to "
                                         input type="number" name="percent" placeholder="percent"
                                             min="1" max="99" required;

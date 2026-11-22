@@ -481,3 +481,60 @@ async fn load_all_never_reuses_the_cache_without_a_create_time() {
         "new"
     );
 }
+
+#[tokio::test]
+async fn a_prompt_document_that_fails_to_decode_rolls_back_the_transaction() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), None)).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    {
+        let mut st = fake.state.lock().unwrap();
+        let (fields, _) = st
+            .docs
+            .iter_mut()
+            .find(|(name, _)| name.ends_with("/prompts/p"))
+            .unwrap()
+            .1;
+        fields["latest_version"] = serde_json::json!({"stringValue": "not a number"});
+    }
+    drain(&fake);
+    assert!(matches!(
+        s.create_version(nv("p", "b")).await,
+        Err(StoreError::Decode(_))
+    ));
+    let ops: Vec<String> = drain(&fake).into_iter().map(|(op, _)| op).collect();
+    assert!(ops.iter().any(|op| op == "rollback"), "{ops:?}");
+    assert!(ops.iter().all(|op| op != "commit"), "{ops:?}");
+    assert!(matches!(
+        s.set_label("p", &Label::production(), 1, None).await,
+        Err(StoreError::Decode(_))
+    ));
+    let ops: Vec<String> = drain(&fake).into_iter().map(|(op, _)| op).collect();
+    assert!(ops.iter().any(|op| op == "rollback"), "{ops:?}");
+    assert!(ops.iter().all(|op| op != "commit"), "{ops:?}");
+}
+
+#[tokio::test]
+async fn a_latest_version_document_that_fails_to_decode_rolls_back_the_transaction() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), None)).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    {
+        let mut st = fake.state.lock().unwrap();
+        let (fields, _) = st
+            .docs
+            .iter_mut()
+            .find(|(name, _)| name.ends_with("/prompts/p/versions/1"))
+            .unwrap()
+            .1;
+        fields["version"] = serde_json::json!({"stringValue": "not a number"});
+    }
+    drain(&fake);
+    assert!(matches!(
+        s.create_version(nv("p", "b")).await,
+        Err(StoreError::Decode(_))
+    ));
+    let ops: Vec<String> = drain(&fake).into_iter().map(|(op, _)| op).collect();
+    assert!(ops.iter().any(|op| op == "rollback"), "{ops:?}");
+    assert!(ops.iter().all(|op| op != "commit"), "{ops:?}");
+}

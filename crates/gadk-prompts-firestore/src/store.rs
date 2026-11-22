@@ -372,7 +372,13 @@ impl PromptStore for FirestoreStore {
             let tx = self.begin().await.map_err(|e| self.map(&new.name, e))?;
             let cur = match self.get(&pdoc, &tx).await {
                 Ok(Some(f)) => {
-                    let (latest, labels, rollouts) = read_prompt(&f)?;
+                    let (latest, labels, rollouts) = match read_prompt(&f) {
+                        Ok(state) => state,
+                        Err(e) => {
+                            self.rollback(&tx).await;
+                            return Err(e);
+                        }
+                    };
                     Current {
                         latest,
                         labels,
@@ -393,7 +399,13 @@ impl PromptStore for FirestoreStore {
                 let vdoc = format!("{pdoc}/versions/{}", cur.latest);
                 match self.get(&vdoc, &tx).await {
                     Ok(Some(f)) => {
-                        let last = read_version(&f)?;
+                        let last = match read_version(&f) {
+                            Ok(last) => last,
+                            Err(e) => {
+                                self.rollback(&tx).await;
+                                return Err(e);
+                            }
+                        };
                         if last.meta.hash == hash {
                             self.rollback(&tx).await;
                             return Ok((last, false));
@@ -601,7 +613,13 @@ impl FirestoreStore {
                     return Err(self.map(name, e));
                 }
             };
-            let (latest, labels, rollouts) = read_prompt(&fields)?;
+            let (latest, labels, rollouts) = match read_prompt(&fields) {
+                Ok(state) => state,
+                Err(e) => {
+                    self.rollback(&tx).await;
+                    return Err(e);
+                }
+            };
             let mut cur = Current {
                 latest,
                 labels,

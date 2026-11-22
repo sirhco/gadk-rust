@@ -80,6 +80,9 @@ store.set_rollout("support-triage", &Label::production(), None).await?;
 - `FileStore` keeps rollouts in the prompt's file (a `rollouts` key, written only when there is
   one) and `gadk-prompts-firestore` in the prompt document. A store that does not support
   rollouts answers `set_rollout` with `Invalid("rollouts are not supported by this store")`.
+- A stored rollout outside the bounds (e.g. a hand-edited percent of 0 or 100) makes that prompt
+  fail to load with a `Decode` error, and the store's writes to that prompt fail too. To fix it,
+  correct or remove the `rollouts` entry by hand in the prompt's YAML file or Firestore document.
 - Mixed versions: a writer built with gadk 0.5.2 or older (CLI, console or service) rewrites a
   prompt's file or document without its rollouts, so changing that prompt with it silently
   ends them (all sessions go back to the label's version). Upgrade every writer before starting

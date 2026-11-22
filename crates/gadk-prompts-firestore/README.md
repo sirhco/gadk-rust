@@ -55,7 +55,7 @@ emulator does not answer transactional single-document GETs):
 FIRESTORE_EMULATOR_HOST=localhost:8080 cargo test -p gadk-prompts-firestore --test live live_emulator_contract -- --ignored
 ```
 
-`live_project_contract` runs the same suite against a real project with Application Default
+`live_project_contract` runs the same suites against a real project with Application Default
 Credentials (it refuses to run while `FIRESTORE_EMULATOR_HOST` is set;
 `GADK_FIRESTORE_DATABASE` defaults to `(default)`):
 
