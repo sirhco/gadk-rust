@@ -108,10 +108,6 @@ impl RolloutSnapshot {
 /// The bucket (0 to 99) of session `key` for label `label` of prompt `name`: the first 8 bytes
 /// of SHA-256(`name` 0x00 `label` 0x00 `key`) as a big-endian `u64`, modulo 100. The rollout
 /// version is served when the bucket is below the rollout's percent.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by rollout resolution in the registry")
-)]
 pub(crate) fn bucket(name: &str, label: &Label, key: &str) -> u8 {
     let mut h = Sha256::new();
     h.update(name.as_bytes());
