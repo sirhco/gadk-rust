@@ -1,10 +1,13 @@
 # gadk-prompts-firestore
 
 A `gadk-prompts` store in Google Cloud Firestore, over the Firestore REST API (v1) with
-Application Default Credentials. `{root}/prompts/{id}` holds a prompt's name, labels and latest
-version, and `{root}/prompts/{id}/versions/{n}` holds each version; every write is one Firestore
-transaction. Re-exported by the `gadk` façade as `gadk::prompts_firestore` (feature
-`prompts-firestore`, not in `default`; it enables `prompts`).
+Application Default Credentials. `{root}/prompts/{id}` holds a prompt's name, labels, latest
+version and, when any label has a rollout, `rollouts` (label → `{version, percent}`; the field is
+absent when there are none), and `{root}/prompts/{id}/versions/{n}` holds each version; every
+write is one Firestore transaction. Each write of a prompt document rewrites all its fields, so
+upgrade every writer (CLI, console, services) before starting rollouts: an older writer drops the
+`rollouts` field when it changes that prompt. Re-exported by the `gadk` façade as
+`gadk::prompts_firestore` (feature `prompts-firestore`, not in `default`; it enables `prompts`).
 
 ```rust,ignore
 use std::sync::Arc;
@@ -31,21 +34,22 @@ let registry = PromptRegistry::builder(Arc::new(store)).load().await?;
 
 ## Read cost
 
-Each registry refresh calls `load_all`, which re-reads the whole prompt set: about one
-document read per prompt plus one per version of every prompt, on every poll. With an empty
-`root`, the versions query (a collection-group query over `versions`) scans every `versions`
-collection in the database, including ones that are not prompts, and drops them by path only
-after the reads are billed. Use a dedicated non-empty `root` (e.g. `envs/prod`) and set
-`PromptRegistryBuilder::refresh_interval` to suit the size of the prompt set: for P prompts
-with V versions in total, a poll every interval costs roughly P + V reads.
+Each registry refresh calls `load_all_with_rollouts` (rollouts come from the prompt documents, so
+they add no reads), which re-reads the whole prompt set: about one document read per prompt plus
+one per version of every prompt, on every poll. With an empty `root`, the versions query (a
+collection-group query over `versions`) scans every `versions` collection in the database,
+including ones that are not prompts, and drops them by path only after the reads are billed. Use
+a dedicated non-empty `root` (e.g. `envs/prod`) and set `PromptRegistryBuilder::refresh_interval`
+to suit the size of the prompt set: for P prompts with V versions in total, a poll every interval
+costs roughly P + V reads.
 
 ## Testing
 
 The store's REST semantics (paths, transactions, retries, error mapping) are verified against an
 in-process fake Firestore server. `tests/live.rs` (ignored by default) runs the `PromptStore`
-contract suite against the Firestore emulator when `FIRESTORE_EMULATOR_HOST` is set. The store
-reads inside transactions with `batchGet` (the emulator does not answer transactional
-single-document GETs):
+contract suites (`testsuite::run` and `testsuite::run_rollouts`) against the Firestore emulator
+when `FIRESTORE_EMULATOR_HOST` is set. The store reads inside transactions with `batchGet` (the
+emulator does not answer transactional single-document GETs):
 
 ```sh
 FIRESTORE_EMULATOR_HOST=localhost:8080 cargo test -p gadk-prompts-firestore --test live live_emulator_contract -- --ignored

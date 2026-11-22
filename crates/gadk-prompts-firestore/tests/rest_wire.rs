@@ -63,6 +63,19 @@ async fn store_contract_firestore() {
     .await;
 }
 
+#[tokio::test]
+async fn store_contract_firestore_rollouts() {
+    let fakes = std::sync::Mutex::new(Vec::new());
+    gadk_prompts::testsuite::run_rollouts(|| {
+        let fake = fake_firestore::start();
+        let store: Arc<dyn PromptStore> =
+            Arc::new(FirestoreStore::new(config(fake.server.url(), Some("envs/test"))).unwrap());
+        fakes.lock().unwrap().push(fake);
+        async move { store }
+    })
+    .await;
+}
+
 #[test]
 fn encodes_doc_ids() {
     assert_eq!(encode_doc_id("a/b"), "a%2Fb");

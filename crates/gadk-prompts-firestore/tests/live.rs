@@ -21,7 +21,7 @@ use std::sync::Arc;
 use gadk_prompts::PromptStore;
 use gadk_prompts_firestore::{FirestoreConfig, FirestoreStore};
 
-/// Runs the contract suite against the Firestore emulator:
+/// Runs the contract suites (`run`, then `run_rollouts`) against the Firestore emulator:
 /// `FIRESTORE_EMULATOR_HOST=localhost:8080 cargo test -p gadk-prompts-firestore --test live live_emulator_contract -- --ignored`.
 /// Each scenario uses its own root so runs do not collide.
 #[tokio::test]
@@ -33,7 +33,7 @@ async fn live_emulator_contract() {
     );
     let n = std::sync::atomic::AtomicUsize::new(0);
     let run = std::process::id();
-    gadk_prompts::testsuite::run(|| {
+    let factory = || {
         let i = n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let store: Arc<dyn PromptStore> = Arc::new(
             FirestoreStore::new(FirestoreConfig {
@@ -44,13 +44,15 @@ async fn live_emulator_contract() {
             .unwrap(),
         );
         async move { store }
-    })
-    .await;
+    };
+    gadk_prompts::testsuite::run(&factory).await;
+    gadk_prompts::testsuite::run_rollouts(&factory).await;
 }
 
-/// Runs the contract suite against a real Firestore project with Application Default
-/// Credentials: `GADK_FIRESTORE_PROJECT=my-project cargo test -p gadk-prompts-firestore --test live
-/// live_project_contract -- --ignored` (`GADK_FIRESTORE_DATABASE` defaults to `(default)`).
+/// Runs the contract suites (`run`, then `run_rollouts`) against a real Firestore project with
+/// Application Default Credentials: `GADK_FIRESTORE_PROJECT=my-project cargo test -p
+/// gadk-prompts-firestore --test live live_project_contract -- --ignored`
+/// (`GADK_FIRESTORE_DATABASE` defaults to `(default)`).
 /// Each scenario writes under its own root, printed as `root: …`; delete the `runs/gadk-test-*`
 /// documents afterwards.
 #[tokio::test]
@@ -66,7 +68,7 @@ async fn live_project_contract() {
         std::env::var("GADK_FIRESTORE_DATABASE").unwrap_or_else(|_| "(default)".to_owned());
     let n = std::sync::atomic::AtomicUsize::new(0);
     let pid = std::process::id();
-    gadk_prompts::testsuite::run(|| {
+    let factory = || {
         let i = n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let root = format!("runs/gadk-test-{pid}-{i}");
         eprintln!("root: {root}");
@@ -80,6 +82,7 @@ async fn live_project_contract() {
             .unwrap(),
         );
         async move { store }
-    })
-    .await;
+    };
+    gadk_prompts::testsuite::run(&factory).await;
+    gadk_prompts::testsuite::run_rollouts(&factory).await;
 }

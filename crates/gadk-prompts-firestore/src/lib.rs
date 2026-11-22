@@ -15,11 +15,16 @@
 //! A [`PromptStore`](gadk_prompts::PromptStore) in Google Cloud Firestore (REST v1, Application
 //! Default Credentials).
 //!
-//! Layout: `{root}/prompts/{id}` holds `name`, `labels` and `latest_version`;
-//! `{root}/prompts/{id}/versions/{n}` holds each version. `id` is the prompt name with `%` and
-//! `/` percent-encoded. Every write is one Firestore transaction.
+//! Layout: `{root}/prompts/{id}` holds `name`, `labels`, `latest_version` and, when any label has
+//! a rollout, `rollouts` (a map of label → map `{version, percent}`, both integers; absent when
+//! there are none); `{root}/prompts/{id}/versions/{n}` holds each version. `id` is the prompt name
+//! with `%` and `/` percent-encoded. Every write is one Firestore transaction, and every write of
+//! a prompt document rewrites all of its fields: a writer from before rollouts existed drops the
+//! `rollouts` field when it changes the prompt.
 //!
-//! Read cost: [`load_all`](gadk_prompts::PromptStore::load_all), which every registry refresh
+//! Read cost: [`load_all`](gadk_prompts::PromptStore::load_all) (and
+//! [`load_all_with_rollouts`](gadk_prompts::PromptStore::load_all_with_rollouts), which reads the
+//! rollouts from the same prompt documents at no extra cost), which every registry refresh
 //! runs, reads the prompt documents (one read per prompt) and then only the version documents
 //! it has not read before, each new version once, by document name. The store keeps the versions
 //! it has read in memory (they are immutable), so a poll of an unchanged store costs one read

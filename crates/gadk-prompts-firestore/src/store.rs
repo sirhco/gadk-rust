@@ -20,8 +20,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use gadk_model::gcp_auth::adc_credentials;
 use gadk_prompts::{
-    Label, NewVersion, PromptEntry, PromptSnapshot, PromptStore, PromptVersion, StoreError,
-    VersionMeta, content_hash, validate_name,
+    Label, NewVersion, PromptEntry, PromptSnapshot, PromptStore, PromptVersion, Rollout,
+    RolloutSnapshot, StoreError, VersionMeta, content_hash, validate_name,
 };
 use http::Method;
 use serde_json::{Value, json};
@@ -75,10 +75,11 @@ impl std::fmt::Debug for FirestoreStore {
     }
 }
 
-/// State read inside a transaction.
+/// State read inside a transaction. Every write of the prompt document writes all three back.
 struct Current {
     latest: u32,
     labels: BTreeMap<Label, u32>,
+    rollouts: BTreeMap<Label, Rollout>,
 }
 
 impl FirestoreStore {
@@ -215,6 +216,18 @@ fn url_doc(doc: &str) -> String {
 #[async_trait]
 impl PromptStore for FirestoreStore {
     async fn load_all(&self) -> Result<PromptSnapshot, StoreError> {
+        self.load_all_with_rollouts().await.map(|(snap, _)| snap)
+    }
+
+    async fn load_rollouts(&self) -> Result<RolloutSnapshot, StoreError> {
+        self.load_all_with_rollouts()
+            .await
+            .map(|(_, rollouts)| rollouts)
+    }
+
+    async fn load_all_with_rollouts(
+        &self,
+    ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
         let parent = if self.root == self.db {
             self.db.clone()
         } else {
@@ -245,9 +258,13 @@ impl PromptStore for FirestoreStore {
             .await?;
         // (prompt doc name, create time, prompt name, latest version, labels)
         let mut listed = Vec::new();
+        let mut rollouts = RolloutSnapshot::default();
         for (doc, created, fields) in docs(prompts) {
             let name = crate::value::get_str(&fields, "name")?;
-            let (latest, labels) = read_prompt(&fields)?;
+            let (latest, labels, prompt_rollouts) = read_prompt(&fields)?;
+            for (label, rollout) in prompt_rollouts {
+                rollouts.insert(name.clone(), label, rollout);
+            }
             listed.push((doc, created, name, latest, labels));
         }
         // Which version documents the cache lacks. The lock is released before any request.
@@ -336,7 +353,7 @@ impl PromptStore for FirestoreStore {
                 .unwrap_or_default();
             snap.prompts.insert(name, PromptEntry { versions, labels });
         }
-        Ok(snap)
+        Ok((snap, rollouts))
     }
 
     async fn create_version(&self, new: NewVersion) -> Result<PromptVersion, StoreError> {
@@ -355,12 +372,17 @@ impl PromptStore for FirestoreStore {
             let tx = self.begin().await.map_err(|e| self.map(&new.name, e))?;
             let cur = match self.get(&pdoc, &tx).await {
                 Ok(Some(f)) => {
-                    let (latest, labels) = read_prompt(&f)?;
-                    Current { latest, labels }
+                    let (latest, labels, rollouts) = read_prompt(&f)?;
+                    Current {
+                        latest,
+                        labels,
+                        rollouts,
+                    }
                 }
                 Ok(None) => Current {
                     latest: 0,
                     labels: BTreeMap::new(),
+                    rollouts: BTreeMap::new(),
                 },
                 Err(e) => {
                     self.rollback(&tx).await;
@@ -399,7 +421,7 @@ impl PromptStore for FirestoreStore {
                 },
             };
             let writes = vec![
-                json!({"update": {"name": pdoc, "fields": prompt_fields(&new.name, v.version, &cur.labels)}}),
+                json!({"update": {"name": pdoc, "fields": prompt_fields(&new.name, v.version, &cur.labels, &cur.rollouts)}}),
                 json!({"update": {"name": format!("{pdoc}/versions/{}", v.version), "fields": version_fields(&v)},
                        "currentDocument": {"exists": false}}),
             ];
@@ -427,6 +449,44 @@ impl PromptStore for FirestoreStore {
 
     async fn remove_label(&self, name: &str, label: &Label) -> Result<(), StoreError> {
         self.label_op(name, label, None).await
+    }
+
+    async fn set_rollout(
+        &self,
+        name: &str,
+        label: &Label,
+        rollout: Option<Rollout>,
+    ) -> Result<(), StoreError> {
+        if let Some(r) = rollout {
+            Rollout::new(r.version, r.percent)?;
+        }
+        self.update_prompt(name, |cur| {
+            let Some(&at) = cur.labels.get(label) else {
+                return Err(StoreError::NotFound {
+                    name: name.into(),
+                    selector: label.to_string(),
+                });
+            };
+            let Some(r) = rollout else {
+                // Nothing to write when the label has no rollout.
+                return Ok(cur.rollouts.remove(label).is_some());
+            };
+            if r.version == 0 || r.version > cur.latest {
+                return Err(StoreError::NotFound {
+                    name: name.into(),
+                    selector: format!("v{}", r.version),
+                });
+            }
+            if r.version == at {
+                return Err(StoreError::Invalid(format!(
+                    "rollout version v{} is already the version of label {label}",
+                    r.version
+                )));
+            }
+            cur.rollouts.insert(label.clone(), r);
+            Ok(true)
+        })
+        .await
     }
 }
 
@@ -472,12 +532,56 @@ impl FirestoreStore {
             .await;
     }
 
-    /// `Some((version, expected))` sets the label, `None` removes it.
+    /// `Some((version, expected))` sets the label, `None` removes it; either way the label's
+    /// rollout is removed.
     async fn label_op(
         &self,
         name: &str,
         label: &Label,
         set: Option<(u32, Option<Option<u32>>)>,
+    ) -> Result<(), StoreError> {
+        self.update_prompt(name, |cur| {
+            let actual = cur.labels.get(label).copied();
+            match set {
+                Some((version, _)) if version == 0 || version > cur.latest => {
+                    return Err(StoreError::NotFound {
+                        name: name.into(),
+                        selector: format!("v{version}"),
+                    });
+                }
+                Some((_, Some(exp))) if exp != actual => {
+                    return Err(StoreError::Conflict {
+                        expected: exp,
+                        actual,
+                    });
+                }
+                None if actual.is_none() => {
+                    return Err(StoreError::NotFound {
+                        name: name.into(),
+                        selector: label.to_string(),
+                    });
+                }
+                Some((version, _)) => {
+                    cur.labels.insert(label.clone(), version);
+                }
+                None => {
+                    cur.labels.remove(label);
+                }
+            }
+            cur.rollouts.remove(label);
+            Ok(true)
+        })
+        .await
+    }
+
+    /// Reads prompt `name` in a transaction, applies `f` and writes the prompt document back
+    /// (its labels and rollouts as `f` left them) when `f` returns `Ok(true)`. `Ok(false)` and
+    /// `Err` roll the transaction back. A missing prompt is `NotFound` (empty selector); an
+    /// aborted commit is retried up to [`ATTEMPTS`] times, then `Conflict`.
+    async fn update_prompt(
+        &self,
+        name: &str,
+        mut f: impl FnMut(&mut Current) -> Result<bool, StoreError> + Send,
     ) -> Result<(), StoreError> {
         validate_name(name)?;
         let pdoc = self.prompt_doc(&encode_doc_id(name));
@@ -497,40 +601,25 @@ impl FirestoreStore {
                     return Err(self.map(name, e));
                 }
             };
-            let (latest, mut labels) = read_prompt(&fields)?;
-            let actual = labels.get(label).copied();
-            let fail = match set {
-                Some((version, _)) if version == 0 || version > latest => {
-                    Some(StoreError::NotFound {
-                        name: name.into(),
-                        selector: format!("v{version}"),
-                    })
-                }
-                Some((_, Some(exp))) if exp != actual => Some(StoreError::Conflict {
-                    expected: exp,
-                    actual,
-                }),
-                None if actual.is_none() => Some(StoreError::NotFound {
-                    name: name.into(),
-                    selector: label.to_string(),
-                }),
-                _ => None,
+            let (latest, labels, rollouts) = read_prompt(&fields)?;
+            let mut cur = Current {
+                latest,
+                labels,
+                rollouts,
             };
-            if let Some(e) = fail {
-                self.rollback(&tx).await;
-                return Err(e);
-            }
-            match set {
-                Some((version, _)) => {
-                    labels.insert(label.clone(), version);
+            match f(&mut cur) {
+                Ok(true) => {}
+                Ok(false) => {
+                    self.rollback(&tx).await;
+                    return Ok(());
                 }
-                None => {
-                    labels.remove(label);
+                Err(e) => {
+                    self.rollback(&tx).await;
+                    return Err(e);
                 }
             }
-            let writes = vec![
-                json!({"update": {"name": pdoc, "fields": prompt_fields(name, latest, &labels)}}),
-            ];
+            let fields = prompt_fields(name, cur.latest, &cur.labels, &cur.rollouts);
+            let writes = vec![json!({"update": {"name": pdoc, "fields": fields}})];
             match self.commit(&tx, writes).await {
                 Ok(()) => return Ok(()),
                 Err(CallError::Aborted) if attempt < ATTEMPTS => continue,
