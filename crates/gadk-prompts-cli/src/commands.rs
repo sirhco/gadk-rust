@@ -18,7 +18,7 @@ use std::io::{Read, Write};
 use std::process::Command as Process;
 
 use clap::ArgMatches;
-use gadk_prompts::{Label, NewVersion, PromptStore, PromptVersion, Selector, StoreError};
+use gadk_prompts::{Label, NewVersion, PromptStore, PromptVersion, Rollout, Selector, StoreError};
 
 fn io(e: std::io::Error) -> StoreError {
     StoreError::Io(e.to_string())
@@ -123,13 +123,53 @@ pub(crate) async fn dispatch(
             store.remove_label(name, &label).await?;
             writeln!(out, "{name} {label} removed").map_err(io)
         }
+        Some(("rollout", m)) => {
+            let name = req(m, "name");
+            let label = Label::new(req(m, "label"))?;
+            if m.get_flag("promote") {
+                let (snap, rollouts) = store.load_all_with_rollouts().await?;
+                let to = rollouts
+                    .get(name, &label)
+                    .ok_or_else(|| StoreError::NotFound {
+                        name: name.into(),
+                        selector: format!("{label} rollout"),
+                    })?
+                    .version;
+                let from = snap.resolve(name, &Selector::Label(label.clone()))?.version;
+                store.set_label(name, &label, to, Some(Some(from))).await?;
+                return writeln!(out, "{name} {label} -> v{to}").map_err(io);
+            }
+            if m.get_flag("abort") {
+                store.set_rollout(name, &label, None).await?;
+                return writeln!(out, "{name} {label} rollout aborted").map_err(io);
+            }
+            let version = parse_version(req(m, "version"))?;
+            let percent = req(m, "percent");
+            let percent = percent
+                .parse()
+                .map_err(|_| StoreError::Invalid(format!("bad percent {percent:?}")))?;
+            let rollout = Rollout::new(version, percent)?;
+            store.set_rollout(name, &label, Some(rollout)).await?;
+            let at = store
+                .load_all()
+                .await?
+                .resolve(name, &Selector::Label(label.clone()))?
+                .version;
+            writeln!(out, "{name} {label} -> v{at} (v{version} at {percent}%)").map_err(io)
+        }
         Some(("list", m)) => {
             let prefix = arg(m, "prefix").map_or("", String::as_str);
-            let snap = store.load_all().await?;
+            let (snap, rollouts) = store.load_all_with_rollouts().await?;
             for (name, e) in snap.prompts.iter().filter(|(n, _)| n.starts_with(prefix)) {
                 let latest = e.versions.keys().next_back().copied().unwrap_or(0);
-                let labels: Vec<String> =
-                    e.labels.iter().map(|(l, v)| format!("{l}=v{v}")).collect();
+                let labels: Vec<String> = e
+                    .labels
+                    .iter()
+                    .map(|(l, v)| match rollouts.get(name, l) {
+                        Some(r) => format!("{l}=v{v}(v{}@{}%)", r.version, r.percent),
+                        None => format!("{l}=v{v}"),
+                    })
+                    .collect();
                 writeln!(out, "{name}\tv{latest}\t{}", labels.join(",")).map_err(io)?;
             }
             Ok(())
@@ -140,13 +180,21 @@ pub(crate) async fn dispatch(
                 (_, Some(v)) => Selector::Version(parse_version(v)?),
                 _ => Selector::Latest,
             };
-            let v = store.load_all().await?.resolve(req(m, "name"), &sel)?;
+            let name = req(m, "name");
+            let (snap, rollouts) = store.load_all_with_rollouts().await?;
+            let v = snap.resolve(name, &sel)?;
             if m.get_flag("json") {
                 let s =
                     serde_json::to_string(&*v).map_err(|e| StoreError::Decode(e.to_string()))?;
                 return writeln!(out, "{s}").map_err(io);
             }
-            show(out, &v)
+            show(out, &v)?;
+            if let Selector::Label(l) = &sel
+                && let Some(r) = rollouts.get(name, l)
+            {
+                writeln!(out, "rollout: v{} at {}%", r.version, r.percent).map_err(io)?;
+            }
+            Ok(())
         }
         Some(("diff", m)) => {
             let snap = store.load_all().await?;
