@@ -553,6 +553,19 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-eval-monitor -> gadk-agent is missing" in e for e in errs), errs)
 
+    def test_eval_monitor_may_dev_depend_on_engine_only(self):
+        # experiments: the experiment example builds an LlmAgent, so the engine is a
+        # dev-dependency; a normal engine edge stays rejected.
+        self.assertEqual(cwd.ENGINE_DEV_DEPENDENTS, ("gadk-eval-monitor",))
+        self.assertNotIn("gadk-eval-monitor", cwd.ENGINE_DEPENDENTS)
+        dev = (self.repo / "crates/gadk-eval-monitor/Cargo.toml").read_text().split("[dev-dependencies]\n", 1)[1]
+        self.assertIn("gadk-engine = { workspace = true }\n", dev)
+        self.assertIn("gadk-prompts = { workspace = true }\n", dev)
+        self.assertEqual(cwd.check(self.repo), [])
+        self.edit("gadk-eval-monitor", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-eval-monitor -> gadk-engine is not allowed" in e for e in errs), errs)
+
     def test_eval_monitor_missing_eval_edge_is_rejected(self):
         self.edit("gadk-eval-monitor", "gadk-eval = { workspace = true }\n", "")
         errs = cwd.check(self.repo)

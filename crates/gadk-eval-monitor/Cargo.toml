@@ -40,6 +40,8 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# The experiment example builds an LlmAgent whose instruction is a prompt version.
+gadk-engine = { workspace = true }
 gadk-genai = { workspace = true }
 gadk-httprr = { workspace = true }
 gadk-model = { workspace = true, features = ["test-util"] }
