@@ -350,3 +350,78 @@ async fn concurrency_bounds_runs_in_flight() {
     assert!(report.all_passed(), "{}", report.summary());
     assert_eq!(slow.max.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test]
+async fn run_measured_returns_runs_report_and_one_metric_per_run() {
+    let set = EvalSet::from_yaml(TWO_CASES).unwrap();
+    let variants = [Variant::new("old"), Variant::new("new")];
+    let build = |v: &Variant| {
+        let text = if v.name() == "new" {
+            "Within 30 days."
+        } else {
+            "Sure!"
+        };
+        Ok::<_, String>(agent(always(text, 4)))
+    };
+    let evaluator = Evaluator::new(judge(&[])).runs_per_case(2);
+    let report = evaluator.run(&set, &variants, build).await.unwrap();
+    let measured = evaluator
+        .run_measured(&set, &variants, build)
+        .await
+        .unwrap();
+    assert_eq!(measured.report, report);
+    let shape: Vec<usize> = measured.metrics.iter().map(Vec::len).collect();
+    assert_eq!(shape, [4, 4]);
+    for (v, m) in report.variants.iter().zip(&measured.metrics) {
+        assert_eq!(v.runs.len(), m.len());
+    }
+    // The scripted model reports no usage metadata.
+    assert!(
+        measured
+            .metrics
+            .iter()
+            .flatten()
+            .all(|m| m.models.is_empty())
+    );
+}
+
+#[tokio::test]
+async fn run_measured_gives_default_metrics_to_a_failed_build() {
+    let set = EvalSet::from_yaml(TWO_CASES).unwrap();
+    let measured = Evaluator::new(judge(&[]))
+        .run_measured(&set, &[Variant::new("broken"), Variant::new("ok")], |v| {
+            if v.name() == "broken" {
+                Err("no such prompt version".to_owned())
+            } else {
+                Ok(agent(always("Within 30 days.", 2)))
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        measured.metrics[0],
+        [
+            gadk_eval::RunMetrics::default(),
+            gadk_eval::RunMetrics::default()
+        ]
+    );
+    assert_eq!(measured.metrics[1].len(), 2);
+    assert_eq!(
+        measured.report.variants[0].runs[0]
+            .transcript
+            .error
+            .as_deref(),
+        Some("building variant broken: no such prompt version")
+    );
+}
+
+#[tokio::test]
+async fn run_measured_rejects_invalid_variants_before_build() {
+    let set = EvalSet::from_yaml(TWO_CASES).unwrap();
+    let r = Evaluator::new(judge(&[]))
+        .run_measured(&set, &[], |_| -> Result<Arc<dyn Agent>, String> {
+            panic!("build must not be called")
+        })
+        .await;
+    assert!(matches!(r, Err(EvalError::Variant(_))));
+}
