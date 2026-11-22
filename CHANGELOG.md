@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-21
+
 ### Added
 
 - `gadk-eval`: `Evaluator::run_measured` returns a `MeasuredReport`, the `EvalReport` of `run`
@@ -603,7 +605,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/sirhco/gadk-rust/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sirhco/gadk-rust/compare/v0.4.11...v0.5.0
 [0.4.11]: https://github.com/sirhco/gadk-rust/compare/v0.4.10...v0.4.11
 [0.4.10]: https://github.com/sirhco/gadk-rust/compare/v0.4.9...v0.4.10
