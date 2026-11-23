@@ -107,6 +107,32 @@ pub enum Unit {
     Millis,
 }
 
+impl Unit {
+    /// A value in this unit: `1.20%` (a rate times 100), `4.10`, `$0.000123` or `1234 ms`, or
+    /// `—` when `v` is `None`.
+    pub fn format_value(self, v: Option<f64>) -> String {
+        let Some(v) = v else {
+            return "—".to_owned();
+        };
+        match self {
+            Unit::Rate => format!("{:.2}%", v * 100.0),
+            Unit::Number => format!("{v:.2}"),
+            Unit::Usd => format!("${v:.6}"),
+            Unit::Millis => format!("{v:.0} ms"),
+        }
+    }
+
+    /// A harm in this unit: signed percentage points for a rate (`+0.20pt`), a signed percent
+    /// otherwise (`+12.0%`), or `—` when `h` is `None`.
+    pub fn format_harm(self, h: Option<f64>) -> String {
+        match (self, h) {
+            (_, None) => "—".to_owned(),
+            (Unit::Rate, Some(h)) => format!("{:+.2}pt", h * 100.0),
+            (_, Some(h)) => format!("{:+.1}%", h * 100.0),
+        }
+    }
+}
+
 /// One side's value of a check and the sample size behind it.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -204,7 +230,7 @@ impl GuardReport {
                     c.name.clone(),
                     side(c.unit, &c.baseline),
                     side(c.unit, &c.rollout),
-                    harm(c.unit, c.harm),
+                    c.unit.format_harm(c.harm),
                     status,
                 ]
             })
@@ -231,7 +257,15 @@ impl GuardReport {
         if let Some(note) = &self.note {
             let _ = writeln!(out, "note: {note}");
         }
-        let action = match (self.action, self.applied) {
+        let _ = writeln!(out, "action: {}", self.action_text());
+        out
+    }
+
+    /// The action as printed, by whether it was applied: `would ramp to 25%` / `ramped to 25%`,
+    /// `would promote v4` / `promoted v4` (the rollout version), `would abort` / `aborted`, or
+    /// `none`.
+    pub fn action_text(&self) -> String {
+        match (self.action, self.applied) {
             (Action::Ramp(q), false) => format!("would ramp to {q}%"),
             (Action::Ramp(q), true) => format!("ramped to {q}%"),
             (Action::Promote, false) => format!("would promote v{}", self.rollout),
@@ -239,9 +273,7 @@ impl GuardReport {
             (Action::Abort, false) => "would abort".to_owned(),
             (Action::Abort, true) => "aborted".to_owned(),
             (Action::None, _) => "none".to_owned(),
-        };
-        let _ = writeln!(out, "action: {action}");
-        out
+        }
     }
 
     /// The process exit code for this report: 0 for `advance`, 1 for `abort`, 3 for `wait`.
@@ -287,29 +319,7 @@ pub(crate) fn duration_text(d: TimeDelta) -> String {
 
 /// One side's cell: the value and `(n=<n>)`.
 fn side(unit: Unit, v: &SideValue) -> String {
-    format!("{} (n={})", value(unit, v.value), v.n)
-}
-
-/// A value in its unit, or `—` when missing.
-fn value(unit: Unit, v: Option<f64>) -> String {
-    let Some(v) = v else {
-        return "—".to_owned();
-    };
-    match unit {
-        Unit::Rate => format!("{:.2}%", v * 100.0),
-        Unit::Number => format!("{v:.2}"),
-        Unit::Usd => format!("${v:.6}"),
-        Unit::Millis => format!("{v:.0} ms"),
-    }
-}
-
-/// The harm: percentage points for rates, a signed percent otherwise, or `—` when missing.
-fn harm(unit: Unit, h: Option<f64>) -> String {
-    match (unit, h) {
-        (_, None) => "—".to_owned(),
-        (Unit::Rate, Some(h)) => format!("{:+.2}pt", h * 100.0),
-        (_, Some(h)) => format!("{:+.1}%", h * 100.0),
-    }
+    format!("{} (n={})", unit.format_value(v.value), v.n)
 }
 
 #[cfg(test)]
@@ -570,6 +580,48 @@ action: would abort
             GuardReport::from_json("{}"),
             Err(MonitorError::Io(e)) if e.kind() == std::io::ErrorKind::InvalidData
         ));
+    }
+
+    #[test]
+    fn values_print_in_their_unit() {
+        assert_eq!(Unit::Rate.format_value(Some(0.012)), "1.20%");
+        assert_eq!(Unit::Number.format_value(Some(4.1)), "4.10");
+        assert_eq!(Unit::Usd.format_value(Some(0.000123)), "$0.000123");
+        assert_eq!(Unit::Millis.format_value(Some(1234.4)), "1234 ms");
+        for unit in [Unit::Rate, Unit::Number, Unit::Usd, Unit::Millis] {
+            assert_eq!(unit.format_value(None), "—");
+        }
+    }
+
+    #[test]
+    fn harms_print_as_points_for_rates_and_percent_otherwise() {
+        assert_eq!(Unit::Rate.format_harm(Some(0.002)), "+0.20pt");
+        assert_eq!(Unit::Rate.format_harm(Some(-0.015)), "-1.50pt");
+        assert_eq!(Unit::Number.format_harm(Some(0.12195)), "+12.2%");
+        assert_eq!(Unit::Usd.format_harm(Some(0.5)), "+50.0%");
+        assert_eq!(Unit::Millis.format_harm(Some(-0.1089)), "-10.9%");
+        for unit in [Unit::Rate, Unit::Number, Unit::Usd, Unit::Millis] {
+            assert_eq!(unit.format_harm(None), "—");
+        }
+    }
+
+    #[test]
+    fn action_texts() {
+        let mut r = report();
+        for (action, applied, text) in [
+            (Action::Ramp(25), false, "would ramp to 25%"),
+            (Action::Ramp(25), true, "ramped to 25%"),
+            (Action::Promote, false, "would promote v4"),
+            (Action::Promote, true, "promoted v4"),
+            (Action::Abort, false, "would abort"),
+            (Action::Abort, true, "aborted"),
+            (Action::None, false, "none"),
+            (Action::None, true, "none"),
+        ] {
+            r.action = action;
+            r.applied = applied;
+            assert_eq!(r.action_text(), text);
+        }
     }
 
     #[test]

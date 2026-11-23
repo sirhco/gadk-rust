@@ -26,8 +26,9 @@ use gadk_eval::{
     TokenCounts, TurnRecord, Variant, VariantReport,
 };
 use gadk_eval_monitor::{
-    ExperimentReport, ExportContext, ExportSource, MonitorError, MonitorReport, MonitoredRun,
-    ProductionRun, ReportStore, ScoreFilter, TraceInvocation, TranscriptQuery, Window,
+    Action, ExperimentReport, ExportContext, ExportSource, GuardReport, MonitorError,
+    MonitorReport, MonitoredRun, ProductionRun, ReportStore, ScoreFilter, TraceInvocation,
+    TranscriptQuery, Window,
 };
 use gadk_prompts::PromptStore;
 use http::header::{CONTENT_TYPE, HOST, ORIGIN};
@@ -37,6 +38,7 @@ use tower::ServiceExt;
 use super::{AppState, router};
 use crate::evals::ReportCache;
 use crate::experiments::ExperimentCache;
+use crate::guards::GuardCache;
 use crate::traces::{SourceError, TraceDetail, TraceId, TracePage, TraceQuery, TraceSource};
 
 /// The port every test state claims to be bound to.
@@ -171,6 +173,7 @@ pub(crate) fn state_with_reports(
         store,
         reports,
         experiments: None,
+        guards: None,
         csrf: Arc::from(CSRF),
         port: PORT,
         now: fixed_now,
@@ -185,6 +188,14 @@ pub(crate) fn state_with_reports(
 pub(crate) fn state_with_experiments(experiments: Arc<ExperimentCache>) -> AppState {
     AppState {
         experiments: Some(experiments),
+        ..state(Arc::new(FakeSource::new()), None)
+    }
+}
+
+/// [`state`] with a guard-report cache (and no monitor-report or experiment cache).
+pub(crate) fn state_with_guards(guards: Arc<GuardCache>) -> AppState {
+    AppState {
+        guards: Some(guards),
         ..state(Arc::new(FakeSource::new()), None)
     }
 }
@@ -341,6 +352,84 @@ pub(crate) async fn experiment_cache(
     }
     let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
     (dir, Arc::new(ExperimentCache::new(store, cap)), names)
+}
+
+/// A guard report of spec `spec` generated at `at(secs)` over the hour before it, from source
+/// `bigquery:p.d.t`, for label `production` of `prompt` with baseline v1 and rollout v2 at
+/// `percent`%, and `action` (`applied` or not). The verdict follows the action: `advance` for a
+/// ramp or a promote, `abort` for an abort, `wait` otherwise. Two checks:
+/// - `error_rate` (rate): baseline 0.00% (n=5), rollout 100.00% (n=6), harm +100.00pt, interval
+///   [+50.00pt, +100.00pt], `worse` with reason `rollout errors`;
+/// - `latency_p95` (ms): baseline 1200 ms (n=5), rollout — (n=0), no harm, no interval,
+///   `insufficient` with reason `too few calls`.
+///
+/// No note. `GuardReport` is `#[non_exhaustive]`, so it is built from its JSON.
+pub(crate) fn guard(
+    spec: &str,
+    secs: i64,
+    prompt: &str,
+    percent: u8,
+    action: Action,
+    applied: bool,
+) -> GuardReport {
+    let verdict = match action {
+        Action::Ramp(_) | Action::Promote => "advance",
+        Action::Abort => "abort",
+        _ => "wait",
+    };
+    let json = serde_json::json!({
+        "spec": spec,
+        "generated_at": at(secs),
+        "window": { "from": at(secs - 3_600), "to": at(secs) },
+        "source": "bigquery:p.d.t",
+        "prompt": prompt,
+        "label": "production",
+        "baseline": 1,
+        "rollout": 2,
+        "percent": percent,
+        "checks": [
+            {
+                "name": "error_rate",
+                "unit": "rate",
+                "baseline": { "value": 0.0, "n": 5 },
+                "rollout": { "value": 1.0, "n": 6 },
+                "harm": 1.0,
+                "interval": [0.5, 1.0],
+                "status": "worse",
+                "reason": "rollout errors"
+            },
+            {
+                "name": "latency_p95",
+                "unit": "millis",
+                "baseline": { "value": 1200.0, "n": 5 },
+                "rollout": { "value": null, "n": 0 },
+                "harm": null,
+                "interval": null,
+                "status": "insufficient",
+                "reason": "too few calls"
+            }
+        ],
+        "verdict": verdict,
+        "action": action,
+        "applied": applied
+    });
+    GuardReport::from_json(&json.to_string()).unwrap()
+}
+
+/// A temp-dir report store holding `guards` (stored in order with `ReportStore::put_guard`)
+/// behind a guard cache of `cap` entries; returns the dir guard, the cache and the stored names.
+pub(crate) async fn guard_cache(
+    guards: &[GuardReport],
+    cap: usize,
+) -> (tempfile::TempDir, Arc<GuardCache>, Vec<String>) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+    let mut names = Vec::new();
+    for g in guards {
+        names.push(store.put_guard(g).await.unwrap());
+    }
+    let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+    (dir, Arc::new(GuardCache::new(store, cap)), names)
 }
 
 /// The `Host` value the guard accepts for `PORT`.

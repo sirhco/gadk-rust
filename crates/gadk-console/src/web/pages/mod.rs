@@ -20,6 +20,8 @@ pub(crate) mod eval_report;
 pub(crate) mod evals;
 pub(crate) mod experiment;
 pub(crate) mod experiments;
+pub(crate) mod guard;
+pub(crate) mod guards;
 pub(crate) mod layout;
 pub(crate) mod prompt;
 pub(crate) mod prompts;
