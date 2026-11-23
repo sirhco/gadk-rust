@@ -8,7 +8,10 @@ monitor spec, writes a JSON report to a local directory or `gs://`, and fails be
 threshold, so it runs from CI or a scheduler.
 
 It also runs experiments: one eval set against several variants of an agent, stored next to the
-monitor reports and compared in `gadk-console` ([Experiments](#experiments)).
+It also runs experiments: one eval set against several variants of an agent, stored next to the
+monitor reports and compared in `gadk-console` ([Experiments](#experiments)), and guards prompt
+rollouts: it compares a rollout's two prompt versions on production signals and ramps, promotes
+or aborts the rollout ([Guards](#guards)).
 
 The command-line tool is the `gadk-eval` binary of this crate (the `gadk-eval` crate is the
 library it builds on):
@@ -22,6 +25,7 @@ gadk-eval report gs://my-bucket/monitors support-bot-prod-20261117T080000Z.json
 gadk-eval export --source bigquery://my-proj.agent_analytics.agent_events \
   --out evals/regressions.yaml --since 1d --score 'thumbs=true' --rubric "Answers correctly."
 gadk-eval experiment experiments/answer-style.yaml --out gs://my-bucket/monitors
+gadk-eval guard guards/support.yaml --prices prices.yaml --apply --out gs://my-bucket/monitors
 ```
 
 ## Monitor spec
@@ -187,6 +191,7 @@ Limits:
 | `gadk-eval report <url> [<name>] [--limit N]` | Lists the newest stored reports (name, spec, time, runs, pass rate, runs with errors; default 20), or prints one report's summary. |
 | `gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [options]` | Writes production runs as eval-set cases to a new file, or `--append`s them; see [Exporting runs as eval cases](#exporting-runs-as-eval-cases). |
 | `gadk-eval experiment <spec.yaml> [--out <url>]` | Runs an experiment from an experiment spec (one Gemini agent on Vertex AI per variant), stores it under `experiments/` of `<url>` when `--out` is given, then prints its summary and, with `--out`, `stored report <name>`; see [Experiment spec](#experiment-spec). |
+| `gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]` | Compares both sides of a prompt rollout, prints the report and, with `--out`, stores it under `guards/` of `<url>` and prints `stored report <name>`; with `--apply` it ramps, promotes or aborts the rollout. Exits 0 (advance), 1 (abort), 3 (wait) or 2 (error); see [Guards](#guards). |
 
 `<url>` is a directory, `file://<dir>` or `gs://<bucket>[/<prefix>]`; other schemes (such as
 `s3://`) are rejected. Reports are named
@@ -412,6 +417,209 @@ carry their model). A custom `cli::Backends` implements `model(project, location
 supply the agents' models; the default refuses with `models are not supported by these
 backends`.
 
+## Guards
+
+A guard watches a prompt rollout (see the [gadk-prompts Rollouts
+section](../gadk-prompts/README.md#rollouts)): it compares the label's version (the baseline, B)
+with the rollout version (R) on production signals in the BigQuery agent-analytics table — error
+rate, feedback scores, eval scorers, cost per call and p95 latency — and decides whether to
+advance the rollout (the next ramp step, or promote R), abort it, or wait for more data. Run on a
+schedule with `--apply`, it turns a manual canary into a guarded, ramped one.
+
+```sh
+# Dry run: print what it would do, write nothing.
+gadk-eval guard guards/support.yaml --prices prices.yaml
+# Carry the decision out in the prompt store and keep the report.
+gadk-eval guard guards/support.yaml --prices prices.yaml --apply --out gs://my-bucket/monitors
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--apply` | off | Write the decision to the prompt store: ramp, promote or abort. Without it nothing is written and the report says what would be done. |
+| `--prices <file>` | none | Price file for `cost_per_call` (the format of `gadk-console --prices`; see the [console's Usage and cost](../gadk-console/README.md#usage-and-cost)). Without it the cost check is `unknown`. |
+| `--out <url>` | none | Store the report under `guards/` of `<url>` as `<name>-<YYYYMMDDTHHMMSSZ>[-<n>].json` and print `stored report <name>`. Monitor and experiment listings ignore `guards/`. |
+| `--max-bytes <n>` | 1073741824 | `maximumBytesBilled` of every BigQuery query the guard sends (at least 1). |
+
+The example spec [`examples/guard.yaml`](examples/guard.yaml) uses every check kind.
+
+### Guard spec
+
+```yaml
+name: support-answer-guard        # [A-Za-z0-9_-]{1,64}; names the reports
+source:                           # BigQuery only
+  bigquery: { project: my-proj, dataset: agent_analytics, table: agent_events }
+store: firestore://my-proj        # the prompt store holding the rollout: file://<dir> or
+                                  #   firestore://<project>[/<database>[/<root>]]
+prompt: support/answer            # the prompt name
+label: production                 # the label whose rollout is guarded
+window: 24h                       # <n>m | <n>h | <n>d, at most 30d: calls in [now - window, now)
+min_calls: 100                    # >= 2, default 100: fewer calls on either side is `insufficient`
+ramp: [10, 25, 50]                # optional: percents 1-99, strictly increasing
+checks:                           # at least one; only `feedback` may repeat (with another
+                                  #   name or source)
+  - error_rate: { max_increase: 0.01 }          # absolute, 0-1
+  - feedback:
+      name: thumbs_up             # the score name
+      source: app                 # app | console | any (default any)
+      max_decrease: 0.05          # absolute for bool scores, relative for number scores, 0-1
+      min_count: 30               # >= 2, default 30: fewer scores on either side is `insufficient`
+  - cost_per_call: { max_increase: 0.2 }        # relative, >= 0
+  - latency_p95: { max_increase: 0.25 }         # relative, >= 0
+  - eval:
+      scorers:                    # gadk-eval scorer syntax, as in a monitor spec; no reference
+                                  #   or equals
+        - llm_judge: { rubric: "Polite and accurate", min_score: 4 }
+      max_decrease: 0.05          # absolute pass-rate drop, 0-1
+      limit: 100                  # 10-500, default 100: runs scored per version
+judge:                            # required if and only if an eval scorer is llm_judge
+  model: gemini-3.8-flash         # Gemini on Vertex AI
+  project: my-proj                # default: the source project
+  location: us                    # default us (the US multi-region)
+  timeout: 120s                   # <n>s | <n>m, default 120s
+```
+
+Each check is a one-key mapping. A spec error prints as `monitor spec: guard spec: <detail>`,
+the detail naming the key.
+
+What each check measures, per version:
+
+- `error_rate`: the guard's calls are the `LLM_REQUEST` rows whose `attributes.prompt` has the
+  spec's prompt and label and version B or R, logged in the window. A call failed when an
+  `LLM_ERROR` row has its `trace_id` and `span_id`. Error rate = failed calls ÷ calls.
+- `feedback`: the latest score per invocation, name and source (as the console counts them)
+  for the check's `name`, joined to the calls by `invocation_id`. `source: any` counts the
+  latest score of each source, so one invocation can count twice. Bool scores compare the share
+  of `true`; number scores compare means, and higher is better. Category scores, or a data type
+  that differs between the sides, make the check `unknown`.
+- `cost_per_call`: the token counts of the calls' `LLM_RESPONSE` rows, per model, priced with
+  `--prices`, divided by the calls. A model without a price makes the check `unknown`, naming
+  the model.
+- `latency_p95`: the approximate 95th percentile of the `LLM_RESPONSE` rows'
+  `latency_ms.total_ms`.
+- `eval`: up to `limit` invocations per version (newest first), rebuilt as `monitor` rebuilds
+  them and scored with the check's scorers. A run with a scorer error is left out of the pass
+  rate and counted in the reason.
+
+### Decision rule
+
+Each check gets a status:
+
+- `insufficient` when either side has fewer than `min_calls` calls; also, for `feedback`, fewer
+  than `min_count` scores, and for `eval`, fewer than 10 scored runs.
+- `unknown` when the values cannot be compared (see above; also a baseline mean, cost or
+  latency of 0, or a missing latency).
+- Otherwise the guard measures the rollout's harm h (positive = worse) and its tolerance t
+  (`max_increase` or `max_decrease`):
+  - `error_rate`: h = rate(R) − rate(B), in percentage points.
+  - bool `feedback` and `eval`: h = rate(B) − rate(R).
+  - number `feedback`: h = (mean(B) − mean(R)) ÷ |mean(B)|, a share of the baseline mean.
+
+  It computes a range [L, U] that, with 95% confidence, still contains h's true value on its
+  own side (each bound is one-sided 95%, z = 1.6448536269514722). For rates the range is
+  Newcombe's hybrid score interval, built from a Wilson score interval for each side; for
+  number means it is Welch's interval (normal quantile, no t distribution) divided by
+  |mean(B)|. The check is `worse` when L > t (the rollout is worse by more than the tolerance
+  even at its best), `ok` when U ≤ t (no worse than the tolerance even at its worst), and
+  `unsure` otherwise (more data needed).
+- `cost_per_call` and `latency_p95` use the point value h = (value(R) − value(B)) ÷ value(B):
+  `worse` when h > t, else `ok`. They can flap near the tolerance, so give them looser
+  tolerances.
+
+The verdict is `abort` when any check is `worse`, else `advance` when every check is `ok`, else
+`wait`. `advance` ramps to the first `ramp` step above the current percent, or promotes R when
+there is none (no `ramp`, or the percent is at or past its last step).
+
+With `--apply`:
+
+- ramp: `set_rollout_if(prompt, label, Some(R at the next step), B, Some(<the rollout read>))`;
+- abort: `set_rollout_if(prompt, label, None, B, Some(<the rollout read>))`;
+- promote: a fresh read that must still show the label at B with the same rollout, then
+  `set_label(prompt, label, R, Some(Some(B)))`, which moves the label and clears the rollout.
+
+These writes are compare-and-set: when the label or rollout changed since the guard read them
+(another guard run, someone in the console), nothing is written and the command fails with
+`prompt store changed since it was read (v<B>, v<R> at <p>%): …`. A store without
+`set_rollout_if` answers `rollouts are not supported by this store` and nothing is written.
+
+The report prints a header, one row per check (each side's value and sample size, the harm,
+the status and its reason), the verdict and the action:
+
+```text
+guard support-answer-guard: support/answer/production v3 → v4 (10%), window 1d
+  check                     baseline            rollout             harm     status
+  error_rate                1.20% (n=1000)      1.25% (n=1200)      +0.05pt  ok
+  feedback thumbs_up (app)  91.00% (n=300)      85.00% (n=40)       +6.00pt  unsure
+  cost_per_call             $0.000123 (n=1000)  $0.000131 (n=1200)  +6.5%    ok
+verdict: wait
+action: none
+```
+
+### Exit codes
+
+| Exit | `guard` |
+|---|---|
+| 0 | `advance` (applied or not) |
+| 1 | `abort` (applied or not) |
+| 3 | `wait` |
+| 2 | the spec or price file is invalid, the prompt store fails or has no such prompt, label or rollout (the message names the prompt and label), the store changed since it was read, a query or the judge fails, the report cannot be stored, or a usage error |
+
+### Sample sizes and false aborts
+
+Intervals are wide on small samples, so a guard often says `wait` early, and a tight tolerance
+may never reach `ok`. With 0 errors in 100 calls on both sides, the upper bound of the error-rate
+increase is U ≈ 0.026: a `max_increase` of 0.01 cannot be `ok` until each side has about 270
+calls, even with no errors at all. Pick a window, `min_calls` and tolerances your traffic can
+meet, and remember that the rollout side only gets its percent of the traffic.
+
+The decision rule has no correction for repeated looks or for several checks: every scheduled
+run, and every check in it, is another chance for noise to cross a tolerance, so a guard run
+hourly for days with five checks will now and then abort a rollout that was fine. An abort only
+removes the rollout (every session goes back to B) and can be undone by starting the rollout
+again; use looser tolerances, fewer checks or a longer interval between runs if false aborts
+cost you too much.
+
+### Scheduling
+
+Run the guard where it can reach BigQuery and the prompt store, on a schedule shorter than the
+window. Exits 0, 1 and 3 are all normal outcomes, so a wrapper can map them to success and keep
+2 as the failure to alert on:
+
+```sh
+#!/bin/sh
+# guard.sh
+gadk-eval guard /etc/gadk/support-guard.yaml --apply \
+  --prices /etc/gadk/prices.yaml --out gs://my-bucket/monitors
+code=$?
+case $code in
+  0|1|3) exit 0 ;;   # advance, abort, wait
+  *) exit "$code" ;;
+esac
+```
+
+With cron, every hour:
+
+```text
+0 * * * * /usr/local/bin/guard.sh >> /var/log/gadk-guard.log 2>&1
+```
+
+As a Cloud Run job started hourly by Cloud Scheduler (the image holds `gadk-eval`, the spec,
+the price file and `guard.sh`; the job's service account needs the roles in
+[Access (IAM)](#access-iam)):
+
+```sh
+gcloud run jobs create support-guard --region us-central1 \
+  --image us-docker.pkg.dev/my-proj/tools/gadk-eval:latest \
+  --command /usr/local/bin/guard.sh --max-retries 0 \
+  --service-account guard@my-proj.iam.gserviceaccount.com
+gcloud scheduler jobs create http support-guard-hourly --location us-central1 \
+  --schedule "0 * * * *" --http-method POST \
+  --uri "https://run.googleapis.com/v2/projects/my-proj/locations/us-central1/jobs/support-guard:run" \
+  --oauth-service-account-email guard@my-proj.iam.gserviceaccount.com
+```
+
+`--max-retries 0` keeps a failed run from being repeated at once; the next scheduled run tries
+again.
+
 ## Library
 
 ```rust
@@ -436,6 +644,14 @@ queries in another project with `with_billing_project` and cap them with
 `with_max_bytes_billed`), `run_to_case`, `export_runs`, `cases_text`, `write_set_file`,
 `ScoreFilter` (with `ScoreFilter::parse` for the `--score` syntax) and `ExportedCase::new`.
 
+`Guard::new().run(&spec, store, source, prices, judge, apply)` is the library side of
+`gadk-eval guard`: a `GuardSpec`, a `gadk_prompts::PromptStore`, a `GuardSource`
+(`BigQueryGuardSource`, or your own for other data), an optional `PriceTable` and judge. It
+returns a `GuardReport` (`summary()`, `exit_code()`, JSON), which
+`ReportStore::put_guard` stores and `guard_names` / `find_guard` read back. A custom
+`cli::Backends` implements `guard_source(project, dataset, table, max_bytes)`; the default
+refuses with `guards are not supported by these backends`.
+
 ## Access (IAM)
 
 Google Cloud access uses Application Default Credentials; specs and reports hold no
@@ -450,6 +666,9 @@ written to as you would the analytics table.
 - Vertex AI User on the experiment spec's `project` (`gadk-eval experiment`: the agents and,
   by default, the judge), and read access to a `firestore://` prompt store when the spec uses
   one.
+- `gadk-eval guard`: the BigQuery roles above, read access to the prompt store, and with
+  `--apply` write access to it (Cloud Datastore User for a `firestore://` store); Vertex AI
+  User on the judge project with `llm_judge` scorers.
 - Storage Object Admin on the bucket for `gs://` output (`report` needs only Storage Object
   Viewer).
 
@@ -464,6 +683,12 @@ short and the event types filtered. Judge cost grows with `limit` times the numb
 their run headers and rows, the sessions' earlier run headers and rows, the scores and the
 prompt versions), each bounded by `timestamp` and by invocation, session or trace ids, with no
 byte cap.
+
+Each guard run issues one query for both versions' calls, one per `feedback` check and, for an
+`eval` check, a schema read plus the run queries for each version (only when both sides have
+`min_calls` calls). Every query filters on `timestamp` from the window's start and is capped
+at `--max-bytes` (default 1 GiB) billed; a query over the cap fails (exit 2) instead of
+running.
 
 With the Cloud Trace source, each monitor run makes up to 50 `COMPLETE` `traces.list` calls of
 100 traces each, counted against the Cloud Trace API read quota.

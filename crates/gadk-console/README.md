@@ -153,7 +153,9 @@ The console is for one developer on their own machine:
 ## Usage and cost
 
 `--prices <file>` reads model prices, in USD per 1,000,000 tokens, from a YAML list. There are no
-built-in prices.
+built-in prices. The same file works for `gadk-eval guard --prices` (crate `gadk-eval-monitor`,
+whose parser the console uses), so one price file serves both; see the [eval-monitor
+Guards](../gadk-eval-monitor/README.md#guards) section.
 
 ```yaml
 - model: gemini-3.8-flash      # an exact model name

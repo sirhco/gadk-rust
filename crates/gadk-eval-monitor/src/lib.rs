@@ -27,6 +27,12 @@
 //! [`ExperimentSpec`] describes an experiment on one Gemini LLM agent in YAML, and
 //! `gadk-eval experiment <spec.yaml> [--out <url>]` ([`cli`]) runs it without Rust code.
 //!
+//! A [`Guard`] watches a prompt rollout: it compares the label's version and the rollout
+//! version on the production signals a [`GuardSource`] reads ([`BigQueryGuardSource`]) as a
+//! [`GuardSpec`] (YAML) asks, decides to advance, abort or wait, and can write that decision to
+//! the prompt store. `gadk-eval guard <spec.yaml>` ([`cli`]) runs it on a schedule; model prices
+//! for its cost check come from a [`PriceTable`].
+//!
 //! ```no_run
 //! # async fn demo() -> Result<(), gadk_eval_monitor::MonitorError> {
 //! use gadk_eval_monitor::{

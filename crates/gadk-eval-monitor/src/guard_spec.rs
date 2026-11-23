@@ -1154,6 +1154,29 @@ judge:
     }
 
     #[test]
+    fn the_example_spec_parses() {
+        let s = GuardSpec::from_yaml(include_str!("../examples/guard.yaml")).unwrap();
+        assert_eq!(s.name, "support-answer-guard");
+        let kinds: Vec<&str> = s.checks.iter().map(Check::kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                "error_rate",
+                "feedback",
+                "feedback",
+                "cost_per_call",
+                "latency_p95",
+                "eval"
+            ]
+        );
+        assert!(s.wants_judge());
+        assert_eq!(
+            s.judge.map(|j| j.model).as_deref(),
+            Some("gemini-3.8-flash")
+        );
+    }
+
+    #[test]
     fn load_reads_a_file() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("g.yaml");

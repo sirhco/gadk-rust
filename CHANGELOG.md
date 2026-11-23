@@ -7,6 +7,36 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval-monitor`: rollout guards. `gadk-eval guard <spec.yaml> [--apply] [--prices <file>]
+  [--out <url>] [--max-bytes <n>]` compares the two sides of a prompt rollout (the label's
+  version and the rollout version) on production signals in the BigQuery agent-analytics table
+  — error rate, feedback scores, eval scorers, cost per call and p95 latency — and decides to
+  advance (next `ramp` step, or promote), abort or wait, with one-sided 95% intervals
+  (Newcombe for rates, Welch for number scores). It writes nothing without `--apply`; with it,
+  it ramps, promotes or aborts with compare-and-set writes. Exit codes: 0 advance, 1 abort,
+  3 wait, 2 error. Every query is parameterized and capped by `--max-bytes` (default 1 GiB).
+  Library: `GuardSpec` (with `Check`, `FeedbackSource`), `Guard`, `GuardReport` (with
+  `CheckResult`, `SideValue`, `Status`, `GuardVerdict`, `Action`, `Unit`), `GuardSource` (with
+  `GuardQuery`, `VersionCalls`, `ModelTokens`, `VersionFeedback`) and `BigQueryGuardSource`;
+  `cli::Backends` gains `guard_source` (refusing by default); `ReportStore` gains `put_guard`,
+  `guard_names` and `find_guard` (reports under `guards/`, ignored by the monitor and
+  experiment listings). The example spec is `crates/gadk-eval-monitor/examples/guard.yaml`.
+- `gadk-eval-monitor`: `PriceTable`, `ModelPrice` and `TokenUsage`, the price-file parser and
+  cost formula of `gadk-console`.
+- `gadk-prompts`: `PromptStore::set_rollout_if(name, label, rollout, expected_version,
+  expected_rollout)`, a compare-and-set rollout write that fails with `Conflict` when the label
+  or its rollout changed; the default body answers `Invalid("rollouts are not supported by this
+  store")`. `FileStore` implements it, and `testsuite::run_rollout_cas` is its contract suite.
+- `gadk-prompts-firestore`: `FirestoreStore` implements `set_rollout_if` in one transaction.
+
+### Changed
+
+- `gadk-console`: the price-file parser moved to `gadk-eval-monitor`; `gadk_console::ModelPrice`
+  is a re-export of `gadk_eval_monitor::ModelPrice` and `gadk_console::PriceTable` wraps
+  `gadk_eval_monitor::PriceTable`. The console's API, behaviour and error texts are unchanged.
+
 ## [0.5.3] - 2026-11-22
 
 ### Added

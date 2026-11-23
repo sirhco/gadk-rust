@@ -95,6 +95,10 @@ store.set_rollout("support-triage", &Label::production(), None).await?;
       .set_rollout_if("support-triage", &prod, Some(Rollout::new(4, 50)?), 3, Some(Rollout::new(4, 10)?))
       .await?;
   ```
+- Guarded rollouts: `gadk-eval guard` (crate `gadk-eval-monitor`) compares the label's version
+  and the rollout version on production error rate, feedback, eval scorers, cost and latency,
+  and ramps, promotes or aborts the rollout with these compare-and-set writes; run it on a
+  schedule. See [Guards](../gadk-eval-monitor/README.md#guards).
 - `FileStore` keeps rollouts in the prompt's file (a `rollouts` key, written only when there is
   one) and `gadk-prompts-firestore` in the prompt document. A store that does not support
   rollouts answers `set_rollout` and `set_rollout_if` with
