@@ -472,34 +472,74 @@ impl PromptStore for FirestoreStore {
         if let Some(r) = rollout {
             Rollout::new(r.version, r.percent)?;
         }
+        self.update_prompt(name, |cur| apply_rollout(cur, name, label, rollout))
+            .await
+    }
+
+    async fn set_rollout_if(
+        &self,
+        name: &str,
+        label: &Label,
+        rollout: Option<Rollout>,
+        expected_version: u32,
+        expected_rollout: Option<Rollout>,
+    ) -> Result<(), StoreError> {
+        if let Some(r) = rollout {
+            Rollout::new(r.version, r.percent)?;
+        }
         self.update_prompt(name, |cur| {
-            let Some(&at) = cur.labels.get(label) else {
-                return Err(StoreError::NotFound {
-                    name: name.into(),
-                    selector: label.to_string(),
-                });
-            };
-            let Some(r) = rollout else {
-                // Nothing to write when the label has no rollout.
-                return Ok(cur.rollouts.remove(label).is_some());
-            };
-            if r.version == 0 || r.version > cur.latest {
-                return Err(StoreError::NotFound {
-                    name: name.into(),
-                    selector: format!("v{}", r.version),
+            let at = cur.labels.get(label).copied();
+            if at != Some(expected_version) {
+                return Err(StoreError::Conflict {
+                    expected: Some(expected_version),
+                    actual: at,
                 });
             }
-            if r.version == at {
-                return Err(StoreError::Invalid(format!(
-                    "rollout version v{} is already the version of label {label}",
-                    r.version
-                )));
+            let current = cur.rollouts.get(label).copied();
+            if current != expected_rollout {
+                return Err(StoreError::Conflict {
+                    expected: expected_rollout.map(|r| r.version),
+                    actual: current.map(|r| r.version),
+                });
             }
-            cur.rollouts.insert(label.clone(), r);
-            Ok(true)
+            apply_rollout(cur, name, label, rollout)
         })
         .await
     }
+}
+
+/// `set_rollout`'s checks and change on the prompt state `cur` read in the transaction: `Ok(true)`
+/// when `cur` changed and must be written, `Ok(false)` when there is nothing to write.
+fn apply_rollout(
+    cur: &mut Current,
+    name: &str,
+    label: &Label,
+    rollout: Option<Rollout>,
+) -> Result<bool, StoreError> {
+    let Some(&at) = cur.labels.get(label) else {
+        return Err(StoreError::NotFound {
+            name: name.into(),
+            selector: label.to_string(),
+        });
+    };
+    let Some(r) = rollout else {
+        // Nothing to write when the label has no rollout.
+        return Ok(cur.rollouts.remove(label).is_some());
+    };
+    if r.version == 0 || r.version > cur.latest {
+        return Err(StoreError::NotFound {
+            name: name.into(),
+            selector: format!("v{}", r.version),
+        });
+    }
+    if r.version == at {
+        return Err(StoreError::Invalid(format!(
+            "rollout version v{} is already the version of label {label}",
+            r.version
+        )));
+    }
+    cur.rollouts.insert(label.clone(), r);
+    Ok(true)
 }
 
 impl FirestoreStore {
