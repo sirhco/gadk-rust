@@ -34,7 +34,6 @@ mod cli;
 mod datasets;
 mod evals;
 mod experiments;
-#[allow(dead_code)] // until the Guards routes use the cache
 mod guards;
 mod model;
 mod prices;
@@ -610,6 +609,28 @@ mod tests {
         let resp = String::from_utf8_lossy(&out);
         assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
         assert!(resp.contains("No experiments yet"), "{resp}");
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_reports_url_serves_the_guards_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = cfg(None);
+        c.reports = Some(format!("file://{}", dir.path().display()));
+        let bound = bind(c).await.unwrap();
+        let port = bound.local_addr().port();
+        let server = tokio::spawn(bound.serve());
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        let req =
+            format!("GET /guards HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let mut out = Vec::new();
+        stream.read_to_end(&mut out).await.unwrap();
+        let resp = String::from_utf8_lossy(&out);
+        assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
+        assert!(resp.contains("No guard runs yet"), "{resp}");
         server.abort();
     }
 
