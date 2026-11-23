@@ -99,19 +99,7 @@ impl Monitor {
         source: &dyn TranscriptSource,
         judge: Option<Arc<dyn Llm>>,
     ) -> Result<MonitorReport, MonitorError> {
-        let wants_judge = spec
-            .scorers
-            .iter()
-            .any(|s| matches!(s, ScorerSpec::LlmJudge { .. }));
-        let judge: Arc<dyn Llm> = match judge {
-            Some(j) => j,
-            None if wants_judge => {
-                return Err(MonitorError::Judge(
-                    "the spec has llm_judge scorers but no judge model was given".into(),
-                ));
-            }
-            None => Arc::new(NoJudge),
-        };
+        check_judge(judge.as_ref(), &spec.scorers)?;
         let now = self.now.unwrap_or_else(Utc::now);
         let q = spec.query(now);
         let mut runs = source.list(&q).await?;
@@ -121,17 +109,7 @@ impl Monitor {
             .judge
             .as_ref()
             .map_or(DEFAULT_JUDGE_TIMEOUT, |j| j.timeout);
-        let judge = &judge;
-        let mut graded: Vec<(usize, MonitoredRun)> =
-            futures::stream::iter(runs.into_iter().enumerate())
-                .map(|(i, run)| async move {
-                    let scores = score_run(judge, timeout, &spec.scorers, &run).await;
-                    (i, MonitoredRun { run, scores })
-                })
-                .buffer_unordered(self.concurrency)
-                .collect()
-                .await;
-        graded.sort_by_key(|(i, _)| *i);
+        let runs = score_runs(judge, timeout, &spec.scorers, runs, self.concurrency).await?;
         Ok(MonitorReport {
             spec: spec.name.clone(),
             generated_at: now,
@@ -140,9 +118,52 @@ impl Monitor {
                 to: q.to,
             },
             source: spec.source.describe(),
-            runs: graded.into_iter().map(|(_, r)| r).collect(),
+            runs,
         })
     }
+}
+
+/// `MonitorError::Judge` when `scorers` has an `llm_judge` scorer and `judge` is `None`.
+fn check_judge(judge: Option<&Arc<dyn Llm>>, scorers: &[ScorerSpec]) -> Result<(), MonitorError> {
+    let wants_judge = scorers
+        .iter()
+        .any(|s| matches!(s, ScorerSpec::LlmJudge { .. }));
+    if wants_judge && judge.is_none() {
+        return Err(MonitorError::Judge(
+            "the spec has llm_judge scorers but no judge model was given".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Scores each of `runs` with `scorers` (see [`Monitor::run`] for the per-run rules), at most
+/// `concurrency` runs at once (values below 1 mean 1), and returns them in the order given.
+/// `judge` grades `llm_judge` scorers, each call bounded by `timeout`.
+///
+/// # Errors
+///
+/// [`MonitorError::Judge`] when a scorer is `llm_judge` and `judge` is `None`.
+pub(crate) async fn score_runs(
+    judge: Option<Arc<dyn Llm>>,
+    timeout: Duration,
+    scorers: &[ScorerSpec],
+    runs: Vec<ProductionRun>,
+    concurrency: usize,
+) -> Result<Vec<MonitoredRun>, MonitorError> {
+    check_judge(judge.as_ref(), scorers)?;
+    let judge: Arc<dyn Llm> = judge.unwrap_or_else(|| Arc::new(NoJudge));
+    let judge = &judge;
+    let mut graded: Vec<(usize, MonitoredRun)> =
+        futures::stream::iter(runs.into_iter().enumerate())
+            .map(|(i, run)| async move {
+                let scores = score_run(judge, timeout, scorers, &run).await;
+                (i, MonitoredRun { run, scores })
+            })
+            .buffer_unordered(concurrency.max(1))
+            .collect()
+            .await;
+    graded.sort_by_key(|(i, _)| *i);
+    Ok(graded.into_iter().map(|(_, r)| r).collect())
 }
 
 /// Scores one run (see [`Monitor::run`]).

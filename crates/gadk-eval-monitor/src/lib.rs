@@ -46,10 +46,6 @@
 //! ```
 
 mod error;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the guard runner (Task 7)")
-)]
 mod guard_stats;
 #[cfg(test)]
 mod testutil;
@@ -59,6 +55,7 @@ pub mod experiment;
 pub mod experiment_spec;
 pub mod export;
 pub mod gcp;
+pub mod guard;
 pub mod guard_report;
 pub mod guard_source;
 pub mod guard_spec;
@@ -80,6 +77,7 @@ pub use export::{
     TraceInvocation, cases_text, export_runs, run_to_case, write_set_file,
 };
 pub use gcp::{AdcTokenSource, NoAuth, TokenSource};
+pub use guard::Guard;
 pub use guard_report::{
     Action, CheckResult, GuardReport, SideValue, Status, Unit, Verdict as GuardVerdict,
 };
