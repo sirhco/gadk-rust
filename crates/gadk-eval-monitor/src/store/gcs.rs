@@ -148,7 +148,7 @@ mod tests {
 
     use crate::gcp::NoAuth;
     use crate::store::ReportStore;
-    use crate::store::tests::{experiment, report};
+    use crate::store::tests::{experiment, guard, report};
     use crate::testutil::{exchange, replay};
 
     const OBJECTS: &str = "https://storage.googleapis.com/storage/v1/b/evals/o";
@@ -443,6 +443,92 @@ mod tests {
         assert_eq!(
             store
                 .find_experiment("exp-e2e-20270115T100000Z.json")
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn guards_are_under_guards() {
+        let r = guard("support-guard", 1_800_000_000);
+        let json = r.to_json().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[
+                exchange(
+                    "POST",
+                    &format!(
+                        "{UPLOADS}?uploadType=media\
+                         &name=monitors%2Fguards%2Fsupport-guard-20270115T080000Z.json\
+                         &ifGenerationMatch=0"
+                    ),
+                    &json,
+                    412,
+                    r#"{"error":{"code":412,"message":"At least one of the pre-conditions you specified did not hold."}}"#,
+                ),
+                exchange(
+                    "POST",
+                    &format!(
+                        "{UPLOADS}?uploadType=media\
+                         &name=monitors%2Fguards%2Fsupport-guard-20270115T080000Z-2.json\
+                         &ifGenerationMatch=0"
+                    ),
+                    &json,
+                    200,
+                    r#"{"name":"monitors/guards/support-guard-20270115T080000Z-2.json","generation":"1"}"#,
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=monitors%2Fguards%2F&delimiter=%2F"),
+                    "",
+                    200,
+                    r#"{"items":[{"name":"monitors/guards/support-guard-20270115T080000Z.json"},{"name":"monitors/guards/support-guard-20270115T080000Z-2.json"},{"name":"monitors/guards/readme.txt"}]}"#,
+                ),
+                exchange(
+                    "GET",
+                    &format!(
+                        "{OBJECTS}/monitors%2Fguards%2Fsupport-guard-20270115T080000Z-2.json?alt=media"
+                    ),
+                    "",
+                    200,
+                    &json,
+                ),
+                exchange(
+                    "GET",
+                    &format!(
+                        "{OBJECTS}/monitors%2Fguards%2Fsupport-guard-20270115T100000Z.json?alt=media"
+                    ),
+                    "",
+                    404,
+                    r#"{"error":{"code":404,"message":"No such object"}}"#,
+                ),
+            ],
+        );
+        let store =
+            ReportStore::gcs_with_client("gs://evals/monitors/", http, Arc::new(NoAuth)).unwrap();
+        assert_eq!(
+            store.put_guard(&r).await.unwrap(),
+            "support-guard-20270115T080000Z-2.json"
+        );
+        assert_eq!(
+            store.guard_names(10).await.unwrap(),
+            [
+                "support-guard-20270115T080000Z-2.json",
+                "support-guard-20270115T080000Z.json"
+            ]
+        );
+        assert_eq!(
+            store
+                .find_guard("support-guard-20270115T080000Z-2.json")
+                .await
+                .unwrap(),
+            Some(r)
+        );
+        assert_eq!(
+            store
+                .find_guard("support-guard-20270115T100000Z.json")
                 .await
                 .unwrap(),
             None
