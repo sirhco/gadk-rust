@@ -16,14 +16,17 @@
 //!
 //! Prices are USD per 1,000,000 tokens and come only from the price file. A model call's tokens
 //! are four counts ([`Usage`]): input (prompt plus tool-use prompt, cached tokens included),
-//! cached input, output (without reasoning) and reasoning.
+//! cached input, output (without reasoning) and reasoning. The price-file rules, [`ModelPrice`]
+//! and the cost formula are gadk-eval-monitor's ([`gadk_eval_monitor::PriceTable`],
+//! [`gadk_eval_monitor::TokenUsage`]); this module wraps them with the console's error type.
 
 use std::collections::BTreeMap;
 use std::ops::AddAssign;
 use std::path::Path;
 
 use gadk_eval::{RunMetrics, TokenCounts};
-use serde::Deserialize;
+pub use gadk_eval_monitor::ModelPrice;
+use gadk_eval_monitor::TokenUsage;
 
 use crate::ConsoleError;
 
@@ -44,57 +47,6 @@ pub(crate) const LABEL_REASONING: &str = "gen_ai.usage.reasoning.output_tokens";
 /// The model shown for a call whose model is not known.
 pub(crate) const UNKNOWN_MODEL: &str = "(unknown)";
 
-/// One entry of the price file.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Entry {
-    model: String,
-    input: f64,
-    output: f64,
-    #[serde(default)]
-    cached_input: Option<f64>,
-    #[serde(default)]
-    reasoning: Option<f64>,
-}
-
-/// The prices of one model, in USD per 1,000,000 tokens.
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub struct ModelPrice {
-    /// Input (prompt) tokens that were not cached.
-    pub input: f64,
-    /// Output tokens.
-    pub output: f64,
-    /// Cached input tokens.
-    pub cached_input: f64,
-    /// Reasoning (thinking) tokens.
-    pub reasoning: f64,
-}
-
-impl ModelPrice {
-    /// `input` and `output` prices; cached input costs `input` and reasoning costs `output`.
-    pub fn new(input: f64, output: f64) -> Self {
-        Self {
-            input,
-            output,
-            cached_input: input,
-            reasoning: output,
-        }
-    }
-
-    /// Sets the cached-input price.
-    pub fn with_cached_input(mut self, price: f64) -> Self {
-        self.cached_input = price;
-        self
-    }
-
-    /// Sets the reasoning price.
-    pub fn with_reasoning(mut self, price: f64) -> Self {
-        self.reasoning = price;
-        self
-    }
-}
-
 /// Model prices from a price file: a YAML list of
 /// `{model, input, output, cached_input?, reasoning?}`, prices in USD per 1,000,000 tokens.
 /// `model` matches a model name exactly, or as a prefix when it ends in `*`; an exact match
@@ -102,9 +54,7 @@ impl ModelPrice {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct PriceTable {
-    exact: BTreeMap<String, ModelPrice>,
-    /// Prefix entries (without the `*`), longest first.
-    prefixes: Vec<(String, ModelPrice)>,
+    inner: gadk_eval_monitor::PriceTable,
 }
 
 impl PriceTable {
@@ -126,51 +76,12 @@ impl PriceTable {
 
     /// Parses price-file text; the error is the detail [`load`](Self::load) reports.
     pub(crate) fn from_yaml(text: &str) -> Result<Self, String> {
-        let entries: Vec<Entry> = serde_saphyr::from_str(text).map_err(|e| e.to_string())?;
-        let mut exact = BTreeMap::new();
-        let mut prefixes: Vec<(String, ModelPrice)> = Vec::new();
-        for (i, e) in entries.into_iter().enumerate() {
-            if e.model.is_empty() {
-                return Err(format!("entry {}: empty model", i + 1));
-            }
-            let prices = [Some(e.input), Some(e.output), e.cached_input, e.reasoning];
-            if prices.iter().flatten().any(|p| !p.is_finite() || *p < 0.0) {
-                return Err(format!(
-                    "model {}: prices must be finite and not negative",
-                    e.model
-                ));
-            }
-            let mut price = ModelPrice::new(e.input, e.output);
-            if let Some(p) = e.cached_input {
-                price = price.with_cached_input(p);
-            }
-            if let Some(p) = e.reasoning {
-                price = price.with_reasoning(p);
-            }
-            let repeated = match e.model.strip_suffix('*') {
-                Some(prefix) => {
-                    let seen = prefixes.iter().any(|(p, _)| p == prefix);
-                    prefixes.push((prefix.to_owned(), price));
-                    seen
-                }
-                None => exact.insert(e.model.clone(), price).is_some(),
-            };
-            if repeated {
-                return Err(format!("model {}: listed twice", e.model));
-            }
-        }
-        prefixes.sort_by_key(|(p, _)| std::cmp::Reverse(p.len()));
-        Ok(Self { exact, prefixes })
+        gadk_eval_monitor::PriceTable::from_yaml(text).map(|inner| Self { inner })
     }
 
     /// The prices of `model`: its exact entry, else the longest matching prefix entry.
     pub fn price_for(&self, model: &str) -> Option<&ModelPrice> {
-        self.exact.get(model).or_else(|| {
-            self.prefixes
-                .iter()
-                .find(|(prefix, _)| model.starts_with(prefix.as_str()))
-                .map(|(_, price)| price)
-        })
+        self.inner.price_for(model)
     }
 }
 
@@ -211,12 +122,13 @@ impl Usage {
     /// The cost in USD: `(input − cached) × input + cached × cached_input + output × output +
     /// reasoning × reasoning`, prices per 1,000,000 tokens (`input − cached` floors at 0).
     pub(crate) fn cost(&self, p: &ModelPrice) -> f64 {
-        let uncached = self.input.saturating_sub(self.cached) as f64;
-        (uncached * p.input
-            + self.cached as f64 * p.cached_input
-            + self.output as f64 * p.output
-            + self.reasoning as f64 * p.reasoning)
-            / 1_000_000.0
+        TokenUsage::from(*self).cost(p)
+    }
+}
+
+impl From<Usage> for TokenUsage {
+    fn from(u: Usage) -> Self {
+        TokenUsage::new(u.input, u.cached, u.output, u.reasoning)
     }
 }
 

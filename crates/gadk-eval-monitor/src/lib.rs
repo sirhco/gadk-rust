@@ -56,6 +56,7 @@ pub mod export;
 pub mod gcp;
 pub mod judge;
 pub mod monitor;
+pub mod prices;
 pub mod report;
 pub mod source;
 pub mod spec;
@@ -73,6 +74,7 @@ pub use export::{
 pub use gcp::{AdcTokenSource, NoAuth, TokenSource};
 pub use judge::vertex_judge;
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
+pub use prices::{ModelPrice, PriceTable, TokenUsage};
 pub use report::{MonitorReport, MonitoredRun, Window};
 pub use source::bigquery::BigQueryTranscriptSource;
 pub use source::cloud_trace::CloudTraceTranscriptSource;
