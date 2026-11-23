@@ -7,6 +7,17 @@ the public API.
 
 ## [Unreleased]
 
+### Changed
+
+- `gadk-console`: score names added in the console are saved trimmed, so ` quality ` is stored as
+  `quality`. Rows saved before keep their names.
+
+### Fixed
+
+- `gadk-console`: adding a trace to a dataset in review mode keeps review mode: the trace page it
+  returns to still shows the review bar. The review queue's `prompt` and `range` filters are
+  trimmed, like `score` and `version`.
+
 ## [0.5.6] - 2026-11-23
 
 ### Added

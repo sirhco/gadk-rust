@@ -7,8 +7,8 @@ registry: versions, diffs and labels. With `--reports`, it also shows the report
 its rollout guards. With a price file (`--prices`) it prices token counts. With the BigQuery trace
 source it also shows usage and cost by model, agent, prompt version and trace, lists and adds
 scores, walks a review queue of the traces not yet scored, and, with `--datasets`, adds a trace's
-runs to an eval set. It runs on your machine, listens
-on 127.0.0.1 only, and reads Google Cloud with your Application Default Credentials.
+runs to an eval set. It runs on your machine, listens on 127.0.0.1 only, and reads Google Cloud with
+your Application Default Credentials.
 
 ```sh
 cargo install gadk-console
@@ -277,7 +277,8 @@ answer 404 with a note.
   pre-filled. Adding a score opens the next trace; when none is left the queue page says
   `Queue empty — all caught up`.
 - The queue is the URL: nothing is stored, nothing is locked. Two reviewers on the same queue may
-  score the same trace; both scores are kept. A trace leaves a short window as time passes.
+  score the same trace; both scores are kept. A trace drops out of the queue once its first model
+  response is older than the range.
 - The pending query reads the window's rows and the `FEEDBACK` rows from a day before it, under
   `--bigquery-max-bytes`. The score name and filters are query parameters.
 

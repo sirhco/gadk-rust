@@ -33,9 +33,10 @@ use super::pages::{trace, traces};
 use super::review::next_link;
 use crate::datasets::{AddError, NEEDS_DATASETS, is_dataset_name};
 use crate::model::{attach_logs, build_tree, trace_end};
-use crate::review::{Cursor, ReviewQueue};
+use crate::review::{Cursor, ReviewQueue, at_text};
 use crate::scores::{BQ_EDITOR_HINT, NewScore};
 use crate::traces::{RawSpan, SourceError, TimeRange, TraceId, TraceQuery};
+use crate::url::percent_encode;
 
 /// How long after a trace's last span ends its log entries may still be arriving.
 const STILL_ARRIVING: TimeDelta = TimeDelta::seconds(120);
@@ -184,16 +185,11 @@ async fn trace_scores(state: &AppState, id: &TraceId, spans: &[RawSpan]) -> Scor
     }
 }
 
-/// The add-score form; missing fields are empty strings. The `q_*` fields carry the review
-/// queue and `at` in review mode.
+/// The hidden `q_*` fields of the score and dataset forms: the review queue and `at` in review
+/// mode, empty strings otherwise.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct ScoreForm {
-    name: String,
-    kind: String,
-    value: String,
-    comment: String,
-    csrf: String,
+struct ReviewFields {
     q_score: String,
     q_prompt: String,
     q_version: String,
@@ -202,10 +198,10 @@ struct ScoreForm {
     q_at: String,
 }
 
-impl ScoreForm {
-    /// Where a successful score goes: the next trace of the review queue when the `q_*` fields
-    /// are a valid queue and `at`, else back to trace `id`.
-    fn redirect(&self, id: &TraceId) -> String {
+impl ReviewFields {
+    /// The review queue and the cursor of trace `id`, when the fields are a valid queue and
+    /// `at`; else `None`.
+    fn parse(&self, id: &TraceId) -> Option<(ReviewQueue, Cursor)> {
         let params: Vec<(String, String)> = [
             ("score", &self.q_score),
             ("prompt", &self.q_prompt),
@@ -216,12 +212,33 @@ impl ScoreForm {
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.clone()))
         .collect();
-        match (
-            ReviewQueue::from_params(&params),
-            Cursor::parse(&self.q_at, id.as_str()),
-        ) {
-            (Ok(Some(queue)), Ok(cursor)) => next_link(&queue, &cursor),
-            _ => format!("/traces/{}", id.as_str()),
+        let queue = ReviewQueue::from_params(&params).ok()??;
+        let cursor = Cursor::parse(&self.q_at, id.as_str()).ok()?;
+        Some((queue, cursor))
+    }
+}
+
+/// The add-score form; missing fields are empty strings. The `q_*` fields carry the review
+/// queue and `at` in review mode.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct ScoreForm {
+    name: String,
+    kind: String,
+    value: String,
+    comment: String,
+    csrf: String,
+    #[serde(flatten)]
+    review: ReviewFields,
+}
+
+impl ScoreForm {
+    /// Where a successful score goes: the next trace of the review queue when the `q_*` fields
+    /// are a valid queue and `at`, else back to trace `id`.
+    fn redirect(&self, id: &TraceId) -> String {
+        match self.review.parse(id) {
+            Some((queue, cursor)) => next_link(&queue, &cursor),
+            None => format!("/traces/{}", id.as_str()),
         }
     }
 }
@@ -281,18 +298,42 @@ fn insert_failed(e: &SourceError) -> Response {
     error_page(StatusCode::BAD_GATEWAY, Nav::Traces, &e.to_string(), hint)
 }
 
-/// The add-to-dataset form; missing fields are empty strings.
+/// The add-to-dataset form; missing fields are empty strings. The `q_*` fields carry the
+/// review queue and `at` in review mode.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct DatasetForm {
     dataset: String,
     rubric: String,
     csrf: String,
+    #[serde(flatten)]
+    review: ReviewFields,
+}
+
+impl DatasetForm {
+    /// Where a successful add of `added` cases goes: trace `id` with the added notice, and in
+    /// review mode (valid `q_*` fields) the queue and `at` too, so the page stays in review
+    /// mode.
+    fn redirect(&self, id: &TraceId, added: usize) -> String {
+        let mut url = format!(
+            "/traces/{}?added={added}&dataset={}",
+            id.as_str(),
+            percent_encode(&self.dataset)
+        );
+        if let Some((queue, cursor)) = self.review.parse(id) {
+            url.push_str(&format!(
+                "&{}&at={}",
+                queue.query_string(),
+                percent_encode(&at_text(cursor.at))
+            ));
+        }
+        url
+    }
 }
 
 /// `POST /traces/{id}/dataset`: checks the token, adds the trace's runs as cases to
-/// `<dir>/<dataset>.yaml` and redirects to the trace with the count (303). Without
-/// `--datasets` it is a 404 page.
+/// `<dir>/<dataset>.yaml` and redirects to the trace with the count (303), keeping review mode.
+/// Without `--datasets` it is a 404 page.
 async fn add_to_dataset(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -309,12 +350,7 @@ async fn add_to_dataset(
     };
     let rubric = Some(form.rubric.as_str()).filter(|r| !r.trim().is_empty());
     match datasets.add_trace(id.as_str(), &form.dataset, rubric).await {
-        Ok(added) => Redirect::to(&format!(
-            "/traces/{}?added={added}&dataset={}",
-            id.as_str(),
-            form.dataset
-        ))
-        .into_response(),
+        Ok(added) => Redirect::to(&form.redirect(&id, added)).into_response(),
         Err(e) => dataset_failed(&e),
     }
 }
@@ -1356,6 +1392,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_padded_score_name_is_inserted_trimmed() {
+        let fake = FakeHttp::new(vec![root_reply(), dml_reply()]);
+        let body = format!("name=%20quality%20&kind=up&csrf={CSRF}");
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, _, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        let insert = fake.body(1);
+        let content: Value = serde_json::from_str(
+            param_value(&insert, "content")["parameterValue"]["value"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            content,
+            json!({"name": "quality", "value": true, "data_type": "bool"})
+        );
+    }
+
+    #[tokio::test]
     async fn score_posts_without_the_token_are_403_and_query_nothing() {
         for csrf in [String::new(), "b".repeat(64)] {
             let fake = FakeHttp::new(vec![]);
@@ -1589,6 +1645,21 @@ mod tests {
         let st = bq_get(invocation_detail(), &fake);
         let (status, _, _) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
         assert_eq!(status, StatusCode::BAD_GATEWAY);
+    }
+
+    #[tokio::test]
+    async fn the_default_range_score_form_redirects_without_a_range() {
+        let fake = FakeHttp::new(vec![root_reply(), dml_reply()]);
+        let body = format!(
+            "name=quality&kind=up&csrf={CSRF}&q_score=quality&q_prompt=&q_version=&q_flagged=&q_range=7d&q_at=2026-11-16T11%3A58%3A59.999750Z"
+        );
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, headers, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        assert_eq!(
+            headers[LOCATION],
+            format!("/review/next?score=quality&after={AT}&after_id={ID}")
+        );
     }
 
     // ---- adding to a dataset ----
@@ -1944,5 +2015,167 @@ mod tests {
             assert!(!page.contains("case(s) to"), "{query}: {page}");
             assert!(!page.contains("<script>"), "{query}");
         }
+    }
+
+    // ---- adding to a dataset in review mode ----
+
+    /// The review fields of the queue `quality`, prompt `team/greet` v3, flagged, 6h, at `AT`.
+    const REVIEW_FIELDS: &str = "&q_score=quality&q_prompt=team%2Fgreet&q_version=3&q_flagged=1&q_range=6h&q_at=2026-11-16T11%3A58%3A59.999750Z";
+
+    /// The `Add to dataset` heading through the end of its form.
+    fn dataset_section(page: &str) -> &str {
+        let start = page
+            .find("<h2>Add to dataset</h2>")
+            .unwrap_or_else(|| panic!("no dataset section: {page}"));
+        let len = page[start..].find("</form>").expect("form end");
+        &page[start..start + len]
+    }
+
+    /// POST `dataset=regressions` plus `review` to a fresh `--datasets` directory; returns the
+    /// status and the `Location` header (empty when there is none).
+    async fn add_regressions(review: &str) -> (StatusCode, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(trace_export());
+        let body = format!("dataset=regressions&rubric=Be+right.&csrf={CSRF}{review}");
+        let (status, headers, page) = post_form(
+            with_datasets(dir.path(), &fake),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        let location = headers
+            .get(LOCATION)
+            .map(|v| v.to_str().unwrap().to_owned())
+            .unwrap_or_default();
+        assert!(
+            status != StatusCode::SEE_OTHER || !location.is_empty(),
+            "{page}"
+        );
+        (status, location)
+    }
+
+    #[tokio::test]
+    async fn in_review_mode_the_dataset_form_carries_the_review_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = FakeHttp::new(vec![reply(&SCORE_FIELDS, vec![], false)]);
+        let mut st = bq_get(invocation_detail(), &fake);
+        st.datasets = Some(Arc::new(Datasets::new(
+            dir.path().to_path_buf(),
+            Arc::new(FakeExport::default()),
+        )));
+        let (status, _, page) = get(
+            st,
+            &format!(
+                "/traces/{ID}?score=quality&prompt=triage&version=2&flagged=1&range=24h&at={AT}"
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        let fields = format!(
+            r#"<input type="hidden" name="csrf" value="{CSRF}"><input type="hidden" name="q_score" value="quality"><input type="hidden" name="q_prompt" value="triage"><input type="hidden" name="q_version" value="2"><input type="hidden" name="q_flagged" value="1"><input type="hidden" name="q_range" value="24h"><input type="hidden" name="q_at" value="2026-11-16T11:58:59.999750Z"><input type="text" name="dataset""#
+        );
+        let section = dataset_section(&page);
+        assert!(section.contains(&fields), "{section}");
+        let scores = scores_section(&page);
+        let hidden = |s: &str| {
+            s[s.find("name=\"q_score\"").unwrap()..s.find("name=\"q_at\"").unwrap()].to_owned()
+        };
+        assert_eq!(
+            hidden(section),
+            hidden(scores),
+            "the same fields as the score form"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let (_, _, page) = get(
+            with_datasets(dir.path(), &Arc::new(FakeExport::default())),
+            &format!("/traces/{ID}"),
+        )
+        .await;
+        let section = dataset_section(&page);
+        assert!(!section.contains("name=\"q_"), "{section}");
+    }
+
+    #[tokio::test]
+    async fn a_dataset_add_in_review_mode_redirects_with_the_queue_and_at() {
+        let (status, location) = add_regressions(REVIEW_FIELDS).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        assert_eq!(
+            location,
+            format!(
+                "/traces/{ID}?added=2&dataset=regressions&score=quality&prompt=team%2Fgreet&version=3&flagged=1&range=6h&at={AT}"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dataset_add_without_valid_review_fields_redirects_to_the_plain_trace() {
+        for review in [
+            "",
+            "&q_score=quality",
+            "&q_score=quality&q_at=yesterday",
+            "&q_score=&q_at=2026-11-16T11%3A58%3A59.999750Z",
+            "&q_score=quality&q_version=2&q_at=2026-11-16T11%3A58%3A59.999750Z",
+            "&q_score=quality&q_range=30d&q_at=2026-11-16T11%3A58%3A59.999750Z",
+        ] {
+            let (status, location) = add_regressions(review).await;
+            assert_eq!(status, StatusCode::SEE_OTHER, "{review}");
+            assert_eq!(
+                location,
+                format!("/traces/{ID}?added=2&dataset=regressions"),
+                "{review}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn review_fields_do_not_change_dataset_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(trace_export());
+        let body = format!("dataset=a%20b&csrf={CSRF}{REVIEW_FIELDS}");
+        let (status, headers, page) = post_form(
+            with_datasets(dir.path(), &fake),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(headers.get(LOCATION).is_none());
+        assert!(page.contains("dataset: must be 1-64 of"), "{page}");
+        let body = format!("dataset=x&csrf={}{REVIEW_FIELDS}", "b".repeat(64));
+        let (status, _, _) = post_form(
+            with_datasets(dir.path(), &fake),
+            &dataset_path(),
+            &body,
+            Some(ORIGIN),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn the_page_after_a_review_mode_add_shows_the_notice_and_the_bar() {
+        let (_, location) =
+            add_regressions("&q_score=quality&q_at=2026-11-16T11%3A58%3A59.999750Z").await;
+        assert_eq!(
+            location,
+            format!("/traces/{ID}?added=2&dataset=regressions&score=quality&at={AT}")
+        );
+        let fake = FakeHttp::new(vec![reply(&SCORE_FIELDS, vec![], false)]);
+        let (status, _, page) = get(bq_get(invocation_detail(), &fake), &location).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        assert!(
+            page.contains(
+                r#"<div class="banner info"><p>Added 2 case(s) to regressions.yaml</p></div>"#
+            ),
+            "{page}"
+        );
+        assert!(
+            page.contains("Reviewing <strong>quality</strong>"),
+            "{page}"
+        );
     }
 }

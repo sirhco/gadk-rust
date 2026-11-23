@@ -91,7 +91,7 @@ pub(crate) struct NewScore {
 
 impl NewScore {
     /// The score of the form fields: `kind` is `up`, `down`, `number` (with `value` a number)
-    /// or `category` (with `value` the category).
+    /// or `category` (with `value` the category). The name is saved trimmed.
     ///
     /// # Errors
     ///
@@ -129,7 +129,7 @@ impl NewScore {
             _ => return Err("kind: must be up, down, number or category".to_owned()),
         };
         Ok(NewScore {
-            name: name.to_owned(),
+            name: name.trim().to_owned(),
             value,
             comment: (!comment.trim().is_empty()).then(|| comment.to_owned()),
         })
@@ -636,6 +636,16 @@ mod tests {
         assert_eq!(err("q", "number", "inf"), "score number is not finite");
         assert_eq!(err("q", "number", "NaN"), "score number is not finite");
         assert_eq!(err("q", "category", " "), "score category is empty");
+    }
+
+    #[test]
+    fn form_score_names_are_saved_trimmed() {
+        let s = NewScore::from_form(" quality ", "up", "", "").unwrap();
+        assert_eq!(s.content()["name"], json!("quality"));
+        assert_eq!(
+            NewScore::from_form(" \t ", "up", "", "").unwrap_err(),
+            "score name is empty"
+        );
     }
 
     #[test]
