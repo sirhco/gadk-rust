@@ -41,6 +41,8 @@ pub(crate) struct AppState {
     pub store: Option<Arc<dyn gadk_prompts::PromptStore>>,
     pub reports: Option<Arc<crate::evals::ReportCache>>,
     pub experiments: Option<Arc<crate::experiments::ExperimentCache>>, // Some with --reports
+    #[allow(dead_code)] // until the Guards routes read it
+    pub guards: Option<Arc<crate::guards::GuardCache>>, // Some with --reports
     pub csrf: Arc<str>,                                                // 64 hex chars
     pub port: u16,                                                     // the bound port
     pub now: fn() -> chrono::DateTime<chrono::Utc>, // Utc::now in production; fixed in tests
@@ -307,5 +309,14 @@ mod tests {
             super::testutil::state_with_reports(Arc::new(FakeSource::new()), None, Some(cache));
         assert!(st.reports.is_some());
         assert!(fresh().reports.is_none());
+    }
+
+    #[tokio::test]
+    async fn state_with_guards_carries_the_cache() {
+        let (_dir, cache, _) = super::testutil::guard_cache(&[], 4).await;
+        let st = super::testutil::state_with_guards(cache);
+        assert!(st.guards.is_some());
+        assert!(st.reports.is_none() && st.experiments.is_none());
+        assert!(fresh().guards.is_none());
     }
 }

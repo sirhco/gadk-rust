@@ -25,6 +25,7 @@ use gadk_eval_monitor::{BigQueryTranscriptSource, MonitorError, ReportStore};
 use crate::datasets::Datasets;
 use crate::evals::{CACHE_CAP, ReportCache};
 use crate::experiments::ExperimentCache;
+use crate::guards::GuardCache;
 use crate::traces::{BigQueryTable, BigQueryTraceSource, CloudTraceSource, TraceSource};
 use crate::usage::UsageSource;
 
@@ -33,6 +34,8 @@ mod cli;
 mod datasets;
 mod evals;
 mod experiments;
+#[allow(dead_code)] // until the Guards routes use the cache
+mod guards;
 mod model;
 mod prices;
 mod prompts;
@@ -198,8 +201,8 @@ impl Bound {
     }
 }
 
-/// Opens the prompt store and the report store (if any, once for the Evals and once for the
-/// Experiments pages), binds `127.0.0.1:<port>`, builds the router.
+/// Opens the prompt store and the report store (if any, once each for the Evals, Experiments and
+/// Guards pages), binds `127.0.0.1:<port>`, builds the router.
 ///
 /// A `gs://` report store needs Application Default Credentials here; the trace source builds its
 /// credentials on the first GCP call.
@@ -269,7 +272,7 @@ pub(crate) async fn bind_full(
         .as_deref()
         .map(gadk_prompts_cli::open_store)
         .transpose()?;
-    // `ReportStore` is not `Clone`: the Evals and Experiments caches each open the URL.
+    // `ReportStore` is not `Clone`: the Evals, Experiments and Guards caches each open the URL.
     let open_reports = |url: &str| {
         ReportStore::open(url).map_err(|e| {
             ConsoleError::Reports(match e {
@@ -278,15 +281,16 @@ pub(crate) async fn bind_full(
             })
         })
     };
-    let (reports, experiments) = match cfg.reports.as_deref() {
+    let (reports, experiments, guards) = match cfg.reports.as_deref() {
         Some(url) => (
             Some(Arc::new(ReportCache::new(open_reports(url)?, CACHE_CAP))),
             Some(Arc::new(ExperimentCache::new(
                 open_reports(url)?,
                 CACHE_CAP,
             ))),
+            Some(Arc::new(GuardCache::new(open_reports(url)?, CACHE_CAP))),
         ),
-        None => (None, None),
+        None => (None, None, None),
     };
     let bind_err = |e: std::io::Error| ConsoleError::Bind {
         port: cfg.port,
@@ -301,6 +305,7 @@ pub(crate) async fn bind_full(
         store,
         reports,
         experiments,
+        guards,
         csrf: Arc::from(csrf_token()),
         port: addr.port(),
         now: chrono::Utc::now,
