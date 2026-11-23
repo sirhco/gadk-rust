@@ -21,8 +21,8 @@ use std::sync::Arc;
 use gadk_prompts::PromptStore;
 use gadk_prompts_firestore::{FirestoreConfig, FirestoreStore};
 
-/// Runs the contract suites (`run`, then `run_rollouts`) against the Firestore emulator:
-/// `FIRESTORE_EMULATOR_HOST=localhost:8080 cargo test -p gadk-prompts-firestore --test live live_emulator_contract -- --ignored`.
+/// Runs the contract suites (`run`, `run_rollouts`, then `run_rollout_cas`) against the Firestore
+/// emulator: `FIRESTORE_EMULATOR_HOST=localhost:8080 cargo test -p gadk-prompts-firestore --test live live_emulator_contract -- --ignored`.
 /// Each scenario uses its own root so runs do not collide.
 #[tokio::test]
 #[ignore = "needs FIRESTORE_EMULATOR_HOST; run with -- --ignored"]
@@ -47,11 +47,12 @@ async fn live_emulator_contract() {
     };
     gadk_prompts::testsuite::run(&factory).await;
     gadk_prompts::testsuite::run_rollouts(&factory).await;
+    gadk_prompts::testsuite::run_rollout_cas(&factory).await;
 }
 
-/// Runs the contract suites (`run`, then `run_rollouts`) against a real Firestore project with
-/// Application Default Credentials: `GADK_FIRESTORE_PROJECT=my-project cargo test -p
-/// gadk-prompts-firestore --test live live_project_contract -- --ignored`
+/// Runs the contract suites (`run`, `run_rollouts`, then `run_rollout_cas`) against a real
+/// Firestore project with Application Default Credentials: `GADK_FIRESTORE_PROJECT=my-project
+/// cargo test -p gadk-prompts-firestore --test live live_project_contract -- --ignored`
 /// (`GADK_FIRESTORE_DATABASE` defaults to `(default)`).
 /// Each scenario writes under its own root, printed as `root: …`; delete the `runs/gadk-test-*`
 /// documents afterwards.
@@ -85,4 +86,5 @@ async fn live_project_contract() {
     };
     gadk_prompts::testsuite::run(&factory).await;
     gadk_prompts::testsuite::run_rollouts(&factory).await;
+    gadk_prompts::testsuite::run_rollout_cas(&factory).await;
 }

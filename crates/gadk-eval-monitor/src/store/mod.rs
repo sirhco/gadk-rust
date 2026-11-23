@@ -17,7 +17,8 @@
 //! A report is stored as `<spec>-<generated_at %Y%m%dT%H%M%SZ>.json`, with `-2`, `-3`, … added
 //! when that name is taken. An [`ExperimentReport`] is stored the same way, named after the
 //! experiment, under `experiments/` (a subdirectory, or the object prefix `<prefix>experiments/`);
-//! the report listing never includes it.
+//! a [`GuardReport`] is stored named after its guard spec under `guards/` the same way. The
+//! report listing never includes either, and the experiment listing never includes guards.
 
 mod gcs;
 mod local;
@@ -32,6 +33,7 @@ use serde::Serialize;
 use crate::error::MonitorError;
 use crate::experiment::ExperimentReport;
 use crate::gcp::{AdcTokenSource, GcpHttp, TokenSource};
+use crate::guard_report::{Action, GuardReport};
 use crate::report::MonitorReport;
 use crate::spec::is_monitor_name;
 
@@ -41,9 +43,15 @@ const MAX_SUFFIX: u32 = 1000;
 /// The subdirectory (local) or object prefix segment (GCS) of experiment reports.
 const EXPERIMENTS: &str = "experiments";
 
+/// The subdirectory (local) or object prefix segment (GCS) of guard reports.
+const GUARDS: &str = "guards";
+
 /// A stored report's name: `<spec>-<timestamp>[-<n>].json`.
 static NAME: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]+-(\d{8}T\d{6}Z)(?:-(\d+))?\.json$").ok());
+/// The part of a report name after `<spec>-`.
+static STAMP: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"^\d{8}T\d{6}Z(?:-\d+)?\.json$").ok());
 
 /// A stored report, summarised.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -149,6 +157,8 @@ pub struct ReportStore {
     backend: Backend,
     /// `backend`'s `experiments` child.
     experiments: Backend,
+    /// `backend`'s `guards` child.
+    guards: Backend,
 }
 
 impl ReportStore {
@@ -186,12 +196,15 @@ impl ReportStore {
         ))))
     }
 
-    /// A store over `backend`, with experiments in its `experiments` child.
+    /// A store over `backend`, with experiments in its `experiments` child and guard reports
+    /// in its `guards` child.
     fn with_backend(backend: Backend) -> Self {
         let experiments = backend.child(EXPERIMENTS);
+        let guards = backend.child(GUARDS);
         Self {
             backend,
             experiments,
+            guards,
         }
     }
 
@@ -364,7 +377,98 @@ impl ReportStore {
             .map(Some)
             .map_err(|e| MonitorError::Store(format!("experiment {name}: {e}")))
     }
+
+    /// Stores the guard `report` under `guards/` as
+    /// `<spec>-<generated_at %Y%m%dT%H%M%SZ>.json` (with `-2`, `-3`, … when taken), never
+    /// overwriting, and returns that file name without the `guards/` part (the stored name). A
+    /// local `guards` directory is created when missing.
+    ///
+    /// # Errors
+    ///
+    /// [`MonitorError::Store`] when the guard spec name is not `[A-Za-z0-9_-]{1,64}`, no free
+    /// name is found, or the write fails.
+    pub async fn put_guard(&self, report: &GuardReport) -> Result<String, MonitorError> {
+        if !is_monitor_name(&report.spec) {
+            return Err(MonitorError::Store(format!(
+                "invalid guard name {:?} (expected [A-Za-z0-9_-]{{1,64}})",
+                report.spec
+            )));
+        }
+        let base = format!(
+            "{}-{}",
+            report.spec,
+            report.generated_at.format("%Y%m%dT%H%M%SZ")
+        );
+        let json = report.to_json()?;
+        self.guards.create_unique(&base, &json).await
+    }
+
+    /// The stored names of the newest `limit` guard reports under `guards/` (by the timestamp
+    /// in their names, then the suffix), newest first, reading none of them. Other files there
+    /// are ignored.
+    ///
+    /// # Errors
+    ///
+    /// [`MonitorError::Store`] when listing fails.
+    pub async fn guard_names(&self, limit: usize) -> Result<Vec<String>, MonitorError> {
+        self.guards.newest(limit).await
+    }
+
+    /// The guard report stored as `name` (a stored name, without `guards/`), or `None` when
+    /// there is none.
+    ///
+    /// # Errors
+    ///
+    /// [`MonitorError::Store`] when `name` is not a report name
+    /// (`<spec>-<YYYYMMDDTHHMMSSZ>[-<n>].json`), or the file cannot be read or is not a guard
+    /// report.
+    pub async fn find_guard(&self, name: &str) -> Result<Option<GuardReport>, MonitorError> {
+        if name_key(name).is_none() {
+            return Err(MonitorError::Store(format!(
+                "invalid guard report name {name:?}"
+            )));
+        }
+        let Some(text) = self.guards.read(name).await? else {
+            return Ok(None);
+        };
+        GuardReport::from_json(&text)
+            .map(Some)
+            .map_err(|e| MonitorError::Store(format!("guard {name}: {e}")))
+    }
+
+    /// The newest stored report of the guard spec `spec` that applied a ramp step (`applied`
+    /// and action `Ramp(_)`), looking at the newest [`LATEST_GUARD_SCAN`] guard reports of any
+    /// spec; held, waiting, dry-run and other reports are skipped. `None` when there is none.
+    ///
+    /// # Errors
+    ///
+    /// [`MonitorError::Store`] when listing fails or one of `spec`'s reports cannot be read.
+    pub(crate) async fn latest_applied_ramp(
+        &self,
+        spec: &str,
+    ) -> Result<Option<GuardReport>, MonitorError> {
+        let names = self.guard_names(LATEST_GUARD_SCAN).await?;
+        // `<spec>-<stamp>[-<n>].json`: what follows `<spec>-` must be the stamp and suffix,
+        // so the reports of a spec named `<spec>-x` do not count.
+        let own = names.iter().filter(|n| {
+            n.strip_prefix(spec)
+                .and_then(|rest| rest.strip_prefix('-'))
+                .is_some_and(|rest| STAMP.as_ref().is_some_and(|re| re.is_match(rest)))
+        });
+        for name in own {
+            if let Some(report) = self.find_guard(name).await?
+                && report.applied
+                && matches!(report.action, Action::Ramp(_))
+            {
+                return Ok(Some(report));
+            }
+        }
+        Ok(None)
+    }
 }
+
+/// How many of the newest guard reports [`ReportStore::latest_guard`] looks at.
+const LATEST_GUARD_SCAN: usize = 200;
 
 /// The sort key of a valid report name: its timestamp text and suffix (1 for none).
 fn name_key(name: &str) -> Option<(String, u32)> {
@@ -387,6 +491,7 @@ mod tests {
         Variant, VariantReport,
     };
 
+    use crate::guard_report::{Action, CheckResult, SideValue, Status, Unit, Verdict};
     use crate::report::{MonitoredRun, Window};
     use crate::testutil::{at, run};
 
@@ -416,6 +521,44 @@ mod tests {
             &[Variant::new("v1")],
             MeasuredReport::new(report, metrics),
         )
+    }
+
+    /// A guard report of spec `name` made at `secs`, with one `ok` error-rate check.
+    pub(crate) fn guard(name: &str, secs: i64) -> GuardReport {
+        GuardReport {
+            spec: name.into(),
+            generated_at: at(secs),
+            window: Window {
+                from: at(secs - 3_600),
+                to: at(secs),
+            },
+            source: "bigquery:p.d.t".into(),
+            prompt: "support".into(),
+            label: "production".into(),
+            baseline: 1,
+            rollout: 2,
+            percent: 10,
+            checks: vec![CheckResult {
+                name: "error_rate".into(),
+                unit: Unit::Rate,
+                baseline: SideValue {
+                    value: Some(0.01),
+                    n: 1000,
+                },
+                rollout: SideValue {
+                    value: Some(0.01),
+                    n: 200,
+                },
+                harm: Some(0.0),
+                interval: Some((-0.01, 0.012)),
+                status: Status::Ok,
+                reason: None,
+            }],
+            verdict: Verdict::Advance,
+            action: Action::Ramp(25),
+            applied: false,
+            note: None,
+        }
     }
 
     /// A one-run report of `spec` made at `secs`; the run passes when `pass`.
@@ -776,6 +919,199 @@ mod tests {
             );
         }
         assert!(!dir.path().join("experiments").exists());
+    }
+
+    #[tokio::test]
+    async fn local_guards_go_under_guards_and_never_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("reports");
+        let store = ReportStore::open(&root.display().to_string()).unwrap();
+        let r = guard("support-guard", 1_800_000_000);
+        assert_eq!(
+            store.put_guard(&r).await.unwrap(),
+            "support-guard-20270115T080000Z.json"
+        );
+        assert_eq!(
+            store.put_guard(&r).await.unwrap(),
+            "support-guard-20270115T080000Z-2.json"
+        );
+        let file = root
+            .join("guards")
+            .join("support-guard-20270115T080000Z-2.json");
+        assert_eq!(
+            GuardReport::from_json(&std::fs::read_to_string(file).unwrap()).unwrap(),
+            r
+        );
+        assert_eq!(
+            store
+                .find_guard("support-guard-20270115T080000Z.json")
+                .await
+                .unwrap(),
+            Some(r)
+        );
+    }
+
+    #[tokio::test]
+    async fn local_guard_names_are_newest_first_and_read_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = ReportStore::open(&dir.path().join("missing").display().to_string()).unwrap();
+        assert!(missing.guard_names(10).await.unwrap().is_empty());
+
+        let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+        store.put_guard(&guard("a", 1_800_000_000)).await.unwrap();
+        store.put_guard(&guard("b", 1_800_003_600)).await.unwrap();
+        store.put_guard(&guard("b", 1_800_003_600)).await.unwrap();
+        let guards = dir.path().join("guards");
+        std::fs::write(guards.join("notes.txt"), "not a report").unwrap();
+        // An unreadable guard report is still named: guard_names() opens none.
+        std::fs::write(guards.join("c-20200101T000000Z.json"), "{").unwrap();
+        assert_eq!(
+            store.guard_names(10).await.unwrap(),
+            [
+                "b-20270115T090000Z-2.json",
+                "b-20270115T090000Z.json",
+                "a-20270115T080000Z.json",
+                "c-20200101T000000Z.json",
+            ]
+        );
+        assert_eq!(
+            store.guard_names(1).await.unwrap(),
+            ["b-20270115T090000Z-2.json"]
+        );
+        assert!(store.guard_names(0).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn find_guard_is_none_when_missing_and_errs_for_bad_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+        assert_eq!(
+            store.find_guard("g-20270115T080000Z.json").await.unwrap(),
+            None
+        );
+        for bad in [
+            "../x",
+            "a.json",
+            "guards/g-20270115T080000Z.json",
+            "../g-20270115T080000Z.json",
+        ] {
+            let err = store.find_guard(bad).await.unwrap_err();
+            assert!(
+                matches!(&err, MonitorError::Store(m) if m.starts_with("invalid guard report name")),
+                "{bad}: {err}"
+            );
+        }
+        std::fs::create_dir_all(dir.path().join("guards")).unwrap();
+        std::fs::write(
+            dir.path().join("guards").join("b-20270115T080000Z.json"),
+            "{",
+        )
+        .unwrap();
+        let err = store
+            .find_guard("b-20270115T080000Z.json")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, MonitorError::Store(m) if m.starts_with("guard b-20270115T080000Z.json: ")),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn latest_applied_ramp_skips_other_reports_and_specs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+        assert_eq!(store.latest_applied_ramp("g").await.unwrap(), None);
+        // An applied ramp, then a newer applied ramp.
+        let applied = |secs: i64, q: u8| {
+            let mut r = guard("g", secs);
+            r.action = Action::Ramp(q);
+            r.applied = true;
+            r
+        };
+        store.put_guard(&applied(1_800_000_000, 10)).await.unwrap();
+        let newest = applied(1_800_003_600, 25);
+        store.put_guard(&newest).await.unwrap();
+        // Newer reports of the spec that did not apply a ramp are skipped: a held or waiting
+        // run, a dry run, an applied abort and an applied promote.
+        let mut wait = guard("g", 1_800_007_200);
+        wait.verdict = Verdict::Wait;
+        wait.action = Action::None;
+        wait.note = Some("step at 25% is 1h old (< min_step_age 1d)".into());
+        store.put_guard(&wait).await.unwrap();
+        let dry = guard("g", 1_800_010_800); // Ramp(25), not applied.
+        store.put_guard(&dry).await.unwrap();
+        for action in [Action::Abort, Action::Promote] {
+            let mut r = guard("g", 1_800_014_400);
+            r.action = action;
+            r.applied = true;
+            store.put_guard(&r).await.unwrap();
+        }
+        // Newer applied ramps of specs whose names start with `g-` do not count.
+        for spec in ["g-x", "g-20270115T090000Z"] {
+            let mut r = applied(1_800_018_000, 50);
+            r.spec = spec.into();
+            store.put_guard(&r).await.unwrap();
+        }
+        assert_eq!(store.latest_applied_ramp("g").await.unwrap(), Some(newest));
+        assert_eq!(store.latest_applied_ramp("h").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn put_guard_rejects_an_invalid_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+        for bad in ["a b", "../x", ""] {
+            let err = store
+                .put_guard(&guard(bad, 1_800_000_000))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, MonitorError::Store(m) if m.starts_with("invalid guard name")),
+                "{bad:?}: {err}"
+            );
+        }
+        assert!(!dir.path().join("guards").exists());
+    }
+
+    #[tokio::test]
+    async fn local_report_and_experiment_listings_ignore_guards() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+        store
+            .put(&report("support", 1_800_000_000, true))
+            .await
+            .unwrap();
+        let exp = store
+            .put_experiment(&experiment("exp-e2e", 1_800_000_000))
+            .await
+            .unwrap();
+        // Named like a monitor or experiment report, but under guards/.
+        let g = store
+            .put_guard(&guard("support-guard", 1_800_003_600))
+            .await
+            .unwrap();
+        assert_eq!(g, "support-guard-20270115T090000Z.json");
+        assert_eq!(
+            store.names(10).await.unwrap(),
+            ["support-20270115T080000Z.json"]
+        );
+        assert_eq!(store.list(10).await.unwrap().len(), 1);
+        assert_eq!(store.find(&g).await.unwrap(), None);
+        assert_eq!(
+            store.experiment_names(10).await.unwrap(),
+            std::slice::from_ref(&exp)
+        );
+        assert_eq!(store.find_experiment(&g).await.unwrap(), None);
+        assert_eq!(store.guard_names(10).await.unwrap(), [g]);
+        assert_eq!(store.find_guard(&exp).await.unwrap(), None);
+        assert_eq!(
+            store
+                .find_guard("support-20270115T080000Z.json")
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     #[tokio::test]

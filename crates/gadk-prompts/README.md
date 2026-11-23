@@ -29,8 +29,9 @@ let provider = registry
   `meter_provider` sets where the refresh metrics go. Without it the instruments bind to the
   global meter provider at `load()` time, so build the registry after installing telemetry
   providers, or pass `meter_provider`.
-- Feature `testsuite`: `gadk_prompts::testsuite::run` and `testsuite::run_rollouts`, the
-  `PromptStore` contract tests, for other store implementations.
+- Feature `testsuite`: `gadk_prompts::testsuite::run`, `testsuite::run_rollouts` and
+  `testsuite::run_rollout_cas`, the `PromptStore` contract tests, for other store
+  implementations.
 
 ## Prompt metrics
 
@@ -77,9 +78,31 @@ store.set_rollout("support-triage", &Label::production(), None).await?;
   line: `gadk-prompts rollout <name> --label <l> <version> --percent <p>` starts or changes a
   rollout, `--promote` moves the label to the rollout version (compare-and-set on the label
   version it read) and `--abort` removes it. The console's prompt page has the same actions.
+- Compare-and-set: `set_rollout_if(name, label, rollout, expected_version, expected_rollout)`
+  writes like `set_rollout` only while the label still points at `expected_version` and its
+  rollout still equals `expected_rollout` (version and percent; `None` = no rollout), so an
+  automated ramp never overwrites a change made since it read the store. A stale label is
+  `Conflict { expected: Some(expected_version), actual: <label version, or None when the label
+  is gone> }`; a stale rollout is `Conflict { expected: <expected rollout version>, actual:
+  <current rollout version> }` (equal versions mean the percent changed). Out-of-bounds input is
+  `Invalid` and an unknown prompt `NotFound` before either check; `set_rollout`'s other errors
+  follow them.
+
+  ```rust,ignore
+  let prod = Label::production();
+  // Ramp v4 from 10% to 50% only if production is still at v3 with v4 at 10%.
+  store
+      .set_rollout_if("support-triage", &prod, Some(Rollout::new(4, 50)?), 3, Some(Rollout::new(4, 10)?))
+      .await?;
+  ```
+- Guarded rollouts: `gadk-eval guard` (crate `gadk-eval-monitor`) compares the label's version
+  and the rollout version on production error rate, feedback, eval scorers, cost and latency,
+  and ramps, promotes or aborts the rollout with these compare-and-set writes; run it on a
+  schedule. See [Guards](../gadk-eval-monitor/README.md#guards).
 - `FileStore` keeps rollouts in the prompt's file (a `rollouts` key, written only when there is
   one) and `gadk-prompts-firestore` in the prompt document. A store that does not support
-  rollouts answers `set_rollout` with `Invalid("rollouts are not supported by this store")`.
+  rollouts answers `set_rollout` and `set_rollout_if` with
+  `Invalid("rollouts are not supported by this store")`.
 - A stored rollout outside the bounds (e.g. a hand-edited percent of 0 or 100) makes that prompt
   fail to load with a `Decode` error, and the store's writes to that prompt fail too. To fix it,
   correct or remove the `rollouts` entry by hand in the prompt's YAML file or Firestore document.

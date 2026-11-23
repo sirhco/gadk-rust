@@ -27,6 +27,12 @@
 //! [`ExperimentSpec`] describes an experiment on one Gemini LLM agent in YAML, and
 //! `gadk-eval experiment <spec.yaml> [--out <url>]` ([`cli`]) runs it without Rust code.
 //!
+//! A [`Guard`] watches a prompt rollout: it compares the label's version and the rollout
+//! version on the production signals a [`GuardSource`] reads ([`BigQueryGuardSource`]) as a
+//! [`GuardSpec`] (YAML) asks, decides to advance, abort or wait, and can write that decision to
+//! the prompt store. `gadk-eval guard <spec.yaml>` ([`cli`]) runs it on a schedule; model prices
+//! for its cost check come from a [`PriceTable`].
+//!
 //! ```no_run
 //! # async fn demo() -> Result<(), gadk_eval_monitor::MonitorError> {
 //! use gadk_eval_monitor::{
@@ -46,6 +52,7 @@
 //! ```
 
 mod error;
+mod guard_stats;
 #[cfg(test)]
 mod testutil;
 
@@ -54,8 +61,13 @@ pub mod experiment;
 pub mod experiment_spec;
 pub mod export;
 pub mod gcp;
+pub mod guard;
+pub mod guard_report;
+pub mod guard_source;
+pub mod guard_spec;
 pub mod judge;
 pub mod monitor;
+pub mod prices;
 pub mod report;
 pub mod source;
 pub mod spec;
@@ -71,10 +83,17 @@ pub use export::{
     TraceInvocation, cases_text, export_runs, run_to_case, write_set_file,
 };
 pub use gcp::{AdcTokenSource, NoAuth, TokenSource};
+pub use guard::Guard;
+pub use guard_report::{
+    Action, CheckResult, GuardReport, SideValue, Status, Unit, Verdict as GuardVerdict,
+};
+pub use guard_source::{GuardQuery, GuardSource, ModelTokens, VersionCalls, VersionFeedback};
+pub use guard_spec::{Check, FeedbackSource, GuardSpec};
 pub use judge::vertex_judge;
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
+pub use prices::{ModelPrice, PriceTable, TokenUsage};
 pub use report::{MonitorReport, MonitoredRun, Window};
-pub use source::bigquery::BigQueryTranscriptSource;
+pub use source::bigquery::{BigQueryGuardSource, BigQueryTranscriptSource};
 pub use source::cloud_trace::CloudTraceTranscriptSource;
 pub use source::{ProductionRun, TranscriptQuery, TranscriptSource};
 pub use spec::{JudgeSpec, MonitorSpec, SourceSpec};

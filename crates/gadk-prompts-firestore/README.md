@@ -46,10 +46,12 @@ costs roughly P + V reads.
 ## Testing
 
 The store's REST semantics (paths, transactions, retries, error mapping) are verified against an
-in-process fake Firestore server. `tests/live.rs` (ignored by default) runs the `PromptStore`
-contract suites (`testsuite::run` and `testsuite::run_rollouts`) against the Firestore emulator
-when `FIRESTORE_EMULATOR_HOST` is set. The store reads inside transactions with `batchGet` (the
-emulator does not answer transactional single-document GETs):
+in-process fake Firestore server, which also runs the `PromptStore` contract suites
+(`testsuite::run`, `testsuite::run_rollouts` and `testsuite::run_rollout_cas`, the last covering
+the compare-and-set `set_rollout_if`). `tests/live.rs` (ignored by default) runs the same three
+suites against the Firestore emulator when `FIRESTORE_EMULATOR_HOST` is set. The store reads
+inside transactions with `batchGet` (the emulator does not answer transactional single-document
+GETs):
 
 ```sh
 FIRESTORE_EMULATOR_HOST=localhost:8080 cargo test -p gadk-prompts-firestore --test live live_emulator_contract -- --ignored

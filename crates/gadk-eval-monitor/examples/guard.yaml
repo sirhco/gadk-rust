@@ -1,0 +1,47 @@
+# A guard spec for `gadk-eval guard` (see the Guards section of the gadk-eval-monitor README).
+#
+# It watches the rollout on the `production` label of the prompt `support/answer` and checks
+# every signal the guard knows. Replace `my-proj` with your Google Cloud project, then:
+#
+#   gadk-eval guard guard.yaml --prices prices.yaml \
+#     --out gs://my-bucket/monitors                                 # dry run
+#   gadk-eval guard guard.yaml --prices prices.yaml --apply \
+#     --out gs://my-bucket/monitors                                 # ramp, promote or abort
+#
+# `min_step_age` reads the newest stored report of this spec, so every run needs --out.
+#
+# Exit codes: 0 advance, 1 abort, 3 wait, 4 no rollout (nothing to guard), 2 error.
+name: support-answer-guard
+source:
+  bigquery: { project: my-proj, dataset: agent_analytics, table: agent_events }
+store: firestore://my-proj
+prompt: support/answer
+label: production
+window: 24h
+min_calls: 200
+# Each ramp step runs at least this long before the next advance (needs --out).
+min_step_age: 24h
+ramp: [10, 25, 50]
+checks:
+  # Failed model calls: at most 1 percentage point more than the label's version.
+  - error_rate: { max_increase: 0.01 }
+  # A bool score sent by the app: the share of `true` may drop by at most 5 points.
+  - feedback:
+      name: thumbs_up
+      source: app
+      max_decrease: 0.05
+      min_count: 50
+  # A number score from the app or the console: the mean may drop by at most 10%.
+  - feedback: { name: rating, source: any, max_decrease: 0.1 }
+  # Needs --prices; without it this check is `unknown` and the guard waits.
+  - cost_per_call: { max_increase: 0.25 }
+  - latency_p95: { max_increase: 0.3 }
+  # Production runs of each version, scored again: the pass rate may drop by at most 5 points.
+  - eval:
+      scorers:
+        - not_contains: "I cannot help"
+        - llm_judge: { rubric: "Answers the question politely and accurately.", min_score: 4 }
+      max_decrease: 0.05
+      limit: 100
+judge:
+  model: gemini-3.8-flash

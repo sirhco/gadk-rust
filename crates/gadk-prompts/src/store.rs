@@ -82,11 +82,11 @@ fn conflict_message(expected: Option<u32>, actual: Option<u32>) -> String {
 /// `remove_label` atomic with respect to each other.
 ///
 /// A store that supports rollouts overrides [`set_rollout`](Self::set_rollout),
-/// [`load_rollouts`](Self::load_rollouts) and
-/// [`load_all_with_rollouts`](Self::load_all_with_rollouts), makes `set_rollout` atomic with the
-/// other writes, removes a label's rollout in the same write whenever `set_label` or
-/// `remove_label` succeeds on that label (also when `set_label` keeps its version), and keeps
-/// every rollout in `create_version`.
+/// [`set_rollout_if`](Self::set_rollout_if), [`load_rollouts`](Self::load_rollouts) and
+/// [`load_all_with_rollouts`](Self::load_all_with_rollouts), makes `set_rollout` and
+/// `set_rollout_if` atomic with the other writes, removes a label's rollout in the same write
+/// whenever `set_label` or `remove_label` succeeds on that label (also when `set_label` keeps
+/// its version), and keeps every rollout in `create_version`.
 #[async_trait]
 pub trait PromptStore: Send + Sync {
     /// Every prompt with all its versions and labels.
@@ -158,6 +158,33 @@ pub trait PromptStore: Send + Sync {
         rollout: Option<Rollout>,
     ) -> Result<(), StoreError> {
         let _ = (name, label, rollout);
+        Err(StoreError::Invalid(UNSUPPORTED.to_owned()))
+    }
+
+    /// [`set_rollout`](Self::set_rollout) with a compare-and-set on what the caller read: the
+    /// write happens only while `label` points at `expected_version` and its rollout equals
+    /// `expected_rollout` (version and percent; `None` = no rollout). Atomic with the other
+    /// writes.
+    ///
+    /// Errors, checked in this order: `Invalid` when `rollout` is `Some` and outside
+    /// [`Rollout::new`]'s bounds; `NotFound` with an empty selector for an unknown prompt;
+    /// `Conflict { expected: Some(expected_version), actual }` when the label is missing
+    /// (`actual: None`) or points at another version (`actual` = that version);
+    /// `Conflict { expected: expected_rollout.map(|r| r.version), actual }` (`actual` = the
+    /// current rollout's version, or `None` without one) when the rollout differs, so a
+    /// percent-only difference reports equal versions; then every error of `set_rollout`.
+    ///
+    /// The default implementation returns
+    /// `Invalid("rollouts are not supported by this store")`.
+    async fn set_rollout_if(
+        &self,
+        name: &str,
+        label: &Label,
+        rollout: Option<Rollout>,
+        expected_version: u32,
+        expected_rollout: Option<Rollout>,
+    ) -> Result<(), StoreError> {
+        let _ = (name, label, rollout, expected_version, expected_rollout);
         Err(StoreError::Invalid(UNSUPPORTED.to_owned()))
     }
 }
