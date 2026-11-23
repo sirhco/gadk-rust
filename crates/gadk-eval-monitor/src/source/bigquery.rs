@@ -41,6 +41,9 @@ use crate::source::{ProductionRun, TranscriptQuery, TranscriptSource};
 use crate::spec::{is_dataset_or_table, is_project_id};
 
 mod export_queries;
+mod guard;
+
+pub use guard::BigQueryGuardSource;
 
 const ENDPOINT: &str = "https://bigquery.googleapis.com/bigquery/v2";
 

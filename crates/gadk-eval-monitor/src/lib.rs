@@ -60,6 +60,7 @@ pub mod experiment_spec;
 pub mod export;
 pub mod gcp;
 pub mod guard_report;
+pub mod guard_source;
 pub mod guard_spec;
 pub mod judge;
 pub mod monitor;
@@ -82,12 +83,13 @@ pub use gcp::{AdcTokenSource, NoAuth, TokenSource};
 pub use guard_report::{
     Action, CheckResult, GuardReport, SideValue, Status, Unit, Verdict as GuardVerdict,
 };
+pub use guard_source::{GuardQuery, GuardSource, ModelTokens, VersionCalls, VersionFeedback};
 pub use guard_spec::{Check, FeedbackSource, GuardSpec};
 pub use judge::vertex_judge;
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
 pub use prices::{ModelPrice, PriceTable, TokenUsage};
 pub use report::{MonitorReport, MonitoredRun, Window};
-pub use source::bigquery::BigQueryTranscriptSource;
+pub use source::bigquery::{BigQueryGuardSource, BigQueryTranscriptSource};
 pub use source::cloud_trace::CloudTraceTranscriptSource;
 pub use source::{ProductionRun, TranscriptQuery, TranscriptSource};
 pub use spec::{JudgeSpec, MonitorSpec, SourceSpec};

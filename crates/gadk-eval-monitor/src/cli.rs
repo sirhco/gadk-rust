@@ -54,9 +54,10 @@ use crate::experiment_spec::{AgentInstruction, ExperimentSpec};
 use crate::export::{
     ExportOptions, ExportSource, ScoreFilter, cases_text, export_runs, write_set_file,
 };
+use crate::guard_source::GuardSource;
 use crate::judge::vertex_judge;
 use crate::monitor::Monitor;
-use crate::source::bigquery::BigQueryTranscriptSource;
+use crate::source::bigquery::{BigQueryGuardSource, BigQueryTranscriptSource};
 use crate::source::cloud_trace::CloudTraceTranscriptSource;
 use crate::source::{TranscriptQuery, TranscriptSource};
 use crate::spec::{
@@ -108,6 +109,22 @@ pub trait Backends: Send + Sync {
         let _ = (project, location, name);
         Err(MonitorError::Judge(
             "models are not supported by these backends".into(),
+        ))
+    }
+
+    /// The guard data source for the agent-analytics table `project.dataset.table`, every query
+    /// capped at `max_bytes` billed (`guard`). The default refuses; [`CloudBackends`] returns a
+    /// [`BigQueryGuardSource`].
+    fn guard_source(
+        &self,
+        project: &str,
+        dataset: &str,
+        table: &str,
+        max_bytes: i64,
+    ) -> Result<Arc<dyn GuardSource>, MonitorError> {
+        let _ = (project, dataset, table, max_bytes);
+        Err(MonitorError::Source(
+            "guards are not supported by these backends".into(),
         ))
     }
 }
@@ -163,6 +180,18 @@ impl Backends for CloudBackends {
             timeout: DEFAULT_JUDGE_TIMEOUT,
         })
         .await
+    }
+
+    fn guard_source(
+        &self,
+        project: &str,
+        dataset: &str,
+        table: &str,
+        max_bytes: i64,
+    ) -> Result<Arc<dyn GuardSource>, MonitorError> {
+        Ok(Arc::new(
+            BigQueryGuardSource::new(project, dataset, table)?.with_max_bytes_billed(max_bytes),
+        ))
     }
 }
 
@@ -1576,6 +1605,17 @@ mod tests {
         assert_eq!(
             stderr,
             "gadk-eval: transcript source: export is not supported by these backends\n"
+        );
+    }
+
+    #[test]
+    fn backends_without_guard_source_refuse_it() {
+        let Err(err) = Fake::new(Vec::new()).guard_source("p", "d", "t", 1_073_741_824) else {
+            panic!("the default guard_source returned a source");
+        };
+        assert_eq!(
+            err.to_string(),
+            "transcript source: guards are not supported by these backends"
         );
     }
 
