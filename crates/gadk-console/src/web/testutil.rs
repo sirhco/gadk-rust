@@ -86,7 +86,8 @@ impl TraceSource for FakeSource {
 }
 
 /// Scripted ExportSource: the trace's invocations, the runs among `runs` that are asked for,
-/// no history and the given contexts (or the error `fail`); counts calls.
+/// no history and the given contexts (or the error `fail`); counts calls and records the
+/// `from` of each `runs` call.
 #[derive(Default)]
 pub(crate) struct FakeExport {
     pub invocations: Vec<TraceInvocation>,
@@ -94,6 +95,7 @@ pub(crate) struct FakeExport {
     pub contexts: HashMap<String, ExportContext>,
     pub fail: Option<String>,
     pub calls: AtomicUsize,
+    pub froms: Mutex<Vec<DateTime<Utc>>>,
 }
 
 impl FakeExport {
@@ -119,8 +121,9 @@ impl ExportSource for FakeExport {
     async fn runs(
         &self,
         ids: &[String],
-        _from: DateTime<Utc>,
+        from: DateTime<Utc>,
     ) -> Result<Vec<ProductionRun>, MonitorError> {
+        self.froms.lock().unwrap().push(from);
         self.call()?;
         Ok(self
             .runs

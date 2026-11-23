@@ -53,7 +53,6 @@ pub(crate) struct AppState {
     pub author: String,                             // the author of console scores
     pub datasets: Option<Arc<crate::datasets::Datasets>>, // Some with --datasets and BigQuery
     // Some with BigQuery: the conversation text of `/sessions/{id}`, or why it is unavailable.
-    #[allow(dead_code)] // read by the session page
     pub export: Option<Result<Arc<dyn gadk_eval_monitor::ExportSource>, String>>,
 }
 

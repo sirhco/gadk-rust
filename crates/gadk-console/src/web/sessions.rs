@@ -12,31 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Session routes: `/sessions` and `/users`.
+//! Session routes: `/sessions`, `/sessions/{id}` and `/users`.
+
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::routing::get;
 use chrono::{DateTime, Utc};
+use gadk_eval_monitor::ExportSource;
 use http::StatusCode;
 
 use super::AppState;
 use super::pages::error::{error_page, source_error_in};
 use super::pages::layout::{Nav, html};
+use super::pages::session::{self, Conversation};
 use super::pages::{sessions, users};
 use super::review::first;
 use crate::review::at_text;
-use crate::sessions::{MAX_ID_LEN, SessionCursor, SessionQuery, UserQuery};
+use crate::sessions::{
+    MAX_ID_LEN, SessionCursor, SessionQuery, TURN_CAP, UserQuery, is_session_id,
+};
 use crate::traces::TimeRange;
 use crate::url::percent_encode;
 
 /// The note shown by the session pages when the trace source is not BigQuery.
 pub(crate) const NEEDS_BIGQUERY_SESSIONS: &str = "Sessions need the BigQuery trace source: start the console with --traces bigquery://<project>.<dataset>.<table>.";
 
+/// The text of the 400 page for a session id that is empty, longer than 128 bytes or holds a
+/// control character.
+const INVALID_SESSION_ID: &str = "invalid session id";
+
+/// Why the session page has no conversation text when the console has no export source.
+const NO_EXPORT: &str = "the console has no transcript source";
+
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/sessions", get(list))
+        .route("/sessions/{id}", get(session_page))
         .route("/users", get(list_users))
 }
 
@@ -168,22 +183,98 @@ async fn list_users(
     }
 }
 
+/// `GET /sessions/{id}`: the session's header (its row of the sessions query), then its turns
+/// in the window (7d by default) with the conversation text from the export source. An invalid
+/// id is a 400 page; no activity is a 404 page with links; a failed query is a 502 page; a
+/// failed or missing export source is a banner on the page.
+async fn session_page(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<Vec<(String, String)>>,
+) -> Response {
+    let Some(usage) = &state.usage else {
+        return needs_bigquery();
+    };
+    if !is_session_id(&id) {
+        return bad_request(INVALID_SESSION_ID);
+    }
+    let range = range_param(&params, TimeRange::Days7);
+    let end = (state.now)();
+    let start = end - range.duration();
+    let q = SessionQuery {
+        range,
+        end,
+        user: None,
+        agent: None,
+        session: Some(id.clone()),
+        after: None,
+    };
+    let head = match usage.sessions(&q).await {
+        Ok(p) => p.sessions.into_iter().next(),
+        Err(e) => return source_error_in(Nav::Sessions, &e),
+    };
+    let Some(head) = head else {
+        return html(StatusCode::NOT_FOUND, session::render_missing(&id, range));
+    };
+    let turns = match usage.session_turns(&id, start, end).await {
+        Ok(turns) => turns,
+        Err(e) => return source_error_in(Nav::Sessions, &e),
+    };
+    let ids: Vec<String> = turns
+        .iter()
+        .take(TURN_CAP)
+        .map(|t| t.invocation_id.clone())
+        .collect();
+    let text = conversation(state.export.as_ref(), &ids, start).await;
+    html(
+        StatusCode::OK,
+        session::render(&head, range, &turns, &text, state.prices.as_deref()),
+    )
+}
+
+/// The runs of the invocations `ids` that started at or after `from`, by invocation id; the
+/// reason when the export source is missing, failed to build or fails.
+async fn conversation(
+    export: Option<&Result<Arc<dyn ExportSource>, String>>,
+    ids: &[String],
+    from: DateTime<Utc>,
+) -> Conversation {
+    match export {
+        None => Conversation::Unavailable(NO_EXPORT.to_owned()),
+        Some(Err(e)) => Conversation::Unavailable(e.clone()),
+        Some(Ok(_)) if ids.is_empty() => Conversation::Runs(HashMap::new()),
+        Some(Ok(source)) => match source.runs(ids, from).await {
+            Ok(runs) => Conversation::Runs(
+                runs.into_iter()
+                    .map(|r| (r.invocation_id.clone(), r))
+                    .collect(),
+            ),
+            Err(e) => Conversation::Unavailable(e.to_string()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
 
     use chrono::{DateTime, TimeDelta, Utc};
     use gadk_bigquery::{BigQueryClient, NoAuth};
+    use gadk_eval::{RunTranscript, TurnRecord};
+    use gadk_eval_monitor::ProductionRun;
     use http::StatusCode;
     use serde_json::json;
 
     use crate::prices::PriceTable;
-    use crate::sessions::{SESSION_FIELDS, USER_FIELDS, session_cells, user_cells};
+    use crate::sessions::{
+        SESSION_FIELDS, TurnCells, USER_FIELDS, session_cells, turn_reply, user_cells,
+    };
     use crate::traces::BigQueryTable;
     use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::usage::UsageSource;
     use crate::web::AppState;
-    use crate::web::testutil::{FakeSource, fixed_now, get, state};
+    use crate::web::testutil::{FakeExport, FakeSource, fixed_now, get, state};
 
     const ACTIVE: &str = r#"<a class="active" href="/sessions">Sessions</a>"#;
     const PRICES: &str = "- model: gemini-3.8-flash\n  input: 1\n  output: 2\n";
@@ -505,5 +596,290 @@ mod tests {
             assert!(body.contains("backend error"), "{path}: {body}");
             assert!(body.contains(ACTIVE), "{body}");
         }
+    }
+
+    /// Run `inv` of session `s-1` with one turn per `(user, reply)`, complete, no error.
+    fn run(inv: &str, turns: &[(&str, &str)]) -> ProductionRun {
+        ProductionRun {
+            invocation_id: inv.to_owned(),
+            session_id: "s-1".to_owned(),
+            trace_id: None,
+            agent: "triage".to_owned(),
+            started_at: ago(3_000),
+            transcript: RunTranscript {
+                turns: turns
+                    .iter()
+                    .map(|(user, reply)| TurnRecord {
+                        user: (*user).to_owned(),
+                        reply: (*reply).to_owned(),
+                        calls: Vec::new(),
+                    })
+                    .collect(),
+                error: None,
+            },
+            content_complete: true,
+            tools_complete: true,
+            notes: Vec::new(),
+        }
+    }
+
+    /// The sessions-query reply of session `s-1`: 9 turns, 2 errors, 1 up, 1 down and
+    /// 1,500,000 tokens of gemini-3.8-flash ($2.000000 with `PRICES`).
+    fn head_reply() -> Result<(u16, String), String> {
+        reply(
+            &SESSION_FIELDS,
+            vec![session_cells(
+                "s-1",
+                "u-1",
+                "triage",
+                ago(3_600),
+                ago(60),
+                [9, 2, 1, 1],
+                Some(("gemini-3.8-flash", [1_000_000, 0, 500_000, 0])),
+            )],
+            false,
+        )
+    }
+
+    /// Four turns: `inv-1` (completed, tools, a score, a 32-hex trace id in mixed case),
+    /// `inv-2` (no completion, an error, a trace id that is not one), `inv-3` and `inv-4`.
+    fn turns_reply() -> Result<(u16, String), String> {
+        turn_reply(vec![
+            TurnCells {
+                trace_id: Some("0123456789ABCDEF0123456789abcdef"),
+                end: Some(ago(2_998)),
+                tools: &["search", "lookup", "search"],
+                tokens: &[("gemini-3.8-flash", [1_000, 0, 200, 0])],
+                scores: &[("helpful", "console", "true")],
+                ..TurnCells::new("inv-1", ago(3_000))
+            }
+            .cells(),
+            TurnCells {
+                trace_id: Some("not-a-trace"),
+                errors: 1,
+                ..TurnCells::new("inv-2", ago(2_000))
+            }
+            .cells(),
+            TurnCells::new("inv-3", ago(1_000)).cells(),
+            TurnCells::new("inv-4", ago(500)).cells(),
+        ])
+    }
+
+    /// Runs for `inv-1` (two turns), `inv-2` (an error), `inv-4` (incomplete) and `inv-9`
+    /// (not on the page); none for `inv-3`.
+    fn export() -> Arc<FakeExport> {
+        let mut failed = run("inv-2", &[("break it", "trying")]);
+        failed.transcript.error = Some("boom <tool>".to_owned());
+        let mut partial = run("inv-4", &[("partial", "")]);
+        partial.content_complete = false;
+        partial.notes = vec!["no USER_MESSAGE_RECEIVED row".to_owned()];
+        Arc::new(FakeExport {
+            runs: vec![
+                run("inv-1", &[("hi", "hello"), ("more?", "sure")]),
+                failed,
+                partial,
+                run("inv-9", &[("other", "other")]),
+            ],
+            ..FakeExport::default()
+        })
+    }
+
+    #[tokio::test]
+    async fn without_bigquery_the_session_page_is_404_with_the_note() {
+        let (status, _, body) =
+            get(state(Arc::new(FakeSource::new()), None), "/sessions/s-1").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(
+            body.contains("Sessions need the BigQuery trace source"),
+            "{body}"
+        );
+        assert!(body.contains(ACTIVE), "{body}");
+    }
+
+    #[tokio::test]
+    async fn an_invalid_session_id_is_400_and_queries_nothing() {
+        for path in [
+            "/sessions/a%0Ab".to_owned(),
+            format!("/sessions/{}", "s".repeat(129)),
+        ] {
+            let fake = FakeHttp::new(vec![]);
+            let (status, _, body) = get(bq_state(&fake, false), &path).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+            assert!(body.contains("invalid session id"), "{path}: {body}");
+            assert!(fake.uris().is_empty(), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_session_without_activity_is_404_with_links() {
+        let fake = FakeHttp::new(vec![reply(&SESSION_FIELDS, vec![], false)]);
+        let (status, _, body) =
+            get(bq_state(&fake, false), "/sessions/a%20%3Cb%3E?range=24h").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        assert!(body.contains(ACTIVE), "{body}");
+        assert!(
+            body.contains("No activity for session a &lt;b&gt; in the last 24h."),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"<a href="/sessions/a%20%3Cb%3E?range=7d">Look in the last 7d</a>"#),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"<a href="/sessions">All sessions</a>"#),
+            "{body}"
+        );
+        assert_eq!(fake.uris().len(), 1, "the turns are not queried");
+        let sent = fake.body(0);
+        assert_eq!(
+            param_value(&sent, "session")["parameterValue"]["value"],
+            json!("a <b>")
+        );
+        assert_eq!(
+            param_value(&sent, "start")["parameterValue"]["value"],
+            json!("2026-11-15 12:00:00.000000+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_session_page_shows_the_header_totals_and_each_turn() {
+        let fake = FakeHttp::new(vec![head_reply(), turns_reply()]);
+        let ex = export();
+        let mut st = bq_state(&fake, true);
+        st.export = Some(Ok(ex.clone()));
+        let (status, _, body) = get(st, "/sessions/s-1").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(ACTIVE), "{body}");
+        assert!(body.contains("<h1>Session s-1</h1>"), "{body}");
+        for piece in [
+            r#"<a href="/traces?session=s-1&amp;range=7d">Open in traces list</a>"#,
+            "<dt>User</dt><dd>u-1</dd><dt>Agent</dt><dd>triage</dd>",
+            r#"<dt>First activity</dt><dd class="mono">2026-11-16T10:59:59.999Z</dd>"#,
+            "<dt>Turns</dt><dd>9</dd><dt>Tokens</dt><dd>1,500,000</dd><dt>Cost</dt><dd>$2.000000</dd><dt>Errors</dt><dd>2</dd><dt>👍 / 👎</dt><dd>1 / 1</dd>",
+            "<div class=\"chat-turn\"><div class=\"bubble user\">hi\n\nmore?</div><div class=\"bubble agent\">hello\n\nsure</div>",
+            r#"<p class="chat-meta"><span class="mono">2026-11-16T11:09:59.999Z</span> · latency 2,000 ms · 1,200 tokens · $0.001400 · tools: search, lookup · errors: 0 · scores: helpful=true · <a href="/traces/0123456789abcdef0123456789abcdef">trace →</a></p>"#,
+            r#"<div class="bubble user">break it</div><div class="bubble agent">trying<div class="run-error">boom &lt;tool&gt;</div></div>"#,
+            r#"<p class="chat-meta"><span class="mono">2026-11-16T11:26:39.999Z</span> · latency — · 0 tokens · — · errors: 1</p>"#,
+            r#"<div class="chat-turn"><p class="empty">(no content logged)</p><p class="chat-meta">"#,
+            r#"<div class="chat-note">content incomplete<ul><li>no USER_MESSAGE_RECEIVED row</li></ul></div>"#,
+        ] {
+            assert!(body.contains(piece), "{piece}\n{body}");
+        }
+        assert_eq!(
+            body.matches("<div class=\"chat-turn\">").count(),
+            4,
+            "{body}"
+        );
+        assert_eq!(body.matches("(no content logged)").count(), 1, "{body}");
+        assert!(!body.contains("other"), "only the page's runs: {body}");
+        assert!(!body.contains("unavailable"), "{body}");
+        let order: Vec<usize> = [
+            "hello",
+            "trying",
+            "(no content logged)",
+            "content incomplete",
+        ]
+        .iter()
+        .map(|s| body.find(s).unwrap())
+        .collect();
+        assert!(
+            order.windows(2).all(|w| w[0] < w[1]),
+            "oldest first: {body}"
+        );
+        assert_eq!(ex.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *ex.froms.lock().unwrap(),
+            vec![fixed_now() - TimeDelta::days(7)],
+            "runs from the window start"
+        );
+        let turns = fake.body(1);
+        assert_eq!(
+            param_value(&turns, "session")["parameterValue"]["value"],
+            json!("s-1")
+        );
+        assert_eq!(
+            param_value(&turns, "start")["parameterValue"]["value"],
+            json!("2026-11-09 12:00:00.000000+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_runs_call_keeps_the_meta_lines_under_a_banner() {
+        let fake = FakeHttp::new(vec![head_reply(), turns_reply()]);
+        let ex = Arc::new(FakeExport {
+            fail: Some("quota exceeded".to_owned()),
+            ..FakeExport::default()
+        });
+        let mut st = bq_state(&fake, false);
+        st.export = Some(Ok(ex.clone()));
+        let (status, _, body) = get(st, "/sessions/s-1").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(
+            body.contains(r#"<div class="banner error"><p>Conversation text unavailable: transcript source: quota exceeded</p></div>"#),
+            "{body}"
+        );
+        assert_eq!(body.matches("<p class=\"chat-meta\">").count(), 4, "{body}");
+        assert!(!body.contains("bubble"), "{body}");
+        assert!(!body.contains("(no content logged)"), "{body}");
+        assert_eq!(ex.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn an_export_build_error_is_the_banner_without_a_runs_call() {
+        let fake = FakeHttp::new(vec![head_reply(), turns_reply()]);
+        let mut st = bq_state(&fake, false);
+        st.export = Some(Err(
+            "transcript source: Application Default Credentials: none".to_owned(),
+        ));
+        let (status, _, body) = get(st, "/sessions/s-1").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(
+            body.contains("Conversation text unavailable: transcript source: Application Default Credentials: none"),
+            "{body}"
+        );
+        assert_eq!(body.matches("<p class=\"chat-meta\">").count(), 4, "{body}");
+        assert_eq!(fake.uris().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn more_than_two_hundred_turns_show_the_first_two_hundred() {
+        let ids: Vec<String> = (0..201).map(|i| format!("inv-{i:03}")).collect();
+        let rows = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| TurnCells::new(id, ago(3_000 - i as i64)).cells())
+            .collect();
+        let fake = FakeHttp::new(vec![head_reply(), turn_reply(rows)]);
+        let ex = Arc::new(FakeExport::default());
+        let mut st = bq_state(&fake, false);
+        st.export = Some(Ok(ex.clone()));
+        let (status, _, body) = get(st, "/sessions/s-1").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(
+            body.contains(r#"<p class="empty">showing the first 200 turns</p>"#),
+            "{body}"
+        );
+        assert_eq!(
+            body.matches("<div class=\"chat-turn\">").count(),
+            200,
+            "{body}"
+        );
+        assert_eq!(
+            param_value(&fake.body(1), "limit")["parameterValue"]["value"],
+            json!("201")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_session_query_is_a_502_page() {
+        let fake = FakeHttp::new(vec![failed()]);
+        let (status, _, body) = get(bq_state(&fake, false), "/sessions/s-1").await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+        assert!(body.contains("backend error"), "{body}");
+
+        let fake = FakeHttp::new(vec![head_reply(), failed()]);
+        let (status, _, body) = get(bq_state(&fake, false), "/sessions/s-1").await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+        assert!(body.contains(ACTIVE), "{body}");
     }
 }

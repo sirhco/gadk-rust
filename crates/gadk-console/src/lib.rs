@@ -40,7 +40,6 @@ mod prices;
 mod prompts;
 mod review;
 mod scores;
-#[allow(dead_code)] // used by the session pages
 mod sessions;
 pub mod traces;
 mod url;
