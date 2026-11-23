@@ -370,42 +370,89 @@ impl PromptStore for FileStore {
         }
         let (name_s, label) = (name.to_owned(), label.clone());
         self.locked(name, move |_, current| {
-            let mut doc = current.ok_or_else(|| StoreError::NotFound {
+            let doc = current.ok_or_else(|| StoreError::NotFound {
                 name: name_s.clone(),
                 selector: String::new(),
             })?;
-            let Some(&at) = doc.labels.get(&label) else {
-                return Err(StoreError::NotFound {
-                    name: name_s,
-                    selector: label.to_string(),
-                });
-            };
-            match rollout {
-                None => {
-                    if doc.rollouts.remove(&label).is_none() {
-                        return Ok((None, ()));
-                    }
-                }
-                Some(r) => {
-                    if !doc.versions.iter().any(|v| v.version == r.version) {
-                        return Err(StoreError::NotFound {
-                            name: name_s,
-                            selector: format!("v{}", r.version),
-                        });
-                    }
-                    if r.version == at {
-                        return Err(StoreError::Invalid(format!(
-                            "rollout version v{} is already the version of label {label}",
-                            r.version
-                        )));
-                    }
-                    doc.rollouts.insert(label, r);
-                }
-            }
-            Ok((Some(doc), ()))
+            apply_rollout(doc, name_s, label, rollout)
         })
         .await
     }
+
+    async fn set_rollout_if(
+        &self,
+        name: &str,
+        label: &Label,
+        rollout: Option<Rollout>,
+        expected_version: u32,
+        expected_rollout: Option<Rollout>,
+    ) -> Result<(), StoreError> {
+        if let Some(r) = rollout {
+            Rollout::new(r.version, r.percent)?;
+        }
+        let (name_s, label) = (name.to_owned(), label.clone());
+        self.locked(name, move |_, current| {
+            let doc = current.ok_or_else(|| StoreError::NotFound {
+                name: name_s.clone(),
+                selector: String::new(),
+            })?;
+            let at = doc.labels.get(&label).copied();
+            if at != Some(expected_version) {
+                return Err(StoreError::Conflict {
+                    expected: Some(expected_version),
+                    actual: at,
+                });
+            }
+            let current_rollout = doc.rollouts.get(&label).copied();
+            if current_rollout != expected_rollout {
+                return Err(StoreError::Conflict {
+                    expected: expected_rollout.map(|r| r.version),
+                    actual: current_rollout.map(|r| r.version),
+                });
+            }
+            apply_rollout(doc, name_s, label, rollout)
+        })
+        .await
+    }
+}
+
+/// `set_rollout`'s checks and change on the prompt document `doc` (read under its lock):
+/// returns the document to write, or `None` when there is nothing to write.
+fn apply_rollout(
+    mut doc: PromptFile,
+    name: String,
+    label: Label,
+    rollout: Option<Rollout>,
+) -> Result<(Option<PromptFile>, ()), StoreError> {
+    let Some(&at) = doc.labels.get(&label) else {
+        return Err(StoreError::NotFound {
+            name,
+            selector: label.to_string(),
+        });
+    };
+    match rollout {
+        None => {
+            if doc.rollouts.remove(&label).is_none() {
+                return Ok((None, ()));
+            }
+        }
+        Some(r) => {
+            if !doc.versions.iter().any(|v| v.version == r.version) {
+                return Err(StoreError::NotFound {
+                    name,
+                    selector: format!("v{}", r.version),
+                });
+            }
+            if r.version == at {
+                return Err(StoreError::Invalid(format!(
+                    "rollout version v{} is already the version of label {label}",
+                    r.version
+                )));
+            }
+            doc.rollouts.insert(label, r);
+        }
+    }
+    Ok((Some(doc), ()))
 }
 
 #[cfg(test)]

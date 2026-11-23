@@ -111,3 +111,44 @@ async fn store_contract_file_store_rollouts() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn set_rollout_if_default_is_unsupported() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = DefaultsOnly(FileStore::new(dir.path()));
+    s.create_version(NewVersion {
+        name: "p".into(),
+        template: "a".into(),
+        config: None,
+        author: String::new(),
+        message: String::new(),
+    })
+    .await
+    .unwrap();
+    let prod = Label::production();
+    s.set_label("p", &prod, 1, None).await.unwrap();
+    let unsupported = Err(StoreError::Invalid(
+        "rollouts are not supported by this store".into(),
+    ));
+    let r = Rollout::new(1, 10).unwrap();
+    assert_eq!(
+        s.set_rollout_if("p", &prod, Some(r), 1, None).await,
+        unsupported
+    );
+    assert_eq!(
+        s.set_rollout_if("p", &prod, None, 1, Some(r)).await,
+        unsupported
+    );
+}
+
+#[tokio::test]
+async fn store_contract_file_store_rollout_cas() {
+    let dirs = std::sync::Mutex::new(Vec::new());
+    gadk_prompts::testsuite::run_rollout_cas(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let store: Arc<dyn PromptStore> = Arc::new(FileStore::new(dir.path()));
+        dirs.lock().unwrap().push(dir); // keep alive for the whole run
+        async move { store }
+    })
+    .await;
+}

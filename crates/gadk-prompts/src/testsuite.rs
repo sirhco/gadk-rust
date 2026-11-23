@@ -14,7 +14,7 @@
 
 //! Contract tests every [`PromptStore`] must pass. Enabled by the `testsuite` feature; call
 //! [`run`] from a store's tests with a factory that builds a fresh, empty store, and also
-//! [`run_rollouts`] when the store supports rollouts.
+//! [`run_rollouts`] and [`run_rollout_cas`] when the store supports rollouts.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -67,6 +67,17 @@ where
     Fut: Future<Output = Arc<dyn PromptStore>>,
 {
     rollouts(factory().await).await;
+}
+
+/// Runs the compare-and-set rollout scenario ([`PromptStore::set_rollout_if`]) against a fresh
+/// store from `factory` (for stores that support rollouts); panics with
+/// `prompts testsuite/rollout_cas: <message>` on the first failure.
+pub async fn run_rollout_cas<F, Fut>(factory: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Arc<dyn PromptStore>>,
+{
+    rollout_cas(factory().await).await;
 }
 
 async fn versions_and_noop(s: Arc<dyn PromptStore>) {
@@ -413,4 +424,173 @@ async fn rollouts(s: Arc<dyn PromptStore>) {
         "final labels {:?}",
         snap.prompts["p"].labels
     );
+}
+
+async fn rollout_cas(s: Arc<dyn PromptStore>) {
+    let c = "rollout_cas";
+    for t in ["a", "b", "c"] {
+        s.create_version(new("p", t)).await.unwrap();
+    }
+    let (prod, staging) = (Label::production(), Label::staging());
+    s.set_label("p", &prod, 1, None).await.unwrap();
+    let not_found = |name: &str, selector: &str| {
+        Err(StoreError::NotFound {
+            name: name.into(),
+            selector: selector.into(),
+        })
+    };
+    let conflict = |expected, actual| Err(StoreError::Conflict { expected, actual });
+
+    // Errors, in order: bounds, unknown prompt, label, rollout, then set_rollout's own.
+    for bad in [raw(2, 0), raw(2, 100), raw(0, 10)] {
+        let r = s.set_rollout_if("nope", &prod, Some(bad), 9, None).await;
+        check!(
+            matches!(r, Err(StoreError::Invalid(_))),
+            c,
+            "out of bounds {bad:?}: {r:?}"
+        );
+    }
+    let r = s
+        .set_rollout_if("nope", &prod, Some(raw(2, 10)), 9, None)
+        .await;
+    check!(r == not_found("nope", ""), c, "unknown prompt {r:?}");
+    let r = s.set_rollout_if("nope", &prod, None, 9, None).await;
+    check!(
+        r == not_found("nope", ""),
+        c,
+        "remove, unknown prompt {r:?}"
+    );
+    let r = s
+        .set_rollout_if("p", &staging, Some(raw(2, 10)), 1, None)
+        .await;
+    check!(r == conflict(Some(1), None), c, "missing label {r:?}");
+    let r = s.set_rollout_if("p", &staging, None, 1, None).await;
+    check!(
+        r == conflict(Some(1), None),
+        c,
+        "remove, missing label {r:?}"
+    );
+    let r = s
+        .set_rollout_if("p", &prod, Some(raw(2, 10)), 2, Some(raw(2, 10)))
+        .await;
+    check!(r == conflict(Some(2), Some(1)), c, "label moved {r:?}");
+    let r = s
+        .set_rollout_if("p", &prod, Some(raw(2, 10)), 1, Some(raw(2, 10)))
+        .await;
+    check!(
+        r == conflict(Some(2), None),
+        c,
+        "expected a rollout, found none {r:?}"
+    );
+    let r = s
+        .set_rollout_if("p", &prod, Some(raw(9, 10)), 1, None)
+        .await;
+    check!(r == not_found("p", "v9"), c, "unknown version {r:?}");
+    let r = s
+        .set_rollout_if("p", &prod, Some(raw(1, 10)), 1, None)
+        .await;
+    check!(
+        matches!(r, Err(StoreError::Invalid(_))),
+        c,
+        "label's own version {r:?}"
+    );
+    let r = s.set_rollout_if("p", &prod, None, 1, None).await;
+    check!(r == Ok(()), c, "remove without a rollout {r:?}");
+    let got = s.load_rollouts().await.unwrap();
+    check!(got.is_empty(), c, "after errors: {got:?}");
+
+    // Start, then ramp.
+    s.set_rollout_if("p", &prod, Some(raw(2, 10)), 1, None)
+        .await
+        .unwrap();
+    let got = s.load_rollouts().await.unwrap();
+    check!(
+        got.get("p", &prod) == Some(&raw(2, 10)),
+        c,
+        "started: {got:?}"
+    );
+    s.set_rollout_if("p", &prod, Some(raw(2, 50)), 1, Some(raw(2, 10)))
+        .await
+        .unwrap();
+    let got = s.load_rollouts().await.unwrap();
+    check!(
+        got.get("p", &prod) == Some(&raw(2, 50)),
+        c,
+        "ramped: {got:?}"
+    );
+
+    // A stale expected rollout writes nothing: percent, version, or none expected.
+    let r = s
+        .set_rollout_if("p", &prod, Some(raw(2, 90)), 1, Some(raw(2, 10)))
+        .await;
+    check!(r == conflict(Some(2), Some(2)), c, "stale percent {r:?}");
+    let r = s
+        .set_rollout_if("p", &prod, Some(raw(3, 90)), 1, Some(raw(3, 50)))
+        .await;
+    check!(r == conflict(Some(3), Some(2)), c, "stale version {r:?}");
+    let r = s
+        .set_rollout_if("p", &prod, Some(raw(3, 10)), 1, None)
+        .await;
+    check!(
+        r == conflict(None, Some(2)),
+        c,
+        "expected none, found one {r:?}"
+    );
+    let r = s.set_rollout_if("p", &prod, None, 1, None).await;
+    check!(
+        r == conflict(None, Some(2)),
+        c,
+        "remove, expected none {r:?}"
+    );
+    let got = s.load_rollouts().await.unwrap();
+    check!(
+        got.get("p", &prod) == Some(&raw(2, 50)),
+        c,
+        "after stale writes: {got:?}"
+    );
+
+    // Remove; a second remove with the same expectation finds it gone.
+    s.set_rollout_if("p", &prod, None, 1, Some(raw(2, 50)))
+        .await
+        .unwrap();
+    let got = s.load_rollouts().await.unwrap();
+    check!(got.is_empty(), c, "after remove: {got:?}");
+    let r = s
+        .set_rollout_if("p", &prod, None, 1, Some(raw(2, 50)))
+        .await;
+    check!(r == conflict(Some(2), None), c, "removed meanwhile {r:?}");
+
+    // The label moved meanwhile (which also cleared its rollout).
+    s.set_rollout_if("p", &prod, Some(raw(2, 10)), 1, None)
+        .await
+        .unwrap();
+    s.set_label("p", &prod, 3, Some(Some(1))).await.unwrap();
+    let r = s
+        .set_rollout_if("p", &prod, Some(raw(2, 20)), 1, Some(raw(2, 10)))
+        .await;
+    check!(r == conflict(Some(1), Some(3)), c, "label moved {r:?}");
+
+    // The label was removed meanwhile.
+    s.remove_label("p", &prod).await.unwrap();
+    let r = s
+        .set_rollout_if("p", &prod, Some(raw(2, 20)), 3, None)
+        .await;
+    check!(r == conflict(Some(3), None), c, "label removed {r:?}");
+
+    // Other labels keep their rollouts.
+    s.set_label("p", &staging, 1, None).await.unwrap();
+    s.set_label("p", &prod, 1, None).await.unwrap();
+    s.set_rollout_if("p", &staging, Some(raw(3, 30)), 1, None)
+        .await
+        .unwrap();
+    s.set_rollout_if("p", &prod, Some(raw(2, 10)), 1, None)
+        .await
+        .unwrap();
+    s.set_rollout_if("p", &prod, None, 1, Some(raw(2, 10)))
+        .await
+        .unwrap();
+    let mut want = RolloutSnapshot::default();
+    want.insert("p", staging.clone(), raw(3, 30));
+    let got = s.load_rollouts().await.unwrap();
+    check!(got == want, c, "final rollouts: {got:?}");
 }
