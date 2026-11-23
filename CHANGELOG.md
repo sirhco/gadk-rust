@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-11-22
+
 ### Added
 
 - `gadk-eval-monitor`: rollout guards. `gadk-eval guard <spec.yaml> [--apply] [--prices <file>]
@@ -701,7 +703,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/sirhco/gadk-rust/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/sirhco/gadk-rust/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/sirhco/gadk-rust/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/sirhco/gadk-rust/compare/v0.5.0...v0.5.1
