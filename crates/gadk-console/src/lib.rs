@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! A local web console for gadk: stored traces from Cloud Trace and Cloud Logging, the prompt
-//! registry, and the reports of gadk-eval-monitor monitors.
+//! registry, and the reports of gadk-eval-monitor monitors, experiments and rollout guards.
 
 use std::fmt::Write as _;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -54,8 +54,8 @@ pub struct ConsoleConfig {
     pub project: String,
     /// Prompt store URL (`file://…` or `firestore://…`); `None` disables the prompt pages.
     pub store: Option<String>,
-    /// Monitor report store URL (`file://…`, a directory or `gs://…`); `None` disables the Evals
-    /// pages.
+    /// Monitor report store URL (`file://…`, a directory or `gs://…`); `None` disables the Evals,
+    /// Experiments and Guards pages.
     pub reports: Option<String>,
     /// Loopback port; 0 picks a free one.
     pub port: u16,

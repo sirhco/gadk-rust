@@ -202,6 +202,7 @@ fn detail_page(
             &state.csrf,
             error,
             metrics,
+            state.guards.is_some(),
         ),
     )
 }
@@ -621,7 +622,7 @@ mod tests {
     use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{CSRF, FakeSource, get, post_form, state};
-    use crate::web::testutil::{fixed_now, report, report_cache, state_with_reports};
+    use crate::web::testutil::{fixed_now, guard_cache, report, report_cache, state_with_reports};
     use gadk_bigquery::{BigQueryClient, NoAuth};
     use gadk_eval::Outcome;
     use serde_json::Value;
@@ -787,6 +788,30 @@ mod tests {
         );
         // No ?v= selects the latest version.
         assert!(body.contains("Hello {{name}}!"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn detail_links_the_guard_history_when_a_report_store_is_configured() {
+        let (_dir, store) = seeded().await;
+        let (_reports, guards, _) = guard_cache(&[], 4).await;
+        let mut with_guards = st(&store);
+        with_guards.guards = Some(guards);
+        for (name, href) in [
+            ("greet", "/guards?prompt=greet"),
+            ("team%2Fgreet", "/guards?prompt=team%2Fgreet"),
+            // `summarize` has no labels: the link follows `No labels.`.
+            ("summarize", "/guards?prompt=summarize"),
+        ] {
+            let path = format!("/prompts/{name}");
+            let (status, _, body) = get(with_guards.clone(), &path).await;
+            assert_eq!(status, StatusCode::OK, "{path}");
+            assert!(
+                body.contains(&format!(r#"<p><a href="{href}">guard history</a></p>"#)),
+                "{path}: {body}"
+            );
+            let (_, _, body) = get(st(&store), &path).await;
+            assert!(!body.contains("guard history"), "{path}: {body}");
+        }
     }
 
     #[tokio::test]

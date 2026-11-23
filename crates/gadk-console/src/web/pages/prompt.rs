@@ -337,7 +337,8 @@ fn metrics_section(base: &str, m: &ProductionMetrics) -> Markup {
 /// The prompt detail page: version history, diff picker, the selected version, the diff,
 /// and the label and rollout forms, and, when given, the production metrics after the diff
 /// picker.
-/// `error` (an `error::banner`) is shown under the heading.
+/// `error` (an `error::banner`) is shown under the heading. With `guards` (a report store is
+/// configured), a `guard history` link to `/guards?prompt=<name>` follows the labels.
 pub(crate) fn render(
     d: &PromptDetail,
     view: Option<&VersionView>,
@@ -345,6 +346,7 @@ pub(crate) fn render(
     csrf: &str,
     error: Option<Markup>,
     metrics: Option<&ProductionMetrics>,
+    guards: bool,
 ) -> Markup {
     let base = href(&d.name);
     let labels_action = format!("{base}/labels");
@@ -517,6 +519,10 @@ pub(crate) fn render(
             }
         }
 
+        @if guards {
+            p { a href={ "/guards?prompt=" (percent_encode(&d.name)) } { "guard history" } }
+        }
+
         h3 { "New label" }
         form method="post" action=(labels_action) data-confirm="Set this label?" class="inline" {
             (csrf_field(csrf))
@@ -530,4 +536,60 @@ pub(crate) fn render(
         }
     };
     page(&d.name, Nav::Prompts, body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render;
+    use crate::prompts::{PromptDetail, VersionRow};
+    use crate::web::testutil::{CSRF, fixed_now};
+
+    /// Prompt `a b` with one version and the given labels (at v1).
+    fn detail(labels: &[&str]) -> PromptDetail {
+        PromptDetail {
+            name: "a b".to_owned(),
+            latest: 1,
+            versions: vec![VersionRow {
+                version: 1,
+                labels: labels.iter().map(|l| (*l).to_owned()).collect(),
+                rollouts: Vec::new(),
+                created_at: fixed_now(),
+                author: "chris".to_owned(),
+                message: "first".to_owned(),
+                hash: "0123456789abcdef".to_owned(),
+            }],
+            labels: labels.iter().map(|l| ((*l).to_owned(), 1)).collect(),
+            rollouts: Vec::new(),
+        }
+    }
+
+    const LINK: &str = r#"<p><a href="/guards?prompt=a%20b">guard history</a></p>"#;
+
+    #[test]
+    fn with_guards_the_labels_are_followed_by_the_guard_history_link() {
+        let out =
+            render(&detail(&["production"]), None, None, CSRF, None, None, true).into_string();
+        let table_end = out.rfind("</tbody></table>").expect(&out);
+        let link = out.find(LINK).expect(&out);
+        let new_label = out.find("<h3>New label</h3>").expect(&out);
+        assert!(table_end < link && link < new_label, "{out}");
+    }
+
+    #[test]
+    fn without_labels_the_link_follows_no_labels() {
+        let out = render(&detail(&[]), None, None, CSRF, None, None, true).into_string();
+        assert!(
+            out.contains(&format!(r#"<p class="empty">No labels.</p>{LINK}"#)),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn without_guards_there_is_no_link() {
+        for labels in [&["production"][..], &[]] {
+            let out = render(&detail(labels), None, None, CSRF, None, None, false).into_string();
+            assert!(!out.contains("guard history"), "{out}");
+            assert!(!out.contains("/guards?"), "{out}");
+        }
+    }
 }

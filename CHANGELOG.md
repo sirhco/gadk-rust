@@ -7,6 +7,19 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-console`: Guards pages for the reports `gadk-eval guard --out` stores under `guards/` of
+  the `--reports` store. `/guards` shows one card per rollout (prompt, label, baseline and
+  rollout version) with its latest verdict, action and percent, its report and applied counts
+  and its applied-step timeline (`50% → ramped 75% → aborted`), then a table of the newest 100
+  reports; `?prompt=<name>` limits it to one prompt. `/guards/{report}` shows one report's
+  checks (values, harm, interval and a status badge), verdict, note and action. A Guards tab
+  follows Experiments, and with `--reports` the prompt page links its "guard history". The
+  pages are read-only.
+- `gadk-eval-monitor`: `Unit::format_value`, `Unit::format_harm` and `GuardReport::action_text`,
+  the formatters `GuardReport::summary` uses, for printing guard reports elsewhere.
+
 ## [0.5.4] - 2026-11-22
 
 ### Added

@@ -3,7 +3,8 @@
 `gadk-console`, a local web console for gadk agents. It shows the traces your agents exported
 to Cloud Trace, with each span's Cloud Logging entries attached, and it browses the
 `gadk-prompts` registry: versions, diffs and labels. With `--reports`, it also shows the reports
-of `gadk-eval-monitor` monitors and compares the variants of its experiments. With a price file
+of `gadk-eval-monitor` monitors, compares the variants of its experiments and shows the decisions
+of its rollout guards. With a price file
 (`--prices`) it prices token counts. With
 the BigQuery trace source it also shows usage and cost by model, agent, prompt version and
 trace, lists and adds scores, and, with `--datasets`, adds a trace's runs to an eval set. It
@@ -24,7 +25,7 @@ The console prints its URL and serves until you stop it (Ctrl-C).
 |---|---|---|
 | `--project <p>` | required | GCP project whose traces and logs are read |
 | `--store <url>` | none | Prompt store: `file://<dir>` or `firestore://<project>/<database>[/<root>]`. Without it the prompt pages say "no store configured" and the label and rollout routes return 404. |
-| `--reports <url>` | none | Monitor report store: `file://<dir>`, a directory, or `gs://<bucket>[/<prefix>]` (the `--out` of `gadk-eval monitor`, or the `<url>` of `gadk-eval report`). Experiments are read from its `experiments/`. Without it the Evals and Experiments pages answer 404 "no report store configured". |
+| `--reports <url>` | none | Monitor report store: `file://<dir>`, a directory, or `gs://<bucket>[/<prefix>]` (the `--out` of `gadk-eval monitor`, or the `<url>` of `gadk-eval report`). Experiments are read from its `experiments/` and guard reports from its `guards/` (the `--out` of `gadk-eval guard`). Without it the Evals, Experiments and Guards pages answer 404 "no report store configured". |
 | `--port <n>` | `8765` | Port on 127.0.0.1; `0` picks a free one (the printed URL shows it) |
 | `--log-id <id>` | `gadk` | Cloud Logging log id the agents write (`with_cloud_log_name` in `gadk-telemetry`) |
 | `--prices <file>` | none | Price file (YAML, USD per 1,000,000 tokens per model). Without it, cost cells show `—`; token counts still show. See [Usage and cost](#usage-and-cost). |
@@ -65,11 +66,13 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/traces` | Traces, newest first, 50 per page. Filters: time range (`1h`, `6h`, `24h`, `7d`), root span name prefix, agent (`gen_ai.agent.name`), session (`gen_ai.conversation.id`). |
 | `/traces/{id}` | The span waterfall (tree order, indented by depth). Selecting a span shows its labels and the log entries whose `spanId` matches it; entries matching no span are listed as "unattached". A `render_prompt …` span with `prompt.name` and `prompt.version` links to that prompt version. A trace that ended less than 2 minutes ago notes that logs may still be arriving. Model calls (spans whose `gen_ai.operation.name` is `generate_content`) are listed with their tokens and cost, plus totals. With the BigQuery source a Scores section lists the trace's scores and a form adds one ([Scores](#scores)). With `--datasets`, an "Add to dataset" form adds its runs to an eval set ([Datasets](#datasets)). |
 | `/prompts` | Every prompt in the store: latest version, labels and when the latest version was created. |
-| `/prompts/{name}` | All versions (newest first) with their labels and rollouts (a `production 10%` chip on the rollout version); `?v=<n>` shows a version's template and config, `?a=<n>&b=<m>` diffs two versions. Forms set, move and remove labels, conditional on the label not having changed since the page was rendered (a stale page gets 409). The Labels table's Rollout column shows each label's rollout (`v4 at 10%`, or `—`); a label without one has a Start rollout form (version and percent), a label with one has forms to change the percent, promote (move the label to the rollout version, which ends the rollout; 409 if the label moved since the page was rendered) and abort. "Production metrics" (BigQuery source, `?range=`, default `7d`): calls, mean tokens and cost, p50/p95 latency and, with `--reports`, eval pass rate per version, then a Feedback table of the scores per version. |
+| `/prompts/{name}` | All versions (newest first) with their labels and rollouts (a `production 10%` chip on the rollout version); `?v=<n>` shows a version's template and config, `?a=<n>&b=<m>` diffs two versions. Forms set, move and remove labels, conditional on the label not having changed since the page was rendered (a stale page gets 409). The Labels table's Rollout column shows each label's rollout (`v4 at 10%`, or `—`); a label without one has a Start rollout form (version and percent), a label with one has forms to change the percent, promote (move the label to the rollout version, which ends the rollout; 409 if the label moved since the page was rendered) and abort. "Production metrics" (BigQuery source, `?range=`, default `7d`): calls, mean tokens and cost, p50/p95 latency and, with `--reports`, eval pass rate per version, then a Feedback table of the scores per version. With `--reports`, a "guard history" link under the Labels table opens `/guards?prompt=<name>`. |
 | `/evals` | The newest 100 monitor reports: a card per monitor (latest pass rate, errors, and a pass-rate trend over its listed reports), then a table of reports. `?spec=<name>` shows only that monitor's newest 100. Reports are read once and kept in memory (up to 256, and at most 20,000 runs in all), so the first load of a `gs://` store can take a while. |
 | `/evals/{report}` | One report: window, source, runs, pass rate and errors, then one row per run with a chip per scorer. Expanding a run shows each score's outcome, judge score and rationale, the run error, notes on incomplete transcripts, and the transcript with tool calls; runs that recorded a trace id link to `/traces/{id}`. |
 | `/experiments` | The newest 100 experiments in the `--reports` store (its `experiments/`), newest first: name (linking to the comparison), eval set, when it was generated, and each variant's name and pass rate. Experiments are read once and kept in memory (up to 256, and at most 20,000 runs in all). |
 | `/experiments/{report}` | One experiment, with a column per variant (the first is the baseline): prompt, model (only when a variant records one), runs, pass rate and its difference from the baseline in percentage points, mean judge score, errors, p50 and p95 duration, input, output, cached and reasoning tokens, and cost. Then the cases where the variants disagree, each with every variant's verdict and, expanded, every run's last reply, run error and score rationales; `?cases=all` lists every case. See [Experiments](#experiments). |
+| `/guards` | The newest 100 guard reports in the `--reports` store (its `guards/`): a card per rollout (prompt, label, baseline and rollout version, linking to the prompt) with its latest verdict, action and percent, how many reports it has and how many applied their action, and its timeline; then a table of the reports, newest first. `?prompt=<name>` shows only that prompt's rollouts. See [Guards](#guards). |
+| `/guards/{report}` | One guard report: the rollout and its percent, window, source and when it was made, then one row per check (baseline and rollout values with their sample sizes, harm, the interval of the harm, and a status badge with its reason), the verdict, the note and the action, marked `applied` or `dry run`. |
 | `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`): totals, then LLM calls, tokens and cost by model, by agent and by prompt version, and the 20 traces with the most tokens. |
 
 ## Evals
@@ -105,6 +108,28 @@ Nothing on these pages runs an experiment or changes the store.
   price, cost shows `—`.
 - An invalid report name answers 400, an unknown one 404, and a stored file that does not parse
   502 (on its page and on `/experiments`).
+
+## Guards
+
+The Guards pages are read-only views of the reports `gadk-eval guard --out <url>` writes under
+`guards/` (see [Guards](../gadk-eval-monitor/README.md#guards) in the `gadk-eval-monitor`
+README); start the console with the same URL as `--reports`. Nothing on these pages runs a guard
+or applies a decision.
+
+- A rollout is the reports that share a prompt, label, baseline version and rollout version.
+  Cards are ordered by each rollout's newest report. A rollout that was aborted and later
+  restarted with the same versions shares one card, and its timeline shows both runs.
+- The timeline starts at the oldest report's percent and adds one step per report that applied
+  its action, oldest first: `50% → ramped 75% → promoted v2`, or `… → aborted`. Dry runs add no
+  step.
+- Values print as `gadk-eval guard` prints them: rates as percents with their harm in
+  percentage points (`+0.20pt`), other values with a relative harm (`+12.0%`), and `—` where
+  there is no value.
+- `?prompt=` filters the newest 100 guard reports, so a prompt whose reports are all older shows
+  "No guard runs yet".
+- An invalid report name answers 400, an unknown one 404, and a stored file that does not parse
+  502 (on its page and on `/guards`).
+- Guard reports are read once and kept in memory (up to 256).
 
 ## Security model
 
