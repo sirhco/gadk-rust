@@ -32,6 +32,7 @@ mod guards;
 pub(crate) mod pages;
 mod prompts;
 mod review;
+mod sessions;
 #[cfg(test)]
 pub(crate) mod testutil;
 mod traces;
@@ -62,8 +63,9 @@ const WATERFALL_JS: &str = include_str!("assets/waterfall.js");
 /// GET / → 303 /traces; GET /assets/console.css and /assets/waterfall.js (include_str!, with
 /// text/css and text/javascript; charset=utf-8 content types); merges traces::routes(),
 /// prompts::routes(), evals::routes(), experiments::routes(), guards::routes(),
-/// review::routes() and usage::routes(); wraps everything in guard::layer (Host 421, POST
-/// Origin 403) and adds the CSP header to every response; unknown paths → error page 404.
+/// review::routes(), sessions::routes() and usage::routes(); wraps everything in guard::layer
+/// (Host 421, POST Origin 403) and adds the CSP header to every response; unknown paths → error
+/// page 404.
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(root))
@@ -75,6 +77,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .merge(experiments::routes())
         .merge(guards::routes())
         .merge(review::routes())
+        .merge(sessions::routes())
         .merge(usage::routes())
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(state.clone(), guard::check))
