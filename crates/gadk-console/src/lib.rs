@@ -38,7 +38,6 @@ mod guards;
 mod model;
 mod prices;
 mod prompts;
-#[allow(dead_code)] // until the review routes use the queue
 mod review;
 mod scores;
 pub mod traces;
