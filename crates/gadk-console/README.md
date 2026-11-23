@@ -1,15 +1,13 @@
 # gadk-console
 
-`gadk-console`, a local web console for gadk agents. It shows the traces your agents exported
-to Cloud Trace, with each span's Cloud Logging entries attached, and it browses the
-`gadk-prompts` registry: versions, diffs and labels. With `--reports`, it also shows the reports
-of `gadk-eval-monitor` monitors, compares the variants of its experiments and shows the decisions
-of its rollout guards. With a price file
-(`--prices`) it prices token counts. With
-the BigQuery trace source it also shows usage and cost by model, agent, prompt version and
-trace, lists and adds scores, and, with `--datasets`, adds a trace's runs to an eval set. It
-runs on your machine, listens on 127.0.0.1 only, and reads Google Cloud with your Application
-Default Credentials.
+`gadk-console`, a local web console for gadk agents. It shows the traces your agents exported to
+Cloud Trace, with each span's Cloud Logging entries attached, and it browses the `gadk-prompts`
+registry: versions, diffs and labels. With `--reports`, it also shows the reports of
+`gadk-eval-monitor` monitors, compares the variants of its experiments and shows the decisions of
+its rollout guards. With a price file (`--prices`) it prices token counts. With the BigQuery trace
+source it also shows usage and cost by model, agent, prompt version and trace, lists and adds
+scores, and, with `--datasets`, adds a trace's runs to an eval set. It runs on your machine, listens
+on 127.0.0.1 only, and reads Google Cloud with your Application Default Credentials.
 
 ```sh
 cargo install gadk-console

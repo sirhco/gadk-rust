@@ -38,7 +38,7 @@ pub(crate) fn routes() -> Router<AppState> {
 }
 
 /// `?prompt=<name>` shows only that prompt's rollouts; empty means no filter.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct ListQuery {
     prompt: Option<String>,
 }
@@ -157,7 +157,7 @@ mod tests {
         ])
         .await;
         let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
-        store
+        let monitor_name = store
             .put(&report("monitor", 1_800_000_000, &[&[Outcome::Pass]]))
             .await
             .unwrap();
@@ -183,7 +183,7 @@ mod tests {
             })
             .collect();
         assert!(rows.windows(2).all(|w| w[0] < w[1]), "{body}");
-        assert!(!body.contains("monitor"), "{body}");
+        assert!(!body.contains(&monitor_name), "{body}");
     }
 
     #[tokio::test]
