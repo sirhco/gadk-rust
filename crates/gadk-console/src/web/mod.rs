@@ -51,6 +51,9 @@ pub(crate) struct AppState {
     pub usage: Option<Arc<crate::usage::UsageSource>>, // Some with --traces bigquery://… only
     pub author: String,                             // the author of console scores
     pub datasets: Option<Arc<crate::datasets::Datasets>>, // Some with --datasets and BigQuery
+    // Some with BigQuery: the conversation text of `/sessions/{id}`, or why it is unavailable.
+    #[allow(dead_code)] // read by the session page
+    pub export: Option<Result<Arc<dyn gadk_eval_monitor::ExportSource>, String>>,
 }
 
 const CONSOLE_CSS: &str = include_str!("assets/console.css");
@@ -312,6 +315,11 @@ mod tests {
             super::testutil::state_with_reports(Arc::new(FakeSource::new()), None, Some(cache));
         assert!(st.reports.is_some());
         assert!(fresh().reports.is_none());
+    }
+
+    #[test]
+    fn test_states_have_no_export_source() {
+        assert!(fresh().export.is_none());
     }
 
     #[tokio::test]

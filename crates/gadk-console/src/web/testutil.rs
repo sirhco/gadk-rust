@@ -157,7 +157,7 @@ impl ExportSource for FakeExport {
     }
 }
 
-/// State with csrf `CSRF`, port `PORT`, clock `fixed_now` and no report store.
+/// State with csrf `CSRF`, port `PORT`, clock `fixed_now`, no report store and no export source.
 pub(crate) fn state(source: Arc<FakeSource>, store: Option<Arc<dyn PromptStore>>) -> AppState {
     state_with_reports(source, store, None)
 }
@@ -181,6 +181,7 @@ pub(crate) fn state_with_reports(
         usage: None,
         author: AUTHOR.to_owned(),
         datasets: None,
+        export: None,
     }
 }
 
