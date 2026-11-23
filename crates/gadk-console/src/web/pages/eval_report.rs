@@ -48,7 +48,8 @@ pub(crate) fn render(name: &str, r: &MonitorReport) -> Markup {
     page(&format!("Report {name}"), Nav::Evals, body)
 }
 
-fn secs(t: &DateTime<Utc>) -> String {
+/// `t` as RFC 3339 in whole seconds, UTC (`2027-01-15T08:00:00Z`).
+pub(crate) fn secs(t: &DateTime<Utc>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
