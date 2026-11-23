@@ -26,10 +26,14 @@ use super::AppState;
 use super::guard::check_csrf;
 use super::pages::error::{error_page, source_error};
 use super::pages::layout::{Nav, html};
-use super::pages::trace::{Annotations, DatasetView, LogView, NEEDS_BIGQUERY_SCORES, ScoresView};
+use super::pages::trace::{
+    Annotations, DatasetView, LogView, NEEDS_BIGQUERY_SCORES, ReviewBar, ScoresView,
+};
 use super::pages::{trace, traces};
+use super::review::next_link;
 use crate::datasets::{AddError, NEEDS_DATASETS, is_dataset_name};
 use crate::model::{attach_logs, build_tree, trace_end};
+use crate::review::{Cursor, ReviewQueue};
 use crate::scores::{BQ_EDITOR_HINT, NewScore};
 use crate::traces::{RawSpan, SourceError, TimeRange, TraceId, TraceQuery};
 
@@ -100,6 +104,20 @@ fn added_notice(params: &[(String, String)]) -> Option<(usize, String)> {
     Some((added, dataset))
 }
 
+/// The review bar of trace `id`, from the `/traces/{id}` query: with the BigQuery source, a
+/// valid queue (`score` plus optional filters) and a valid `at`; else `None` (never fails the
+/// page).
+fn review_bar(state: &AppState, id: &TraceId, params: &[(String, String)]) -> Option<ReviewBar> {
+    state.usage.as_ref()?;
+    let queue = ReviewQueue::from_params(params).ok()??;
+    let at = params
+        .iter()
+        .find(|(k, _)| k == "at")
+        .map_or("", |(_, v)| v.as_str());
+    let cursor = Cursor::parse(at, id.as_str()).ok()?;
+    Some(ReviewBar { queue, cursor })
+}
+
 async fn detail(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -122,6 +140,7 @@ async fn detail(
             names: state.datasets.as_ref().map(|d| d.names()),
             added: added_notice(&params),
         },
+        review: review_bar(&state, &id, &params),
     };
     let logs = detail.logs.map(|set| LogView {
         shown: set.entries.len(),
@@ -165,7 +184,8 @@ async fn trace_scores(state: &AppState, id: &TraceId, spans: &[RawSpan]) -> Scor
     }
 }
 
-/// The add-score form; missing fields are empty strings.
+/// The add-score form; missing fields are empty strings. The `q_*` fields carry the review
+/// queue and `at` in review mode.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct ScoreForm {
@@ -174,11 +194,42 @@ struct ScoreForm {
     value: String,
     comment: String,
     csrf: String,
+    q_score: String,
+    q_prompt: String,
+    q_version: String,
+    q_flagged: String,
+    q_range: String,
+    q_at: String,
+}
+
+impl ScoreForm {
+    /// Where a successful score goes: the next trace of the review queue when the `q_*` fields
+    /// are a valid queue and `at`, else back to trace `id`.
+    fn redirect(&self, id: &TraceId) -> String {
+        let params: Vec<(String, String)> = [
+            ("score", &self.q_score),
+            ("prompt", &self.q_prompt),
+            ("version", &self.q_version),
+            ("flagged", &self.q_flagged),
+            ("range", &self.q_range),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.clone()))
+        .collect();
+        match (
+            ReviewQueue::from_params(&params),
+            Cursor::parse(&self.q_at, id.as_str()),
+        ) {
+            (Ok(Some(queue)), Ok(cursor)) => next_link(&queue, &cursor),
+            _ => format!("/traces/{}", id.as_str()),
+        }
+    }
 }
 
 /// `POST /traces/{id}/scores`: checks the token, validates the score (400), reads the trace's
 /// identity (404 when it has none in the last 30 days), inserts a `FEEDBACK` row and redirects
-/// to the trace (303). Without the BigQuery source it is a 404 page.
+/// (303) to the trace, or in review mode to the queue's next trace. Without the BigQuery source
+/// it is a 404 page.
 async fn add_score(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -211,7 +262,7 @@ async fn add_score(
         .insert_score(id.as_str(), &root, &score, &state.author)
         .await
     {
-        Ok(()) => Redirect::to(&format!("/traces/{}", id.as_str())).into_response(),
+        Ok(()) => Redirect::to(&form.redirect(&id)).into_response(),
         Err(e) => insert_failed(&e),
     }
 }
@@ -1385,6 +1436,159 @@ mod tests {
             page.contains("Scores need the BigQuery trace source"),
             "{page}"
         );
+    }
+
+    // ---- review mode ----
+
+    const AT: &str = "2026-11-16T11%3A58%3A59.999750Z";
+
+    /// GET `/traces/{ID}{query}` with the BigQuery source answering the scores query with no
+    /// rows; returns the page.
+    async fn review_page(query: &str) -> String {
+        let fake = FakeHttp::new(vec![reply(&SCORE_FIELDS, vec![], false)]);
+        let (status, _, page) = get(
+            bq_get(invocation_detail(), &fake),
+            &format!("/traces/{ID}{query}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{query}: {page}");
+        page
+    }
+
+    #[tokio::test]
+    async fn a_queue_and_at_render_the_review_bar_and_fill_the_score_form() {
+        let page = review_page(&format!(
+            "?score=quality&prompt=triage&version=2&flagged=1&range=24h&at={AT}"
+        ))
+        .await;
+        let qs = "score=quality&amp;prompt=triage&amp;version=2&amp;flagged=1&amp;range=24h";
+        let bar = format!(
+            r#"<div class="banner info"><p>Reviewing <strong>quality</strong> · <a href="/review/next?{qs}&amp;after=2026-11-16T11%3A58%3A59.999750Z&amp;after_id={ID}">Skip →</a> · <a href="/review?{qs}">Back to queue</a></p></div><h1>Trace "#
+        );
+        assert!(page.contains(&bar), "{page}");
+        let scores = scores_section(&page);
+        let fields = format!(
+            r#"<input type="hidden" name="csrf" value="{CSRF}"><input type="hidden" name="q_score" value="quality"><input type="hidden" name="q_prompt" value="triage"><input type="hidden" name="q_version" value="2"><input type="hidden" name="q_flagged" value="1"><input type="hidden" name="q_range" value="24h"><input type="hidden" name="q_at" value="2026-11-16T11:58:59.999750Z"><input type="text" name="name" placeholder="score name" value="quality" required maxlength="100">"#
+        );
+        assert!(scores.contains(&fields), "{scores}");
+
+        // Absent filters are empty hidden fields and the default range is 7d.
+        let page = review_page(&format!("?score=quality&at={AT}")).await;
+        assert!(
+            page.contains(r#"<a href="/review?score=quality">Back to queue</a>"#),
+            "{page}"
+        );
+        assert!(
+            page.contains(r#"<input type="hidden" name="q_prompt" value=""><input type="hidden" name="q_version" value=""><input type="hidden" name="q_flagged" value=""><input type="hidden" name="q_range" value="7d">"#),
+            "{page}"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_a_valid_queue_and_at_the_page_is_unchanged() {
+        let plain = review_page("").await;
+        assert!(!plain.contains("Reviewing"), "{plain}");
+        for query in [
+            "?score=quality".to_owned(),
+            format!("?at={AT}"),
+            format!("?score=%20&at={AT}"),
+            "?score=quality&at=yesterday".to_owned(),
+            format!("?score=quality&version=0&prompt=p&at={AT}"),
+            format!("?score=quality&version=2&at={AT}"),
+            format!("?score=quality&range=30d&at={AT}"),
+        ] {
+            assert_eq!(review_page(&query).await, plain, "{query}");
+        }
+    }
+
+    #[tokio::test]
+    async fn with_the_cloud_trace_source_there_is_no_review_bar() {
+        let (_, plain) = trace_page(detail(600, logs(vec![], false))).await;
+        let (_, st) = with_get(Ok(detail(600, logs(vec![], false))));
+        let (status, _, page) = get(st, &format!("/traces/{ID}?score=quality&at={AT}")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(page, plain);
+    }
+
+    #[tokio::test]
+    async fn hostile_queue_values_are_escaped_in_the_bar_and_encoded_in_links() {
+        let page = review_page(&format!(
+            "?score=%3Cscript%3E%26%22&prompt=%22%3E%3Cscript%3E&at={AT}"
+        ))
+        .await;
+        assert!(!page.contains("<script>"), "{page}");
+        assert!(
+            page.contains("Reviewing <strong>&lt;script&gt;&amp;&quot;</strong>"),
+            "{page}"
+        );
+        assert!(
+            page.contains(r#"<a href="/review?score=%3Cscript%3E%26%22&amp;prompt=%22%3E%3Cscript%3E">Back to queue</a>"#),
+            "{page}"
+        );
+        assert!(
+            page.contains(
+                r#"<input type="hidden" name="q_prompt" value="&quot;&gt;&lt;script&gt;">"#
+            ),
+            "{page}"
+        );
+        assert!(
+            page.contains(r#"<input type="text" name="name" placeholder="score name" value="&lt;script&gt;&amp;&quot;" required maxlength="100">"#),
+            "{page}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_score_in_review_mode_redirects_to_the_next_trace() {
+        let fake = FakeHttp::new(vec![root_reply(), dml_reply()]);
+        let body = format!(
+            "name=quality&kind=up&csrf={CSRF}&q_score=quality&q_prompt=team%2Fgreet&q_version=3&q_flagged=1&q_range=6h&q_at=2026-11-16T11%3A58%3A59.999750Z"
+        );
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, headers, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        assert_eq!(
+            headers[LOCATION],
+            format!(
+                "/review/next?score=quality&prompt=team%2Fgreet&version=3&flagged=1&range=6h&after=2026-11-16T11%3A58%3A59.999750Z&after_id={ID}"
+            )
+        );
+        assert_eq!(fake.uris().len(), 2, "the score is inserted first");
+    }
+
+    #[tokio::test]
+    async fn a_score_without_valid_review_fields_redirects_to_the_trace() {
+        for review in [
+            "",
+            "&q_score=quality",
+            "&q_score=quality&q_at=yesterday",
+            "&q_score=&q_at=2026-11-16T11%3A58%3A59.999750Z",
+            "&q_score=quality&q_version=0&q_prompt=p&q_at=2026-11-16T11%3A58%3A59.999750Z",
+            "&q_score=quality&q_range=30d&q_at=2026-11-16T11%3A58%3A59.999750Z",
+        ] {
+            let fake = FakeHttp::new(vec![root_reply(), dml_reply()]);
+            let body = format!("name=quality&kind=up&csrf={CSRF}{review}");
+            let st = bq_get(invocation_detail(), &fake);
+            let (status, headers, _) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+            assert_eq!(status, StatusCode::SEE_OTHER, "{review}");
+            assert_eq!(headers[LOCATION], format!("/traces/{ID}"), "{review}");
+        }
+    }
+
+    #[tokio::test]
+    async fn review_fields_do_not_change_score_errors() {
+        let review = "&q_score=quality&q_at=2026-11-16T11%3A58%3A59.999750Z";
+        let fake = FakeHttp::new(vec![]);
+        let body = format!("name=&kind=up&csrf={CSRF}{review}");
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, _, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(page.contains("score name is empty"), "{page}");
+
+        let fake = FakeHttp::new(vec![root_reply(), denied()]);
+        let body = format!("name=q&kind=down&csrf={CSRF}{review}");
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, _, _) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
     }
 
     // ---- adding to a dataset ----

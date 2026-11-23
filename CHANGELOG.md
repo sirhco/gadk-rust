@@ -7,6 +7,15 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-console`: a review queue (BigQuery trace source). `/review?score=<name>` lists the recent
+  traces with no console score of that name, newest first (at most 100), optionally only those
+  that used a prompt (and version) or carry an app thumbs-down, over `1h` to `7d` (default
+  `7d`). "Start reviewing" opens each trace in review mode: a bar with `Skip →` and `Back to
+  queue`, the score name pre-filled, and adding a score opens the next trace (`/review/next`)
+  until the queue says `Queue empty — all caught up`. A Review tab follows Guards.
+
 ## [0.5.5] - 2026-11-23
 
 ### Added

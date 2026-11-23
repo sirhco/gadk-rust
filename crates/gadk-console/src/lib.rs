@@ -38,6 +38,7 @@ mod guards;
 mod model;
 mod prices;
 mod prompts;
+mod review;
 mod scores;
 pub mod traces;
 mod url;

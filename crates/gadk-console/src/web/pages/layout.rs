@@ -27,12 +27,13 @@ pub(crate) enum Nav {
     Evals,
     Experiments,
     Guards,
+    Review,
     Usage,
 }
 
 /// Full HTML document: <!DOCTYPE html>, <title>{title} · gadk console</title>, <link rel=stylesheet
 /// href="/assets/console.css">, <script src="/assets/waterfall.js" defer>, a header nav with links
-/// /traces, /prompts, /evals, /experiments, /guards and /usage (the active one has class
+/// /traces, /prompts, /evals, /experiments, /guards, /review and /usage (the active one has class
 /// "active"), then `body` in <main>.
 pub(crate) fn page(title: &str, nav: Nav, body: Markup) -> Markup {
     let link = |href: &str, label: &str, this: Nav| {
@@ -63,6 +64,7 @@ pub(crate) fn page(title: &str, nav: Nav, body: Markup) -> Markup {
                         (link("/evals", "Evals", Nav::Evals))
                         (link("/experiments", "Experiments", Nav::Experiments))
                         (link("/guards", "Guards", Nav::Guards))
+                        (link("/review", "Review", Nav::Review))
                         (link("/usage", "Usage", Nav::Usage))
                     }
                 }
@@ -105,38 +107,44 @@ mod tests {
             "{out}"
         );
         assert!(
-            out.contains(r#"<a class="active" href="/traces">Traces</a><a href="/prompts">Prompts</a><a href="/evals">Evals</a><a href="/experiments">Experiments</a><a href="/guards">Guards</a><a href="/usage">Usage</a>"#),
+            out.contains(r#"<a class="active" href="/traces">Traces</a><a href="/prompts">Prompts</a><a href="/evals">Evals</a><a href="/experiments">Experiments</a><a href="/guards">Guards</a><a href="/review">Review</a><a href="/usage">Usage</a>"#),
             "{out}"
         );
         assert!(out.contains("<main><p>hi &lt;b&gt;</p></main>"), "{out}");
 
         let out = page("P", Nav::Prompts, html! {}).into_string();
         assert!(
-            out.contains(r#"<a href="/traces">Traces</a><a class="active" href="/prompts">Prompts</a><a href="/evals">Evals</a><a href="/experiments">Experiments</a><a href="/guards">Guards</a><a href="/usage">Usage</a>"#),
+            out.contains(r#"<a href="/traces">Traces</a><a class="active" href="/prompts">Prompts</a><a href="/evals">Evals</a><a href="/experiments">Experiments</a><a href="/guards">Guards</a><a href="/review">Review</a><a href="/usage">Usage</a>"#),
             "{out}"
         );
 
         let out = page("E", Nav::Evals, html! {}).into_string();
         assert!(
-            out.contains(r#"<a href="/traces">Traces</a><a href="/prompts">Prompts</a><a class="active" href="/evals">Evals</a><a href="/experiments">Experiments</a><a href="/guards">Guards</a><a href="/usage">Usage</a>"#),
+            out.contains(r#"<a href="/traces">Traces</a><a href="/prompts">Prompts</a><a class="active" href="/evals">Evals</a><a href="/experiments">Experiments</a><a href="/guards">Guards</a><a href="/review">Review</a><a href="/usage">Usage</a>"#),
             "{out}"
         );
 
         let out = page("X", Nav::Experiments, html! {}).into_string();
         assert!(
-            out.contains(r#"<a href="/traces">Traces</a><a href="/prompts">Prompts</a><a href="/evals">Evals</a><a class="active" href="/experiments">Experiments</a><a href="/guards">Guards</a><a href="/usage">Usage</a>"#),
+            out.contains(r#"<a href="/traces">Traces</a><a href="/prompts">Prompts</a><a href="/evals">Evals</a><a class="active" href="/experiments">Experiments</a><a href="/guards">Guards</a><a href="/review">Review</a><a href="/usage">Usage</a>"#),
             "{out}"
         );
 
         let out = page("G", Nav::Guards, html! {}).into_string();
         assert!(
-            out.contains(r#"<a href="/traces">Traces</a><a href="/prompts">Prompts</a><a href="/evals">Evals</a><a href="/experiments">Experiments</a><a class="active" href="/guards">Guards</a><a href="/usage">Usage</a>"#),
+            out.contains(r#"<a href="/traces">Traces</a><a href="/prompts">Prompts</a><a href="/evals">Evals</a><a href="/experiments">Experiments</a><a class="active" href="/guards">Guards</a><a href="/review">Review</a><a href="/usage">Usage</a>"#),
+            "{out}"
+        );
+
+        let out = page("R", Nav::Review, html! {}).into_string();
+        assert!(
+            out.contains(r#"<a href="/traces">Traces</a><a href="/prompts">Prompts</a><a href="/evals">Evals</a><a href="/experiments">Experiments</a><a href="/guards">Guards</a><a class="active" href="/review">Review</a><a href="/usage">Usage</a>"#),
             "{out}"
         );
 
         let out = page("U", Nav::Usage, html! {}).into_string();
         assert!(
-            out.contains(r#"<a href="/traces">Traces</a><a href="/prompts">Prompts</a><a href="/evals">Evals</a><a href="/experiments">Experiments</a><a href="/guards">Guards</a><a class="active" href="/usage">Usage</a>"#),
+            out.contains(r#"<a href="/traces">Traces</a><a href="/prompts">Prompts</a><a href="/evals">Evals</a><a href="/experiments">Experiments</a><a href="/guards">Guards</a><a href="/review">Review</a><a class="active" href="/usage">Usage</a>"#),
             "{out}"
         );
     }

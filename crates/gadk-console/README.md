@@ -6,7 +6,8 @@ registry: versions, diffs and labels. With `--reports`, it also shows the report
 `gadk-eval-monitor` monitors, compares the variants of its experiments and shows the decisions of
 its rollout guards. With a price file (`--prices`) it prices token counts. With the BigQuery trace
 source it also shows usage and cost by model, agent, prompt version and trace, lists and adds
-scores, and, with `--datasets`, adds a trace's runs to an eval set. It runs on your machine, listens
+scores, walks a review queue of the traces not yet scored, and, with `--datasets`, adds a trace's
+runs to an eval set. It runs on your machine, listens
 on 127.0.0.1 only, and reads Google Cloud with your Application Default Credentials.
 
 ```sh
@@ -62,7 +63,7 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | Page | Shows |
 |---|---|
 | `/traces` | Traces, newest first, 50 per page. Filters: time range (`1h`, `6h`, `24h`, `7d`), root span name prefix, agent (`gen_ai.agent.name`), session (`gen_ai.conversation.id`). |
-| `/traces/{id}` | The span waterfall (tree order, indented by depth). Selecting a span shows its labels and the log entries whose `spanId` matches it; entries matching no span are listed as "unattached". A `render_prompt …` span with `prompt.name` and `prompt.version` links to that prompt version. A trace that ended less than 2 minutes ago notes that logs may still be arriving. Model calls (spans whose `gen_ai.operation.name` is `generate_content`) are listed with their tokens and cost, plus totals. With the BigQuery source a Scores section lists the trace's scores and a form adds one ([Scores](#scores)). With `--datasets`, an "Add to dataset" form adds its runs to an eval set ([Datasets](#datasets)). |
+| `/traces/{id}` | The span waterfall (tree order, indented by depth). Selecting a span shows its labels and the log entries whose `spanId` matches it; entries matching no span are listed as "unattached". A `render_prompt …` span with `prompt.name` and `prompt.version` links to that prompt version. A trace that ended less than 2 minutes ago notes that logs may still be arriving. Model calls (spans whose `gen_ai.operation.name` is `generate_content`) are listed with their tokens and cost, plus totals. With the BigQuery source a Scores section lists the trace's scores and a form adds one ([Scores](#scores)). With `--datasets`, an "Add to dataset" form adds its runs to an eval set ([Datasets](#datasets)). Opened from a review queue, it shows a review bar and the score form continues to the queue's next trace ([Review](#review)). |
 | `/prompts` | Every prompt in the store: latest version, labels and when the latest version was created. |
 | `/prompts/{name}` | All versions (newest first) with their labels and rollouts (a `production 10%` chip on the rollout version); `?v=<n>` shows a version's template and config, `?a=<n>&b=<m>` diffs two versions. Forms set, move and remove labels, conditional on the label not having changed since the page was rendered (a stale page gets 409). The Labels table's Rollout column shows each label's rollout (`v4 at 10%`, or `—`); a label without one has a Start rollout form (version and percent), a label with one has forms to change the percent, promote (move the label to the rollout version, which ends the rollout; 409 if the label moved since the page was rendered) and abort. "Production metrics" (BigQuery source, `?range=`, default `7d`): calls, mean tokens and cost, p50/p95 latency and, with `--reports`, eval pass rate per version, then a Feedback table of the scores per version. With `--reports`, a "guard history" link under the Labels table opens `/guards?prompt=<name>`. |
 | `/evals` | The newest 100 monitor reports: a card per monitor (latest pass rate, errors, and a pass-rate trend over its listed reports), then a table of reports. `?spec=<name>` shows only that monitor's newest 100. Reports are read once and kept in memory (up to 256, and at most 20,000 runs in all), so the first load of a `gs://` store can take a while. |
@@ -71,6 +72,8 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/experiments/{report}` | One experiment, with a column per variant (the first is the baseline): prompt, model (only when a variant records one), runs, pass rate and its difference from the baseline in percentage points, mean judge score, errors, p50 and p95 duration, input, output, cached and reasoning tokens, and cost. Then the cases where the variants disagree, each with every variant's verdict and, expanded, every run's last reply, run error and score rationales; `?cases=all` lists every case. See [Experiments](#experiments). |
 | `/guards` | The newest 100 guard reports in the `--reports` store (its `guards/`): a card per rollout (prompt, label, baseline and rollout version, linking to the prompt) with its latest verdict, action and percent, how many reports it has and how many applied their action, and its timeline; then a table of the reports, newest first. `?prompt=<name>` shows only that prompt's rollouts. See [Guards](#guards). |
 | `/guards/{report}` | One guard report: the rollout and its percent, window, source and when it was made, then one row per check (baseline and rollout values with their sample sizes, harm, the interval of the harm, and a status badge with its reason), the verdict, the note and the action, marked `applied` or `dry run`. |
+| `/review` | BigQuery source only. A review queue: `?score=<name>` (required) with optional `prompt`, `version`, `flagged=1` and `range` (`1h`, `6h`, `24h`, `7d` default) lists the recent traces with no console score of that name, newest first, at most 100, with a "Start reviewing" link. Without `score` it shows the form alone. See [Review](#review). |
+| `/review/next` | BigQuery source only. `?<queue>&after=<time>&after_id=<trace id>` redirects (303) to the queue's next trace after that one, or back to `/review?<queue>&done=1` when none is left. |
 | `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`): totals, then LLM calls, tokens and cost by model, by agent and by prompt version, and the 20 traces with the most tokens. |
 
 ## Evals
@@ -253,6 +256,30 @@ shows a note and no form.
   the most common value (`category`; a tie goes to the lowest value). Scores count from the
   start of the range with no end, since they arrive after the calls, and map to versions
   through their invocations' `LLM_REQUEST` rows like the eval pass rate.
+
+## Review
+
+A review queue walks you through the recent traces that have no console score of a given name
+yet. It needs `--traces bigquery://…`; with the Cloud Trace source `/review` and `/review/next`
+answer 404 with a note.
+
+- `/review` defines the queue with its form: a score name (required, 1-100 bytes after
+  trimming), optionally a prompt name and version (only traces whose `LLM_REQUEST` rows used that
+  prompt, at that version), "Thumbs-down only" (only traces with an app thumbs-down score) and a
+  range (`1h`, `6h`, `24h` or `7d`, the default). A trace is in the window when it has an
+  `LLM_RESPONSE` row in it, and pending while no console score with exactly that name is on it
+  (by `trace_id`, or by one of its invocations).
+- The page lists at most 100 pending traces, newest first by their first LLM response: the time,
+  the trace, its prompt versions (`name@version`) and its app thumbs-down count. With more it
+  says `100+ pending (showing 100)`.
+- "Start reviewing" (or a trace link) opens the trace in review mode. A bar above the trace shows
+  `Reviewing <score>`, `Skip →` (the next trace) and `Back to queue`, and the score form's name is
+  pre-filled. Adding a score opens the next trace; when none is left the queue page says
+  `Queue empty — all caught up`.
+- The queue is the URL: nothing is stored, nothing is locked. Two reviewers on the same queue may
+  score the same trace; both scores are kept. A trace leaves a short window as time passes.
+- The pending query reads the window's rows and the `FEEDBACK` rows from a day before it, under
+  `--bigquery-max-bytes`. The score name and filters are query parameters.
 
 ## Datasets
 
