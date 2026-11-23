@@ -55,7 +55,8 @@ pub(crate) struct ReviewQueue {
 
 impl ReviewQueue {
     /// The queue of the URL parameters `score`, `prompt`, `version`, `flagged` and `range`
-    /// (the first value of each counts; a blank `prompt`, `version` or `range` is absent).
+    /// (the first value of each counts and is trimmed; a blank `prompt`, `version` or `range`
+    /// is absent).
     ///
     /// `Ok(None)` when `score` is absent or blank, before any other parameter is checked.
     ///
@@ -77,7 +78,7 @@ impl ReviewQueue {
         if score.len() > MAX_SCORE_LEN {
             return Err(format!("score: must be at most {MAX_SCORE_LEN} bytes"));
         }
-        let prompt = present("prompt").map(str::to_owned);
+        let prompt = present("prompt").map(|p| p.trim().to_owned());
         let version = match present("version") {
             None => None,
             Some(v) => match v.trim().parse::<u32>() {
@@ -90,9 +91,8 @@ impl ReviewQueue {
         }
         let range = match present("range") {
             None => TimeRange::Days7,
-            Some(r) => {
-                TimeRange::parse(r).ok_or_else(|| "range: must be 1h, 6h, 24h or 7d".to_owned())?
-            }
+            Some(r) => TimeRange::parse(r.trim())
+                .ok_or_else(|| "range: must be 1h, 6h, 24h or 7d".to_owned())?,
         };
         Ok(Some(ReviewQueue {
             score: score.to_owned(),
@@ -474,6 +474,16 @@ mod tests {
             queue(&[("score", "q")])
         );
         assert_eq!(queue(&[("score", &"x".repeat(100))]).score.len(), 100);
+    }
+
+    #[test]
+    fn padded_prompt_and_range_are_trimmed() {
+        let q = queue(&[("score", "q"), ("prompt", " triage "), ("range", " 7d ")]);
+        assert_eq!(q.prompt.as_deref(), Some("triage"));
+        assert_eq!(q.range, TimeRange::Days7);
+        let q = queue(&[("score", "q"), ("range", "\t24h ")]);
+        assert_eq!(q.range, TimeRange::Hours24);
+        assert_eq!(queue(&[("score", "q"), ("prompt", "   ")]).prompt, None);
     }
 
     #[test]

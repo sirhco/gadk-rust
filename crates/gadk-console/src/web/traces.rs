@@ -1356,6 +1356,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_padded_score_name_is_inserted_trimmed() {
+        let fake = FakeHttp::new(vec![root_reply(), dml_reply()]);
+        let body = format!("name=%20quality%20&kind=up&csrf={CSRF}");
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, _, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        let insert = fake.body(1);
+        let content: Value = serde_json::from_str(
+            param_value(&insert, "content")["parameterValue"]["value"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            content,
+            json!({"name": "quality", "value": true, "data_type": "bool"})
+        );
+    }
+
+    #[tokio::test]
     async fn score_posts_without_the_token_are_403_and_query_nothing() {
         for csrf in [String::new(), "b".repeat(64)] {
             let fake = FakeHttp::new(vec![]);
