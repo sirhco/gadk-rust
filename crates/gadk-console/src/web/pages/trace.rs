@@ -26,9 +26,11 @@ use crate::prices::{
     CostSum, LABEL_MODEL, LABEL_OPERATION, OP_GENERATE_CONTENT, PriceTable, UNKNOWN_MODEL, Usage,
     cost_of, cost_text, thousands,
 };
+use crate::review::{Cursor, ReviewQueue, at_text};
 use crate::scores::{ScoreRow, TRACE_SCORES_CAP, TraceScores};
 use crate::traces::{LogEntry, RawSpan, SourceError, TraceId};
 use crate::url::percent_encode;
+use crate::web::review::next_link;
 
 /// Payload texts longer than this many chars render collapsed.
 pub(crate) const PAYLOAD_LIMIT: usize = 4096;
@@ -45,11 +47,22 @@ pub(crate) struct DatasetView {
     pub added: Option<(usize, String)>,
 }
 
-/// The sections of a trace page that read or write annotations: scores and datasets.
+/// The sections of a trace page that read or write annotations: scores, datasets and the
+/// review bar.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Annotations {
     pub scores: ScoresView,
     pub dataset: DatasetView,
+    /// `Some` in review mode (a valid queue and `at` with the BigQuery source).
+    pub review: Option<ReviewBar>,
+}
+
+/// A trace page in review mode: the queue and the trace's place in it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ReviewBar {
+    pub queue: ReviewQueue,
+    /// `(at, trace id)`: where `Skip` and a score continue from.
+    pub cursor: Cursor,
 }
 
 /// The Scores section of a trace page.
@@ -86,6 +99,9 @@ pub(crate) fn render(
     csrf: &str,
 ) -> Markup {
     let body = html! {
+        @if let Some(bar) = &annotations.review {
+            (review_bar(bar))
+        }
         h1 { "Trace " span class="mono" { (id.as_str()) } }
         @if let Some((added, dataset)) = &annotations.dataset.added {
             div class="banner info" {
@@ -123,7 +139,7 @@ pub(crate) fn render(
             }
         }
         (llm_calls(rows, prices))
-        (scores_section(id, &annotations.scores, csrf))
+        (scores_section(id, &annotations.scores, annotations.review.as_ref(), csrf))
         (dataset_section(id, &annotations.dataset, csrf))
         @if let Ok(view) = logs {
             (log_sections(rows, view))
@@ -234,13 +250,40 @@ fn score_value_text(r: &ScoreRow) -> &str {
     }
 }
 
-/// The form that adds a score to trace `id` (`POST /traces/{id}/scores`, confirmed first).
-fn score_form(id: &TraceId, csrf: &str) -> Markup {
+/// The review bar: the queue's score name, `Skip →` (the next trace) and `Back to queue`.
+fn review_bar(bar: &ReviewBar) -> Markup {
+    let qs = bar.queue.query_string();
+    html! {
+        div class="banner info" {
+            p {
+                "Reviewing " strong { (bar.queue.score) }
+                " · " a href=(next_link(&bar.queue, &bar.cursor)) { "Skip →" }
+                " · " a href={ "/review?" (qs) } { "Back to queue" }
+            }
+        }
+    }
+}
+
+/// The form that adds a score to trace `id` (`POST /traces/{id}/scores`, confirmed first). In
+/// review mode the name is pre-filled with the queue's score and the queue and `at` ride along
+/// as hidden `q_*` fields.
+fn score_form(id: &TraceId, review: Option<&ReviewBar>, csrf: &str) -> Markup {
     html! {
         form method="post" action={ "/traces/" (id.as_str()) "/scores" }
             data-confirm="Add this score to the trace?" class="inline" {
             input type="hidden" name="csrf" value=(csrf);
-            input type="text" name="name" placeholder="score name" required maxlength="100";
+            @if let Some(bar) = review {
+                @let q = &bar.queue;
+                input type="hidden" name="q_score" value=(q.score);
+                input type="hidden" name="q_prompt" value=(q.prompt.as_deref().unwrap_or_default());
+                input type="hidden" name="q_version"
+                    value=(q.version.map(|v| v.to_string()).unwrap_or_default());
+                input type="hidden" name="q_flagged" value=(if q.flagged { "1" } else { "" });
+                input type="hidden" name="q_range" value=(q.range.as_str());
+                input type="hidden" name="q_at" value=(at_text(bar.cursor.at));
+            }
+            input type="text" name="name" placeholder="score name"
+                value=[review.map(|bar| bar.queue.score.as_str())] required maxlength="100";
             " "
             select name="kind" {
                 option value="up" { "thumbs up" }
@@ -260,7 +303,12 @@ fn score_form(id: &TraceId, csrf: &str) -> Markup {
 
 /// The Scores section: the needs-BigQuery note, or the scores newest first (or the error
 /// banner) and the form that adds one.
-fn scores_section(id: &TraceId, scores: &ScoresView, csrf: &str) -> Markup {
+fn scores_section(
+    id: &TraceId,
+    scores: &ScoresView,
+    review: Option<&ReviewBar>,
+    csrf: &str,
+) -> Markup {
     html! {
         h2 { "Scores" }
         @match scores {
@@ -301,7 +349,7 @@ fn scores_section(id: &TraceId, scores: &ScoresView, csrf: &str) -> Markup {
             }
         }
         @if !matches!(scores, ScoresView::NeedsBigQuery) {
-            (score_form(id, csrf))
+            (score_form(id, review, csrf))
         }
     }
 }

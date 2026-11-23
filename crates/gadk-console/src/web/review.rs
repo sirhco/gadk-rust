@@ -45,7 +45,6 @@ pub(crate) fn review_link(q: &ReviewQueue, trace_id: &str, first: DateTime<Utc>)
 }
 
 /// `/review/next?{queue}&after={at}&after_id={id}`: the trace that comes after `after`.
-#[allow(dead_code)] // until the score form redirects with it
 pub(crate) fn next_link(q: &ReviewQueue, after: &Cursor) -> String {
     format!(
         "/review/next?{}&after={}&after_id={}",
