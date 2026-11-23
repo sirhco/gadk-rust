@@ -292,13 +292,14 @@ The Sessions tab groups the agent-analytics rows by session and by user. It need
 `--traces bigquery://…`; with the Cloud Trace source `/sessions`, `/sessions/{id}` and `/users`
 answer 404 with a note.
 
-- A session's activity rows are its rows in the window other than `FEEDBACK` rows. Its user and
-  root agent come from its earliest `INVOCATION_STARTING` row in the window (`(none)` when it has
-  none). Turns are its distinct invocations; errors are its `LLM_ERROR` and `TOOL_ERROR` rows and
-  rows with status `ERROR`; tokens are input + output + reasoning of its `LLM_RESPONSE` rows, and
-  the cost prices them per model (`—` without prices, `$x*` when some models have none). 👍 and
-  👎 count the latest boolean score per invocation, name and source. Every count covers the
-  window only, so a session that started before it shows only its later turns.
+- A session's activity rows are its rows in the window other than `FEEDBACK` rows. Its user and root
+  agent come from its earliest `INVOCATION_STARTING` row in the window (the user shows `(none)` when
+  it has none, and the agent cell is left empty). Turns are its distinct invocations; errors are its
+  `LLM_ERROR` and `TOOL_ERROR` rows and rows with status `ERROR`; tokens are input + output +
+  reasoning of its `LLM_RESPONSE` rows, and the cost prices them per model (`—` without prices,
+  `$x*` when some models have none). 👍 and 👎 count the latest boolean score per invocation, name and
+  source. Every count covers the window only, so a session that started before it shows only its
+  later turns.
 - `/sessions` lists at most 100 sessions per page, newest last activity first, with a `Next →`
   link to the following ones. `range` is `1h`, `6h`, `24h` (the default) or `7d`; `user` and
   `agent` (at most 128 bytes each, trimmed) keep only the sessions of that user or root agent.
@@ -308,8 +309,9 @@ answer 404 with a note.
   user's message and the agent's reply as chat bubbles (a run error follows the reply), and a
   line with the start time, latency, tokens and cost, the tools called, errors, the latest
   scores (`name=value`) and a link to the trace. The text comes from the same transcripts as
-  `gadk-eval export`: a turn whose run started before the window shows `(no content logged)`,
-  and a transcript that could not be fully rebuilt says `content incomplete` with the reasons.
+  `gadk-eval export`: a turn with no transcript run (for example one whose run started before
+  the window) shows `(no content logged)`, and a transcript that could not be fully rebuilt says
+  `content incomplete` with the reasons.
   If the transcripts cannot be read, the page keeps the metrics and says why in a banner.
 - `/users` (`range` defaults to `7d`, optional `agent`) lists at most 100 users, most recent first,
   with their sessions, turns, tokens, cost, errors, thumbs and last activity; each links to its
