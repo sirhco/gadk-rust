@@ -101,12 +101,13 @@ impl Guard {
     /// verdict is `abort` when a check is `worse`, `advance` when all are `ok`, else `wait`;
     /// `advance` ramps to the first `ramp` step above p, or promotes R without one.
     ///
-    /// `previous` is the newest stored report of the same spec. With the spec's
-    /// `min_step_age` set, an `advance` is held back (verdict `wait`, action none, and a
-    /// [`note`](GuardReport::note) `step at <q>% is <age> old (< min_step_age <min>)`) when
-    /// `previous` applied `Ramp(q)` to the same prompt, label and rollout version, the rollout
-    /// is still at q%, and `previous` was made less than `min_step_age` before now. An
-    /// `abort` is never held back.
+    /// `previous` is the newest stored report of the same spec that applied a ramp step
+    /// (the CLI skips held, waiting, dry-run and other reports; one made after `now` counts
+    /// as made at `now`). With the spec's `min_step_age` set, an `advance` is held back
+    /// (verdict `wait`, action none, and a [`note`](GuardReport::note)
+    /// `step at <q>% is <age> old (< min_step_age <min>)`) when `previous` applied `Ramp(q)`
+    /// to the same prompt, label and rollout version, the rollout is still at q%, and
+    /// `previous` was made less than `min_step_age` before now. An `abort` is never held back.
     ///
     /// `eval` checks score up to `limit` runs per version with `judge` for `llm_judge`
     /// scorers; runs with a scorer error are left out of the pass rates and counted in the
@@ -261,7 +262,8 @@ fn young_step(
     let Action::Ramp(q) = previous.action else {
         return None;
     };
-    let age = now - previous.generated_at;
+    // A report from the future (clock skew) counts as made now.
+    let age = (now - previous.generated_at).max(TimeDelta::zero());
     (previous.applied
         && previous.prompt == spec.prompt
         && previous.label == spec.label.as_str()

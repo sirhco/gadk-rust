@@ -437,7 +437,7 @@ gadk-eval guard guards/support.yaml --prices prices.yaml --apply --out gs://my-b
 |---|---|---|
 | `--apply` | off | Write the decision to the prompt store: ramp, promote or abort. Without it nothing is written and the report says what would be done. |
 | `--prices <file>` | none | Price file for `cost_per_call` (the format of `gadk-console --prices`; see the [console's Usage and cost](../gadk-console/README.md#usage-and-cost)). Without it the cost check is `unknown`. |
-| `--out <url>` | none | Store the report under `guards/` of `<url>` as `<name>-<YYYYMMDDTHHMMSSZ>[-<n>].json` and print `stored report <name>`. Monitor and experiment listings ignore `guards/`. Required when the spec sets `min_step_age`: the guard then reads the spec's newest stored report there (among the newest 200 guard reports). |
+| `--out <url>` | none | Store the report under `guards/` of `<url>` as `<name>-<YYYYMMDDTHHMMSSZ>[-<n>].json` and print `stored report <name>`. Monitor and experiment listings ignore `guards/`. Required when the spec sets `min_step_age`: the guard then reads the spec's newest stored report there that applied a ramp (looking at the newest 200 guard reports). |
 | `--max-bytes <n>` | 1073741824 | `maximumBytesBilled` of every BigQuery query the guard sends (at least 1). |
 
 The example spec [`examples/guard.yaml`](examples/guard.yaml) uses every check kind.
@@ -533,11 +533,13 @@ The verdict is `abort` when any check is `worse`, else `advance` when every chec
 `wait`. `advance` ramps to the first `ramp` step above the current percent, or promotes R when
 there is none (no `ramp`, or the percent is at or past its last step).
 
-With `min_step_age`, an `advance` is held back when the spec's newest stored report applied a
-ramp to q% for the same prompt, label and rollout version, the rollout is still at q%, and that
-report was made less than `min_step_age` ago: the verdict becomes `wait`, the action none, and
-the report gets a note such as `note: step at 25% is 3h old (< min_step_age 1d)` after the
-verdict line. An `abort` is never held back.
+With `min_step_age`, the guard reads the spec's newest stored report that applied a ramp
+(held, waiting and dry-run reports are skipped). When it ramped to q% for the same prompt, label
+and rollout version, the rollout is still at q%, and that report was made less than
+`min_step_age` ago (a report time in the future counts as now), an `advance` is held back: the
+verdict becomes `wait`, the action none, and the report gets a note such as
+`note: step at 25% is 3h old (< min_step_age 1d)` after the verdict line. An `abort` is never
+held back.
 
 A label without a rollout (none was started, or a guard run already promoted or aborted it) is
 nothing to guard: the command prints `guard <name>: <prompt>/<label> has no rollout`, stores no

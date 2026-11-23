@@ -17,8 +17,9 @@ the public API.
   (Newcombe for rates, Welch for number scores). It writes nothing without `--apply`; with it,
   it ramps, promotes or aborts with compare-and-set writes. The optional spec key
   `min_step_age` (needs `--out`) holds an `advance` back until the last applied ramp step is
-  that old, using the spec's newest stored report. Exit codes: 0 advance, 1 abort, 3 wait,
-  4 no rollout on the label (nothing to guard, nothing stored), 2 error. Every query is parameterized and capped by `--max-bytes` (default 1 GiB).
+  that old, using the spec's newest stored report that applied a ramp. Exit codes: 0 advance,
+  1 abort, 3 wait, 4 no rollout on the label (nothing to guard, nothing stored), 2 error.
+  Every query is parameterized and capped by `--max-bytes` (default 1 GiB).
   Library: `GuardSpec` (with `Check`, `FeedbackSource`), `Guard`, `GuardReport` (with
   `CheckResult`, `SideValue`, `Status`, `GuardVerdict`, `Action`, `Unit`), `GuardSource` (with
   `GuardQuery`, `VersionCalls`, `ModelTokens`, `VersionFeedback`) and `BigQueryGuardSource`;

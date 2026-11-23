@@ -38,8 +38,8 @@
 //! with `--out`, stores it (`stored report <name>`); with `--apply` it also writes the decision
 //! (ramp, promote or abort) to the prompt store. Every BigQuery query it sends bills at most
 //! `--max-bytes` bytes (default 1073741824). With the spec's `min_step_age` it needs `--out` and
-//! reads the spec's newest stored report there. It exits 0 when the verdict is `advance`, 1 when
-//! it is `abort`, 3 when it is `wait` (applied or not), 4 when the label has no rollout (it
+//! reads the spec's newest stored report there that applied a ramp. It exits 0 when the
+//! verdict is `advance`, 1 when it is `abort`, 3 when it is `wait` (applied or not), 4 when the label has no rollout (it
 //! prints `guard <name>: <prompt>/<label> has no rollout` and stores nothing), and 2 on an
 //! invalid spec (or `min_step_age` without `--out`), an unreadable price file, a prompt store
 //! error (an unknown prompt or label, or a store changed since it was read), a query or judge
@@ -578,7 +578,7 @@ async fn guard(
     // Opened before the run, so a bad URL fails before anything is written.
     let out = out_url.map(|url| ReportStore::open(url)).transpose()?;
     let previous = match (&out, spec.min_step_age) {
-        (Some(out), Some(_)) => out.latest_guard(&spec.name).await?,
+        (Some(out), Some(_)) => out.latest_applied_ramp(&spec.name).await?,
         _ => None,
     };
     let store = gadk_prompts_cli::open_store(&spec.store)
@@ -2561,41 +2561,80 @@ mod tests {
             std::fs::write(spec, text).unwrap();
         }
 
+        /// Runs `guard <spec> --apply --out <out>` and checks it was held at 25% (exit 3, the
+        /// note, the rollout unchanged).
+        async fn held(spec: &str, out: &str, store: &FileStore) {
+            let (code, stdout, stderr) =
+                cli_run(&["guard", spec, "--apply", "--out", out], &healthy()).await;
+            assert_eq!(code, 3, "{stdout}{stderr}");
+            let summary = stdout.split("stored report").next().unwrap();
+            let note = Regex::new(
+                r"verdict: wait\nnote: step at 25% is \d+m old \(< min_step_age 1d\)\naction: none\n$",
+            )
+            .unwrap();
+            assert!(note.is_match(summary), "{stdout}");
+            assert_eq!(state(store).await, (Some(1), Rollout::new(2, 25).ok()));
+        }
+
+        /// Applies the ramp from 10% to 25% with `--out <out>` and returns the stored name.
+        async fn ramp_to_25(spec: &str, out: &str, store: &FileStore) -> String {
+            let (code, stdout, stderr) =
+                cli_run(&["guard", spec, "--apply", "--out", out], &healthy()).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(state(store).await, (Some(1), Rollout::new(2, 25).ok()));
+            let names = ReportStore::open(out)
+                .unwrap()
+                .guard_names(1)
+                .await
+                .unwrap();
+            names[0].clone()
+        }
+
         #[tokio::test]
-        async fn a_young_step_is_held_with_a_note_and_exits_3() {
+        async fn a_young_step_stays_held_until_min_step_age() {
+            let dir = tempfile::tempdir().unwrap();
+            let store = prompts(dir.path(), Some(10)).await;
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            let out_dir = dir.path().join("reports");
+            let out = out_dir.display().to_string();
+            let ramped = ramp_to_25(&spec, &out, &store).await;
+            // A newer applied ramp of another spec (named `g-…` too) is skipped.
+            let reports = ReportStore::open(&out).unwrap();
+            let mut other = reports.find_guard(&ramped).await.unwrap().unwrap();
+            other.spec = "g-other".into();
+            other.generated_at -= TimeDelta::days(2);
+            reports.put_guard(&other).await.unwrap();
+            with_min_step_age(&spec);
+            // Each held run stores a wait report; the next run still finds the applied ramp.
+            held(&spec, &out, &store).await;
+            held(&spec, &out, &store).await;
+            // A day later (the applied report made two days ago), the guard advances.
+            let path = out_dir.join("guards").join(&ramped);
+            let mut report =
+                GuardReport::from_json(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            report.generated_at -= TimeDelta::days(2);
+            std::fs::write(&path, report.to_json().unwrap()).unwrap();
+            let (code, stdout, stderr) =
+                cli_run(&["guard", &spec, "--apply", "--out", &out], &healthy()).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert!(!stdout.contains("note:"), "{stdout}");
+            assert!(stdout.contains("action: ramped to 50%\n"), "{stdout}");
+            assert_eq!(state(&store).await, (Some(1), Rollout::new(2, 50).ok()));
+        }
+
+        #[tokio::test]
+        async fn a_dry_run_report_does_not_break_the_hold() {
             let dir = tempfile::tempdir().unwrap();
             let store = prompts(dir.path(), Some(10)).await;
             let spec = guard_file(dir.path(), ERROR_RATE);
             let out = dir.path().join("reports").display().to_string();
+            ramp_to_25(&spec, &out, &store).await;
             let (code, stdout, stderr) =
-                cli_run(&["guard", &spec, "--apply", "--out", &out], &healthy()).await;
+                cli_run(&["guard", &spec, "--out", &out], &healthy()).await;
             assert_eq!(code, 0, "{stdout}{stderr}");
-            assert_eq!(state(&store).await, (Some(1), Rollout::new(2, 25).ok()));
-            // A newer report of another spec (named `g-…` too) in the same store is skipped.
-            let reports = ReportStore::open(&out).unwrap();
-            let first = reports.guard_names(1).await.unwrap();
-            let mut other = reports.find_guard(&first[0]).await.unwrap().unwrap();
-            other.spec = "g-other".into();
-            other.generated_at += TimeDelta::minutes(1);
-            other.applied = false;
-            reports.put_guard(&other).await.unwrap();
+            assert!(stdout.contains("action: would ramp to 50%\n"), "{stdout}");
             with_min_step_age(&spec);
-            let (code, stdout, stderr) =
-                cli_run(&["guard", &spec, "--apply", "--out", &out], &healthy()).await;
-            assert_eq!(code, 3, "{stdout}{stderr}");
-            let summary = stdout.split("stored report").next().unwrap();
-            let held = Regex::new(
-                r"verdict: wait\nnote: step at 25% is \d+m old \(< min_step_age 1d\)\naction: none\n$",
-            )
-            .unwrap();
-            assert!(held.is_match(summary), "{stdout}");
-            assert_eq!(state(&store).await, (Some(1), Rollout::new(2, 25).ok()));
-            let names = ReportStore::open(&out)
-                .unwrap()
-                .guard_names(10)
-                .await
-                .unwrap();
-            assert_eq!(names.len(), 3, "{names:?}");
+            held(&spec, &out, &store).await;
         }
 
         #[tokio::test]

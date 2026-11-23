@@ -1226,6 +1226,17 @@ async fn a_step_is_not_held_when_any_condition_fails() {
 }
 
 #[tokio::test]
+async fn a_previous_report_from_the_future_counts_as_age_0() {
+    let (report, now) = after_step(STEPS, -300, |_| {}, None, plenty()).await;
+    assert_eq!(report.verdict, Verdict::Wait);
+    assert_eq!(
+        report.note.as_deref(),
+        Some("step at 25% is 0m old (< min_step_age 1d)")
+    );
+    assert_eq!(now, (Some(1), Some(Rollout::new(2, 25).unwrap())));
+}
+
+#[tokio::test]
 async fn an_abort_is_never_held() {
     let worse = calls((1000, 0), (1000, 100));
     let (report, now) = after_step(STEPS, 60, |_| {}, None, worse).await;

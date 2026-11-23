@@ -33,7 +33,7 @@ use serde::Serialize;
 use crate::error::MonitorError;
 use crate::experiment::ExperimentReport;
 use crate::gcp::{AdcTokenSource, GcpHttp, TokenSource};
-use crate::guard_report::GuardReport;
+use crate::guard_report::{Action, GuardReport};
 use crate::report::MonitorReport;
 use crate::spec::is_monitor_name;
 
@@ -435,28 +435,35 @@ impl ReportStore {
             .map(Some)
             .map_err(|e| MonitorError::Store(format!("guard {name}: {e}")))
     }
-    /// The newest stored report of the guard spec `spec`, looking at the newest
-    /// [`LATEST_GUARD_SCAN`] guard reports of any spec; `None` when none of them is `spec`'s.
+
+    /// The newest stored report of the guard spec `spec` that applied a ramp step (`applied`
+    /// and action `Ramp(_)`), looking at the newest [`LATEST_GUARD_SCAN`] guard reports of any
+    /// spec; held, waiting, dry-run and other reports are skipped. `None` when there is none.
     ///
     /// # Errors
     ///
-    /// [`MonitorError::Store`] when listing fails or that report cannot be read.
-    pub(crate) async fn latest_guard(
+    /// [`MonitorError::Store`] when listing fails or one of `spec`'s reports cannot be read.
+    pub(crate) async fn latest_applied_ramp(
         &self,
         spec: &str,
     ) -> Result<Option<GuardReport>, MonitorError> {
         let names = self.guard_names(LATEST_GUARD_SCAN).await?;
         // `<spec>-<stamp>[-<n>].json`: what follows `<spec>-` must be the stamp and suffix,
         // so the reports of a spec named `<spec>-x` do not count.
-        let own = names.iter().find(|n| {
+        let own = names.iter().filter(|n| {
             n.strip_prefix(spec)
                 .and_then(|rest| rest.strip_prefix('-'))
                 .is_some_and(|rest| STAMP.as_ref().is_some_and(|re| re.is_match(rest)))
         });
-        match own {
-            Some(name) => self.find_guard(name).await,
-            None => Ok(None),
+        for name in own {
+            if let Some(report) = self.find_guard(name).await?
+                && report.applied
+                && matches!(report.action, Action::Ramp(_))
+            {
+                return Ok(Some(report));
+            }
         }
+        Ok(None)
     }
 }
 
@@ -1011,22 +1018,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn latest_guard_is_the_newest_report_of_exactly_that_spec() {
+    async fn latest_applied_ramp_skips_other_reports_and_specs() {
         let dir = tempfile::tempdir().unwrap();
         let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
-        assert_eq!(store.latest_guard("g").await.unwrap(), None);
-        store.put_guard(&guard("g", 1_800_000_000)).await.unwrap();
-        let mut newer = guard("g", 1_800_003_600);
-        newer.percent = 25;
-        store.put_guard(&newer).await.unwrap();
-        // Newer reports of specs whose names start with `g-` do not count.
-        store.put_guard(&guard("g-x", 1_800_007_200)).await.unwrap();
-        store
-            .put_guard(&guard("g-20270115T090000Z", 1_800_007_200))
-            .await
-            .unwrap();
-        assert_eq!(store.latest_guard("g").await.unwrap(), Some(newer));
-        assert_eq!(store.latest_guard("h").await.unwrap(), None);
+        assert_eq!(store.latest_applied_ramp("g").await.unwrap(), None);
+        // An applied ramp, then a newer applied ramp.
+        let applied = |secs: i64, q: u8| {
+            let mut r = guard("g", secs);
+            r.action = Action::Ramp(q);
+            r.applied = true;
+            r
+        };
+        store.put_guard(&applied(1_800_000_000, 10)).await.unwrap();
+        let newest = applied(1_800_003_600, 25);
+        store.put_guard(&newest).await.unwrap();
+        // Newer reports of the spec that did not apply a ramp are skipped: a held or waiting
+        // run, a dry run, an applied abort and an applied promote.
+        let mut wait = guard("g", 1_800_007_200);
+        wait.verdict = Verdict::Wait;
+        wait.action = Action::None;
+        wait.note = Some("step at 25% is 1h old (< min_step_age 1d)".into());
+        store.put_guard(&wait).await.unwrap();
+        let dry = guard("g", 1_800_010_800); // Ramp(25), not applied.
+        store.put_guard(&dry).await.unwrap();
+        for action in [Action::Abort, Action::Promote] {
+            let mut r = guard("g", 1_800_014_400);
+            r.action = action;
+            r.applied = true;
+            store.put_guard(&r).await.unwrap();
+        }
+        // Newer applied ramps of specs whose names start with `g-` do not count.
+        for spec in ["g-x", "g-20270115T090000Z"] {
+            let mut r = applied(1_800_018_000, 50);
+            r.spec = spec.into();
+            store.put_guard(&r).await.unwrap();
+        }
+        assert_eq!(store.latest_applied_ramp("g").await.unwrap(), Some(newest));
+        assert_eq!(store.latest_applied_ramp("h").await.unwrap(), None);
     }
 
     #[tokio::test]
