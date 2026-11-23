@@ -140,7 +140,7 @@ pub(crate) fn render(
         }
         (llm_calls(rows, prices))
         (scores_section(id, &annotations.scores, annotations.review.as_ref(), csrf))
-        (dataset_section(id, &annotations.dataset, csrf))
+        (dataset_section(id, &annotations.dataset, annotations.review.as_ref(), csrf))
         @if let Ok(view) = logs {
             (log_sections(rows, view))
         }
@@ -264,6 +264,21 @@ fn review_bar(bar: &ReviewBar) -> Markup {
     }
 }
 
+/// The hidden `q_*` fields that carry the review queue and `at` through the score and dataset
+/// forms.
+fn review_fields(bar: &ReviewBar) -> Markup {
+    let q = &bar.queue;
+    html! {
+        input type="hidden" name="q_score" value=(q.score);
+        input type="hidden" name="q_prompt" value=(q.prompt.as_deref().unwrap_or_default());
+        input type="hidden" name="q_version"
+            value=(q.version.map(|v| v.to_string()).unwrap_or_default());
+        input type="hidden" name="q_flagged" value=(if q.flagged { "1" } else { "" });
+        input type="hidden" name="q_range" value=(q.range.as_str());
+        input type="hidden" name="q_at" value=(at_text(bar.cursor.at));
+    }
+}
+
 /// The form that adds a score to trace `id` (`POST /traces/{id}/scores`, confirmed first). In
 /// review mode the name is pre-filled with the queue's score and the queue and `at` ride along
 /// as hidden `q_*` fields.
@@ -273,14 +288,7 @@ fn score_form(id: &TraceId, review: Option<&ReviewBar>, csrf: &str) -> Markup {
             data-confirm="Add this score to the trace?" class="inline" {
             input type="hidden" name="csrf" value=(csrf);
             @if let Some(bar) = review {
-                @let q = &bar.queue;
-                input type="hidden" name="q_score" value=(q.score);
-                input type="hidden" name="q_prompt" value=(q.prompt.as_deref().unwrap_or_default());
-                input type="hidden" name="q_version"
-                    value=(q.version.map(|v| v.to_string()).unwrap_or_default());
-                input type="hidden" name="q_flagged" value=(if q.flagged { "1" } else { "" });
-                input type="hidden" name="q_range" value=(q.range.as_str());
-                input type="hidden" name="q_at" value=(at_text(bar.cursor.at));
+                (review_fields(bar))
             }
             input type="text" name="name" placeholder="score name"
                 value=[review.map(|bar| bar.queue.score.as_str())] required maxlength="100";
@@ -355,14 +363,23 @@ fn scores_section(
 }
 
 /// The form that adds the trace's runs to a dataset (`POST /traces/{id}/dataset`, confirmed
-/// first), offering the existing datasets; nothing without `--datasets`.
-fn dataset_section(id: &TraceId, view: &DatasetView, csrf: &str) -> Markup {
+/// first), offering the existing datasets; nothing without `--datasets`. In review mode the
+/// queue and `at` ride along as hidden `q_*` fields.
+fn dataset_section(
+    id: &TraceId,
+    view: &DatasetView,
+    review: Option<&ReviewBar>,
+    csrf: &str,
+) -> Markup {
     html! {
         @if let Some(names) = &view.names {
             h2 { "Add to dataset" }
             form method="post" action={ "/traces/" (id.as_str()) "/dataset" }
                 data-confirm="Add this trace's runs to the dataset?" class="inline" {
                 input type="hidden" name="csrf" value=(csrf);
+                @if let Some(bar) = review {
+                    (review_fields(bar))
+                }
                 input type="text" name="dataset" list="datasets" placeholder="dataset"
                     required maxlength="64";
                 datalist id="datasets" {
