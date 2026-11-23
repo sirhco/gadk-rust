@@ -37,10 +37,14 @@
 //! [`GuardSpec`] against the prompt rollout it names, prints the report and,
 //! with `--out`, stores it (`stored report <name>`); with `--apply` it also writes the decision
 //! (ramp, promote or abort) to the prompt store. Every BigQuery query it sends bills at most
-//! `--max-bytes` bytes (default 1073741824). It exits 0 when the verdict is `advance`, 1 when it
-//! is `abort` and 3 when it is `wait` (applied or not), and 2 on an invalid spec, an unreadable
-//! price file, a prompt store error (including no rollout on the label, or a store changed since
-//! it was read), a query or judge error, or a report store error. Usage errors exit 2.
+//! `--max-bytes` bytes (default 1073741824). With the spec's `min_step_age` it needs `--out` and
+//! reads the spec's newest stored report there. It exits 0 when the verdict is `advance`, 1 when
+//! it is `abort`, 3 when it is `wait` (applied or not), 4 when the label has no rollout (it
+//! prints `guard <name>: <prompt>/<label> has no rollout` and stores nothing), and 2 on an
+//! invalid spec (or `min_step_age` without `--out`), an unreadable price file, a prompt store
+//! error (an unknown prompt or label, or a store changed since it was read), a query or judge
+//! error, or a report store error (after `--apply` the decision stays written). Usage errors
+//! exit 2.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -263,6 +267,7 @@ fn cli() -> Command {
 fn guard_cli() -> Command {
     Command::new("guard")
         .about("Compare both sides of a prompt rollout and advance, abort or wait")
+        .after_help("Exit codes: 0 advance, 1 abort, 3 wait, 4 no rollout, 2 error.")
         .arg(Arg::new("spec").required(true).help("guard spec YAML file"))
         .arg(
             Arg::new("apply")
@@ -556,7 +561,7 @@ async fn report(
     Ok(())
 }
 
-/// `guard`: 0 (advance), 1 (abort) or 3 (wait); errors map to 2.
+/// `guard`: 0 (advance), 1 (abort), 3 (wait) or 4 (no rollout); errors map to 2.
 async fn guard(
     m: &ArgMatches,
     backends: &dyn Backends,
@@ -564,11 +569,18 @@ async fn guard(
 ) -> Result<i32, MonitorError> {
     let spec_path = m.get_one::<String>("spec").map_or("", String::as_str);
     let spec = GuardSpec::load(spec_path)?;
+    let out_url = m.get_one::<String>("out");
+    if spec.min_step_age.is_some() && out_url.is_none() {
+        return Err(MonitorError::Spec(
+            "guard spec: min_step_age needs --out".into(),
+        ));
+    }
     // Opened before the run, so a bad URL fails before anything is written.
-    let out = m
-        .get_one::<String>("out")
-        .map(|url| ReportStore::open(url))
-        .transpose()?;
+    let out = out_url.map(|url| ReportStore::open(url)).transpose()?;
+    let previous = match (&out, spec.min_step_age) {
+        (Some(out), Some(_)) => out.latest_guard(&spec.name).await?,
+        _ => None,
+    };
     let store = gadk_prompts_cli::open_store(&spec.store)
         .map_err(|e| MonitorError::Store(format!("prompt store: {e}")))?;
     let prices = m
@@ -602,9 +614,18 @@ async fn guard(
             source.as_ref(),
             prices.as_ref(),
             judge,
+            previous.as_ref(),
             m.get_flag("apply"),
         )
         .await?;
+    let Some(report) = report else {
+        writeln!(
+            stdout,
+            "guard {}: {}/{} has no rollout",
+            spec.name, spec.prompt, spec.label
+        )?;
+        return Ok(4);
+    };
     // Print before storing: with --apply the decision is already written to the prompt store,
     // so the operator must see it even when storing the report fails.
     write!(stdout, "{}", report.summary())?;
@@ -2099,6 +2120,8 @@ mod tests {
 
         use gadk_prompts::{FileStore, Label, NewVersion, PromptStore, Rollout};
 
+        use regex::Regex;
+
         use crate::guard_report::GuardReport;
         use crate::guard_source::{GuardQuery, ModelTokens, VersionCalls, VersionFeedback};
         use crate::guard_spec::FeedbackSource;
@@ -2477,17 +2500,36 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn a_missing_rollout_prompt_or_label_exits_2_naming_them() {
+        async fn no_rollout_exits_4_and_stores_nothing() {
             let dir = tempfile::tempdir().unwrap();
             prompts(dir.path(), None).await;
             let spec = guard_file(dir.path(), ERROR_RATE);
-            let (code, _, stderr) = cli_run(&["guard", &spec], &healthy()).await;
-            assert_eq!(code, 2);
-            assert_eq!(
-                stderr,
-                "gadk-eval: report store: prompt store: support/production: the label has no \
-                 rollout\n"
-            );
+            let before = files(&dir.path().join("prompts"));
+            let out = dir.path().join("reports");
+            let fake = healthy();
+            let (code, stdout, stderr) = cli_run(
+                &[
+                    "guard",
+                    &spec,
+                    "--apply",
+                    "--out",
+                    &out.display().to_string(),
+                ],
+                &fake,
+            )
+            .await;
+            assert_eq!(code, 4, "{stdout}{stderr}");
+            assert_eq!(stdout, "guard g: support/production has no rollout\n");
+            assert_eq!(stderr, "");
+            assert!(!out.join("guards").exists());
+            assert_eq!(files(&dir.path().join("prompts")), before);
+        }
+
+        #[tokio::test]
+        async fn a_missing_prompt_or_label_exits_2_naming_them() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), None).await;
+            let spec = guard_file(dir.path(), ERROR_RATE);
             let other = std::fs::read_to_string(&spec)
                 .unwrap()
                 .replace("label: production", "label: staging");
@@ -2508,6 +2550,68 @@ mod tests {
                 stderr,
                 "gadk-eval: report store: prompt store: billing/staging: no such prompt\n"
             );
+        }
+
+        /// Adds `min_step_age: 1d` to the guard spec at `spec`.
+        fn with_min_step_age(spec: &str) {
+            let text = std::fs::read_to_string(spec).unwrap().replace(
+                "ramp: [10, 25, 50]\n",
+                "ramp: [10, 25, 50]\nmin_step_age: 1d\n",
+            );
+            std::fs::write(spec, text).unwrap();
+        }
+
+        #[tokio::test]
+        async fn a_young_step_is_held_with_a_note_and_exits_3() {
+            let dir = tempfile::tempdir().unwrap();
+            let store = prompts(dir.path(), Some(10)).await;
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            let out = dir.path().join("reports").display().to_string();
+            let (code, stdout, stderr) =
+                cli_run(&["guard", &spec, "--apply", "--out", &out], &healthy()).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(state(&store).await, (Some(1), Rollout::new(2, 25).ok()));
+            // A newer report of another spec (named `g-…` too) in the same store is skipped.
+            let reports = ReportStore::open(&out).unwrap();
+            let first = reports.guard_names(1).await.unwrap();
+            let mut other = reports.find_guard(&first[0]).await.unwrap().unwrap();
+            other.spec = "g-other".into();
+            other.generated_at += TimeDelta::minutes(1);
+            other.applied = false;
+            reports.put_guard(&other).await.unwrap();
+            with_min_step_age(&spec);
+            let (code, stdout, stderr) =
+                cli_run(&["guard", &spec, "--apply", "--out", &out], &healthy()).await;
+            assert_eq!(code, 3, "{stdout}{stderr}");
+            let summary = stdout.split("stored report").next().unwrap();
+            let held = Regex::new(
+                r"verdict: wait\nnote: step at 25% is \d+m old \(< min_step_age 1d\)\naction: none\n$",
+            )
+            .unwrap();
+            assert!(held.is_match(summary), "{stdout}");
+            assert_eq!(state(&store).await, (Some(1), Rollout::new(2, 25).ok()));
+            let names = ReportStore::open(&out)
+                .unwrap()
+                .guard_names(10)
+                .await
+                .unwrap();
+            assert_eq!(names.len(), 3, "{names:?}");
+        }
+
+        #[tokio::test]
+        async fn min_step_age_without_out_exits_2_before_any_access() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), Some(10)).await;
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            with_min_step_age(&spec);
+            let fake = healthy();
+            let (code, stdout, stderr) = cli_run(&["guard", &spec, "--apply"], &fake).await;
+            assert_eq!(code, 2, "{stdout}");
+            assert_eq!(
+                stderr,
+                "gadk-eval: monitor spec: guard spec: min_step_age needs --out\n"
+            );
+            assert!(fake.calls().is_empty(), "{:?}", fake.calls());
         }
 
         #[tokio::test]
@@ -2587,6 +2691,10 @@ mod tests {
             for flag in ["--apply", "--prices", "--out", "--max-bytes"] {
                 assert!(stdout.contains(flag), "{flag}: {stdout}");
             }
+            assert!(
+                stdout.contains("Exit codes: 0 advance, 1 abort, 3 wait, 4 no rollout, 2 error."),
+                "{stdout}"
+            );
             let (code, _, stderr) = cli_run(&["guard"], &healthy()).await;
             assert_eq!(code, 2);
             assert!(stderr.contains("<spec>"), "{stderr}");

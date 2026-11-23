@@ -17,7 +17,7 @@
 
 use std::fmt::Write as _;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::MonitorError;
@@ -170,11 +170,16 @@ pub struct GuardReport {
     pub action: Action,
     /// Whether the action was written to the prompt store.
     pub applied: bool,
+    /// Why the verdict differs from what the checks say, for example
+    /// `step at 25% is 3h old (< min_step_age 1d)` when `min_step_age` held back an `advance`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 impl GuardReport {
     /// A text summary: a header line, one row per check (baseline and rollout values with
-    /// their sample sizes, harm, status and reason), the verdict and the action.
+    /// their sample sizes, harm, status and reason), the verdict, the note (when there is one)
+    /// and the action.
     pub fn summary(&self) -> String {
         let mut out = format!(
             "guard {}: {}/{} v{} → v{} ({}%), window {}\n",
@@ -184,7 +189,7 @@ impl GuardReport {
             self.baseline,
             self.rollout,
             self.percent,
-            window_length(&self.window)
+            duration_text(self.window.to - self.window.from)
         );
         let header = ["check", "baseline", "rollout", "harm"];
         let rows: Vec<[String; 5]> = self
@@ -223,6 +228,9 @@ impl GuardReport {
             );
         }
         let _ = writeln!(out, "verdict: {}", self.verdict.as_str());
+        if let Some(note) = &self.note {
+            let _ = writeln!(out, "note: {note}");
+        }
         let action = match (self.action, self.applied) {
             (Action::Ramp(q), false) => format!("would ramp to {q}%"),
             (Action::Ramp(q), true) => format!("ramped to {q}%"),
@@ -264,9 +272,10 @@ impl GuardReport {
     }
 }
 
-/// The window's length: `<n>d` when whole days, else `<n>h` when whole hours, else `<n>m`.
-fn window_length(w: &Window) -> String {
-    let minutes = (w.to - w.from).num_minutes();
+/// A duration in whole minutes (rounded down): `<n>d` when whole days, else `<n>h` when
+/// whole hours, else `<n>m`.
+pub(crate) fn duration_text(d: TimeDelta) -> String {
+    let minutes = d.num_minutes();
     if minutes != 0 && minutes % (24 * 60) == 0 {
         format!("{}d", minutes / (24 * 60))
     } else if minutes != 0 && minutes % 60 == 0 {
@@ -305,8 +314,6 @@ fn harm(unit: Unit, h: Option<f64>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeDelta;
-
     use super::*;
 
     fn at(secs: i64) -> DateTime<Utc> {
@@ -403,6 +410,7 @@ mod tests {
             verdict: Verdict::Abort,
             action: Action::Abort,
             applied: false,
+            note: None,
         }
     }
 
@@ -420,6 +428,35 @@ verdict: abort
 action: would abort
 ";
         assert_eq!(report().summary(), expected);
+    }
+
+    #[test]
+    fn summary_prints_the_note_after_the_verdict() {
+        let mut r = report();
+        r.verdict = Verdict::Wait;
+        r.action = Action::None;
+        r.note = Some("step at 10% is 3h old (< min_step_age 1d)".into());
+        let summary = r.summary();
+        assert!(
+            summary.ends_with(
+                "verdict: wait\nnote: step at 10% is 3h old (< min_step_age 1d)\naction: none\n"
+            ),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn durations_print_in_the_largest_whole_unit() {
+        for (d, text) in [
+            (TimeDelta::days(7), "7d"),
+            (TimeDelta::hours(36), "36h"),
+            (TimeDelta::minutes(90), "90m"),
+            (TimeDelta::minutes(45), "45m"),
+            (TimeDelta::seconds(179), "2m"),
+            (TimeDelta::seconds(59), "0m"),
+        ] {
+            assert_eq!(duration_text(d), text);
+        }
     }
 
     #[test]
@@ -516,6 +553,19 @@ action: would abort
             r.action = action;
             assert_eq!(GuardReport::from_json(&r.to_json().unwrap()).unwrap(), r);
         }
+        assert!(!r.to_json().unwrap().contains("note"));
+        r.note = Some("step at 25% is 1h old (< min_step_age 1d)".into());
+        let json = r.to_json().unwrap();
+        assert!(
+            json.contains("\"note\": \"step at 25% is 1h old (< min_step_age 1d)\""),
+            "{json}"
+        );
+        assert_eq!(GuardReport::from_json(&json).unwrap(), r);
+        // A report stored before `note` existed still parses.
+        r.note = None;
+        let mut old: serde_json::Value = serde_json::from_str(&r.to_json().unwrap()).unwrap();
+        assert!(old.as_object_mut().unwrap().remove("note").is_none());
+        assert_eq!(GuardReport::from_json(&old.to_string()).unwrap(), r);
         assert!(matches!(
             GuardReport::from_json("{}"),
             Err(MonitorError::Io(e)) if e.kind() == std::io::ErrorKind::InvalidData

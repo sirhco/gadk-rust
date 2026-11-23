@@ -49,6 +49,9 @@ const GUARDS: &str = "guards";
 /// A stored report's name: `<spec>-<timestamp>[-<n>].json`.
 static NAME: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]+-(\d{8}T\d{6}Z)(?:-(\d+))?\.json$").ok());
+/// The part of a report name after `<spec>-`.
+static STAMP: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"^\d{8}T\d{6}Z(?:-\d+)?\.json$").ok());
 
 /// A stored report, summarised.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -432,7 +435,33 @@ impl ReportStore {
             .map(Some)
             .map_err(|e| MonitorError::Store(format!("guard {name}: {e}")))
     }
+    /// The newest stored report of the guard spec `spec`, looking at the newest
+    /// [`LATEST_GUARD_SCAN`] guard reports of any spec; `None` when none of them is `spec`'s.
+    ///
+    /// # Errors
+    ///
+    /// [`MonitorError::Store`] when listing fails or that report cannot be read.
+    pub(crate) async fn latest_guard(
+        &self,
+        spec: &str,
+    ) -> Result<Option<GuardReport>, MonitorError> {
+        let names = self.guard_names(LATEST_GUARD_SCAN).await?;
+        // `<spec>-<stamp>[-<n>].json`: what follows `<spec>-` must be the stamp and suffix,
+        // so the reports of a spec named `<spec>-x` do not count.
+        let own = names.iter().find(|n| {
+            n.strip_prefix(spec)
+                .and_then(|rest| rest.strip_prefix('-'))
+                .is_some_and(|rest| STAMP.as_ref().is_some_and(|re| re.is_match(rest)))
+        });
+        match own {
+            Some(name) => self.find_guard(name).await,
+            None => Ok(None),
+        }
+    }
 }
+
+/// How many of the newest guard reports [`ReportStore::latest_guard`] looks at.
+const LATEST_GUARD_SCAN: usize = 200;
 
 /// The sort key of a valid report name: its timestamp text and suffix (1 for none).
 fn name_key(name: &str) -> Option<(String, u32)> {
@@ -521,6 +550,7 @@ mod tests {
             verdict: Verdict::Advance,
             action: Action::Ramp(25),
             applied: false,
+            note: None,
         }
     }
 
@@ -978,6 +1008,25 @@ mod tests {
             matches!(&err, MonitorError::Store(m) if m.starts_with("guard b-20270115T080000Z.json: ")),
             "{err}"
         );
+    }
+
+    #[tokio::test]
+    async fn latest_guard_is_the_newest_report_of_exactly_that_spec() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ReportStore::open(&dir.path().display().to_string()).unwrap();
+        assert_eq!(store.latest_guard("g").await.unwrap(), None);
+        store.put_guard(&guard("g", 1_800_000_000)).await.unwrap();
+        let mut newer = guard("g", 1_800_003_600);
+        newer.percent = 25;
+        store.put_guard(&newer).await.unwrap();
+        // Newer reports of specs whose names start with `g-` do not count.
+        store.put_guard(&guard("g-x", 1_800_007_200)).await.unwrap();
+        store
+            .put_guard(&guard("g-20270115T090000Z", 1_800_007_200))
+            .await
+            .unwrap();
+        assert_eq!(store.latest_guard("g").await.unwrap(), Some(newer));
+        assert_eq!(store.latest_guard("h").await.unwrap(), None);
     }
 
     #[tokio::test]

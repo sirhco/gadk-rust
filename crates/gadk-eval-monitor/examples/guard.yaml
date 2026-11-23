@@ -3,11 +3,14 @@
 # It watches the rollout on the `production` label of the prompt `support/answer` and checks
 # every signal the guard knows. Replace `my-proj` with your Google Cloud project, then:
 #
-#   gadk-eval guard guard.yaml --prices prices.yaml                 # dry run
+#   gadk-eval guard guard.yaml --prices prices.yaml \
+#     --out gs://my-bucket/monitors                                 # dry run
 #   gadk-eval guard guard.yaml --prices prices.yaml --apply \
 #     --out gs://my-bucket/monitors                                 # ramp, promote or abort
 #
-# Exit codes: 0 advance, 1 abort, 3 wait, 2 error.
+# `min_step_age` reads the newest stored report of this spec, so every run needs --out.
+#
+# Exit codes: 0 advance, 1 abort, 3 wait, 4 no rollout (nothing to guard), 2 error.
 name: support-answer-guard
 source:
   bigquery: { project: my-proj, dataset: agent_analytics, table: agent_events }
@@ -16,6 +19,8 @@ prompt: support/answer
 label: production
 window: 24h
 min_calls: 200
+# Each ramp step runs at least this long before the next advance (needs --out).
+min_step_age: 24h
 ramp: [10, 25, 50]
 checks:
   # Failed model calls: at most 1 percentage point more than the label's version.

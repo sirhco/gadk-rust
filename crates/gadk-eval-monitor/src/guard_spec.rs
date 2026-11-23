@@ -23,6 +23,8 @@
 //! label: production                 # the label whose rollout is guarded
 //! window: 24h                       # <n>m | <n>h | <n>d, at most 30d: calls in [now - window, now)
 //! min_calls: 100                    # >= 2, default 100: fewer calls on a side is `insufficient`
+//! min_step_age: 24h                 # optional, <n>m | <n>h | <n>d, at most 30d: hold an advance
+//!                                   # until the last applied ramp step is this old (needs --out)
 //! ramp: [10, 25, 50]                # optional: percents 1-99, strictly increasing
 //! checks:                           # at least one; only `feedback` may repeat
 //!   - error_rate: { max_increase: 0.01 }          # absolute, 0-1
@@ -65,7 +67,7 @@ pub const DEFAULT_EVAL_LIMIT: usize = 100;
 /// The fewest scored runs per version an `eval` check compares; fewer is `insufficient`.
 pub const MIN_EVAL_RUNS: u64 = 10;
 
-/// The longest `window`.
+/// The longest `window` and `min_step_age`.
 const MAX_WINDOW_DAYS: i64 = 30;
 /// The check kinds, in the order the spec documents them.
 const CHECK_KINDS: [&str; 5] = [
@@ -94,6 +96,10 @@ pub struct GuardSpec {
     pub window: TimeDelta,
     /// The fewest calls per version every check needs (at least 2).
     pub min_calls: u64,
+    /// How long a ramp step the guard applied must have run before the next `advance` (at
+    /// most 30 days); `None` holds nothing back. Needs the previous report, so the CLI
+    /// requires `--out`.
+    pub min_step_age: Option<TimeDelta>,
     /// The rollout percents to step through, strictly increasing, each 1-99; empty means
     /// promote on the first `advance`.
     pub ramp: Vec<u8>,
@@ -233,6 +239,7 @@ fn parse(doc: &Value) -> Result<GuardSpec, String> {
             "label",
             "window",
             "min_calls",
+            "min_step_age",
             "ramp",
             "checks",
             "judge",
@@ -265,14 +272,11 @@ fn parse(doc: &Value) -> Result<GuardSpec, String> {
         StoreError::Invalid(m) => format!("`label`: {m}"),
         other => format!("`label`: {other}"),
     })?;
-    let window = top
-        .get("window")
-        .and_then(Value::as_str)
-        .and_then(parse_window)
-        .ok_or("`window` must be <n>m, <n>h or <n>d with n >= 1")?;
-    if window > TimeDelta::days(MAX_WINDOW_DAYS) {
-        return Err(format!("`window` must be at most {MAX_WINDOW_DAYS}d"));
-    }
+    let window = duration(top.get("window"), "window")?;
+    let min_step_age = match top.get("min_step_age") {
+        None | Some(Value::Null) => None,
+        v => Some(duration(v, "min_step_age")?),
+    };
     let min_calls = match top.get("min_calls") {
         None | Some(Value::Null) => DEFAULT_MIN_CALLS,
         Some(v) => v
@@ -298,6 +302,7 @@ fn parse(doc: &Value) -> Result<GuardSpec, String> {
         label,
         window,
         min_calls,
+        min_step_age,
         ramp,
         checks,
         judge: None,
@@ -315,6 +320,18 @@ fn parse(doc: &Value) -> Result<GuardSpec, String> {
         (Some(v), true) => Some(parse_judge(v, spec.source.project())?),
     };
     Ok(spec)
+}
+
+/// The duration `key` (`<n>m`, `<n>h` or `<n>d`, at most 30 days).
+fn duration(v: Option<&Value>, key: &str) -> Result<TimeDelta, String> {
+    let d = v
+        .and_then(Value::as_str)
+        .and_then(parse_window)
+        .ok_or_else(|| format!("`{key}` must be <n>m, <n>h or <n>d with n >= 1"))?;
+    if d > TimeDelta::days(MAX_WINDOW_DAYS) {
+        return Err(format!("`{key}` must be at most {MAX_WINDOW_DAYS}d"));
+    }
+    Ok(d)
 }
 
 /// `{ bigquery: { project, dataset, table } }`; Cloud Trace sources are refused.
@@ -729,7 +746,7 @@ judge:
         assert_eq!(
             printed(&with("rollout: 10")),
             "monitor spec: guard spec: unknown key `rollout` (expected one of: name, source, \
-             store, prompt, label, window, min_calls, ramp, checks, judge)"
+             store, prompt, label, window, min_calls, min_step_age, ramp, checks, judge)"
         );
     }
 
@@ -775,6 +792,45 @@ judge:
                 printed(&with(&format!("window: {window}"))),
                 "monitor spec: guard spec: `window` must be at most 30d",
                 "{window}"
+            );
+        }
+    }
+
+    #[test]
+    fn min_step_age_is_optional_and_parsed_like_the_window() {
+        assert_eq!(
+            GuardSpec::from_yaml(&with("window: 1h"))
+                .unwrap()
+                .min_step_age,
+            None
+        );
+        for (v, want) in [
+            ("90m", TimeDelta::minutes(90)),
+            ("24h", TimeDelta::hours(24)),
+            ("30d", TimeDelta::days(30)),
+            ("720h", TimeDelta::days(30)),
+        ] {
+            let s = GuardSpec::from_yaml(&with(&format!("min_step_age: {v}"))).unwrap();
+            assert_eq!(s.min_step_age, Some(want), "{v}");
+        }
+        let s = GuardSpec::from_yaml(&with("min_step_age: null")).unwrap();
+        assert_eq!(s.min_step_age, None);
+    }
+
+    #[test]
+    fn rejects_a_bad_min_step_age() {
+        for v in ["0h", "5s", "h", "\"\"", "12"] {
+            assert_eq!(
+                printed(&with(&format!("min_step_age: {v}"))),
+                "monitor spec: guard spec: `min_step_age` must be <n>m, <n>h or <n>d with n >= 1",
+                "{v}"
+            );
+        }
+        for v in ["31d", "721h", "43201m"] {
+            assert_eq!(
+                printed(&with(&format!("min_step_age: {v}"))),
+                "monitor spec: guard spec: `min_step_age` must be at most 30d",
+                "{v}"
             );
         }
     }
@@ -1170,6 +1226,7 @@ judge:
             ]
         );
         assert!(s.wants_judge());
+        assert_eq!(s.min_step_age, Some(TimeDelta::hours(24)));
         assert_eq!(
             s.judge.map(|j| j.model).as_deref(),
             Some("gemini-3.8-flash")

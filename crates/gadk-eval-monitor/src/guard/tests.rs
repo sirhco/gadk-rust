@@ -185,9 +185,10 @@ fn files(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 async fn dry(spec: &GuardSpec, store: &dyn PromptStore, source: &FakeGuard) -> GuardReport {
     Guard::new()
         .now(at(NOW))
-        .run(spec, store, source, None, None, false)
+        .run(spec, store, source, None, None, None, false)
         .await
         .unwrap()
+        .expect("a rollout")
 }
 
 /// The only check of `report`.
@@ -351,8 +352,9 @@ async fn min_calls_makes_every_check_insufficient() {
         );
     }
     assert_eq!(report.verdict, Verdict::Wait);
-    // Eval runs are not listed or scored while a side has too few calls.
-    assert_eq!(source.log(), ["calls", "feedback thumbs_up any"]);
+    // Feedback is not queried and eval runs are not listed or scored while a side has too
+    // few calls.
+    assert_eq!(source.log(), ["calls"]);
 }
 
 /// A bool row of `version` from `source`.
@@ -599,9 +601,11 @@ async fn cost_check(b: (&str, u64), r: (&str, u64), prices: Option<&PriceTable>)
             &source,
             prices,
             None,
+            None,
             false,
         )
         .await
+        .unwrap()
         .unwrap();
     only(&report).clone()
 }
@@ -723,8 +727,9 @@ async fn eval_check(b: (u32, Vec<ProductionRun>), r: (u32, Vec<ProductionRun>)) 
     let report = Guard::new()
         .now(at(NOW))
         .concurrency(0)
-        .run(&spec("", EVAL), &store, &source, None, None, false)
+        .run(&spec("", EVAL), &store, &source, None, None, None, false)
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(source.log(), ["calls", "runs v1 50", "runs v2 50"]);
     only(&report).clone()
@@ -784,7 +789,7 @@ async fn eval_uses_the_judge_and_requires_one() {
     let mut source = FakeGuard::new(plenty());
     source.runs = vec![runs(1, 10, 0, 0), runs(2, 10, 0, 0)];
     let err = Guard::new()
-        .run(&spec, &store, &source, None, None, false)
+        .run(&spec, &store, &source, None, None, None, false)
         .await
         .unwrap_err();
     assert_eq!(
@@ -796,8 +801,17 @@ async fn eval_uses_the_judge_and_requires_one() {
     let judge = FakeJudge::new(&[verdict; 20]);
     let report = Guard::new()
         .now(at(NOW))
-        .run(&spec, &store, &source, None, Some(judge.clone()), false)
+        .run(
+            &spec,
+            &store,
+            &source,
+            None,
+            Some(judge.clone()),
+            None,
+            false,
+        )
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(judge.calls(), 20);
     assert_eq!(
@@ -832,8 +846,9 @@ async fn apply(
 ) -> Result<GuardReport, MonitorError> {
     Guard::new()
         .now(at(NOW))
-        .run(spec, store, &FakeGuard::new(c), None, None, true)
+        .run(spec, store, &FakeGuard::new(c), None, None, None, true)
         .await
+        .map(|r| r.expect("a rollout"))
 }
 
 #[tokio::test]
@@ -1003,6 +1018,31 @@ async fn promote_after_rewriting_the_same_rollout_goes_through() {
 }
 
 #[tokio::test]
+async fn a_label_without_a_rollout_is_nothing_to_guard() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), None).await;
+    let before = files(dir.path());
+    let source = FakeGuard::new(plenty());
+    for apply in [false, true] {
+        let out = Guard::new()
+            .run(
+                &spec("", ERROR_RATE),
+                &store,
+                &source,
+                None,
+                None,
+                None,
+                apply,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out, None);
+    }
+    assert!(source.log().is_empty());
+    assert_eq!(files(dir.path()), before);
+}
+
+#[tokio::test]
 async fn store_errors_name_the_prompt_and_label() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_in(dir.path(), None).await;
@@ -1013,16 +1053,20 @@ async fn store_errors_name_the_prompt_and_label() {
             s.prompt = yaml_prompt.into();
             s.label = Label::new(label).unwrap();
             Guard::new()
-                .run(&s, store, &FakeGuard::new(plenty()), None, None, false)
+                .run(
+                    &s,
+                    store,
+                    &FakeGuard::new(plenty()),
+                    None,
+                    None,
+                    None,
+                    false,
+                )
                 .await
                 .unwrap_err()
                 .to_string()
         }
     };
-    assert_eq!(
-        run("support", "production").await,
-        "report store: prompt store: support/production: the label has no rollout"
-    );
     assert_eq!(
         run("missing", "production").await,
         "report store: prompt store: missing/production: no such prompt"
@@ -1044,6 +1088,7 @@ async fn other_store_errors_are_prompt_store_errors() {
             &FakeGuard::new(plenty()),
             None,
             None,
+            None,
             false,
         )
         .await
@@ -1053,4 +1098,139 @@ async fn other_store_errors_are_prompt_store_errors() {
         err.starts_with("report store: prompt store: decode: "),
         "{err}"
     );
+}
+
+const STEPS: &str = "ramp: [10, 25, 50]\nmin_step_age: 1d\n";
+
+/// Ramps a rollout at 10% to 25% with apply, `age_secs` before `NOW`; changes that report
+/// with `edit` and the store's rollout to `percent` when given; then runs `spec_extra` at
+/// `NOW` with apply over `c`, passing the report as the previous one.
+async fn after_step(
+    spec_extra: &str,
+    age_secs: i64,
+    edit: impl FnOnce(&mut GuardReport),
+    percent: Option<u8>,
+    c: Vec<VersionCalls>,
+) -> (GuardReport, (Option<u32>, Option<Rollout>)) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let s = spec(spec_extra, ERROR_RATE);
+    let mut previous = Guard::new()
+        .now(at(NOW - age_secs))
+        .run(
+            &s,
+            &store,
+            &FakeGuard::new(plenty()),
+            None,
+            None,
+            None,
+            true,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (previous.action, previous.applied),
+        (Action::Ramp(25), true)
+    );
+    edit(&mut previous);
+    if let Some(p) = percent {
+        let r = Rollout::new(2, p).unwrap();
+        store
+            .set_rollout("support", &prod(), Some(r))
+            .await
+            .unwrap();
+    }
+    let report = Guard::new()
+        .now(at(NOW))
+        .run(
+            &s,
+            &store,
+            &FakeGuard::new(c),
+            None,
+            None,
+            Some(&previous),
+            true,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    (report, state(&store).await)
+}
+
+#[tokio::test]
+async fn a_young_step_holds_an_advance() {
+    let (report, now) = after_step(STEPS, 3 * 3600, |_| {}, None, plenty()).await;
+    assert_eq!(report.verdict, Verdict::Wait);
+    assert_eq!((report.action, report.applied), (Action::None, false));
+    assert_eq!(
+        report.note.as_deref(),
+        Some("step at 25% is 3h old (< min_step_age 1d)")
+    );
+    assert_eq!(report.exit_code(), 3);
+    assert_eq!(report.checks[0].status, Status::Ok);
+    assert_eq!(now, (Some(1), Some(Rollout::new(2, 25).unwrap())));
+    // The age is rounded down to minutes.
+    let (report, _) = after_step(STEPS, 90 * 60 + 59, |_| {}, None, plenty()).await;
+    assert_eq!(
+        report.note.as_deref(),
+        Some("step at 25% is 90m old (< min_step_age 1d)")
+    );
+}
+
+/// A change to the previous report.
+type Edit = Box<dyn FnOnce(&mut GuardReport)>;
+
+#[tokio::test]
+async fn a_step_is_not_held_when_any_condition_fails() {
+    let ramped = || (Some(1), Some(Rollout::new(2, 50).unwrap()));
+    let cases: Vec<(&str, i64, Edit, Option<u8>)> = vec![
+        ("old enough", 24 * 3600, Box::new(|_| {}), None),
+        ("other percent", 3600, Box::new(|_| {}), Some(30)),
+        ("other rollout", 3600, Box::new(|r| r.rollout = 3), None),
+        (
+            "other prompt",
+            3600,
+            Box::new(|r| r.prompt = "billing".into()),
+            None,
+        ),
+        (
+            "other label",
+            3600,
+            Box::new(|r| r.label = "staging".into()),
+            None,
+        ),
+        ("not applied", 3600, Box::new(|r| r.applied = false), None),
+        (
+            "not a ramp",
+            3600,
+            Box::new(|r| r.action = Action::Promote),
+            None,
+        ),
+    ];
+    for (what, age, edit, percent) in cases {
+        let (report, now) = after_step(STEPS, age, edit, percent, plenty()).await;
+        assert_eq!(report.verdict, Verdict::Advance, "{what}");
+        assert_eq!(
+            (report.action, report.applied),
+            (Action::Ramp(50), true),
+            "{what}"
+        );
+        assert_eq!(report.note, None, "{what}");
+        assert_eq!(now, ramped(), "{what}");
+    }
+    // Without min_step_age nothing is held.
+    let (report, now) = after_step("ramp: [10, 25, 50]\n", 60, |_| {}, None, plenty()).await;
+    assert_eq!((report.action, report.note), (Action::Ramp(50), None));
+    assert_eq!(now, ramped());
+}
+
+#[tokio::test]
+async fn an_abort_is_never_held() {
+    let worse = calls((1000, 0), (1000, 100));
+    let (report, now) = after_step(STEPS, 60, |_| {}, None, worse).await;
+    assert_eq!(report.verdict, Verdict::Abort);
+    assert_eq!((report.action, report.applied), (Action::Abort, true));
+    assert_eq!(report.note, None);
+    assert_eq!(now, (Some(1), None));
 }

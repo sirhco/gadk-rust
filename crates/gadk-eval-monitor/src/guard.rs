@@ -21,12 +21,12 @@ mod tests;
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use gadk_model::Llm;
 use gadk_prompts::{Label, PromptStore, Rollout, StoreError};
 
 use crate::error::MonitorError;
-use crate::guard_report::{Action, CheckResult, GuardReport, Status, Verdict};
+use crate::guard_report::{Action, CheckResult, GuardReport, Status, Verdict, duration_text};
 use crate::guard_source::{GuardQuery, GuardSource};
 use crate::guard_spec::{Check, GuardSpec};
 use crate::monitor::{DEFAULT_CONCURRENCY, score_runs};
@@ -48,8 +48,10 @@ use checks::Sides;
 /// use gadk_eval_monitor::{Guard, GuardSpec};
 ///
 /// let spec = GuardSpec::load("guards/support.yaml")?;
-/// let report = Guard::new().run(&spec, store, source, None, None, false).await?;
-/// print!("{}", report.summary());
+/// match Guard::new().run(&spec, store, source, None, None, None, false).await? {
+///     Some(report) => print!("{}", report.summary()),
+///     None => println!("{}/{} has no rollout", spec.prompt, spec.label),
+/// }
 /// # Ok(()) }
 /// ```
 #[derive(Debug, Clone)]
@@ -85,17 +87,26 @@ impl Guard {
         self
     }
 
-    /// Runs `spec`.
+    /// Runs `spec`; `Ok(None)` when the prompt and label exist but the label has no rollout
+    /// (nothing to guard).
     ///
     /// Reads the label's version B and its rollout (version R at p%) from `store` in one
     /// `load_all_with_rollouts`, gets both versions' calls in `[now − window, now)` from
     /// `source`, and classifies each check: `insufficient` when a side has fewer than
-    /// `min_calls` calls (and, for `feedback`, fewer than `min_count` scores; for `eval`, fewer
-    /// than [`MIN_EVAL_RUNS`](crate::guard_spec::MIN_EVAL_RUNS) scored runs); `unknown` when a
+    /// `min_calls` calls (then neither feedback nor eval runs are queried), for `feedback`
+    /// fewer than `min_count` scores, for `eval` fewer
+    /// than [`MIN_EVAL_RUNS`](crate::guard_spec::MIN_EVAL_RUNS) scored runs; `unknown` when a
     /// value cannot be computed; else `worse`, `ok` or `unsure` from the one-sided 95% interval
     /// of the rollout's harm (cost and p95 latency: the point harm, `worse` or `ok`). The
     /// verdict is `abort` when a check is `worse`, `advance` when all are `ok`, else `wait`;
     /// `advance` ramps to the first `ramp` step above p, or promotes R without one.
+    ///
+    /// `previous` is the newest stored report of the same spec. With the spec's
+    /// `min_step_age` set, an `advance` is held back (verdict `wait`, action none, and a
+    /// [`note`](GuardReport::note) `step at <q>% is <age> old (< min_step_age <min>)`) when
+    /// `previous` applied `Ramp(q)` to the same prompt, label and rollout version, the rollout
+    /// is still at q%, and `previous` was made less than `min_step_age` before now. An
+    /// `abort` is never held back.
     ///
     /// `eval` checks score up to `limit` runs per version with `judge` for `llm_judge`
     /// scorers; runs with a scorer error are left out of the pass rates and counted in the
@@ -107,11 +118,12 @@ impl Guard {
     ///
     /// # Errors
     ///
-    /// [`MonitorError::Store`] when the prompt, the label or its rollout is missing (naming
-    /// the prompt and label), when the store fails (`prompt store: …`), and when it changed
+    /// [`MonitorError::Store`] when the prompt or the label is missing (naming the prompt
+    /// and label), when the store fails (`prompt store: …`), and when it changed
     /// since it was read (`prompt store changed since it was read (v<B>, v<R> at <p>%): …`,
     /// nothing written); [`MonitorError::Judge`] when an `eval` check has an `llm_judge`
     /// scorer and `judge` is `None`; the source's errors.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run(
         &self,
         spec: &GuardSpec,
@@ -119,14 +131,17 @@ impl Guard {
         source: &dyn GuardSource,
         prices: Option<&PriceTable>,
         judge: Option<Arc<dyn Llm>>,
+        previous: Option<&GuardReport>,
         apply: bool,
-    ) -> Result<GuardReport, MonitorError> {
+    ) -> Result<Option<GuardReport>, MonitorError> {
         if spec.wants_judge() && judge.is_none() {
             return Err(MonitorError::Judge(
                 "the spec has llm_judge scorers but no judge model was given".into(),
             ));
         }
-        let (baseline, read) = read_rollout(store, &spec.prompt, &spec.label).await?;
+        let (baseline, Some(read)) = read_rollout(store, &spec.prompt, &spec.label).await? else {
+            return Ok(None);
+        };
         let now = self.now.unwrap_or_else(Utc::now);
         let from = now - spec.window;
         let q = GuardQuery::new(
@@ -159,7 +174,10 @@ impl Guard {
                     max_decrease,
                     min_count,
                 } => {
-                    let rows = source.version_feedback(&q, name, *from_source).await?;
+                    let rows = match sides.insufficient() {
+                        Some(_) => Vec::new(),
+                        None => source.version_feedback(&q, name, *from_source).await?,
+                    };
                     checks::feedback(&sides, name, *from_source, *max_decrease, *min_count, &rows)
                 }
                 Check::CostPerCall { max_increase } => {
@@ -198,12 +216,20 @@ impl Guard {
             };
             results.push(result);
         }
-        let verdict = verdict(&results);
-        let action = action(verdict, &spec.ramp, read.percent);
+        let mut verdict = verdict(&results);
+        let mut action = action(verdict, &spec.ramp, read.percent);
+        let note = match (verdict, spec.min_step_age, previous) {
+            (Verdict::Advance, Some(min), Some(p)) => young_step(spec, read, p, now, min),
+            _ => None,
+        };
+        if note.is_some() {
+            verdict = Verdict::Wait;
+            action = Action::None;
+        }
         if apply {
             write(store, &spec.prompt, &spec.label, baseline, read, action).await?;
         }
-        Ok(GuardReport {
+        Ok(Some(GuardReport {
             spec: spec.name.clone(),
             generated_at: now,
             window: Window { from, to: now },
@@ -217,8 +243,38 @@ impl Guard {
             verdict,
             action,
             applied: apply && action != Action::None,
-        })
+            note,
+        }))
     }
+}
+
+/// `step at <q>% is <age> old (< min_step_age <min>)` when `previous` applied the ramp step
+/// the rollout `read` is still at, on the same prompt, label and rollout version, less than
+/// `min` before `now`; else `None`.
+fn young_step(
+    spec: &GuardSpec,
+    read: Rollout,
+    previous: &GuardReport,
+    now: DateTime<Utc>,
+    min: TimeDelta,
+) -> Option<String> {
+    let Action::Ramp(q) = previous.action else {
+        return None;
+    };
+    let age = now - previous.generated_at;
+    (previous.applied
+        && previous.prompt == spec.prompt
+        && previous.label == spec.label.as_str()
+        && previous.rollout == read.version
+        && read.percent == q
+        && age < min)
+        .then(|| {
+            format!(
+                "step at {q}% is {} old (< min_step_age {})",
+                duration_text(age),
+                duration_text(min)
+            )
+        })
 }
 
 /// `abort` when a check is `worse`, `advance` when every check is `ok`, else `wait`.
@@ -250,12 +306,13 @@ fn store_error(e: StoreError) -> MonitorError {
     MonitorError::Store(format!("prompt store: {e}"))
 }
 
-/// The label's version and its rollout, read with one `load_all_with_rollouts`.
+/// The label's version and its rollout (`None`: no rollout), read with one
+/// `load_all_with_rollouts`.
 async fn read_rollout(
     store: &dyn PromptStore,
     prompt: &str,
     label: &Label,
-) -> Result<(u32, Rollout), MonitorError> {
+) -> Result<(u32, Option<Rollout>), MonitorError> {
     let (prompts, rollouts) = store.load_all_with_rollouts().await.map_err(store_error)?;
     let named = |what: &str| MonitorError::Store(format!("prompt store: {prompt}/{label}: {what}"));
     let entry = prompts
@@ -266,10 +323,7 @@ async fn read_rollout(
         .labels
         .get(label)
         .ok_or_else(|| named("no such label"))?;
-    let rollout = *rollouts
-        .get(prompt, label)
-        .ok_or_else(|| named("the label has no rollout"))?;
-    Ok((baseline, rollout))
+    Ok((baseline, rollouts.get(prompt, label).copied()))
 }
 
 /// Writes `action` with compare-and-set on what was read (`baseline` and `read`).
