@@ -605,13 +605,11 @@ async fn guard(
             m.get_flag("apply"),
         )
         .await?;
-    // Store before printing, so a failing stdout (a closed pipe) does not lose the report.
-    let stored = match out {
-        Some(out) => Some(out.put_guard(&report).await?),
-        None => None,
-    };
+    // Print before storing: with --apply the decision is already written to the prompt store,
+    // so the operator must see it even when storing the report fails.
     write!(stdout, "{}", report.summary())?;
-    if let Some(name) = stored {
+    if let Some(out) = out {
+        let name = out.put_guard(&report).await?;
         writeln!(stdout, "stored report {name}")?;
     }
     Ok(report.exit_code())
@@ -2396,6 +2394,26 @@ mod tests {
                 (report.prompt.as_str(), report.baseline, report.rollout),
                 ("support", 1, 2)
             );
+        }
+
+        #[tokio::test]
+        async fn a_failing_out_store_after_apply_still_prints_the_decision() {
+            let dir = tempfile::tempdir().unwrap();
+            let store = prompts(dir.path(), Some(10)).await;
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            // A local store under a regular file: it opens, but writing fails.
+            let blocker = dir.path().join("a-file");
+            std::fs::write(&blocker, "x").unwrap();
+            let out = blocker.join("sub").display().to_string();
+            let (code, stdout, stderr) =
+                cli_run(&["guard", &spec, "--apply", "--out", &out], &healthy()).await;
+            assert_eq!(code, 2, "{stdout}{stderr}");
+            assert!(
+                stdout.ends_with("verdict: advance\naction: ramped to 25%\n"),
+                "{stdout}"
+            );
+            assert!(stderr.starts_with("gadk-eval: report store: "), "{stderr}");
+            assert_eq!(state(&store).await, (Some(1), Rollout::new(2, 25).ok()));
         }
 
         #[tokio::test]
