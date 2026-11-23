@@ -68,6 +68,8 @@ use crate::usage::{CALL_COLUMNS, UsageSource, count, window_params};
 pub(crate) const SESSION_CAP: usize = 100;
 /// The most users `/users` lists.
 pub(crate) const USER_CAP: usize = 100;
+/// The most turns `/sessions/{id}` lists.
+pub(crate) const TURN_CAP: usize = 200;
 /// The most (session or user) × model rows the sessions and users queries return.
 const ROW_CAP: u32 = 5_000;
 /// The longest session id, user or agent filter, in bytes.
@@ -460,6 +462,182 @@ ORDER BY last DESC, user_id, model"
     )
 }
 
+/// The latest score of one (name, source) on a turn.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TurnScore {
+    /// The score name.
+    pub(crate) name: String,
+    /// `attributes.source` (empty when none).
+    pub(crate) source: String,
+    /// The value as text.
+    pub(crate) value: String,
+}
+
+/// The metrics of one turn (invocation) of a session in the window.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TurnRow {
+    /// The invocation id.
+    pub(crate) invocation_id: String,
+    /// A trace id of its rows.
+    pub(crate) trace_id: Option<String>,
+    /// Its first activity row.
+    pub(crate) start: DateTime<Utc>,
+    /// Its `INVOCATION_COMPLETED` row.
+    pub(crate) end: Option<DateTime<Utc>>,
+    /// Its error rows.
+    pub(crate) errors: u64,
+    /// The tools it called, distinct, in first-call order.
+    pub(crate) tools: Vec<String>,
+    /// Its `LLM_RESPONSE` tokens per model.
+    pub(crate) tokens: Vec<(String, Usage)>,
+    /// The latest score per (name, source).
+    pub(crate) scores: Vec<TurnScore>,
+}
+
+impl UsageSource {
+    /// The turns of session `id` in `[start, end)`, oldest first: at most [`TURN_CAP`] + 1,
+    /// so the caller can tell whether the cap was hit.
+    pub(crate) async fn session_turns(
+        &self,
+        id: &str,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<TurnRow>, SourceError> {
+        let sql = session_turns_sql(&self.table_path()?);
+        let mut params = window_params(start, end);
+        params.push(param("session", "STRING", Some(id.to_owned())));
+        params.push(param("limit", "INT64", Some((TURN_CAP + 1).to_string())));
+        let result = self.run(&sql, params, (TURN_CAP + 1) as u32).await?;
+        result.rows.iter().map(turn_row).collect()
+    }
+}
+
+/// The `key` cell as an array (empty when NULL).
+fn array<'a>(row: &'a Map<String, Value>, key: &str) -> &'a [Value] {
+    row.get(key)
+        .and_then(Value::as_array)
+        .map_or(&[], Vec::as_slice)
+}
+
+/// A row of [`session_turns_sql`]: the tools deduplicated in first-call order (empty names
+/// dropped), the token and score structs read from their arrays.
+fn turn_row(row: &Map<String, Value>) -> Result<TurnRow, SourceError> {
+    let invocation_id = text(row, "invocation_id").ok_or_else(|| SourceError::BigQuery {
+        status: None,
+        reason: None,
+        detail: "row without a valid invocation_id".to_owned(),
+    })?;
+    let mut tools: Vec<String> = Vec::new();
+    for tool in array(row, "tools").iter().filter_map(Value::as_str) {
+        if !tool.is_empty() && !tools.iter().any(|t| t == tool) {
+            tools.push(tool.to_owned());
+        }
+    }
+    let mut tokens = Vec::new();
+    for item in array(row, "tokens").iter().filter_map(Value::as_object) {
+        add_tokens(&mut tokens, item);
+    }
+    let scores = array(row, "scores")
+        .iter()
+        .filter_map(Value::as_object)
+        .filter_map(|s| {
+            Some(TurnScore {
+                name: text(s, "name")?,
+                source: text(s, "source").unwrap_or_default(),
+                value: text(s, "value").unwrap_or_default(),
+            })
+        })
+        .collect();
+    let end = row
+        .get("completed")
+        .and_then(Value::as_str)
+        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+        .map(|t| t.with_timezone(&Utc));
+    Ok(TurnRow {
+        invocation_id,
+        trace_id: text(row, "trace_id"),
+        start: timestamp(row, "start")?,
+        end,
+        errors: count(row, "errors"),
+        tools,
+        tokens,
+        scores,
+    })
+}
+
+/// One row per turn of session `@session` in `[@start, @end)`, at most `@limit`, oldest first
+/// (`start, invocation_id`). Every CTE reads only `@session` and the window:
+///
+/// - `inv`: per non-empty invocation over activity rows, the first row (`start`), a trace id,
+///   the `INVOCATION_COMPLETED` time, the errors and the `TOOL_STARTING` tool names in call
+///   order; `ipage` keeps the first `@limit`;
+/// - `req`, `c`, `tok`: per invocation, the `LLM_RESPONSE` tokens per model as
+///   `ARRAY<STRUCT<model, input, cached, output, reasoning>>`;
+/// - `sc`: per invocation, the latest `FEEDBACK` per (name, source) as
+///   `ARRAY<STRUCT<name, source, value>>`.
+fn session_turns_sql(table: &str) -> String {
+    format!(
+        r"WITH inv AS (
+  SELECT invocation_id, MIN(timestamp) AS start, ANY_VALUE(NULLIF(trace_id, '')) AS trace_id,
+    MAX(IF(event_type = 'INVOCATION_COMPLETED', timestamp, NULL)) AS completed,
+    COUNTIF(event_type IN ('LLM_ERROR', 'TOOL_ERROR') OR status = 'ERROR') AS errors,
+    ARRAY_AGG(IF(event_type = 'TOOL_STARTING', JSON_VALUE(content, '$.tool'), NULL)
+      IGNORE NULLS ORDER BY timestamp) AS tools
+  FROM {table}
+  WHERE event_type != 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
+    AND session_id = @session AND invocation_id IS NOT NULL AND invocation_id != ''
+  GROUP BY invocation_id),
+ipage AS (
+  SELECT * FROM inv
+  ORDER BY start, invocation_id
+  LIMIT @limit),
+req AS (
+  SELECT trace_id, span_id, ANY_VALUE(JSON_VALUE(attributes, '$.model')) AS model
+  FROM {table}
+  WHERE event_type = 'LLM_REQUEST' AND timestamp >= @start AND timestamp < @end
+    AND session_id = @session
+  GROUP BY trace_id, span_id),
+c AS (
+  SELECT res.invocation_id AS invocation_id,
+    COALESCE(NULLIF(req.model, ''), NULLIF(JSON_VALUE(res.attributes, '$.model_version'), ''), '(unknown)') AS model,
+    {CALL_COLUMNS}
+  FROM {table} AS res
+  LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id
+  WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end
+    AND res.session_id = @session),
+tok AS (
+  SELECT invocation_id,
+    ARRAY_AGG(STRUCT(model, input, cached, output, reasoning) ORDER BY model) AS tokens
+  FROM (
+    SELECT invocation_id, model, SUM(input) AS input, SUM(cached) AS cached,
+      SUM(output) AS output, SUM(reasoning) AS reasoning
+    FROM c
+    GROUP BY invocation_id, model)
+  GROUP BY invocation_id),
+sc AS (
+  SELECT invocation_id, ARRAY_AGG(STRUCT(name, source, value) ORDER BY name, source) AS scores
+  FROM (
+    SELECT invocation_id, JSON_VALUE(content, '$.name') AS name,
+      IFNULL(JSON_VALUE(attributes, '$.source'), '') AS source,
+      JSON_VALUE(content, '$.value') AS value
+    FROM {table}
+    WHERE event_type = 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
+      AND session_id = @session AND invocation_id IS NOT NULL AND invocation_id != ''
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')
+      ORDER BY timestamp DESC, event_id DESC) = 1)
+  WHERE name IS NOT NULL
+  GROUP BY invocation_id)
+SELECT ipage.invocation_id AS invocation_id, ipage.trace_id AS trace_id, ipage.start AS start,
+  ipage.completed AS completed, ipage.errors AS errors, ipage.tools AS tools,
+  tok.tokens AS tokens, sc.scores AS scores
+FROM ipage
+LEFT JOIN tok ON tok.invocation_id = ipage.invocation_id
+LEFT JOIN sc ON sc.invocation_id = ipage.invocation_id
+ORDER BY start, invocation_id"
+    )
+}
+
 /// The model cells of a test row: `(model, [input, cached, output, reasoning])`, or `None` for
 /// a row without model calls (NULL cells).
 #[cfg(test)]
@@ -521,6 +699,106 @@ pub(crate) fn user_cells(
     cells
 }
 
+/// The schema of [`session_turns_sql`]: `tools` is `REPEATED` and `tokens` and `scores` are
+/// `REPEATED RECORD`s.
+#[cfg(test)]
+pub(crate) fn turn_reply(rows: Vec<Vec<Value>>) -> Result<(u16, String), String> {
+    use serde_json::json;
+    let field = |name: &str, ty: &str| json!({ "name": name, "type": ty, "mode": "NULLABLE" });
+    let schema = vec![
+        field("invocation_id", "STRING"),
+        field("trace_id", "STRING"),
+        field("start", "TIMESTAMP"),
+        field("completed", "TIMESTAMP"),
+        field("errors", "INT64"),
+        json!({ "name": "tools", "type": "STRING", "mode": "REPEATED" }),
+        json!({ "name": "tokens", "type": "RECORD", "mode": "REPEATED", "fields": [
+            field("model", "STRING"),
+            field("input", "INT64"),
+            field("cached", "INT64"),
+            field("output", "INT64"),
+            field("reasoning", "INT64"),
+        ] }),
+        json!({ "name": "scores", "type": "RECORD", "mode": "REPEATED", "fields": [
+            field("name", "STRING"),
+            field("source", "STRING"),
+            field("value", "STRING"),
+        ] }),
+    ];
+    crate::traces::test_http::schema_reply(schema, rows, false)
+}
+
+/// The cells of one [`session_turns_sql`] row.
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub(crate) struct TurnCells<'a> {
+    /// The invocation id.
+    pub(crate) invocation_id: &'a str,
+    /// The trace id (`None` is NULL).
+    pub(crate) trace_id: Option<&'a str>,
+    /// The turn's first activity row.
+    pub(crate) start: DateTime<Utc>,
+    /// The `INVOCATION_COMPLETED` time (`None` is NULL).
+    pub(crate) end: Option<DateTime<Utc>>,
+    /// The error count.
+    pub(crate) errors: u64,
+    /// The `TOOL_STARTING` tool names, in call order.
+    pub(crate) tools: &'a [&'a str],
+    /// `(model, [input, cached, output, reasoning])` per model.
+    pub(crate) tokens: &'a [(&'a str, [u64; 4])],
+    /// `(name, source, value)` per latest score.
+    pub(crate) scores: &'a [(&'a str, &'a str, &'a str)],
+}
+
+#[cfg(test)]
+impl<'a> TurnCells<'a> {
+    /// Invocation `invocation_id` starting at `start`, with no trace, no completion, no errors,
+    /// no tools, no tokens and no scores.
+    pub(crate) fn new(invocation_id: &'a str, start: DateTime<Utc>) -> Self {
+        Self {
+            invocation_id,
+            trace_id: None,
+            start,
+            end: None,
+            errors: 0,
+            tools: &[],
+            tokens: &[],
+            scores: &[],
+        }
+    }
+
+    /// The row's cells.
+    pub(crate) fn cells(&self) -> Vec<Value> {
+        use crate::traces::test_http::{record, repeated};
+        vec![
+            Value::from(self.invocation_id),
+            self.trace_id.map_or(Value::Null, Value::from),
+            ts_cell(self.start),
+            self.end.map_or(Value::Null, ts_cell),
+            Value::from(self.errors.to_string()),
+            repeated(self.tools.iter().map(|t| Value::from(*t)).collect()),
+            repeated(
+                self.tokens
+                    .iter()
+                    .map(|(model, counts)| record(model_cells(Some((model, *counts)))))
+                    .collect(),
+            ),
+            repeated(
+                self.scores
+                    .iter()
+                    .map(|(name, source, value)| {
+                        record(vec![
+                            Value::from(*name),
+                            Value::from(*source),
+                            Value::from(*value),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -533,6 +811,71 @@ mod tests {
     use super::*;
     use crate::traces::BigQueryTable;
     use crate::traces::test_http::{FakeHttp, param_value, reply};
+    const TURNS_SQL: &str = r"WITH inv AS (
+  SELECT invocation_id, MIN(timestamp) AS start, ANY_VALUE(NULLIF(trace_id, '')) AS trace_id,
+    MAX(IF(event_type = 'INVOCATION_COMPLETED', timestamp, NULL)) AS completed,
+    COUNTIF(event_type IN ('LLM_ERROR', 'TOOL_ERROR') OR status = 'ERROR') AS errors,
+    ARRAY_AGG(IF(event_type = 'TOOL_STARTING', JSON_VALUE(content, '$.tool'), NULL)
+      IGNORE NULLS ORDER BY timestamp) AS tools
+  FROM `p.d.t`
+  WHERE event_type != 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
+    AND session_id = @session AND invocation_id IS NOT NULL AND invocation_id != ''
+  GROUP BY invocation_id),
+ipage AS (
+  SELECT * FROM inv
+  ORDER BY start, invocation_id
+  LIMIT @limit),
+req AS (
+  SELECT trace_id, span_id, ANY_VALUE(JSON_VALUE(attributes, '$.model')) AS model
+  FROM `p.d.t`
+  WHERE event_type = 'LLM_REQUEST' AND timestamp >= @start AND timestamp < @end
+    AND session_id = @session
+  GROUP BY trace_id, span_id),
+c AS (
+  SELECT res.invocation_id AS invocation_id,
+    COALESCE(NULLIF(req.model, ''), NULLIF(JSON_VALUE(res.attributes, '$.model_version'), ''), '(unknown)') AS model,
+    JSON_VALUE(res.attributes, '$.prompt.name') AS prompt_name,
+    SAFE_CAST(JSON_VALUE(res.attributes, '$.prompt.version') AS INT64) AS prompt_version,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.prompt_token_count') AS INT64), 0)
+      + IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.tool_use_prompt_token_count') AS INT64), 0) AS input,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.cached_content_token_count') AS INT64), 0) AS cached,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.candidates_token_count') AS INT64), 0) AS output,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.thoughts_token_count') AS INT64), 0) AS reasoning,
+    SAFE_CAST(JSON_VALUE(res.latency_ms, '$.total_ms') AS FLOAT64) AS total_ms
+  FROM `p.d.t` AS res
+  LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id
+  WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end
+    AND res.session_id = @session),
+tok AS (
+  SELECT invocation_id,
+    ARRAY_AGG(STRUCT(model, input, cached, output, reasoning) ORDER BY model) AS tokens
+  FROM (
+    SELECT invocation_id, model, SUM(input) AS input, SUM(cached) AS cached,
+      SUM(output) AS output, SUM(reasoning) AS reasoning
+    FROM c
+    GROUP BY invocation_id, model)
+  GROUP BY invocation_id),
+sc AS (
+  SELECT invocation_id, ARRAY_AGG(STRUCT(name, source, value) ORDER BY name, source) AS scores
+  FROM (
+    SELECT invocation_id, JSON_VALUE(content, '$.name') AS name,
+      IFNULL(JSON_VALUE(attributes, '$.source'), '') AS source,
+      JSON_VALUE(content, '$.value') AS value
+    FROM `p.d.t`
+    WHERE event_type = 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
+      AND session_id = @session AND invocation_id IS NOT NULL AND invocation_id != ''
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')
+      ORDER BY timestamp DESC, event_id DESC) = 1)
+  WHERE name IS NOT NULL
+  GROUP BY invocation_id)
+SELECT ipage.invocation_id AS invocation_id, ipage.trace_id AS trace_id, ipage.start AS start,
+  ipage.completed AS completed, ipage.errors AS errors, ipage.tools AS tools,
+  tok.tokens AS tokens, sc.scores AS scores
+FROM ipage
+LEFT JOIN tok ON tok.invocation_id = ipage.invocation_id
+LEFT JOIN sc ON sc.invocation_id = ipage.invocation_id
+ORDER BY start, invocation_id";
 
     const SESSIONS_SQL: &str = r"WITH head AS (
   SELECT session_id,
@@ -1065,6 +1408,112 @@ ORDER BY last DESC, user_id, model";
                 status: Some(500),
                 reason: Some("backendError".into()),
                 detail: "backend error".into()
+            }
+        );
+    }
+
+    #[test]
+    fn the_turns_sql_is_byte_identical() {
+        assert_eq!(session_turns_sql("`p.d.t`"), TURNS_SQL);
+    }
+
+    #[tokio::test]
+    async fn session_turns_read_struct_arrays_and_keep_tools_in_first_call_order() {
+        let fake = FakeHttp::new(vec![turn_reply(vec![
+            TurnCells {
+                trace_id: Some("0123456789abcdef0123456789abcdef"),
+                end: Some(ago(590)),
+                errors: 1,
+                tools: &["search", "lookup", "search", ""],
+                tokens: &[
+                    ("gemini-3.8-flash", [1000, 200, 300, 50]),
+                    ("other-model", [10, 0, 5, 0]),
+                ],
+                scores: &[("helpful", "console", "true"), ("quality", "app", "4")],
+                ..TurnCells::new("inv-1", ago(600))
+            }
+            .cells(),
+            TurnCells::new("inv-2", ago(300)).cells(),
+        ])]);
+        let turns = source(&fake)
+            .session_turns("Sess-AB", end() - TimeDelta::days(7), end())
+            .await
+            .unwrap();
+        assert_eq!(
+            turns,
+            vec![
+                TurnRow {
+                    invocation_id: "inv-1".into(),
+                    trace_id: Some("0123456789abcdef0123456789abcdef".into()),
+                    start: ago(600),
+                    end: Some(ago(590)),
+                    errors: 1,
+                    tools: vec!["search".into(), "lookup".into()],
+                    tokens: vec![
+                        ("gemini-3.8-flash".into(), usage(1000, 200, 300, 50)),
+                        ("other-model".into(), usage(10, 0, 5, 0)),
+                    ],
+                    scores: vec![
+                        TurnScore {
+                            name: "helpful".into(),
+                            source: "console".into(),
+                            value: "true".into(),
+                        },
+                        TurnScore {
+                            name: "quality".into(),
+                            source: "app".into(),
+                            value: "4".into(),
+                        },
+                    ],
+                },
+                TurnRow {
+                    invocation_id: "inv-2".into(),
+                    trace_id: None,
+                    start: ago(300),
+                    end: None,
+                    errors: 0,
+                    tools: Vec::new(),
+                    tokens: Vec::new(),
+                    scores: Vec::new(),
+                },
+            ]
+        );
+        let body = fake.body(0);
+        assert_eq!(body["maxResults"], json!(201));
+        assert_eq!(body["maximumBytesBilled"], json!("1000"));
+        let sql = body["query"].as_str().unwrap();
+        assert_eq!(
+            sql,
+            session_turns_sql("`data-proj.agent_analytics.agent_events`")
+        );
+        assert!(!sql.contains("Sess-AB"), "{sql}");
+        for (name, value) in [
+            ("start", "2026-11-09 12:00:00.000000+00:00"),
+            ("end", "2026-11-16 12:00:00.000000+00:00"),
+            ("session", "Sess-AB"),
+            ("limit", "201"),
+        ] {
+            assert_eq!(
+                param_value(&body, name)["parameterValue"]["value"],
+                json!(value),
+                "{name}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_turn_row_without_an_invocation_id_is_an_error() {
+        let fake = FakeHttp::new(vec![turn_reply(vec![TurnCells::new("", ago(60)).cells()])]);
+        let err = source(&fake)
+            .session_turns("s-1", end() - TimeDelta::days(7), end())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            SourceError::BigQuery {
+                status: None,
+                reason: None,
+                detail: "row without a valid invocation_id".into()
             }
         );
     }

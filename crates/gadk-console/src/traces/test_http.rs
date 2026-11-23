@@ -104,10 +104,17 @@ pub(crate) fn reply(
         .iter()
         .map(|(n, t)| json!({ "name": n, "type": t, "mode": "NULLABLE" }))
         .collect();
-    let rows: Vec<Value> = rows
-        .into_iter()
-        .map(|cells| json!({ "f": cells.into_iter().map(|v| json!({ "v": v })).collect::<Vec<_>>() }))
-        .collect();
+    schema_reply(schema, rows, page_token)
+}
+
+/// [`reply`] with whole `jobs.query` schema fields, so a field can be `REPEATED` or a `RECORD`
+/// with its own `fields` (see [`record`] and [`repeated`] for such cells).
+pub(crate) fn schema_reply(
+    schema: Vec<Value>,
+    rows: Vec<Vec<Value>>,
+    page_token: bool,
+) -> Result<(u16, String), String> {
+    let rows: Vec<Value> = rows.into_iter().map(record).collect();
     let mut body = json!({
         "jobComplete": true,
         "jobReference": { "projectId": "billing-proj", "jobId": "job_1" },
@@ -118,6 +125,16 @@ pub(crate) fn reply(
         body["pageToken"] = json!("next");
     }
     Ok((200, body.to_string()))
+}
+
+/// A `RECORD` value (or a whole row) as `jobs.query` sends it: `{"f": [{"v": cell}, …]}`.
+pub(crate) fn record(cells: Vec<Value>) -> Value {
+    json!({ "f": cells.into_iter().map(|v| json!({ "v": v })).collect::<Vec<_>>() })
+}
+
+/// A `REPEATED` cell as `jobs.query` sends it: `[{"v": item}, …]`.
+pub(crate) fn repeated(items: Vec<Value>) -> Value {
+    Value::Array(items.into_iter().map(|v| json!({ "v": v })).collect())
 }
 
 /// The query parameter `name` of a `jobs.query` request body.
