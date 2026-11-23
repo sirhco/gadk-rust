@@ -333,7 +333,7 @@ fn parse_source(v: Option<&Value>) -> Result<SourceSpec, String> {
     }
 }
 
-fn parse_bigquery(v: &Value) -> Result<SourceSpec, String> {
+pub(crate) fn parse_bigquery(v: &Value) -> Result<SourceSpec, String> {
     let bq = v.as_object().ok_or("`source.bigquery` must be a mapping")?;
     check_keys(bq, "`source.bigquery`: ", &["project", "dataset", "table"])?;
     let project = required(
@@ -415,7 +415,7 @@ pub(crate) fn parse_judge(v: &Value, source_project: &str) -> Result<JudgeSpec, 
 }
 
 /// Scorer `i` (1-based) in the gadk-eval syntax; `reference` and `equals` are rejected.
-fn parse_scorer(i: usize, v: &Value) -> Result<ScorerSpec, String> {
+pub(crate) fn parse_scorer(i: usize, v: &Value) -> Result<ScorerSpec, String> {
     let spec = ScorerSpec::from_value(v).map_err(|e| match e {
         EvalError::Load { message, .. } => format!("scorers[{i}]: {message}"),
         other => format!("scorers[{i}]: {other}"),
@@ -436,7 +436,7 @@ pub(crate) fn amount(s: &str) -> Option<(i64, char)> {
     (n >= 1).then_some((n, unit))
 }
 
-fn parse_window(s: &str) -> Option<TimeDelta> {
+pub(crate) fn parse_window(s: &str) -> Option<TimeDelta> {
     match amount(s)? {
         (n, 'm') => TimeDelta::try_minutes(n),
         (n, 'h') => TimeDelta::try_hours(n),

@@ -54,6 +54,7 @@ pub mod experiment;
 pub mod experiment_spec;
 pub mod export;
 pub mod gcp;
+pub mod guard_spec;
 pub mod judge;
 pub mod monitor;
 pub mod prices;
@@ -72,6 +73,7 @@ pub use export::{
     TraceInvocation, cases_text, export_runs, run_to_case, write_set_file,
 };
 pub use gcp::{AdcTokenSource, NoAuth, TokenSource};
+pub use guard_spec::{Check, FeedbackSource, GuardSpec};
 pub use judge::vertex_judge;
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
 pub use prices::{ModelPrice, PriceTable, TokenUsage};
