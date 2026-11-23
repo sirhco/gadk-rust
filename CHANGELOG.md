@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-11-23
+
 ### Changed
 
 - `gadk-console`: score names added in the console are saved trimmed, so ` quality ` is stored as
@@ -740,7 +742,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.6...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.7...HEAD
+[0.5.7]: https://github.com/sirhco/gadk-rust/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/sirhco/gadk-rust/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/sirhco/gadk-rust/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/sirhco/gadk-rust/compare/v0.5.3...v0.5.4
