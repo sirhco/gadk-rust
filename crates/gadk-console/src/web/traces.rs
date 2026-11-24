@@ -108,7 +108,11 @@ fn added_notice(params: &[(String, String)]) -> Option<(usize, String)> {
 /// The review bar of trace `id`, from the `/traces/{id}` query: with the BigQuery source, a
 /// valid queue (`score` plus optional filters) and a valid `at`; else `None` (never fails the
 /// page).
-fn review_bar(state: &AppState, id: &TraceId, params: &[(String, String)]) -> Option<ReviewBar> {
+fn review_bar_from_query(
+    state: &AppState,
+    id: &TraceId,
+    params: &[(String, String)],
+) -> Option<ReviewBar> {
     state.usage.as_ref()?;
     let queue = ReviewQueue::from_params(params).ok()??;
     let at = params
@@ -141,7 +145,7 @@ async fn detail(
             names: state.datasets.as_ref().map(|d| d.names()),
             added: added_notice(&params),
         },
-        review: review_bar(&state, &id, &params),
+        review: review_bar_from_query(&state, &id, &params),
     };
     let logs = detail.logs.map(|set| LogView {
         shown: set.entries.len(),
@@ -187,6 +191,9 @@ async fn trace_scores(state: &AppState, id: &TraceId, spans: &[RawSpan]) -> Scor
 
 /// The hidden `q_*` fields of the score and dataset forms: the review queue and `at` in review
 /// mode, empty strings otherwise.
+///
+/// The fields must stay `String`: they are flattened into urlencoded forms, which deserialize
+/// only string fields reliably.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct ReviewFields {
