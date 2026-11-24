@@ -14,10 +14,10 @@
 
 //! The review page: the queue's filter form and its pending traces.
 
-use chrono::{DateTime, Utc};
 use maud::{Markup, html};
 
 use super::layout::{Nav, page};
+use super::millis;
 use crate::review::{PendingTrace, REVIEW_CAP, ReviewQueue};
 use crate::traces::TimeRange;
 use crate::web::review::review_link;
@@ -125,9 +125,4 @@ fn pending_table(q: &ReviewQueue, rows: &[PendingTrace]) -> Markup {
             }
         }
     }
-}
-
-/// `%Y-%m-%dT%H:%M:%S%.3fZ`, as the scores table shows times.
-fn millis(t: DateTime<Utc>) -> String {
-    t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }

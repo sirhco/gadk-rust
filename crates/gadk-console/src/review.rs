@@ -81,10 +81,14 @@ impl ReviewQueue {
         let prompt = present("prompt").map(|p| p.trim().to_owned());
         let version = match present("version") {
             None => None,
-            Some(v) => match v.trim().parse::<u32>() {
-                Ok(n) if n > 0 => Some(n),
-                _ => return Err("version: must be a positive integer".to_owned()),
-            },
+            Some(v) => {
+                let v = v.trim();
+                match v.parse::<u32>() {
+                    // `parse` alone would take a leading `+`.
+                    Ok(n) if n > 0 && v.bytes().all(|b| b.is_ascii_digit()) => Some(n),
+                    _ => return Err("version: must be a positive integer".to_owned()),
+                }
+            }
         };
         if version.is_some() && prompt.is_none() {
             return Err("version: needs a prompt".to_owned());
@@ -526,6 +530,23 @@ mod tests {
                 "{len}"
             );
         }
+    }
+
+    #[test]
+    fn a_version_is_ascii_digits_only() {
+        let version = |v: &str| {
+            ReviewQueue::from_params(&params(&[("score", "q"), ("prompt", "p"), ("version", v)]))
+                .map(|q| q.unwrap().version)
+        };
+        for v in ["+3", " +3 "] {
+            assert_eq!(
+                version(v),
+                Err("version: must be a positive integer".to_owned()),
+                "{v}"
+            );
+        }
+        assert_eq!(version("3"), Ok(Some(3)));
+        assert_eq!(version(" 3 "), Ok(Some(3)));
     }
 
     #[test]

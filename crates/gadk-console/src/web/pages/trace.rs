@@ -14,13 +14,13 @@
 
 //! The trace detail page: waterfall, span details and log payloads.
 
-use chrono::{DateTime, SecondsFormat, Utc};
 use maud::{Markup, PreEscaped, html};
 use serde_json::{Value, json};
 
 use super::cost::{NO_PRICES, PARTIAL_NOTE, token_cells};
 use super::error::banner;
 use super::layout::{Nav, page};
+use super::millis;
 use crate::model::{AttachedLogs, SpanRow, prompt_link};
 use crate::prices::{
     CostSum, LABEL_MODEL, LABEL_OPERATION, OP_GENERATE_CONTENT, PriceTable, UNKNOWN_MODEL, Usage,
@@ -451,10 +451,6 @@ fn payload(text: &str) -> Markup {
             }
         },
     }
-}
-
-fn millis(t: DateTime<Utc>) -> String {
-    t.to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
 /// The gadk-telemetry `event.name` of a log entry's jsonPayload.
