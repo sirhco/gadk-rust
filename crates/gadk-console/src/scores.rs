@@ -385,7 +385,8 @@ fn merge_feedback(rows: &[Map<String, Value>]) -> Vec<FeedbackRow> {
 }
 
 /// Scores of the calls of `@prompt`, per version, name, source, data type and category (NULL
-/// unless `category`): count, `true` values and the sum of numbers.
+/// unless `category`): count, `true` values and the sum of numbers. Only the latest score per
+/// (invocation, name, source) counts, a NULL source counting as `''`.
 fn version_feedback_sql(table: &str) -> String {
     format!(
         r"WITH s AS (
@@ -397,7 +398,7 @@ fn version_feedback_sql(table: &str) -> String {
   WHERE event_type = 'FEEDBACK' AND timestamp >= @start
     AND invocation_id IS NOT NULL AND invocation_id != ''
   QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')
+    PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), IFNULL(JSON_VALUE(attributes, '$.source'), '')
     ORDER BY timestamp DESC, event_id DESC) = 1),
 v AS (
   SELECT DISTINCT invocation_id,
@@ -921,7 +922,7 @@ mod tests {
         let sql = body["query"].as_str().unwrap();
         for piece in [
             "WHERE event_type = 'FEEDBACK' AND timestamp >= @start\n    AND invocation_id IS NOT NULL",
-            "QUALIFY ROW_NUMBER() OVER (\n    PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')\n    ORDER BY timestamp DESC, event_id DESC) = 1",
+            "QUALIFY ROW_NUMBER() OVER (\n    PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), IFNULL(JSON_VALUE(attributes, '$.source'), '')\n    ORDER BY timestamp DESC, event_id DESC) = 1",
             "WHERE event_type = 'LLM_REQUEST'",
             "AND timestamp >= TIMESTAMP_SUB(@start, INTERVAL 1 DAY)",
             "AND timestamp < TIMESTAMP_ADD(@end, INTERVAL 1 HOUR)",
