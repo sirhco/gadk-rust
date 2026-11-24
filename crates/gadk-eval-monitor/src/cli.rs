@@ -187,6 +187,20 @@ fn cloud_storage() -> Result<GcpHttp, MonitorError> {
     Ok(GcpHttp::new(GcpHttp::default_http(), Arc::new(auth)))
 }
 
+/// The full names of the objects directly under `prefix` in `bucket`: [`gcs::list_names`]
+/// gives them without `prefix`, so it is put back.
+async fn list_full_names(
+    gcp: &GcpHttp,
+    bucket: &str,
+    prefix: &str,
+) -> Result<Vec<String>, MonitorError> {
+    let names = gcs::list_names(gcp, bucket, prefix).await?;
+    Ok(names
+        .into_iter()
+        .map(|name| format!("{prefix}{name}"))
+        .collect())
+}
+
 /// The real backends: the BigQuery or Cloud Trace transcript source and Gemini on Vertex AI,
 /// with Application Default Credentials.
 #[derive(Debug, Clone, Copy, Default)]
@@ -253,11 +267,7 @@ impl Backends for CloudBackends {
     }
 
     async fn list_objects(&self, bucket: &str, prefix: &str) -> Result<Vec<String>, MonitorError> {
-        let names = gcs::list_names(&cloud_storage()?, bucket, prefix).await?;
-        Ok(names
-            .into_iter()
-            .map(|name| format!("{prefix}{name}"))
-            .collect())
+        list_full_names(&cloud_storage()?, bucket, prefix).await
     }
 
     async fn read_object(&self, bucket: &str, name: &str) -> Result<Option<String>, MonitorError> {
@@ -3375,9 +3385,9 @@ mod tests {
             prompts(dir.path(), Some(10)).await;
             let spec = guard_file(dir.path(), ERROR_RATE);
             let fake = healthy();
-            // The `== g ==` header (8 bytes) succeeds; the failure lands in the report.
+            // The `== g ==` header succeeds; the failure lands in the report.
             let mut stdout = FailsAfter {
-                left: 8 + 10,
+                left: "== g ==\n".len() + 10,
                 taken: Vec::new(),
             };
             let mut err = Vec::new();
@@ -3392,5 +3402,28 @@ mod tests {
             assert!(err.starts_with("gadk-eval: "), "{err}");
             assert!(!err.contains("guards: "), "{err}");
         }
+    }
+
+    #[tokio::test]
+    async fn list_full_names_puts_the_prefix_back() {
+        use crate::gcp::NoAuth;
+        use crate::testutil::{exchange, replay};
+
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[exchange(
+                "GET",
+                "https://storage.googleapis.com/storage/v1/b/evals/o?prefix=p%2F&delimiter=%2F",
+                "",
+                200,
+                r#"{"items":[{"name":"p/a.yaml"}]}"#,
+            )],
+        );
+        let gcp = GcpHttp::new(http, Arc::new(NoAuth));
+        assert_eq!(
+            list_full_names(&gcp, "evals", "p/").await.unwrap(),
+            ["p/a.yaml"]
+        );
     }
 }
