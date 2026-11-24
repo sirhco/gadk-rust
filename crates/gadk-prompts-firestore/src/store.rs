@@ -295,8 +295,12 @@ impl FirestoreStore {
         }
         let mut snap = PromptSnapshot::default();
         for l in listed {
+            // Only versions of the incarnation this call read: a concurrent call may have reset
+            // the entry for a recreated prompt since, and its versions do not go with `l`'s
+            // labels. Missing versions heal on the next read.
             let versions = cache
                 .get(&l.doc)
+                .filter(|have| have.create_time == l.created)
                 .map(|have| {
                     have.versions
                         .range(..=l.latest)
@@ -776,5 +780,57 @@ impl FirestoreStore {
             expected: None,
             actual: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    fn version(n: u32, template: &str) -> Arc<PromptVersion> {
+        Arc::new(PromptVersion {
+            name: "p".into(),
+            version: n,
+            template: template.into(),
+            config: None,
+            meta: VersionMeta {
+                created_at: "2026-11-24T00:00:00Z".parse().unwrap(),
+                author: "a".into(),
+                message: "m".into(),
+                hash: format!("h{n}"),
+            },
+        })
+    }
+
+    /// A cache entry left by another call for a different incarnation of the prompt document
+    /// (a concurrent `load_all` that saw the prompt deleted and recreated) is not served with
+    /// this call's labels: the versions come back empty and the next read refetches them.
+    #[tokio::test]
+    async fn the_snapshot_never_pairs_a_prompt_with_another_incarnations_versions() {
+        let store = FirestoreStore::new(FirestoreConfig {
+            project: "p".into(),
+            endpoint: Some("http://127.0.0.1:9".into()),
+            ..FirestoreConfig::default()
+        })
+        .unwrap();
+        let doc = store.prompt_doc("p");
+        store.cache.lock().unwrap().insert(
+            doc.clone(),
+            CachedVersions {
+                create_time: "2026-11-24T00:00:02Z".into(),
+                versions: BTreeMap::from([(1, version(1, "new"))]),
+            },
+        );
+        let listed = vec![Listed {
+            doc,
+            created: "2026-11-24T00:00:01Z".into(),
+            name: "p".into(),
+            latest: 1,
+            labels: BTreeMap::new(),
+        }];
+        let snap = store.fetch_and_build(listed, Vec::new()).await.unwrap();
+        assert!(snap.prompts["p"].versions.is_empty(), "{snap:?}");
     }
 }

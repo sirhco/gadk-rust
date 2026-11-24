@@ -21,6 +21,12 @@ the public API.
   prompt they work on through `load_prompt`. On Firestore, a fresh process now reads one prompt
   and its versions instead of every version of every prompt. Output and errors are unchanged.
 
+### Fixed
+
+- `gadk-prompts-firestore`: a read that overlapped another read of a prompt deleted and recreated
+  outside the store no longer returns that prompt's labels with the recreated prompt's versions.
+  The versions are left out for that one read and fetched again on the next.
+
 ## [0.5.10] - 2026-11-24
 
 ### Changed
