@@ -54,6 +54,7 @@
 mod error;
 mod guard_sources;
 mod guard_stats;
+mod notify;
 #[cfg(test)]
 mod testutil;
 

@@ -7,6 +7,18 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval-monitor`: `gadk-eval guards --notify <url|env:NAME>` posts one summary of the run
+  to a webhook when a guard advanced, aborted or errored: Slack-style text (the summary line
+  and one line per such guard) by default, or with `--notify-format json` the counts and each
+  such guard's prompt, versions, verdict, action and stored report. `env:NAME` reads the URL
+  from an environment variable, and the target is checked before any guard runs. Any transport
+  error (a connection failure, a timeout or another request failure) or a 5xx reply is retried
+  once; a failed post prints `notify: POST <origin> failed: <reason>` and exits 2. Output names
+  only the URL's origin. `Backends` gains the defaulted `post_webhook`, which `CloudBackends`
+  implements. Without `--notify`, `guards` prints and exits exactly as before.
+
 ## [0.5.11] - 2026-11-24
 
 ### Added
