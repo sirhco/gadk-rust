@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.14] - 2026-11-24
+
 ### Fixed
 
 - `gadk-console`: the `/usage` trends now count every call in the range. Before, a call in the
@@ -840,7 +842,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.13...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.14...HEAD
+[0.5.14]: https://github.com/sirhco/gadk-rust/compare/v0.5.13...v0.5.14
 [0.5.13]: https://github.com/sirhco/gadk-rust/compare/v0.5.12...v0.5.13
 [0.5.12]: https://github.com/sirhco/gadk-rust/compare/v0.5.11...v0.5.12
 [0.5.11]: https://github.com/sirhco/gadk-rust/compare/v0.5.10...v0.5.11
