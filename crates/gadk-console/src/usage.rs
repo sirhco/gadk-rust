@@ -648,7 +648,7 @@ fn trend_sql(table: &str) -> String {
     let cte = calls_cte_builder(table, true);
     format!(
         r"{cte}
-SELECT DIV(UNIX_SECONDS(ts) - UNIX_SECONDS(@start), @bucket) AS bucket, model, IFNULL(agent, '') AS agent,
+SELECT DIV(TIMESTAMP_DIFF(ts, @start, SECOND), @bucket) AS bucket, model, IFNULL(agent, '') AS agent,
   IF(prompt_name IS NULL OR prompt_version IS NULL, NULL,
      CONCAT(prompt_name, '@', CAST(prompt_version AS STRING))) AS prompt,
   COUNT(*) AS calls, SUM(input) AS input, SUM(cached) AS cached, SUM(output) AS output,
@@ -683,7 +683,7 @@ ORDER BY 2 DESC, 1, 3"
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
 
     use chrono::{DateTime, TimeZone, Utc};
@@ -1303,7 +1303,7 @@ c AS (
   FROM `data-proj.agent_analytics.agent_events` AS res
   LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id
   WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end)
-SELECT DIV(UNIX_SECONDS(ts) - UNIX_SECONDS(@start), @bucket) AS bucket, model, IFNULL(agent, '') AS agent,
+SELECT DIV(TIMESTAMP_DIFF(ts, @start, SECOND), @bucket) AS bucket, model, IFNULL(agent, '') AS agent,
   IF(prompt_name IS NULL OR prompt_version IS NULL, NULL,
      CONCAT(prompt_name, '@', CAST(prompt_version AS STRING))) AS prompt,
   COUNT(*) AS calls, SUM(input) AS input, SUM(cached) AS cached, SUM(output) AS output,
@@ -1318,7 +1318,7 @@ LIMIT @limit";
         assert_eq!(trend_sql(TABLE), TREND_SQL);
     }
 
-    const TREND_FIELDS: [(&str, &str); 9] = [
+    pub(crate) const TREND_FIELDS: [(&str, &str); 9] = [
         ("bucket", "INT64"),
         ("model", "STRING"),
         ("agent", "STRING"),
