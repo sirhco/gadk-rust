@@ -551,3 +551,164 @@ async fn a_latest_version_document_that_fails_to_decode_rolls_back_the_transacti
     assert!(ops.iter().any(|op| op == "rollback"), "{ops:?}");
     assert!(ops.iter().all(|op| op != "commit"), "{ops:?}");
 }
+
+/// The document name of prompt `id` under root `envs/t` of project `proj`.
+fn doc(id: &str) -> String {
+    format!("projects/proj/databases/(default)/documents/envs/t/prompts/{id}")
+}
+
+/// A non-transactional `batchGet` of `docs`, as [`drain`] reports it.
+fn batch_get(docs: &[String]) -> (String, serde_json::Value) {
+    ("batchGet".into(), serde_json::json!({ "documents": docs }))
+}
+
+#[tokio::test]
+async fn load_prompt_reads_one_prompt_document_and_its_new_versions() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    s.create_version(nv("p", "b")).await.unwrap();
+    s.create_version(nv("q", "x")).await.unwrap();
+    s.set_label("p", &Label::production(), 1, None)
+        .await
+        .unwrap();
+    drain(&fake);
+    let (snap, rollouts) = s.load_prompt("p").await.unwrap();
+    assert_eq!(snap.prompts.keys().collect::<Vec<_>>(), ["p"]);
+    assert_eq!(
+        snap.prompts["p"]
+            .versions
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(snap.prompts["p"].labels.get(&Label::production()), Some(&1));
+    assert!(rollouts.is_empty());
+    assert_eq!(
+        drain(&fake),
+        [
+            batch_get(&[doc("p")]),
+            batch_get(&[doc("p/versions/1"), doc("p/versions/2")]),
+        ]
+    );
+
+    s.create_version(nv("p", "c")).await.unwrap();
+    drain(&fake);
+    let (snap, _) = s.load_prompt("p").await.unwrap();
+    assert_eq!(
+        snap.prompts["p"]
+            .versions
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    assert_eq!(snap.prompts["p"].versions[&3].template, "c");
+    assert_eq!(
+        drain(&fake),
+        [batch_get(&[doc("p")]), batch_get(&[doc("p/versions/3")])]
+    );
+}
+
+#[tokio::test]
+async fn load_prompt_reuses_versions_load_all_cached() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    s.create_version(nv("p", "b")).await.unwrap();
+    let all = s.load_all().await.unwrap();
+    drain(&fake);
+    let (snap, _) = s.load_prompt("p").await.unwrap();
+    assert_eq!(snap.prompts["p"], all.prompts["p"]);
+    assert_eq!(drain(&fake), [batch_get(&[doc("p")])]);
+}
+
+#[tokio::test]
+async fn load_all_reuses_versions_load_prompt_cached() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    s.create_version(nv("p", "b")).await.unwrap();
+    let (one, _) = s.load_prompt("p").await.unwrap();
+    drain(&fake);
+    let all = s.load_all().await.unwrap();
+    assert_eq!(all.prompts["p"], one.prompts["p"]);
+    let ops: Vec<String> = drain(&fake).into_iter().map(|(op, _)| op).collect();
+    assert_eq!(ops, ["runQuery"]);
+}
+
+#[tokio::test]
+async fn load_prompt_of_an_unknown_prompt_is_empty_after_one_read() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    drain(&fake);
+    let (snap, rollouts) = s.load_prompt("nope").await.unwrap();
+    assert!(snap.prompts.is_empty());
+    assert!(rollouts.is_empty());
+    assert_eq!(drain(&fake), [batch_get(&[doc("nope")])]);
+}
+
+#[tokio::test]
+async fn load_prompt_server_error_is_http() {
+    let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = paths.clone();
+    let server = FakeServer::start(move |req| {
+        seen.lock().unwrap().push(req.path.clone());
+        FakeResponse::json_status(
+            500,
+            r#"{"error":{"code":500,"status":"INTERNAL","message":"x"}}"#,
+        )
+    });
+    let s = FirestoreStore::new(config(server.url(), Some("envs/t"))).unwrap();
+    assert!(matches!(
+        s.load_prompt("p").await,
+        Err(StoreError::Http { status: 500, .. })
+    ));
+    let paths = paths.lock().unwrap();
+    assert!(
+        !paths.is_empty() && paths.iter().all(|p| p.ends_with(":batchGet")),
+        "{paths:?}"
+    );
+}
+
+#[tokio::test]
+async fn load_prompt_malformed_reply_is_decode() {
+    let server = FakeServer::json("{}");
+    let s = FirestoreStore::new(config(server.url(), Some("envs/t"))).unwrap();
+    assert_eq!(
+        s.load_prompt("p").await,
+        Err(StoreError::Decode(
+            "batchGet: response is not an array".into()
+        ))
+    );
+}
+
+#[tokio::test]
+async fn load_prompt_of_an_invalid_name_sends_nothing() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    for name in ["", ".."] {
+        let (snap, rollouts) = s.load_prompt(name).await.unwrap();
+        assert!(snap.prompts.is_empty(), "{name:?}");
+        assert!(rollouts.is_empty(), "{name:?}");
+    }
+    assert_eq!(drain(&fake), []);
+}
+
+#[tokio::test]
+async fn load_prompt_does_not_prune_other_prompts() {
+    let fake = fake_firestore::start();
+    let s = FirestoreStore::new(config(fake.server.url(), Some("envs/t"))).unwrap();
+    s.create_version(nv("p", "a")).await.unwrap();
+    s.create_version(nv("q", "x")).await.unwrap();
+    let first = s.load_all().await.unwrap();
+    drain(&fake);
+    s.load_prompt("p").await.unwrap();
+    assert_eq!(drain(&fake), [batch_get(&[doc("p")])]);
+    let again = s.load_all().await.unwrap();
+    assert_eq!(again, first);
+    let ops: Vec<String> = drain(&fake).into_iter().map(|(op, _)| op).collect();
+    assert_eq!(ops, ["runQuery"]);
+}

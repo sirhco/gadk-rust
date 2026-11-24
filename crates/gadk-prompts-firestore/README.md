@@ -34,14 +34,22 @@ let registry = PromptRegistry::builder(Arc::new(store)).load().await?;
 
 ## Read cost
 
-Each registry refresh calls `load_all_with_rollouts` (rollouts come from the prompt documents, so
-they add no reads), which re-reads the whole prompt set: about one document read per prompt plus
-one per version of every prompt, on every poll. With an empty `root`, the versions query (a
-collection-group query over `versions`) scans every `versions` collection in the database,
-including ones that are not prompts, and drops them by path only after the reads are billed. Use
-a dedicated non-empty `root` (e.g. `envs/prod`) and set `PromptRegistryBuilder::refresh_interval`
-to suit the size of the prompt set: for P prompts with V versions in total, a poll every interval
-costs roughly P + V reads.
+Each registry refresh calls `load_all_with_rollouts`. It makes one `runQuery` over the `prompts`
+collection under the root (one document read per prompt; there is no collection-group scan of
+`versions`), then reads by name only the version documents it has not read before, each new
+version once. The rollouts come from the same prompt documents, so they add no reads, and
+`load_all` costs the same. The store keeps the versions it has read in memory (they are
+immutable), so a poll of an unchanged store costs about one read per prompt; the first call after
+a restart reads every version once.
+
+`load_prompt(name)` reads only that prompt's document (one read) and then only its versions not
+yet read, from the same in-memory versions; a name that fails `validate_name` reads nothing. The
+`gadk-prompts` CLI's `show`, `diff` and `rollout`, `gadk-eval guard` and `guards`, and the
+console's prompt page use it, so in a fresh process they read one prompt and its versions instead
+of every version of every prompt.
+
+Use a dedicated non-empty `root` (e.g. `envs/prod`) and set
+`PromptRegistryBuilder::refresh_interval` to suit the number of prompts.
 
 ## Testing
 
