@@ -236,8 +236,8 @@ leaves out calls to models without a price.
 `/usage` also shows how usage changes across its range. Under `Over time`, a chart plots the
 cost per bucket (without `--prices`, the input + output + reasoning tokens per bucket), labeled
 with the largest and the latest bucket's value and the first and last buckets' start times in
-UTC. With a price file, calls to models without a price count as 0, and a note under the chart
-says so. The Totals, By model, By agent and By prompt tables end with a `Trend` column: a
+UTC. With a price file, calls to models without a price count as 0, and when the range has any,
+a note under the chart says so. The Totals, By model, By agent and By prompt tables end with a `Trend` column: a
 sparkline of the same metric per bucket for each row, scaled to the row's own largest bucket
 (the row's size is in its other columns). The buckets are aligned to the start of the range:
 
