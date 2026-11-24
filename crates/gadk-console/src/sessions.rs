@@ -266,6 +266,7 @@ impl UsageSource {
         let sql = user_rows_sql(&self.table_path()?);
         let mut params = window_params(q.end - q.range.duration(), q.end);
         params.push(param("agent", "STRING", q.agent.clone()));
+        params.push(param("session", "STRING", None));
         params.push(param("limit", "INT64", Some((USER_CAP + 1).to_string())));
         let result = self.run(&sql, params, ROW_CAP).await?;
         let mut users: Vec<UserRow> = Vec::new();
@@ -325,12 +326,13 @@ fn add_tokens(tokens: &mut Vec<(String, Usage)>, row: &Map<String, Value>) {
 }
 
 /// The CTEs shared by [`session_rows_sql`] and [`user_rows_sql`], each over `[@start, @end)`
-/// and a non-empty `session_id`, each aggregated on its own:
+/// and a non-empty `session_id`, each aggregated on its own. `head`, `act`, `fb` and `c` also
+/// keep only session `@session` when it is set (a typed NULL otherwise):
 ///
 /// - `head`: per session, the user and agent (`h`) of the earliest `INVOCATION_STARTING` row;
 /// - `act`: per session, first and last activity, turns and errors;
 /// - `fb`: per session, the latest boolean `FEEDBACK` per (invocation, name, source) that are
-///   `true` (`ups`) and `false` (`downs`);
+///   `true` (`ups`) and `false` (`downs`), a NULL source counting as `''`;
 /// - `req`, `c`, `tok`: per session and model, the `LLM_RESPONSE` tokens.
 fn session_ctes(table: &str) -> String {
     format!(
@@ -340,6 +342,7 @@ fn session_ctes(table: &str) -> String {
   FROM {table}
   WHERE event_type = 'INVOCATION_STARTING' AND timestamp >= @start AND timestamp < @end
     AND session_id IS NOT NULL AND session_id != ''
+    AND (@session IS NULL OR session_id = @session)
   GROUP BY session_id),
 act AS (
   SELECT session_id, MIN(timestamp) AS first, MAX(timestamp) AS last,
@@ -348,6 +351,7 @@ act AS (
   FROM {table}
   WHERE event_type != 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
     AND session_id IS NOT NULL AND session_id != ''
+    AND (@session IS NULL OR session_id = @session)
   GROUP BY session_id),
 fb AS (
   SELECT session_id, COUNTIF(value = 'true') AS ups, COUNTIF(value = 'false') AS downs
@@ -357,9 +361,10 @@ fb AS (
     FROM {table}
     WHERE event_type = 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
       AND session_id IS NOT NULL AND session_id != ''
+      AND (@session IS NULL OR session_id = @session)
       AND invocation_id IS NOT NULL AND invocation_id != ''
     QUALIFY ROW_NUMBER() OVER (
-      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')
+      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), IFNULL(JSON_VALUE(attributes, '$.source'), '')
       ORDER BY timestamp DESC, event_id DESC) = 1)
   WHERE data_type = 'bool'
   GROUP BY session_id),
@@ -375,7 +380,8 @@ c AS (
   FROM {table} AS res
   LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id
   WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end
-    AND res.session_id IS NOT NULL AND res.session_id != ''),
+    AND res.session_id IS NOT NULL AND res.session_id != ''
+    AND (@session IS NULL OR res.session_id = @session)),
 tok AS (
   SELECT session_id, model, SUM(input) AS input, SUM(cached) AS cached, SUM(output) AS output,
     SUM(reasoning) AS reasoning
@@ -573,8 +579,8 @@ fn turn_row(row: &Map<String, Value>) -> Result<TurnRow, SourceError> {
 ///   order; `ipage` keeps the first `@limit`;
 /// - `req`, `c`, `tok`: per invocation, the `LLM_RESPONSE` tokens per model as
 ///   `ARRAY<STRUCT<model, input, cached, output, reasoning>>`;
-/// - `sc`: per invocation, the latest `FEEDBACK` per (name, source) as
-///   `ARRAY<STRUCT<name, source, value>>`.
+/// - `sc`: per invocation, the latest `FEEDBACK` per (name, source), a NULL source counting as
+///   `''`, as `ARRAY<STRUCT<name, source, value>>`.
 fn session_turns_sql(table: &str) -> String {
     format!(
         r"WITH inv AS (
@@ -624,7 +630,7 @@ sc AS (
     WHERE event_type = 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
       AND session_id = @session AND invocation_id IS NOT NULL AND invocation_id != ''
     QUALIFY ROW_NUMBER() OVER (
-      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')
+      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), IFNULL(JSON_VALUE(attributes, '$.source'), '')
       ORDER BY timestamp DESC, event_id DESC) = 1)
   WHERE name IS NOT NULL
   GROUP BY invocation_id)
@@ -865,7 +871,7 @@ sc AS (
     WHERE event_type = 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
       AND session_id = @session AND invocation_id IS NOT NULL AND invocation_id != ''
     QUALIFY ROW_NUMBER() OVER (
-      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')
+      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), IFNULL(JSON_VALUE(attributes, '$.source'), '')
       ORDER BY timestamp DESC, event_id DESC) = 1)
   WHERE name IS NOT NULL
   GROUP BY invocation_id)
@@ -883,6 +889,7 @@ ORDER BY start, invocation_id";
   FROM `p.d.t`
   WHERE event_type = 'INVOCATION_STARTING' AND timestamp >= @start AND timestamp < @end
     AND session_id IS NOT NULL AND session_id != ''
+    AND (@session IS NULL OR session_id = @session)
   GROUP BY session_id),
 act AS (
   SELECT session_id, MIN(timestamp) AS first, MAX(timestamp) AS last,
@@ -891,6 +898,7 @@ act AS (
   FROM `p.d.t`
   WHERE event_type != 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
     AND session_id IS NOT NULL AND session_id != ''
+    AND (@session IS NULL OR session_id = @session)
   GROUP BY session_id),
 fb AS (
   SELECT session_id, COUNTIF(value = 'true') AS ups, COUNTIF(value = 'false') AS downs
@@ -900,9 +908,10 @@ fb AS (
     FROM `p.d.t`
     WHERE event_type = 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
       AND session_id IS NOT NULL AND session_id != ''
+      AND (@session IS NULL OR session_id = @session)
       AND invocation_id IS NOT NULL AND invocation_id != ''
     QUALIFY ROW_NUMBER() OVER (
-      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')
+      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), IFNULL(JSON_VALUE(attributes, '$.source'), '')
       ORDER BY timestamp DESC, event_id DESC) = 1)
   WHERE data_type = 'bool'
   GROUP BY session_id),
@@ -925,7 +934,8 @@ c AS (
   FROM `p.d.t` AS res
   LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id
   WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end
-    AND res.session_id IS NOT NULL AND res.session_id != ''),
+    AND res.session_id IS NOT NULL AND res.session_id != ''
+    AND (@session IS NULL OR res.session_id = @session)),
 tok AS (
   SELECT session_id, model, SUM(input) AS input, SUM(cached) AS cached, SUM(output) AS output,
     SUM(reasoning) AS reasoning
@@ -960,6 +970,7 @@ ORDER BY last DESC, session_id DESC, model";
   FROM `p.d.t`
   WHERE event_type = 'INVOCATION_STARTING' AND timestamp >= @start AND timestamp < @end
     AND session_id IS NOT NULL AND session_id != ''
+    AND (@session IS NULL OR session_id = @session)
   GROUP BY session_id),
 act AS (
   SELECT session_id, MIN(timestamp) AS first, MAX(timestamp) AS last,
@@ -968,6 +979,7 @@ act AS (
   FROM `p.d.t`
   WHERE event_type != 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
     AND session_id IS NOT NULL AND session_id != ''
+    AND (@session IS NULL OR session_id = @session)
   GROUP BY session_id),
 fb AS (
   SELECT session_id, COUNTIF(value = 'true') AS ups, COUNTIF(value = 'false') AS downs
@@ -977,9 +989,10 @@ fb AS (
     FROM `p.d.t`
     WHERE event_type = 'FEEDBACK' AND timestamp >= @start AND timestamp < @end
       AND session_id IS NOT NULL AND session_id != ''
+      AND (@session IS NULL OR session_id = @session)
       AND invocation_id IS NOT NULL AND invocation_id != ''
     QUALIFY ROW_NUMBER() OVER (
-      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), JSON_VALUE(attributes, '$.source')
+      PARTITION BY invocation_id, JSON_VALUE(content, '$.name'), IFNULL(JSON_VALUE(attributes, '$.source'), '')
       ORDER BY timestamp DESC, event_id DESC) = 1)
   WHERE data_type = 'bool'
   GROUP BY session_id),
@@ -1002,7 +1015,8 @@ c AS (
   FROM `p.d.t` AS res
   LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id
   WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end
-    AND res.session_id IS NOT NULL AND res.session_id != ''),
+    AND res.session_id IS NOT NULL AND res.session_id != ''
+    AND (@session IS NULL OR res.session_id = @session)),
 tok AS (
   SELECT session_id, model, SUM(input) AS input, SUM(cached) AS cached, SUM(output) AS output,
     SUM(reasoning) AS reasoning
@@ -1373,6 +1387,22 @@ ORDER BY last DESC, user_id, model";
                 "{name}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn users_send_the_session_as_a_typed_null() {
+        let fake = FakeHttp::new(vec![reply(&USER_FIELDS, vec![], false)]);
+        let q = UserQuery {
+            range: TimeRange::Days7,
+            end: end(),
+            agent: None,
+        };
+        let page = source(&fake).users(&q).await.unwrap();
+        assert!(page.users.is_empty() && !page.more && !page.truncated);
+        assert_eq!(
+            param_value(&fake.body(0), "session"),
+            json!({ "name": "session", "parameterType": { "type": "STRING" }, "parameterValue": {} })
+        );
     }
 
     #[tokio::test]
