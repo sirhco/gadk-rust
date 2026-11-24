@@ -62,7 +62,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, TimeDelta, Utc};
@@ -178,17 +178,13 @@ pub trait Backends: Send + Sync {
 /// The error of the default [`Backends::list_objects`] and [`Backends::read_object`].
 const GS_REFUSED: &str = "gs:// sources are not supported by these backends";
 
-/// The Cloud Storage client of [`CloudBackends`], built on first use.
+/// A fresh Cloud Storage client with Application Default Credentials. It is built per call:
+/// the credentials' token refresh task runs on the runtime that built them, so a client cached
+/// across runtimes could outlive it.
 fn cloud_storage() -> Result<GcpHttp, MonitorError> {
-    static GCS: OnceLock<GcpHttp> = OnceLock::new();
-    if let Some(gcp) = GCS.get() {
-        return Ok(gcp.clone());
-    }
     let auth = AdcTokenSource::adc()
         .map_err(|e| MonitorError::Store(format!("Application Default Credentials: {e}")))?;
-    Ok(GCS
-        .get_or_init(|| GcpHttp::new(GcpHttp::default_http(), Arc::new(auth)))
-        .clone())
+    Ok(GcpHttp::new(GcpHttp::default_http(), Arc::new(auth)))
 }
 
 /// The real backends: the BigQuery or Cloud Trace transcript source and Gemini on Vertex AI,
@@ -803,7 +799,11 @@ async fn guards(
             Ok(0) => advance += 1,
             Ok(1) => abort += 1,
             Ok(3) => wait += 1,
-            Ok(_) => idle += 1,
+            Ok(4) => idle += 1,
+            Ok(code) => {
+                writeln!(stdout, "error: unexpected exit code {code}")?;
+                errors += 1;
+            }
             // A stdout failure ends the run, as it does for `guard`.
             Err(e) if stdout.failed => return Err(e),
             Err(e) => {
@@ -829,7 +829,11 @@ struct Watched<'a> {
 
 impl Write for Watched<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.inner.write(buf).inspect_err(|_| self.failed = true)
+        self.inner.write(buf).inspect_err(|e| {
+            if e.kind() != std::io::ErrorKind::Interrupted {
+                self.failed = true;
+            }
+        })
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -1094,6 +1098,42 @@ mod tests {
     use crate::testutil::{FakeJudge, FakeSource, at, run as prod_run};
 
     use super::*;
+
+    /// A writer that is interrupted on its first write.
+    struct InterruptedOnce {
+        interrupted: bool,
+        written: Vec<u8>,
+    }
+
+    impl Write for InterruptedOnce {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if !self.interrupted {
+                self.interrupted = true;
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn an_interrupted_write_is_not_a_failure() {
+        let mut inner = InterruptedOnce {
+            interrupted: false,
+            written: Vec::new(),
+        };
+        let mut w = Watched {
+            inner: &mut inner,
+            failed: false,
+        };
+        w.write_all(b"hello").unwrap();
+        assert!(!w.failed);
+        assert_eq!(inner.written, b"hello");
+    }
 
     const VERDICT: &str = r#"{"pass": true, "score": 5, "rationale": "ok"}"#;
 

@@ -147,6 +147,7 @@ async fn resolve(
         if names.is_empty() {
             return Err(no_specs(source));
         }
+        check_cap(out.len() + names.len())?;
         names.sort();
         for name in names {
             let origin = format!("gs://{bucket}/{name}");
@@ -182,10 +183,21 @@ async fn resolve(
     if files.is_empty() {
         return Err(no_specs(source));
     }
+    check_cap(out.len() + files.len())?;
     files.sort();
     for (_, origin, file) in files {
         let text = std::fs::read_to_string(&file).map_err(|e| local_error(&origin, e))?;
         out.push((origin, text));
+    }
+    Ok(())
+}
+
+/// Refuses `count` specs when that is more than [`MAX_GUARD_SPECS`], before any is read.
+fn check_cap(count: usize) -> Result<(), MonitorError> {
+    if count > MAX_GUARD_SPECS {
+        return Err(MonitorError::Spec(format!(
+            "guards: more than {MAX_GUARD_SPECS} specs"
+        )));
     }
     Ok(())
 }
@@ -279,6 +291,37 @@ mod tests {
                 .iter()
                 .find(|(b, n, _)| *b == bucket && n == name)
                 .map(|(_, _, t)| t.clone()))
+        }
+    }
+
+    /// [`Objects`] that counts the objects read.
+    struct Counting(Objects, std::sync::atomic::AtomicUsize);
+
+    #[async_trait::async_trait]
+    impl Backends for Counting {
+        fn source(&self, spec: &SourceSpec) -> Result<Arc<dyn TranscriptSource>, MonitorError> {
+            self.0.source(spec)
+        }
+
+        async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError> {
+            self.0.judge(spec).await
+        }
+
+        async fn list_objects(
+            &self,
+            bucket: &str,
+            prefix: &str,
+        ) -> Result<Vec<String>, MonitorError> {
+            self.0.list_objects(bucket, prefix).await
+        }
+
+        async fn read_object(
+            &self,
+            bucket: &str,
+            name: &str,
+        ) -> Result<Option<String>, MonitorError> {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.0.read_object(bucket, name).await
         }
     }
 
@@ -473,6 +516,23 @@ mod tests {
             load_err(&[bad, missing.clone()], &NoObjects).await,
             format!("monitor spec: guard spec {missing}: not found")
         );
+    }
+
+    #[tokio::test]
+    async fn a_huge_prefix_is_refused_before_any_object_is_read() {
+        let objects = Counting(
+            Objects(
+                (0..=MAX_GUARD_SPECS)
+                    .map(|i| ("b", format!("p/g{i:03}.yaml"), spec(&format!("g{i:03}"))))
+                    .collect(),
+            ),
+            std::sync::atomic::AtomicUsize::new(0),
+        );
+        assert_eq!(
+            load_err(&["gs://b/p/".into()], &objects).await,
+            "monitor spec: guards: more than 200 specs"
+        );
+        assert_eq!(objects.1.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

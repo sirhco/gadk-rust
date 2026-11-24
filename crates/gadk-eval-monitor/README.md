@@ -662,7 +662,7 @@ undo decisions already written: check the printed actions before retrying.
 With cron, every hour:
 
 ```text
-0 * * * * gadk-eval guards gs://my-bucket/guards/ --apply --prices gs://my-bucket/prices.yaml --out gs://my-bucket/monitors >> /var/log/gadk-guards.log 2>&1
+0 * * * * /usr/local/bin/gadk-eval guards gs://my-bucket/guards/ --apply --prices gs://my-bucket/prices.yaml --out gs://my-bucket/monitors >> /var/log/gadk-guards.log 2>&1
 ```
 
 As a Cloud Run job started hourly by Cloud Scheduler (the image only needs `gadk-eval`; the
