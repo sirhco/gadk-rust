@@ -606,6 +606,27 @@ async fn report(
     Ok(())
 }
 
+/// Where [`run_one_guard`] gets model prices.
+enum Prices {
+    /// A price file read when the guard runs, after the prompt store opens (`guard`).
+    Path(Option<PathBuf>),
+    /// A table read before any guard runs (`guards`).
+    // Constructed by the `guards` command, which a later change adds.
+    #[allow(dead_code)]
+    Loaded(Option<PriceTable>),
+}
+
+/// The settings of one guard run, shared by `guard` and `guards`.
+struct GuardRunOpts {
+    /// Write the decision to the prompt store.
+    apply: bool,
+    prices: Prices,
+    /// The report store, already opened.
+    out: Option<ReportStore>,
+    /// The most bytes billed per BigQuery query.
+    max_bytes: i64,
+}
+
 /// `guard`: 0 (advance), 1 (abort), 3 (wait) or 4 (no rollout); errors map to 2.
 async fn guard(
     m: &ArgMatches,
@@ -622,20 +643,40 @@ async fn guard(
     }
     // Opened before the run, so a bad URL fails before anything is written.
     let out = out_url.map(|url| ReportStore::open(url)).transpose()?;
-    let previous = match (&out, spec.min_step_age) {
+    let opts = GuardRunOpts {
+        apply: m.get_flag("apply"),
+        prices: Prices::Path(m.get_one::<PathBuf>("prices").cloned()),
+        out,
+        max_bytes: m
+            .get_one::<i64>("max-bytes")
+            .copied()
+            .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED),
+    };
+    run_one_guard(&spec, &opts, backends, stdout).await
+}
+
+/// Runs `spec` once and prints what `guard` prints: 0 (advance), 1 (abort), 3 (wait) or 4 (no
+/// rollout).
+async fn run_one_guard(
+    spec: &GuardSpec,
+    opts: &GuardRunOpts,
+    backends: &dyn Backends,
+    stdout: &mut dyn Write,
+) -> Result<i32, MonitorError> {
+    let previous = match (&opts.out, spec.min_step_age) {
         (Some(out), Some(_)) => out.latest_applied_ramp(&spec.name).await?,
         _ => None,
     };
     let store = gadk_prompts_cli::open_store(&spec.store)
         .map_err(|e| MonitorError::Store(format!("prompt store: {e}")))?;
-    let prices = m
-        .get_one::<PathBuf>("prices")
-        .map(PriceTable::load)
-        .transpose()?;
-    let max_bytes = m
-        .get_one::<i64>("max-bytes")
-        .copied()
-        .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED);
+    let read;
+    let prices = match &opts.prices {
+        Prices::Path(path) => {
+            read = path.as_ref().map(PriceTable::load).transpose()?;
+            read.as_ref()
+        }
+        Prices::Loaded(table) => table.as_ref(),
+    };
     let SourceSpec::BigQuery {
         project,
         dataset,
@@ -647,20 +688,20 @@ async fn guard(
             spec.source.describe()
         )));
     };
-    let source = backends.guard_source(project, dataset, table, max_bytes)?;
+    let source = backends.guard_source(project, dataset, table, opts.max_bytes)?;
     let judge = match &spec.judge {
         Some(j) if spec.wants_judge() => Some(backends.judge(j).await?),
         _ => None,
     };
     let report = Guard::new()
         .run(
-            &spec,
+            spec,
             store.as_ref(),
             source.as_ref(),
-            prices.as_ref(),
+            prices,
             judge,
             previous.as_ref(),
-            m.get_flag("apply"),
+            opts.apply,
         )
         .await?;
     let Some(report) = report else {
@@ -674,7 +715,7 @@ async fn guard(
     // Print before storing: with --apply the decision is already written to the prompt store,
     // so the operator must see it even when storing the report fails.
     write!(stdout, "{}", report.summary())?;
-    if let Some(out) = out {
+    if let Some(out) = &opts.out {
         let name = out.put_guard(&report).await?;
         writeln!(stdout, "stored report {name}")?;
     }
@@ -2755,6 +2796,27 @@ mod tests {
             let (code, _, stderr) = cli_run(&["guard", &spec, "--out", &out], &healthy()).await;
             assert_eq!(code, 2);
             assert!(stderr.starts_with("gadk-eval: report store: "), "{stderr}");
+        }
+
+        #[tokio::test]
+        async fn a_bad_prompt_store_is_reported_before_a_missing_price_file() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            let text = std::fs::read_to_string(&spec).unwrap().replace(
+                &format!("store: file://{}", dir.path().join("prompts").display()),
+                "store: s3://bucket/prompts",
+            );
+            std::fs::write(&spec, text).unwrap();
+            let missing = dir.path().join("missing.yaml").display().to_string();
+            let fake = healthy();
+            let (code, stdout, stderr) =
+                cli_run(&["guard", &spec, "--prices", &missing], &fake).await;
+            assert_eq!(code, 2, "{stdout}");
+            assert!(
+                stderr.starts_with("gadk-eval: report store: prompt store: "),
+                "{stderr}"
+            );
+            assert!(fake.calls().is_empty(), "{:?}", fake.calls());
         }
 
         #[tokio::test]
