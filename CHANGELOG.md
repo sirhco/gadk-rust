@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.11] - 2026-11-24
+
 ### Added
 
 - `gadk-prompts`: `PromptStore::load_prompt(name)` returns one prompt and its rollouts, the
@@ -804,7 +806,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.10...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.11...HEAD
+[0.5.11]: https://github.com/sirhco/gadk-rust/compare/v0.5.10...v0.5.11
 [0.5.10]: https://github.com/sirhco/gadk-rust/compare/v0.5.9...v0.5.10
 [0.5.9]: https://github.com/sirhco/gadk-rust/compare/v0.5.8...v0.5.9
 [0.5.8]: https://github.com/sirhco/gadk-rust/compare/v0.5.7...v0.5.8
