@@ -99,14 +99,12 @@ pub(crate) async fn load_prices(
     source: &str,
     backends: &dyn Backends,
 ) -> Result<PriceTable, MonitorError> {
-    let Some(rest) = source.strip_prefix("gs://") else {
-        return PriceTable::load(source);
-    };
     let err = |detail: &str| MonitorError::Spec(format!("price file {source}: {detail}"));
-    let (bucket, object) = rest.split_once('/').unwrap_or((rest, ""));
-    if !is_valid_bucket(bucket) {
-        return Err(err("invalid bucket"));
-    }
+    let (bucket, object) = match split_gs(source) {
+        Gs::Local => return PriceTable::load(source),
+        Gs::BadBucket => return Err(err("invalid bucket")),
+        Gs::Object(bucket, object) => (bucket, object),
+    };
     if object.is_empty() || object.ends_with('/') {
         return Err(err("not an object"));
     }
@@ -123,13 +121,16 @@ async fn resolve(
     backends: &dyn Backends,
     out: &mut Vec<(String, String)>,
 ) -> Result<(), MonitorError> {
-    if let Some(rest) = source.strip_prefix("gs://") {
-        let (bucket, object) = rest.split_once('/').unwrap_or((rest, ""));
-        if !is_valid_bucket(bucket) {
+    let gs = match split_gs(source) {
+        Gs::Local => None,
+        Gs::BadBucket => {
             return Err(MonitorError::Spec(format!(
                 "guard spec {source}: invalid bucket"
             )));
         }
+        Gs::Object(bucket, object) => Some((bucket, object)),
+    };
+    if let Some((bucket, object)) = gs {
         if !object.is_empty() && !object.ends_with('/') {
             let text = backends
                 .read_object(bucket, object)
@@ -190,6 +191,29 @@ async fn resolve(
         out.push((origin, text));
     }
     Ok(())
+}
+
+/// A spec or price-file source, split.
+enum Gs<'a> {
+    /// Not a `gs://` URL: a local path.
+    Local,
+    /// A `gs://` URL whose bucket fails [`is_valid_bucket`].
+    BadBucket,
+    /// `gs://<bucket>/<rest>` as `(bucket, rest)`; `gs://<bucket>` gives `(bucket, "")`.
+    Object(&'a str, &'a str),
+}
+
+/// Splits `source` into [`Gs`].
+fn split_gs(source: &str) -> Gs<'_> {
+    let Some(rest) = source.strip_prefix("gs://") else {
+        return Gs::Local;
+    };
+    let (bucket, rest) = rest.split_once('/').unwrap_or((rest, ""));
+    if is_valid_bucket(bucket) {
+        Gs::Object(bucket, rest)
+    } else {
+        Gs::BadBucket
+    }
 }
 
 /// Refuses `count` specs when that is more than [`MAX_GUARD_SPECS`], before any is read.
