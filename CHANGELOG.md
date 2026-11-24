@@ -7,6 +7,14 @@ the public API.
 
 ## [Unreleased]
 
+### Fixed
+
+- `gadk-console`: the `/usage` trends now count every call in the range. Before, a call in the
+  range's last second could be left out, and a call within a second of a bucket boundary could
+  land in the bucket before.
+- `gadk-eval-monitor`: `gadk-eval guards --notify` no longer waits a second and posts again
+  before failing on backends without webhook support. It fails at once, with the same message.
+
 ## [0.5.13] - 2026-11-24
 
 ### Added
