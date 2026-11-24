@@ -86,6 +86,7 @@ mod tests {
     use crate::traces::BigQueryTable;
     use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::usage::UsageSource;
+    use crate::usage::tests::TREND_FIELDS;
     use crate::web::AppState;
     use crate::web::testutil::{FakeSource, get, state};
 
@@ -198,20 +199,9 @@ mod tests {
     /// The trend rows of [`breakdown_reply`]'s calls: the first group in bucket 0, the other two
     /// in bucket 23.
     fn trend_reply(page_token: bool) -> Result<(u16, String), String> {
-        let fields = [
-            ("bucket", "INT64"),
-            ("model", "STRING"),
-            ("agent", "STRING"),
-            ("prompt", "STRING"),
-            ("calls", "INT64"),
-            ("input", "INT64"),
-            ("cached", "INT64"),
-            ("output", "INT64"),
-            ("reasoning", "INT64"),
-        ];
         let row = |cells: [Value; 9]| cells.to_vec();
         reply(
-            &fields,
+            &TREND_FIELDS,
             vec![
                 row([
                     json!("0"),
