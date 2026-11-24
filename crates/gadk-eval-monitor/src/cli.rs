@@ -81,11 +81,13 @@ use crate::export::{
 };
 use crate::gcp::{AdcTokenSource, GcpHttp};
 use crate::guard::Guard;
+use crate::guard_report::GuardReport;
 use crate::guard_source::GuardSource;
 use crate::guard_sources::{load_prices, load_specs};
 use crate::guard_spec::GuardSpec;
 use crate::judge::vertex_judge;
 use crate::monitor::Monitor;
+use crate::notify::{self, Counts, Notifier, NotifyFormat, Outcome};
 use crate::prices::PriceTable;
 use crate::source::bigquery::{BigQueryGuardSource, BigQueryTranscriptSource};
 use crate::source::cloud_trace::CloudTraceTranscriptSource;
@@ -418,6 +420,19 @@ fn guards_cli() -> Command {
         .args(guard_flags(Arg::new("prices").help(
             "price file (YAML) for cost_per_call checks: <file> or gs://<bucket>/<object>",
         )))
+        .arg(
+            Arg::new("notify")
+                .long("notify")
+                .value_name("url|env:NAME")
+                .help("post a summary to this webhook when a guard advances, aborts or errors"),
+        )
+        .arg(
+            Arg::new("notify-format")
+                .long("notify-format")
+                .value_parser(["slack", "json"])
+                .requires("notify")
+                .help("webhook body: slack (default) or json"),
+        )
 }
 
 fn export_cli() -> Command {
@@ -732,17 +747,27 @@ async fn guard(
             .copied()
             .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED),
     };
-    run_one_guard(&spec, &opts, backends, stdout).await
+    Ok(run_one_guard(&spec, &opts, backends, stdout).await?.code)
 }
 
-/// Runs `spec` once and prints what `guard` prints: 0 (advance), 1 (abort), 3 (wait) or 4 (no
-/// rollout).
+/// What [`run_one_guard`] found.
+struct GuardRun {
+    /// 0 (advance), 1 (abort), 3 (wait) or 4 (no rollout).
+    code: i32,
+    /// The report, unless the label had no rollout.
+    report: Option<GuardReport>,
+    /// The stored report's name, with `--out`.
+    stored: Option<String>,
+}
+
+/// Runs `spec` once and prints what `guard` prints; the code is 0 (advance), 1 (abort), 3
+/// (wait) or 4 (no rollout).
 async fn run_one_guard(
     spec: &GuardSpec,
     opts: &GuardRunOpts,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
-) -> Result<i32, MonitorError> {
+) -> Result<GuardRun, MonitorError> {
     let previous = match (&opts.out, spec.min_step_age) {
         (Some(out), Some(_)) => out.latest_applied_ramp(&spec.name).await?,
         _ => None,
@@ -790,19 +815,30 @@ async fn run_one_guard(
             "guard {}: {}/{} has no rollout",
             spec.name, spec.prompt, spec.label
         )?;
-        return Ok(4);
+        return Ok(GuardRun {
+            code: 4,
+            report: None,
+            stored: None,
+        });
     };
     // Print before storing: with --apply the decision is already written to the prompt store,
     // so the operator must see it even when storing the report fails.
     write!(stdout, "{}", report.summary())?;
+    let mut stored = None;
     if let Some(out) = &opts.out {
         let name = out.put_guard(&report).await?;
         writeln!(stdout, "stored report {name}")?;
+        stored = Some(name);
     }
-    Ok(report.exit_code())
+    Ok(GuardRun {
+        code: report.exit_code(),
+        report: Some(report),
+        stored,
+    })
 }
 
-/// `guards`: 0 when every guard reached an outcome, 2 when one failed; errors map to 2.
+/// `guards`: 0 when every guard reached an outcome, 2 when one failed or the `--notify` post
+/// failed; errors map to 2.
 async fn guards(
     m: &ArgMatches,
     backends: &dyn Backends,
@@ -829,6 +865,17 @@ async fn guards(
         None => None,
     };
     let out = out_url.map(|url| ReportStore::open(url)).transpose()?;
+    // The last pre-run check, so a bad --notify also fails before any guard runs.
+    let notifier = match m.get_one::<String>("notify") {
+        Some(target) => Some(Notifier {
+            url: notify::resolve(target, &|name| std::env::var(name).ok())?,
+            format: match m.get_one::<String>("notify-format").map(String::as_str) {
+                Some("json") => NotifyFormat::Json,
+                _ => NotifyFormat::Slack,
+            },
+        }),
+        None => None,
+    };
     let opts = GuardRunOpts {
         apply: m.get_flag("apply"),
         prices: Prices::Loaded(prices),
@@ -842,33 +889,73 @@ async fn guards(
         inner: stdout,
         failed: false,
     };
-    let (mut advance, mut abort, mut wait, mut idle, mut errors) = (0, 0, 0, 0, 0);
+    let mut counts = Counts {
+        run: specs.len(),
+        ..Counts::default()
+    };
+    // The guards that advanced, aborted or errored, in run order, for the --notify body.
+    let mut outcomes = Vec::new();
     for s in &specs {
         writeln!(stdout, "== {} ==", s.spec.name)?;
-        match run_one_guard(&s.spec, &opts, backends, &mut stdout).await {
-            Ok(0) => advance += 1,
-            Ok(1) => abort += 1,
-            Ok(3) => wait += 1,
-            Ok(4) => idle += 1,
-            Ok(code) => {
-                writeln!(stdout, "error: unexpected exit code {code}")?;
-                errors += 1;
+        let error = match run_one_guard(&s.spec, &opts, backends, &mut stdout).await {
+            Ok(GuardRun {
+                code: code @ (0 | 1),
+                report: Some(report),
+                stored,
+            }) => {
+                if code == 0 {
+                    counts.advance += 1;
+                } else {
+                    counts.abort += 1;
+                }
+                outcomes.push(Outcome::Report { report, stored });
+                None
             }
+            Ok(GuardRun { code: 3, .. }) => {
+                counts.wait += 1;
+                None
+            }
+            Ok(GuardRun { code: 4, .. }) => {
+                counts.no_rollout += 1;
+                None
+            }
+            Ok(GuardRun { code, .. }) => Some(format!("unexpected exit code {code}")),
             // A stdout failure ends the run, as it does for `guard`.
             Err(e) if stdout.failed => return Err(e),
-            Err(e) => {
-                writeln!(stdout, "error: {e}")?;
-                errors += 1;
-            }
+            Err(e) => Some(e.to_string()),
+        };
+        if let Some(message) = error {
+            writeln!(stdout, "error: {message}")?;
+            counts.errors += 1;
+            outcomes.push(Outcome::Error {
+                name: s.spec.name.clone(),
+                message,
+            });
         }
     }
-    writeln!(
-        stdout,
-        "guards: {} run — {advance} advance, {abort} abort, {wait} wait, {idle} no rollout, \
-         {errors} errors",
-        specs.len()
-    )?;
-    Ok(if errors == 0 { 0 } else { 2 })
+    let summary = format!(
+        "guards: {} run — {} advance, {} abort, {} wait, {} no rollout, {} errors",
+        counts.run, counts.advance, counts.abort, counts.wait, counts.no_rollout, counts.errors
+    );
+    writeln!(stdout, "{summary}")?;
+    let code = if counts.errors == 0 { 0 } else { 2 };
+    let Some(notifier) = notifier else {
+        return Ok(code);
+    };
+    if counts.advance + counts.abort + counts.errors == 0 {
+        return Ok(code);
+    }
+    let body = notify::body(notifier.format, &summary, &counts, &outcomes);
+    match notify::post(backends, &notifier.url, &body, tokio::time::sleep).await {
+        Ok(()) => {
+            writeln!(stdout, "notify: posted")?;
+            Ok(code)
+        }
+        Err(reason) => {
+            writeln!(stdout, "notify: {reason}")?;
+            Ok(2)
+        }
+    }
 }
 
 /// A writer that remembers whether a write to `inner` failed.
@@ -2476,7 +2563,7 @@ mod tests {
     // ---- guard ----
 
     mod guard_command {
-        use std::collections::BTreeMap;
+        use std::collections::{BTreeMap, VecDeque};
         use std::path::PathBuf;
 
         use gadk_prompts::{FileStore, Label, NewVersion, PromptStore, Rollout};
@@ -2531,6 +2618,10 @@ mod tests {
             calls: Mutex<Vec<String>>,
             /// Cloud Storage objects by `<bucket>/<name>`.
             objects: BTreeMap<String, String>,
+            /// The `post_webhook` replies, in order; once they run out, every post gets 200.
+            webhook: Mutex<VecDeque<Result<u16, String>>>,
+            /// Every `post_webhook` call: the URL and the body.
+            posts: Mutex<Vec<(String, serde_json::Value)>>,
         }
 
         impl Guarded {
@@ -2557,11 +2648,17 @@ mod tests {
                     judge_error: None,
                     calls: Mutex::new(Vec::new()),
                     objects: BTreeMap::new(),
+                    webhook: Mutex::new(VecDeque::new()),
+                    posts: Mutex::new(Vec::new()),
                 }
             }
 
             fn calls(&self) -> Vec<String> {
                 self.calls.lock().unwrap().clone()
+            }
+
+            fn posts(&self) -> Vec<(String, serde_json::Value)> {
+                self.posts.lock().unwrap().clone()
             }
         }
 
@@ -2622,6 +2719,18 @@ mod tests {
                 name: &str,
             ) -> Result<Option<String>, MonitorError> {
                 Ok(self.objects.get(&format!("{bucket}/{name}")).cloned())
+            }
+
+            async fn post_webhook(
+                &self,
+                url: &str,
+                body: &serde_json::Value,
+            ) -> Result<u16, String> {
+                self.posts
+                    .lock()
+                    .unwrap()
+                    .push((url.to_owned(), body.clone()));
+                self.webhook.lock().unwrap().pop_front().unwrap_or(Ok(200))
             }
         }
 
@@ -3494,6 +3603,277 @@ mod tests {
             let err = String::from_utf8(err).unwrap();
             assert!(err.starts_with("gadk-eval: "), "{err}");
             assert!(!err.contains("guards: "), "{err}");
+        }
+
+        // ---- guards --notify ----
+
+        /// A webhook URL whose path is the secret.
+        const HOOK: &str = "https://hooks.example/T0/B0/secret-token";
+
+        #[tokio::test]
+        async fn notify_posts_a_slack_summary_after_an_advance() {
+            let dir = tempfile::tempdir().unwrap();
+            let (specs, _) = three_specs(dir.path()).await;
+            let (_, plain, _) = cli_run(&["guards", &specs], &healthy()).await;
+            let fake = healthy();
+            let (code, stdout, stderr) =
+                cli_run(&["guards", &specs, "--notify", HOOK], &fake).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(stderr, "");
+            assert_eq!(stdout, format!("{plain}notify: posted\n"));
+            let text = "guards: 3 run — 1 advance, 0 abort, 1 wait, 1 no rollout, 0 errors\n\
+                        • advance: support/production v1→v2 at 10% — advance: would ramp to 25%";
+            assert_eq!(
+                fake.posts(),
+                [(HOOK.to_owned(), serde_json::json!({ "text": text }))]
+            );
+            // `--notify-format slack` is the default.
+            let explicit = healthy();
+            let args = [
+                "guards",
+                &specs,
+                "--notify",
+                HOOK,
+                "--notify-format",
+                "slack",
+            ];
+            assert_eq!(cli_run(&args, &explicit).await.0, 0);
+            assert_eq!(explicit.posts(), fake.posts());
+        }
+
+        #[tokio::test]
+        async fn notify_format_json_posts_the_counts_and_the_stored_report() {
+            let dir = tempfile::tempdir().unwrap();
+            let (specs, _) = three_specs(dir.path()).await;
+            let out = dir.path().join("reports").display().to_string();
+            let fake = healthy();
+            let args = [
+                "guards",
+                &specs,
+                "--out",
+                &out,
+                "--notify",
+                HOOK,
+                "--notify-format",
+                "json",
+            ];
+            let (code, stdout, stderr) = cli_run(&args, &fake).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert!(
+                stdout.ends_with(
+                    "guards: 3 run — 1 advance, 0 abort, 1 wait, 1 no rollout, 0 errors\n\
+                     notify: posted\n"
+                ),
+                "{stdout}"
+            );
+            let stored = ReportStore::open(&out)
+                .unwrap()
+                .guard_names(10)
+                .await
+                .unwrap();
+            let advance = stored
+                .iter()
+                .find(|n| n.starts_with("advance-"))
+                .unwrap_or_else(|| panic!("{stored:?}"));
+            let want = serde_json::json!({
+                "summary": {
+                    "run": 3, "advance": 1, "abort": 0, "wait": 1, "no_rollout": 1, "errors": 0
+                },
+                "guards": [{
+                    "name": "advance", "prompt": "support", "label": "production",
+                    "baseline": 1, "rollout": 2, "percent": 10, "verdict": "advance",
+                    "action": "would ramp to 25%", "applied": false, "report": advance
+                }]
+            });
+            assert_eq!(fake.posts(), [(HOOK.to_owned(), want)]);
+        }
+
+        #[tokio::test]
+        async fn a_quiet_run_posts_nothing_and_prints_the_same() {
+            let dir = tempfile::tempdir().unwrap();
+            let (specs, files) = three_specs(dir.path()).await;
+            // Leave the `wait` and `idle` specs only.
+            std::fs::remove_file(&files[0]).unwrap();
+            let (code, plain, _) = cli_run(&["guards", &specs], &healthy()).await;
+            assert_eq!(code, 0, "{plain}");
+            let fake = healthy();
+            let (code, stdout, stderr) =
+                cli_run(&["guards", &specs, "--notify", HOOK], &fake).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(stdout, plain);
+            assert!(
+                stdout.ends_with(
+                    "guards: 2 run — 0 advance, 0 abort, 1 wait, 1 no rollout, 0 errors\n"
+                ),
+                "{stdout}"
+            );
+            assert!(!stdout.contains("notify:"), "{stdout}");
+            assert!(fake.posts().is_empty(), "{:?}", fake.posts());
+        }
+
+        #[tokio::test]
+        async fn an_error_run_posts_and_still_exits_2() {
+            let dir = tempfile::tempdir().unwrap();
+            let specs = dir.path().join("specs");
+            std::fs::create_dir(&specs).unwrap();
+            // A store without the prompt.
+            named_guard_file(
+                &specs,
+                "b.yaml",
+                "broken",
+                &dir.path().join("empty"),
+                ERROR_RATE,
+            );
+            let fake = healthy();
+            let (code, stdout, stderr) = cli_run(
+                &["guards", &specs.display().to_string(), "--notify", HOOK],
+                &fake,
+            )
+            .await;
+            assert_eq!(code, 2, "{stdout}{stderr}");
+            assert_eq!(stderr, "");
+            assert_eq!(
+                stdout,
+                "== broken ==\n\
+                 error: report store: prompt store: support/production: no such prompt\n\
+                 guards: 1 run — 0 advance, 0 abort, 0 wait, 0 no rollout, 1 errors\n\
+                 notify: posted\n"
+            );
+            let text = "guards: 1 run — 0 advance, 0 abort, 0 wait, 0 no rollout, 1 errors\n\
+                        • broken: error: report store: prompt store: support/production: \
+                        no such prompt";
+            assert_eq!(
+                fake.posts(),
+                [(HOOK.to_owned(), serde_json::json!({ "text": text }))]
+            );
+        }
+
+        #[tokio::test]
+        async fn a_failed_post_exits_2_naming_only_the_origin() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), Some(10)).await;
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            let fake = healthy();
+            fake.webhook.lock().unwrap().push_back(Ok(404));
+            let (code, stdout, stderr) = cli_run(&["guards", &spec, "--notify", HOOK], &fake).await;
+            assert_eq!(code, 2, "{stdout}{stderr}");
+            assert_eq!(stderr, "");
+            assert!(
+                stdout.ends_with(
+                    "guards: 1 run — 1 advance, 0 abort, 0 wait, 0 no rollout, 0 errors\n\
+                     notify: POST https://hooks.example failed: http 404\n"
+                ),
+                "{stdout}"
+            );
+            for secret in ["secret-token", "/T0/"] {
+                assert!(!stdout.contains(secret), "{stdout}");
+                assert!(!stderr.contains(secret), "{stderr}");
+            }
+            assert_eq!(fake.posts().len(), 1);
+        }
+
+        #[tokio::test]
+        async fn backends_without_webhooks_fail_the_post() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), Some(10)).await;
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            // `Fake` has neither a guard source nor webhooks: the guard errors, then the post
+            // fails twice (one retry, after a second).
+            let (code, stdout, _) =
+                cli_run(&["guards", &spec, "--notify", HOOK], &Fake::new(Vec::new())).await;
+            assert_eq!(code, 2, "{stdout}");
+            assert!(
+                stdout.ends_with(
+                    "notify: POST https://hooks.example failed: \
+                     webhooks are not supported by these backends\n"
+                ),
+                "{stdout}"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_bad_notify_target_exits_2_before_any_guard_runs() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), Some(10)).await;
+            let store = dir.path().join("prompts");
+            let a = named_guard_file(dir.path(), "a.yaml", "a", &store, ERROR_RATE);
+            let fake = healthy();
+            refused(
+                &[&a, "--notify", "env:GADK_EVAL_TEST_UNSET_WEBHOOK"],
+                &fake,
+                "gadk-eval: monitor spec: --notify: environment variable \
+                 GADK_EVAL_TEST_UNSET_WEBHOOK is not set\n",
+                false,
+            )
+            .await;
+            let bad = "gadk-eval: monitor spec: --notify: expected an http:// or https:// URL \
+                       or env:NAME\n";
+            for target in ["ftp://hooks.example/secret-token", "env:", "env:PATH"] {
+                refused(&[&a, "--notify", target], &fake, bad, false).await;
+            }
+            // The existing checks come first.
+            refused(
+                &[&a, "--out", "s3://bucket/reports", "--notify", "env:"],
+                &fake,
+                "gadk-eval: report store: unsupported store URL scheme",
+                true,
+            )
+            .await;
+            assert!(fake.posts().is_empty(), "{:?}", fake.posts());
+        }
+
+        #[tokio::test]
+        async fn notify_format_needs_notify_and_slack_or_json() {
+            let fake = healthy();
+            let (code, out, stderr) =
+                cli_run(&["guards", "x.yaml", "--notify-format", "json"], &fake).await;
+            assert_eq!(code, 2);
+            assert_eq!(out, "");
+            assert!(stderr.contains("--notify <url|env:NAME>"), "{stderr}");
+            let (code, _, stderr) = cli_run(
+                &[
+                    "guards",
+                    "x.yaml",
+                    "--notify",
+                    HOOK,
+                    "--notify-format",
+                    "xml",
+                ],
+                &fake,
+            )
+            .await;
+            assert_eq!(code, 2);
+            assert!(stderr.contains("--notify-format"), "{stderr}");
+            assert!(fake.calls().is_empty() && fake.posts().is_empty());
+        }
+
+        #[tokio::test]
+        async fn help_lists_the_notify_flags() {
+            let (code, stdout, _) = cli_run(&["guards", "--help"], &healthy()).await;
+            assert_eq!(code, 0);
+            for text in [
+                "--notify <url|env:NAME>",
+                "post a summary to this webhook when a guard advances, aborts or errors",
+                "--notify-format <notify-format>",
+                "webhook body: slack (default) or json",
+            ] {
+                assert!(stdout.contains(text), "{text}: {stdout}");
+            }
+        }
+
+        #[tokio::test]
+        async fn a_stdout_failure_ends_guards_before_any_post() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), Some(10)).await;
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            let fake = healthy();
+            let mut err = Vec::new();
+            let argv = ["gadk-eval", "guards", &spec, "--notify", HOOK]
+                .map(str::to_owned)
+                .to_vec();
+            let code = run(argv, &fake, &mut BrokenPipe, &mut err).await;
+            assert_eq!(code, 2);
+            assert!(fake.posts().is_empty(), "{:?}", fake.posts());
         }
     }
 

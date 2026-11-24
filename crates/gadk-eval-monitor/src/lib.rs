@@ -54,7 +54,6 @@
 mod error;
 mod guard_sources;
 mod guard_stats;
-#[expect(dead_code, reason = "not yet called by `guards`")]
 mod notify;
 #[cfg(test)]
 mod testutil;
