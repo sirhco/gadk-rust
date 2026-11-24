@@ -332,4 +332,13 @@ mod tests {
         assert!(st.reports.is_none() && st.experiments.is_none());
         assert!(fresh().guards.is_none());
     }
+
+    #[test]
+    fn stylesheet_rules_are_not_diff_pasted() {
+        assert!(super::CONSOLE_CSS.contains(".bubble {"));
+        assert!(
+            super::CONSOLE_CSS.lines().all(|l| !l.starts_with('+')),
+            "a stylesheet line starts with a diff `+`"
+        );
+    }
 }

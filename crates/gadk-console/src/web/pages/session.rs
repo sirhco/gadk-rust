@@ -122,7 +122,7 @@ fn meta(t: &TurnRow, prices: Option<&PriceTable>) -> Markup {
             @if !t.tools.is_empty() {
                 " · tools: " (t.tools.join(", "))
             }
-            " · errors: " (t.errors)
+            " · errors: " (thousands(t.errors))
             @if !scores.is_empty() {
                 " · scores: " (scores.join(", "))
             }

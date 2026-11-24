@@ -21,7 +21,7 @@ use super::cost::{NO_PRICES, PARTIAL_NOTE};
 use super::layout::{Nav, page};
 use super::sessions::{TRUNCATED, millis, totals, user_text};
 use crate::prices::{PriceTable, thousands};
-use crate::sessions::{USER_CAP, UserPage, UserQuery};
+use crate::sessions::{MAX_ID_LEN, USER_CAP, UserPage, UserQuery};
 use crate::traces::TimeRange;
 use crate::url::percent_encode;
 
@@ -44,6 +44,12 @@ fn filter_form(q: &UserQuery) -> Markup {
             button type="submit" { "Show" }
         }
     }
+}
+
+/// Whether a user id can be the `/sessions?user=` filter: non-empty, already trimmed and within
+/// [`MAX_ID_LEN`] bytes, so `/sessions` accepts it unchanged.
+fn linkable(user: &str) -> bool {
+    !user.is_empty() && user == user.trim() && user.len() <= MAX_ID_LEN
 }
 
 /// `/users`: the filter form, a link to `/sessions`, then one row per user (most recent last
@@ -82,7 +88,7 @@ pub(crate) fn render(q: &UserQuery, p: &UserPage, prices: Option<&PriceTable>) -
                     @for (u, (total, cost)) in &rows {
                         tr {
                             td {
-                                @if u.user.is_empty() {
+                                @if !linkable(&u.user) {
                                     (user_text(&u.user))
                                 } @else {
                                     a href={
@@ -109,4 +115,54 @@ pub(crate) fn render(q: &UserQuery, p: &UserPage, prices: Option<&PriceTable>) -
         }
     };
     page("Users", Nav::Sessions, body)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+
+    use super::*;
+
+    fn row(user: &str) -> crate::sessions::UserRow {
+        crate::sessions::UserRow {
+            user: user.to_owned(),
+            sessions: 1,
+            turns: 1,
+            errors: 0,
+            ups: 0,
+            downs: 0,
+            last: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+            tokens: Vec::new(),
+        }
+    }
+
+    fn html_for(users: &[&str]) -> String {
+        let q = UserQuery {
+            range: TimeRange::ALL[0],
+            end: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+            agent: None,
+        };
+        let p = UserPage {
+            users: users.iter().map(|u| row(u)).collect(),
+            more: false,
+            truncated: false,
+        };
+        render(&q, &p, None).into_string()
+    }
+
+    #[test]
+    fn only_filterable_users_are_linked() {
+        let long = "x".repeat(MAX_ID_LEN + 1);
+        let ok = "y".repeat(MAX_ID_LEN);
+        let out = html_for(&["alice", " bob ", &long, &ok, ""]);
+        assert!(
+            out.contains("/sessions?user=alice&amp;range=")
+                || out.contains("/sessions?user=alice&range=")
+        );
+        assert!(out.contains(&format!("user={ok}")));
+        assert!(!out.contains("user=%20bob"), "{out}");
+        assert!(!out.contains(&format!("user={long}")));
+        assert!(out.contains(" bob "));
+        assert!(out.contains(&long));
+    }
 }
