@@ -206,92 +206,45 @@ impl FirestoreStore {
         }
         Err(decode("no found or missing item"))
     }
-}
 
-fn url_doc(doc: &str) -> String {
-    // doc is "projects/…/documents/…/prompts/{id}[/versions/{n}]"; only ids contain '%'.
-    url_seg(doc)
-}
-
-#[async_trait]
-impl PromptStore for FirestoreStore {
-    async fn load_all(&self) -> Result<PromptSnapshot, StoreError> {
-        self.load_all_with_rollouts().await.map(|(snap, _)| snap)
-    }
-
-    async fn load_rollouts(&self) -> Result<RolloutSnapshot, StoreError> {
-        self.load_all_with_rollouts()
-            .await
-            .map(|(_, rollouts)| rollouts)
-    }
-
-    async fn load_all_with_rollouts(
-        &self,
-    ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
-        let parent = if self.root == self.db {
-            self.db.clone()
-        } else {
-            self.root.clone()
-        };
-        let docs = |v: Value| -> Vec<(String, String, serde_json::Map<String, Value>)> {
-            v.as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|it| {
-                    let d = it.get("document")?;
-                    Some((
-                        d.get("name")?.as_str()?.to_owned(),
-                        d.get("createTime")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_owned(),
-                        d.get("fields")?.as_object()?.clone(),
-                    ))
-                })
-                .collect()
-        };
-        let path = format!("{}:runQuery", url_doc(&parent));
-        let query = json!({"structuredQuery": {"from": [{"collectionId": "prompts", "allDescendants": false}]}});
-        let prompts = self
-            .client
-            .call_unclassified(Method::POST, &path, Some(query))
-            .await?;
-        // (prompt doc name, create time, prompt name, latest version, labels)
-        let mut listed = Vec::new();
-        let mut rollouts = RolloutSnapshot::default();
-        for (doc, created, fields) in docs(prompts) {
-            let name = crate::value::get_str(&fields, "name")?;
-            let (latest, labels, prompt_rollouts) = read_prompt(&fields)?;
-            for (label, rollout) in prompt_rollouts {
-                rollouts.insert(name.clone(), label, rollout);
-            }
-            listed.push((doc, created, name, latest, labels));
+    /// The version documents of `listed` the cache lacks, after clearing each prompt's entry
+    /// when its `createTime` changed or is empty, or when it holds a version above `latest`.
+    /// With `prune`, the entries of prompts not in `listed` are dropped first (`listed` is then
+    /// every prompt). The lock is released before any request.
+    fn wanted_versions(&self, listed: &[Listed], prune: bool) -> Vec<String> {
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        if prune {
+            cache.retain(|doc, _| listed.iter().any(|l| l.doc == *doc));
         }
-        // Which version documents the cache lacks. The lock is released before any request.
-        let wanted: Vec<String> = {
-            let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-            cache.retain(|doc, _| listed.iter().any(|(d, ..)| d == doc));
-            let mut wanted = Vec::new();
-            for (doc, created, _, latest, _) in &listed {
-                let have = cache.entry(doc.clone()).or_default();
-                let max = have.versions.keys().next_back().copied().unwrap_or(0);
-                // A document without a createTime cannot be told apart from a recreated one, so
-                // its cache is never reused.
-                if created.is_empty() || have.create_time != *created || max > *latest {
-                    // Deleted and recreated: start over.
-                    have.versions.clear();
-                    have.create_time.clone_from(created);
-                }
-                // Every version not cached, so a gap left by a missing document or a racing
-                // call heals on the next poll; a complete cache wants nothing.
-                wanted.extend(
-                    (1..=*latest)
-                        .filter(|n| !have.versions.contains_key(n))
-                        .map(|n| format!("{doc}/versions/{n}")),
-                );
+        let mut wanted = Vec::new();
+        for l in listed {
+            let have = cache.entry(l.doc.clone()).or_default();
+            let max = have.versions.keys().next_back().copied().unwrap_or(0);
+            // A document without a createTime cannot be told apart from a recreated one, so
+            // its cache is never reused.
+            if l.created.is_empty() || have.create_time != l.created || max > l.latest {
+                // Deleted and recreated: start over.
+                have.versions.clear();
+                have.create_time.clone_from(&l.created);
             }
-            wanted
-        };
+            // Every version not cached, so a gap left by a missing document or a racing
+            // call heals on the next poll; a complete cache wants nothing.
+            wanted.extend(
+                (1..=l.latest)
+                    .filter(|n| !have.versions.contains_key(n))
+                    .map(|n| format!("{}/versions/{n}", l.doc)),
+            );
+        }
+        wanted
+    }
+
+    /// Reads the `wanted` version documents (`BATCH_GET_LIMIT` per `batchGet`), adds them to
+    /// the cache and builds the snapshot of `listed` from it.
+    async fn fetch_and_build(
+        &self,
+        listed: Vec<Listed>,
+        wanted: Vec<String>,
+    ) -> Result<PromptSnapshot, StoreError> {
         let mut fetched = Vec::new();
         for chunk in wanted.chunks(BATCH_GET_LIMIT) {
             let reply = self
@@ -330,29 +283,164 @@ impl PromptStore for FirestoreStore {
         // pruned or reset the cache meanwhile cannot make this one return fewer versions than
         // it fetched.
         for (pdoc, v) in fetched {
-            let Some((_, created, ..)) = listed.iter().find(|(d, ..)| *d == pdoc) else {
+            let Some(l) = listed.iter().find(|l| l.doc == pdoc) else {
                 continue;
             };
             let have = cache.entry(pdoc).or_default();
-            if have.create_time != *created {
+            if have.create_time != l.created {
                 have.versions.clear();
-                have.create_time.clone_from(created);
+                have.create_time.clone_from(&l.created);
             }
             have.versions.insert(v.version, Arc::new(v));
         }
         let mut snap = PromptSnapshot::default();
-        for (doc, _, name, latest, labels) in listed {
+        for l in listed {
             let versions = cache
-                .get(&doc)
+                .get(&l.doc)
                 .map(|have| {
                     have.versions
-                        .range(..=latest)
+                        .range(..=l.latest)
                         .map(|(n, v)| (*n, v.clone()))
                         .collect()
                 })
                 .unwrap_or_default();
-            snap.prompts.insert(name, PromptEntry { versions, labels });
+            snap.prompts.insert(
+                l.name,
+                PromptEntry {
+                    versions,
+                    labels: l.labels,
+                },
+            );
         }
+        Ok(snap)
+    }
+}
+
+/// A prompt document as read: its document name and `createTime`, and the prompt's name,
+/// latest version and labels.
+struct Listed {
+    doc: String,
+    created: String,
+    name: String,
+    latest: u32,
+    labels: BTreeMap<Label, u32>,
+}
+
+impl Listed {
+    /// Decodes the `fields` of prompt document `doc`, adding its rollouts to `rollouts`.
+    fn read(
+        doc: String,
+        created: String,
+        fields: &serde_json::Map<String, Value>,
+        rollouts: &mut RolloutSnapshot,
+    ) -> Result<Self, StoreError> {
+        let name = crate::value::get_str(fields, "name")?;
+        let (latest, labels, prompt_rollouts) = read_prompt(fields)?;
+        for (label, rollout) in prompt_rollouts {
+            rollouts.insert(name.clone(), label, rollout);
+        }
+        Ok(Self {
+            doc,
+            created,
+            name,
+            latest,
+            labels,
+        })
+    }
+}
+
+/// `(name, createTime, fields)` of a Firestore document, as `runQuery` (`document`) and
+/// `batchGet` (`found`) return it; `None` without a name or fields. A missing `createTime` is
+/// empty.
+fn prompt_document(d: &Value) -> Option<(String, String, serde_json::Map<String, Value>)> {
+    Some((
+        d.get("name")?.as_str()?.to_owned(),
+        d.get("createTime")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        d.get("fields")?.as_object()?.clone(),
+    ))
+}
+
+fn url_doc(doc: &str) -> String {
+    // doc is "projects/…/documents/…/prompts/{id}[/versions/{n}]"; only ids contain '%'.
+    url_seg(doc)
+}
+
+#[async_trait]
+impl PromptStore for FirestoreStore {
+    async fn load_all(&self) -> Result<PromptSnapshot, StoreError> {
+        self.load_all_with_rollouts().await.map(|(snap, _)| snap)
+    }
+
+    async fn load_rollouts(&self) -> Result<RolloutSnapshot, StoreError> {
+        self.load_all_with_rollouts()
+            .await
+            .map(|(_, rollouts)| rollouts)
+    }
+
+    async fn load_all_with_rollouts(
+        &self,
+    ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
+        let parent = if self.root == self.db {
+            self.db.clone()
+        } else {
+            self.root.clone()
+        };
+        let path = format!("{}:runQuery", url_doc(&parent));
+        let query = json!({"structuredQuery": {"from": [{"collectionId": "prompts", "allDescendants": false}]}});
+        let prompts = self
+            .client
+            .call_unclassified(Method::POST, &path, Some(query))
+            .await?;
+        let mut listed = Vec::new();
+        let mut rollouts = RolloutSnapshot::default();
+        for (doc, created, fields) in prompts
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|it| prompt_document(it.get("document")?))
+        {
+            listed.push(Listed::read(doc, created, &fields, &mut rollouts)?);
+        }
+        let wanted = self.wanted_versions(&listed, true);
+        let snap = self.fetch_and_build(listed, wanted).await?;
+        Ok((snap, rollouts))
+    }
+
+    async fn load_prompt(
+        &self,
+        name: &str,
+    ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
+        let empty = || (PromptSnapshot::default(), RolloutSnapshot::default());
+        // No stored prompt fails `validate_name`, and such a name (`""`, `..`) may not even be a
+        // valid document ID, which Firestore would refuse with an error.
+        if validate_name(name).is_err() {
+            return Ok(empty());
+        }
+        let reply = self
+            .client
+            .call_unclassified(
+                Method::POST,
+                &format!("{}:batchGet", self.db),
+                Some(json!({"documents": [self.prompt_doc(&encode_doc_id(name))]})),
+            )
+            .await?;
+        let items = reply
+            .as_array()
+            .ok_or_else(|| StoreError::Decode("batchGet: response is not an array".into()))?;
+        // A `missing` item (or no `found` one) is a prompt that does not exist.
+        let Some((doc, created, fields)) = items
+            .iter()
+            .find_map(|it| prompt_document(it.get("found")?))
+        else {
+            return Ok(empty());
+        };
+        let mut rollouts = RolloutSnapshot::default();
+        let listed = Listed::read(doc, created, &fields, &mut rollouts)?;
+        let wanted = self.wanted_versions(std::slice::from_ref(&listed), false);
+        let snap = self.fetch_and_build(vec![listed], wanted).await?;
         Ok((snap, rollouts))
     }
 

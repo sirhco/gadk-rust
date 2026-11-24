@@ -133,12 +133,14 @@ pub fn start() -> Fake {
                 {
                     reads.insert(name.clone(), current.as_ref().map_or(0, |d| d.1));
                 }
+                // The document's own createTime, the value runQuery gives.
+                let created = s.created.get(&name).cloned().unwrap_or_default();
                 out.push(match current {
                     Some((fields, _)) => json!({
                         "found": {
                             "name": name,
                             "fields": fields,
-                            "createTime": "2026-11-15T00:00:00Z",
+                            "createTime": created,
                             "updateTime": "2026-11-15T00:00:00Z",
                         },
                         "readTime": "2026-11-15T00:00:00Z",

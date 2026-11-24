@@ -29,8 +29,12 @@
 //! documents, so they add no reads, and [`load_all`](gadk_prompts::PromptStore::load_all) costs
 //! the same. The store keeps the versions it has read in memory (they are immutable), so a poll
 //! of an unchanged store costs one read per prompt and nothing more. The first call after a
-//! restart reads every version once. Use a dedicated non-empty root (e.g. `envs/prod`) and a
-//! refresh interval suited to the number of prompts.
+//! restart reads every version once.
+//! [`load_prompt`](gadk_prompts::PromptStore::load_prompt) reads only the one prompt document
+//! (one read) and then only that prompt's versions not yet read, sharing those in-memory
+//! versions with `load_all_with_rollouts`; a name that fails
+//! [`validate_name`](gadk_prompts::validate_name) reads nothing. Use a dedicated non-empty root
+//! (e.g. `envs/prod`) and a refresh interval suited to the number of prompts.
 //!
 //! ```no_run
 //! # fn demo() -> Result<(), gadk_prompts::StoreError> {
