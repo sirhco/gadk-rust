@@ -52,6 +52,9 @@
 //! ```
 
 mod error;
+// Used by the `guards` command, which a later change adds.
+#[allow(dead_code)]
+mod guard_sources;
 mod guard_stats;
 #[cfg(test)]
 mod testutil;
