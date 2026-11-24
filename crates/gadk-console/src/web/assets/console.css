@@ -213,6 +213,9 @@ p.filter { color: var(--muted); }
 .trend { display: block; }
 .trend polyline { stroke: var(--bar); stroke-width: 1.5; }
 .trend circle { fill: var(--bar); }
+.usage-chart { display: block; width: 100%; max-width: 600px; height: auto; margin: 0 0 8px; }
+.usage-chart polyline { stroke: var(--bar); stroke-width: 1.5; }
+.usage-chart text { fill: var(--muted); font-size: 10px; }
 .chip-pass { background: var(--ins-bg); }
 .chip-fail { background: var(--del-bg); }
 .chip-error { background: var(--warn-bg); color: var(--warn-fg); }

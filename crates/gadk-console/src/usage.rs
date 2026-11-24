@@ -41,10 +41,6 @@ const VERSION_MODEL_CAP: usize = 5_000;
 /// The most invocation × version rows the pass-rate mapping returns.
 const MAPPING_CAP: usize = 20_000;
 /// The most bucket × model × agent × prompt rows the trend query returns.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the /usage page uses it from the next task")
-)]
 pub(crate) const TREND_CAP: usize = 20_000;
 
 /// The byte cap floor of a DML statement: BigQuery bills every one at least 10 MiB.
@@ -82,10 +78,6 @@ pub(crate) struct Breakdown {
 }
 
 /// One trend group: the calls of one model by one agent with one prompt version in one bucket.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the /usage page uses it from the next task")
-)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TrendCell {
     /// The bucket index, `0..count` from the window start.
@@ -95,10 +87,6 @@ pub(crate) struct TrendCell {
 }
 
 /// The trend groups of a window.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the /usage page uses it from the next task")
-)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Trend {
     /// The groups, ordered by bucket, model, agent, prompt.
@@ -109,10 +97,6 @@ pub(crate) struct Trend {
 
 /// The `/usage` time window: the trace-list ranges plus 30 days, each cut into fixed buckets
 /// for the trends.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the /usage page uses it from the next task")
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum UsageRange {
     /// The last hour.
@@ -128,10 +112,6 @@ pub(crate) enum UsageRange {
     Days30,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the /usage page uses it from the next task")
-)]
 impl UsageRange {
     /// Every range, shortest first.
     pub(crate) const ALL: [UsageRange; 5] = [
@@ -374,10 +354,6 @@ impl UsageSource {
     /// The model calls of `[start, end)` grouped by `bucket_seconds`-wide bucket (aligned to
     /// `start`), model, agent and prompt version. Rows whose bucket falls outside the window are
     /// dropped.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the /usage page uses it from the next task")
-    )]
     pub(crate) async fn trend(
         &self,
         start: DateTime<Utc>,
@@ -668,10 +644,6 @@ LIMIT @limit"
 
 /// Calls and tokens per `@bucket`-second bucket from `@start` × model × agent × prompt, with
 /// the groups of [`breakdown_sql`].
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the /usage page uses it from the next task")
-)]
 fn trend_sql(table: &str) -> String {
     let cte = calls_cte_builder(table, true);
     format!(
