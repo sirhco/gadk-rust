@@ -23,7 +23,7 @@
 //! gadk-eval experiment <spec.yaml> [--out <url>]
 //! gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]
 //! gadk-eval guards <source>... [--apply] [--prices <file|gs://bucket/object>] [--out <url>]
-//!     [--max-bytes <n>]
+//!     [--max-bytes <n>] [--notify <url|env:NAME>] [--notify-format slack|json]
 //! ```
 //!
 //! `monitor` exits 0 on success, 1 when the spec's `min_pass_rate` is set and either the pass
@@ -54,10 +54,16 @@
 //! (a path or a `gs://` object) and `--out` before running any guard. Each guard's output
 //! follows a `== <name> ==` line and is what `guard` prints for it; a guard that fails prints
 //! `error: <message>` and the run goes on. The last line counts the outcomes
-//! (`guards: <n> run — <a> advance, <b> abort, <c> wait, <d> no rollout, <e> errors`). It
-//! exits 0 when every guard reached an outcome (advance, abort, wait or no rollout), and 2 when
-//! a guard failed, a source, spec, price file or `--out` check failed (nothing runs and no
-//! summary is printed), stdout could not be written, or on a usage error.
+//! (`guards: <n> run — <a> advance, <b> abort, <c> wait, <d> no rollout, <e> errors`). With
+//! `--notify <url|env:NAME>` (checked with the others before any guard runs), a run in which a
+//! guard advanced, aborted or errored then posts a summary to that webhook, Slack-style text or
+//! with `--notify-format json` the counts and each such guard, retries any transport error
+//! or 5xx reply once, and prints `notify: posted` or
+//! `notify: POST <origin> failed: <reason>` (the URL's `scheme://host[:port]` only). It exits 0
+//! when every guard reached an outcome (advance, abort, wait or no rollout) and any post
+//! succeeded, and 2 when a guard failed, the post failed, a source, spec, price file, `--out` or
+//! `--notify` check failed (nothing runs and no summary is printed), stdout could not be
+//! written, or on a usage error.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;

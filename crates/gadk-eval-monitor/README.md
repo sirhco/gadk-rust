@@ -194,7 +194,7 @@ Limits:
 | `gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [options]` | Writes production runs as eval-set cases to a new file, or `--append`s them; see [Exporting runs as eval cases](#exporting-runs-as-eval-cases). |
 | `gadk-eval experiment <spec.yaml> [--out <url>]` | Runs an experiment from an experiment spec (one Gemini agent on Vertex AI per variant), stores it under `experiments/` of `<url>` when `--out` is given, then prints its summary and, with `--out`, `stored report <name>`; see [Experiment spec](#experiment-spec). |
 | `gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]` | Compares both sides of a prompt rollout, prints the report and, with `--out`, stores it under `guards/` of `<url>` and prints `stored report <name>`; with `--apply` it ramps, promotes or aborts the rollout. Exits 0 (advance), 1 (abort), 3 (wait), 4 (no rollout) or 2 (error); see [Guards](#guards). |
-| `gadk-eval guards <source>... [--apply] [--prices <file\|gs://bucket/object>] [--out <url>] [--max-bytes <n>]` | Runs every guard spec in its sources (files, directories, `gs://` objects and prefixes) one at a time, each under a `== <name> ==` line, then prints a summary line; see [Running many guards](#running-many-guards). |
+| `gadk-eval guards <source>... [--apply] [--prices <file\|gs://bucket/object>] [--out <url>] [--max-bytes <n>] [--notify <url\|env:NAME>] [--notify-format slack\|json]` | Runs every guard spec in its sources (files, directories, `gs://` objects and prefixes) one at a time, each under a `== <name> ==` line, then prints a summary line; with `--notify`, posts that summary to a webhook when a guard advanced, aborted or errored; see [Running many guards](#running-many-guards) and [Notifications](#notifications). |
 
 `<url>` is a directory, `file://<dir>` or `gs://<bucket>[/<prefix>]`; other schemes (such as
 `s3://`) are rejected. Reports are named
@@ -204,7 +204,7 @@ Limits:
 |---|---|---|---|---|---|
 | 0 | success | success | at least one case was added | the experiment ran (whatever its case results) and, with `--out`, was stored | every guard reached an outcome (advance, abort, wait or no rollout) |
 | 1 | `min_pass_rate` is set and either the pass rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0) | — | no case was added (nothing is written) | — | — |
-| 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, or a usage error | a store error, an unknown or invalid report name, or a usage error | the file exists (without `--append`) or cannot be read, appended to or written, a query fails, or a usage error | the spec is invalid, the eval set cannot be read or is invalid, the prompt store or a variant's prompt version cannot be loaded, a model or the judge cannot be built, the experiment fails, the report cannot be stored, or a usage error | a guard failed, a check before the run failed (a source, a spec, the price file or `--out`), or a usage error |
+| 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, or a usage error | a store error, an unknown or invalid report name, or a usage error | the file exists (without `--append`) or cannot be read, appended to or written, a query fails, or a usage error | the spec is invalid, the eval set cannot be read or is invalid, the prompt store or a variant's prompt version cannot be loaded, a model or the judge cannot be built, the experiment fails, the report cannot be stored, or a usage error | a guard failed, a check before the run failed (a source, a spec, the price file, `--out` or `--notify`), the `--notify` post failed, or a usage error |
 
 A judge call that fails or times out is an error result for that scorer, not exit 2.
 
@@ -613,7 +613,9 @@ failure exits 2 with nothing run or written:
 - the price file cannot be read or parsed, including a `gs://` price file that is missing, has
   an invalid bucket or does not name an object (`price file <source>: not found`,
   `invalid bucket` or `not an object`);
-- `--out` is not a valid store URL.
+- `--out` is not a valid store URL;
+- `--notify` names an unset or empty environment variable, or is not an `http://` or `https://`
+  URL (see [Notifications](#notifications)).
 
 Each guard's output starts with `== <name> ==`, followed by exactly what `guard` prints for it:
 the report and, with `--out`, `stored report <name>`, or the `no rollout` line. A guard that
@@ -628,7 +630,54 @@ guards: 3 run — 1 advance, 0 abort, 1 wait, 0 no rollout, 1 errors
 | Exit | `guards` |
 |---|---|
 | 0 | every guard reached an outcome: advance, abort, wait or no rollout |
-| 2 | a guard failed (the summary counts it under `errors`), a check before the run failed, stdout could not be written, or a usage error (no summary is printed for these three) |
+| 2 | a guard failed (the summary counts it under `errors`), the `--notify` post failed (after the summary), a check before the run failed, stdout could not be written, or a usage error (no summary is printed for these three) |
+
+#### Notifications
+
+`--notify <target>` posts one summary of the run to a webhook, after the summary line, when at
+least one guard advanced, aborted or errored. A run in which every guard waited or had no
+rollout posts nothing and prints nothing more. `<target>` is an `http://` or `https://` URL, or
+`env:NAME` to read the URL from environment variable `NAME`, which keeps it out of the command
+line and the process list (see [Scheduling](#scheduling)). It is checked with the other checks
+before any guard runs:
+
+- `--notify: environment variable NAME is not set` when `NAME` is unset or empty;
+- `--notify: expected an http:// or https:// URL or env:NAME` for anything else that is not an
+  `http://` or `https://` URL with a host.
+
+The body is posted as `application/json`. `--notify-format slack`, the default, sends a
+Slack-style incoming-webhook message: the summary line, then one line per guard that advanced,
+aborted or errored, in run order:
+
+```json
+{"text": "guards: 3 run — 1 advance, 0 abort, 1 wait, 0 no rollout, 1 errors\n• support: support/production v3→v4 at 10% — advance: ramped to 25%\n• billing: error: transcript source: HTTP 403: denied"}
+```
+
+`--notify-format json` sends the counts and the same guards as fields. An advanced or aborted
+guard has its prompt, label, versions, rollout percent, verdict, action (as the report prints
+it), whether it was applied, and `report`, the stored report's name, or `null` without `--out`.
+A failed guard has its `error`:
+
+```json
+{
+  "summary": {"run": 3, "advance": 1, "abort": 0, "wait": 1, "no_rollout": 0, "errors": 1},
+  "guards": [
+    {"name": "support", "prompt": "support", "label": "production", "baseline": 3,
+     "rollout": 4, "percent": 10, "verdict": "advance", "action": "ramped to 25%",
+     "applied": true, "report": "support-20261124T080000Z.json"},
+    {"name": "billing", "error": "transcript source: HTTP 403: denied"}
+  ]
+}
+```
+
+The post times out after 10 seconds, sends no Google credentials and does not follow
+redirects. A 2xx reply prints `notify: posted` and leaves the exit code as the guards set it.
+Any transport error (a connection failure, a timeout or another request failure) or a 5xx
+reply is retried once, a second later. Any other reply (including a redirect), or a second
+failure, prints `notify: POST <origin> failed: <reason>`, for example
+`notify: POST https://hooks.slack.com failed: http 404`, and the run exits 2, so a
+broken webhook does not go unnoticed. The webhook URL is a secret: output shows only its
+origin, `scheme://host[:port]`, never its path, query or user info.
 
 ### Sample sizes and false aborts
 
@@ -686,6 +735,25 @@ gcloud scheduler jobs create http guards-hourly --location us-central1 \
 
 `--max-retries 0` keeps a failed run from being repeated at once; the next scheduled run tries
 again.
+
+To post each run's outcome to a webhook (see [Notifications](#notifications)), keep the URL in
+Secret Manager and hand it to the job as an environment variable, so it is never part of the
+job's arguments:
+
+```sh
+gcloud secrets create guards-webhook --data-file webhook-url.txt
+gcloud secrets add-iam-policy-binding guards-webhook \
+  --member serviceAccount:guard@my-proj.iam.gserviceaccount.com \
+  --role roles/secretmanager.secretAccessor
+gcloud run jobs update guards --region us-central1 \
+  --set-secrets GUARDS_WEBHOOK=guards-webhook:latest \
+  --args guards,gs://my-bucket/guards/,--apply,--prices,gs://my-bucket/prices.yaml,--out,gs://my-bucket/monitors,--notify,env:GUARDS_WEBHOOK
+```
+
+`webhook-url.txt` holds only the URL, with no trailing newline (for example
+`printf '%s' 'https://hooks.slack.com/services/…' > webhook-url.txt`): the value is not
+trimmed, so a trailing newline makes every run fail its `--notify` check. The job then posts
+after every run in which a guard advanced, aborted or errored, and exits 2 when the post fails.
 
 ## Library
 
