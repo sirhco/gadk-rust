@@ -173,10 +173,21 @@ pub trait Backends: Send + Sync {
         let _ = (bucket, name);
         Err(MonitorError::Store(GS_REFUSED.into()))
     }
+
+    /// Posts `body` as JSON to the webhook `url` (`guards --notify`) and returns the reply's
+    /// HTTP status, or the transport error text. The default refuses; [`CloudBackends`] sends
+    /// it with a 10 s timeout, without following redirects or sending credentials.
+    async fn post_webhook(&self, url: &str, body: &serde_json::Value) -> Result<u16, String> {
+        let _ = (url, body);
+        Err("webhooks are not supported by these backends".into())
+    }
 }
 
 /// The error of the default [`Backends::list_objects`] and [`Backends::read_object`].
 const GS_REFUSED: &str = "gs:// sources are not supported by these backends";
+
+/// How long [`CloudBackends::post_webhook`] waits for a webhook's reply.
+const WEBHOOK_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A fresh Cloud Storage client with Application Default Credentials. It is built per call:
 /// the credentials' token refresh task runs on the runtime that built them, so a client cached
@@ -272,6 +283,35 @@ impl Backends for CloudBackends {
 
     async fn read_object(&self, bucket: &str, name: &str) -> Result<Option<String>, MonitorError> {
         gcs::read_text(&cloud_storage()?, bucket, name).await
+    }
+
+    /// Posts with a client of its own: a 10 s timeout, no redirects, no Google
+    /// credentials. A transport error is returned as a kind that never names the URL: `timed
+    /// out`, `connection failed` or `request failed` (a `reqwest` error's own text embeds it).
+    async fn post_webhook(&self, url: &str, body: &serde_json::Value) -> Result<u16, String> {
+        let client = reqwest::Client::builder()
+            .timeout(WEBHOOK_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(gadk_platform::tracking_header())
+            .build()
+            .map_err(|_| "request failed".to_owned())?;
+        let reply = client
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|e| {
+                let kind = if e.is_timeout() {
+                    "timed out"
+                } else if e.is_connect() {
+                    "connection failed"
+                } else {
+                    "request failed"
+                };
+                kind.to_owned()
+            })?;
+        Ok(reply.status().as_u16())
     }
 }
 
@@ -2006,6 +2046,59 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             refused
+        );
+    }
+
+    #[tokio::test]
+    async fn backends_without_webhooks_refuse_them() {
+        let body = serde_json::json!({ "text": "hi" });
+        assert_eq!(
+            Fake::new(Vec::new())
+                .post_webhook("https://hooks.example/T0/secret", &body)
+                .await,
+            Err("webhooks are not supported by these backends".to_owned())
+        );
+    }
+
+    #[tokio::test]
+    async fn cloud_backends_post_a_webhook_as_json_without_credentials() {
+        use gadk_model::rest::test_util::{FakeResponse, FakeServer};
+
+        let server = FakeServer::always(FakeResponse::new(204));
+        let url = format!("{}/hooks/T0/secret?token=t", server.url());
+        let body = serde_json::json!({ "text": "guards: 1 run — 1 advance" });
+        assert_eq!(CloudBackends.post_webhook(&url, &body).await, Ok(204));
+        let req = server.last_request();
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.path_and_query(), "/hooks/T0/secret?token=t");
+        assert_eq!(req.header("content-type"), "application/json");
+        assert_eq!(req.header("user-agent"), gadk_platform::tracking_header());
+        assert_eq!(req.json(), body);
+        assert!(req.header_values("authorization").is_empty(), "{req:?}");
+
+        // A status, any status, is returned as is; a redirect is not followed.
+        let moved = FakeServer::always(
+            FakeResponse::new(302).header("Location", format!("{}/elsewhere", server.url())),
+        );
+        assert_eq!(
+            CloudBackends.post_webhook(&moved.url(), &body).await,
+            Ok(302)
+        );
+        assert_eq!(moved.hits(), 1);
+        assert_eq!(server.hits(), 1);
+        let failing = FakeServer::always(FakeResponse::new(500));
+        assert_eq!(
+            CloudBackends.post_webhook(&failing.url(), &body).await,
+            Ok(500)
+        );
+
+        // A refused connection is a URL-free error kind.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/hooks/T0/secret", closed.local_addr().unwrap());
+        drop(closed);
+        assert_eq!(
+            CloudBackends.post_webhook(&url, &body).await,
+            Err("connection failed".to_owned())
         );
     }
 
