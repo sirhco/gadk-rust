@@ -45,12 +45,22 @@ pub(crate) enum NotifyFormat {
 }
 
 /// Where and how a `guards` run posts its summary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Notifier {
     /// The resolved webhook URL (a secret: print only its [`origin`]).
     pub(crate) url: String,
     /// The body format.
     pub(crate) format: NotifyFormat,
+}
+
+impl std::fmt::Debug for Notifier {
+    /// Shows the URL as its [`origin`] only: it is a secret.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Notifier")
+            .field("url", &origin(&self.url))
+            .field("format", &self.format)
+            .finish()
+    }
 }
 
 /// The webhook URL `--notify <target>` names: `target` itself, or the value of environment
@@ -216,7 +226,7 @@ pub(crate) fn body(
 /// error or a 5xx reply is retried once, after `sleep(1 s)`. Any other reply, or a second
 /// failure, is the error `POST <origin> failed: http <status>` or
 /// `POST <origin> failed: <transport error>`, with every occurrence of `url` in the transport
-/// error replaced by its [`origin`].
+/// error replaced by its [`origin`] (also its normalized form, as `reqwest` prints it).
 pub(crate) async fn post<F, Fut>(
     backends: &dyn Backends,
     url: &str,
@@ -228,12 +238,23 @@ where
     Fut: Future<Output = ()>,
 {
     let origin = origin(url);
+    let normalized = reqwest::Url::parse(url)
+        .map(|u| u.to_string())
+        .ok()
+        .filter(|n| n != url);
     let mut retried = false;
     loop {
         let (reason, retry) = match backends.post_webhook(url, body).await {
             Ok(status) if (200..300).contains(&status) => return Ok(()),
             Ok(status) => (format!("http {status}"), (500..600).contains(&status)),
-            Err(e) => (e.replace(url, &origin), true),
+            Err(e) => {
+                let e = e.replace(url, &origin);
+                let e = match &normalized {
+                    Some(n) => e.replace(n.as_str(), &origin),
+                    None => e,
+                };
+                (e, true)
+            }
         };
         if retry && !retried {
             retried = true;
@@ -602,5 +623,27 @@ mod tests {
         let reason = result.unwrap_err();
         assert_eq!(reason, "POST https://h failed: https://h");
         assert!(!reason.contains("tok"), "{reason}");
+    }
+
+    #[tokio::test]
+    async fn a_transport_error_with_the_normalized_url_is_redacted() {
+        let url = "HTTPS://Hooks.Example/T0/secret-token";
+        let err = "error sending request for url (https://hooks.example/T0/secret-token)";
+        let (result, _, _) = post_to(url, vec![Err(err.into()), Err(err.into())]).await;
+        let reason = result.unwrap_err();
+        assert!(!reason.contains("secret-token"), "{reason}");
+        assert!(!reason.contains("/T0/"), "{reason}");
+    }
+
+    #[test]
+    fn notifier_debug_shows_only_the_origin() {
+        let notifier = Notifier {
+            url: "https://hooks.example/T0/secret-token".into(),
+            format: NotifyFormat::Json,
+        };
+        let shown = format!("{notifier:?}");
+        assert!(shown.contains("https://hooks.example"), "{shown}");
+        assert!(!shown.contains("secret-token"), "{shown}");
+        assert!(!shown.contains("/T0/"), "{shown}");
     }
 }

@@ -185,6 +185,11 @@ pub trait Backends: Send + Sync {
     /// Posts `body` as JSON to the webhook `url` (`guards --notify`) and returns the reply's
     /// HTTP status, or the transport error text. The default refuses; [`CloudBackends`] sends
     /// it with a 10 s timeout, without following redirects or sending credentials.
+    ///
+    /// The `Err` text is printed and posted as-is, apart from redaction of the URL, so it must
+    /// not contain the URL or any part of it beyond its origin. Return a short kind such as
+    /// `timed out` or `connection failed`, never a `reqwest::Error`'s `Display` (it embeds the
+    /// URL).
     async fn post_webhook(&self, url: &str, body: &serde_json::Value) -> Result<u16, String> {
         let _ = (url, body);
         Err("webhooks are not supported by these backends".into())
