@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.13] - 2026-11-24
+
 ### Added
 
 - `gadk-console`: `/usage` shows usage over time. A chart under `Over time` plots the cost per
@@ -829,7 +831,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.12...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.13...HEAD
+[0.5.13]: https://github.com/sirhco/gadk-rust/compare/v0.5.12...v0.5.13
 [0.5.12]: https://github.com/sirhco/gadk-rust/compare/v0.5.11...v0.5.12
 [0.5.11]: https://github.com/sirhco/gadk-rust/compare/v0.5.10...v0.5.11
 [0.5.10]: https://github.com/sirhco/gadk-rust/compare/v0.5.9...v0.5.10
