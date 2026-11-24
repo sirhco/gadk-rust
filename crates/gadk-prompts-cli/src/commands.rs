@@ -127,7 +127,7 @@ pub(crate) async fn dispatch(
             let name = req(m, "name");
             let label = Label::new(req(m, "label"))?;
             if m.get_flag("promote") {
-                let (snap, rollouts) = store.load_all_with_rollouts().await?;
+                let (snap, rollouts) = store.load_prompt(name).await?;
                 let to = rollouts
                     .get(name, &label)
                     .ok_or_else(|| StoreError::NotFound {
@@ -151,8 +151,9 @@ pub(crate) async fn dispatch(
             let rollout = Rollout::new(version, percent)?;
             store.set_rollout(name, &label, Some(rollout)).await?;
             let at = store
-                .load_all()
+                .load_prompt(name)
                 .await?
+                .0
                 .resolve(name, &Selector::Label(label.clone()))?
                 .version;
             writeln!(out, "{name} {label} -> v{at} (v{version} at {percent}%)").map_err(io)
@@ -181,7 +182,7 @@ pub(crate) async fn dispatch(
                 _ => Selector::Latest,
             };
             let name = req(m, "name");
-            let (snap, rollouts) = store.load_all_with_rollouts().await?;
+            let (snap, rollouts) = store.load_prompt(name).await?;
             let v = snap.resolve(name, &sel)?;
             if m.get_flag("json") {
                 let s =
@@ -197,8 +198,8 @@ pub(crate) async fn dispatch(
             Ok(())
         }
         Some(("diff", m)) => {
-            let snap = store.load_all().await?;
             let name = req(m, "name");
+            let snap = store.load_prompt(name).await?.0;
             let (from, to) = (req(m, "from"), req(m, "to"));
             let a = snap.resolve(name, &parse_selector(from)?)?;
             let b = snap.resolve(name, &parse_selector(to)?)?;

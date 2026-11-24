@@ -246,8 +246,124 @@ mod tests {
         assert_eq!(loads.load(Ordering::SeqCst), 0);
     }
 
+    /// A store that counts [`PromptStore::load_prompt`] calls apart from the whole-store reads
+    /// (`load_all` and `load_all_with_rollouts`).
+    struct PromptReads {
+        inner: FileStore,
+        prompt: AtomicUsize,
+        whole: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl PromptStore for PromptReads {
+        async fn load_all(&self) -> Result<PromptSnapshot, StoreError> {
+            self.whole.fetch_add(1, Ordering::SeqCst);
+            self.inner.load_all().await
+        }
+        async fn load_all_with_rollouts(
+            &self,
+        ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
+            self.whole.fetch_add(1, Ordering::SeqCst);
+            self.inner.load_all_with_rollouts().await
+        }
+        async fn load_prompt(
+            &self,
+            name: &str,
+        ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
+            self.prompt.fetch_add(1, Ordering::SeqCst);
+            self.inner.load_prompt(name).await
+        }
+        async fn create_version(&self, new: NewVersion) -> Result<PromptVersion, StoreError> {
+            self.inner.create_version(new).await
+        }
+        async fn set_label(
+            &self,
+            name: &str,
+            label: &Label,
+            version: u32,
+            expected: Option<Option<u32>>,
+        ) -> Result<(), StoreError> {
+            self.inner.set_label(name, label, version, expected).await
+        }
+        async fn remove_label(&self, name: &str, label: &Label) -> Result<(), StoreError> {
+            self.inner.remove_label(name, label).await
+        }
+        async fn set_rollout(
+            &self,
+            name: &str,
+            label: &Label,
+            rollout: Option<Rollout>,
+        ) -> Result<(), StoreError> {
+            self.inner.set_rollout(name, label, rollout).await
+        }
+    }
+
+    #[tokio::test]
+    async fn single_prompt_commands_read_only_that_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let fs = FileStore::new(dir.path());
+        for t in ["one\n", "two\n", "three\n"] {
+            fs.create_version(NewVersion {
+                name: "p".into(),
+                template: t.into(),
+                config: None,
+                author: "me".into(),
+                message: String::new(),
+            })
+            .await
+            .unwrap();
+        }
+        let prod = Label::production();
+        fs.set_label("p", &prod, 1, None).await.unwrap();
+        fs.set_rollout("p", &prod, Some(Rollout::new(2, 10).unwrap()))
+            .await
+            .unwrap();
+        let store = PromptReads {
+            inner: fs,
+            prompt: AtomicUsize::new(0),
+            whole: AtomicUsize::new(0),
+        };
+        let cases: [(&[&str], &str); 4] = [
+            (
+                &["show", "p", "--label", "production"],
+                "one\nrollout: v2 at 10%\n",
+            ),
+            (&["diff", "p", "v1", "v2"], "-one\n+two\n"),
+            (
+                &[
+                    "rollout",
+                    "p",
+                    "3",
+                    "--label",
+                    "production",
+                    "--percent",
+                    "20",
+                ],
+                "p production -> v1 (v3 at 20%)\n",
+            ),
+            (
+                &["rollout", "p", "--label", "production", "--promote"],
+                "p production -> v3\n",
+            ),
+        ];
+        for (i, (args, tail)) in cases.into_iter().enumerate() {
+            let m = super::cli()
+                .try_get_matches_from(std::iter::once("gadk-prompts").chain(args.iter().copied()))
+                .unwrap();
+            let mut out = Vec::new();
+            super::commands::dispatch(&store, &m, &mut "".as_bytes(), &mut out)
+                .await
+                .unwrap();
+            let out = String::from_utf8(out).unwrap();
+            assert!(out.ends_with(tail), "{args:?}: {out}");
+            assert_eq!(store.prompt.load(Ordering::SeqCst), i + 1, "{args:?}");
+            assert_eq!(store.whole.load(Ordering::SeqCst), 0, "{args:?}");
+        }
+    }
+
     /// A store where another writer moves `production` to v3 right after every
-    /// `load_all_with_rollouts` read, i.e. between `rollout --promote`'s read and its write.
+    /// `load_all_with_rollouts` read, which the default `load_prompt` makes, i.e. between
+    /// `rollout --promote`'s `load_prompt` and its write.
     struct MovedAfterRead(FileStore);
 
     #[async_trait]
