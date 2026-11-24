@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::cli::Backends;
+use crate::cli::{Backends, WEBHOOKS_UNSUPPORTED};
 use crate::error::MonitorError;
 use crate::guard_report::GuardReport;
 
@@ -223,7 +223,8 @@ pub(crate) fn body(
 }
 
 /// Posts `body` to `url` through [`Backends::post_webhook`]. A 2xx reply succeeds. A transport
-/// error or a 5xx reply is retried once, after `sleep(1 s)`. Any other reply, or a second
+/// error or a 5xx reply is retried once, after `sleep(1 s)`, except the default
+/// [`Backends::post_webhook`] error, which is final. Any other reply, or a second
 /// failure, is the error `POST <origin> failed: http <status>` or
 /// `POST <origin> failed: <transport error>`, with every occurrence of `url` in the transport
 /// error replaced by its [`origin`] (also its normalized form, as `reqwest` prints it).
@@ -248,12 +249,13 @@ where
             Ok(status) if (200..300).contains(&status) => return Ok(()),
             Ok(status) => (format!("http {status}"), (500..600).contains(&status)),
             Err(e) => {
+                let retry = e != WEBHOOKS_UNSUPPORTED;
                 let e = e.replace(url, &origin);
                 let e = match &normalized {
                     Some(n) => e.replace(n.as_str(), &origin),
                     None => e,
                 };
-                (e, true)
+                (e, retry)
             }
         };
         if retry && !retried {
@@ -578,6 +580,27 @@ mod tests {
         assert_eq!(result, Ok(()));
         assert_eq!(urls.len(), 2);
         assert_eq!(slept, [Duration::from_secs(1)]);
+    }
+
+    #[tokio::test]
+    async fn a_backend_without_webhooks_is_not_retried() {
+        let (result, urls, slept) = post_to(
+            URL,
+            vec![
+                Err(WEBHOOKS_UNSUPPORTED.into()),
+                Err(WEBHOOKS_UNSUPPORTED.into()),
+            ],
+        )
+        .await;
+        assert_eq!(
+            result,
+            Err(
+                "POST https://hooks.example failed: webhooks are not supported by these backends"
+                    .into()
+            )
+        );
+        assert_eq!(urls, [URL]);
+        assert!(slept.is_empty(), "{slept:?}");
     }
 
     #[tokio::test]
