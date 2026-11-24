@@ -190,14 +190,19 @@ pub trait Backends: Send + Sync {
     /// not contain the URL or any part of it beyond its origin. Return a short kind such as
     /// `timed out` or `connection failed`, never a `reqwest::Error`'s `Display` (it embeds the
     /// URL).
+    ///
+    /// The default's error is not retried.
     async fn post_webhook(&self, url: &str, body: &serde_json::Value) -> Result<u16, String> {
         let _ = (url, body);
-        Err("webhooks are not supported by these backends".into())
+        Err(WEBHOOKS_UNSUPPORTED.into())
     }
 }
 
 /// The error of the default [`Backends::list_objects`] and [`Backends::read_object`].
 const GS_REFUSED: &str = "gs:// sources are not supported by these backends";
+
+/// The error of the default [`Backends::post_webhook`].
+pub(crate) const WEBHOOKS_UNSUPPORTED: &str = "webhooks are not supported by these backends";
 
 /// How long [`CloudBackends::post_webhook`] waits for a webhook's reply.
 const WEBHOOK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -2154,7 +2159,7 @@ mod tests {
             Fake::new(Vec::new())
                 .post_webhook("https://hooks.example/T0/secret", &body)
                 .await,
-            Err("webhooks are not supported by these backends".to_owned())
+            Err(WEBHOOKS_UNSUPPORTED.to_owned())
         );
     }
 
@@ -3788,8 +3793,8 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             prompts(dir.path(), Some(10)).await;
             let spec = guard_file(dir.path(), ERROR_RATE);
-            // `Fake` has neither a guard source nor webhooks: the guard errors, then the post
-            // fails twice (one retry, after a second).
+            // `Fake` has neither a guard source nor webhooks: the guard errors, then the default
+            // is not retried, so the post fails at once.
             let (code, stdout, _) =
                 cli_run(&["guards", &spec, "--notify", HOOK], &Fake::new(Vec::new())).await;
             assert_eq!(code, 2, "{stdout}");
