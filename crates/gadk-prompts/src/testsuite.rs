@@ -57,6 +57,7 @@ where
     remove_label(factory().await).await;
     invalid_input(factory().await).await;
     nested_names(factory().await).await;
+    load_prompt(factory().await).await;
 }
 
 /// Runs the rollout scenario against a fresh store from `factory` (for stores that support
@@ -268,6 +269,45 @@ async fn nested_names(s: Arc<dyn PromptStore>) {
     );
 }
 
+async fn load_prompt(s: Arc<dyn PromptStore>) {
+    let c = "load_prompt";
+    for t in ["a", "b", "c"] {
+        s.create_version(new("p", t)).await.unwrap();
+    }
+    s.set_label("p", &Label::production(), 1, None)
+        .await
+        .unwrap();
+    s.set_label("p", &Label::staging(), 3, None).await.unwrap();
+    s.create_version(new("q", "x")).await.unwrap();
+    s.create_version(new("team/a", "y")).await.unwrap();
+    let (all, all_rollouts) = s.load_all_with_rollouts().await.unwrap();
+    for name in ["p", "team/a"] {
+        let (snap, rollouts) = s.load_prompt(name).await.unwrap();
+        let names: Vec<_> = snap.prompts.keys().cloned().collect();
+        check!(names == vec![name], c, "{name}: names {names:?}");
+        check!(
+            snap.prompts[name] == all.prompts[name],
+            c,
+            "{name}: entry differs from load_all_with_rollouts: {:?}",
+            snap.prompts[name]
+        );
+        let mut want = RolloutSnapshot::default();
+        for (n, label, r) in all_rollouts.iter().filter(|(n, ..)| *n == name) {
+            want.insert(n, label.clone(), *r);
+        }
+        check!(rollouts == want, c, "{name}: rollouts {rollouts:?}");
+    }
+    for name in ["nope", "team", ""] {
+        let (snap, rollouts) = s.load_prompt(name).await.unwrap();
+        check!(
+            snap.prompts.is_empty() && rollouts.is_empty(),
+            c,
+            "{name:?}: not empty: {:?} {rollouts:?}",
+            snap.prompts.keys()
+        );
+    }
+}
+
 /// A rollout built without [`Rollout::new`]'s checks, to hand invalid values to a store.
 fn raw(version: u32, percent: u8) -> Rollout {
     Rollout { version, percent }
@@ -424,6 +464,23 @@ async fn rollouts(s: Arc<dyn PromptStore>) {
         "final labels {:?}",
         snap.prompts["p"].labels
     );
+
+    // load_prompt returns one prompt's rollouts and none of another's.
+    s.set_rollout("p", &prod, Some(raw(2, 10))).await.unwrap();
+    let (snap, got) = s.load_prompt("p").await.unwrap();
+    want = RolloutSnapshot::default();
+    want.insert("p", prod.clone(), raw(2, 10));
+    check!(got == want, c, "load_prompt(p) rollouts: {got:?}");
+    check!(
+        snap.prompts.keys().eq(["p"]),
+        c,
+        "load_prompt(p) names {:?}",
+        snap.prompts.keys()
+    );
+    let (_, got) = s.load_prompt("q").await.unwrap();
+    want = RolloutSnapshot::default();
+    want.insert("q", staging.clone(), raw(1, 99));
+    check!(got == want, c, "load_prompt(q) rollouts: {got:?}");
 }
 
 async fn rollout_cas(s: Arc<dyn PromptStore>) {

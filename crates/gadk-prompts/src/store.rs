@@ -141,6 +141,30 @@ pub trait PromptStore: Send + Sync {
         let rollouts = self.load_rollouts().await?;
         Ok((prompts, rollouts))
     }
+    /// Prompt `name` alone: its entry and its rollouts, equal to what
+    /// [`load_all_with_rollouts`](Self::load_all_with_rollouts) returns for that name. An
+    /// unknown name, or one that fails [`validate_name`](crate::validate_name), gives both
+    /// snapshots empty rather than an error; callers resolve through
+    /// [`PromptSnapshot::resolve`], which reports `NotFound`.
+    ///
+    /// The default implementation reads the whole store with `load_all_with_rollouts` and keeps
+    /// only `name`. Stores should override it with a native single-prompt read; the Firestore
+    /// store does.
+    async fn load_prompt(
+        &self,
+        name: &str,
+    ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
+        let (mut all, rollouts) = self.load_all_with_rollouts().await?;
+        let mut snap = PromptSnapshot::default();
+        if let Some(entry) = all.prompts.remove(name) {
+            snap.prompts.insert(name.to_owned(), entry);
+        }
+        let mut mine = RolloutSnapshot::default();
+        for (n, label, r) in rollouts.iter().filter(|(n, ..)| *n == name) {
+            mine.insert(n, label.clone(), *r);
+        }
+        Ok((snap, mine))
+    }
     /// Starts, replaces (`Some`) or removes (`None`) the rollout on `label` of prompt `name`.
     ///
     /// `Some(r)`: `Invalid` when `r` is outside [`Rollout::new`]'s bounds; `NotFound` with an
