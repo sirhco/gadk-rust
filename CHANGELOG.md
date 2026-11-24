@@ -7,6 +7,18 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval-monitor`: `gadk-eval guards <source>...` runs every guard spec found in files,
+  directories, `gs://` objects and `gs://` prefixes, one at a time, each under a `== <name> ==`
+  line, and ends with `guards: <n> run — <a> advance, <b> abort, <c> wait, <d> no rollout, <e>
+  errors`. It takes `guard`'s flags, and `--prices` may be a `gs://` object. Every spec, the
+  price file and `--out` are checked before any guard runs; a guard that fails prints `error:
+  <message>` and the rest still run. It exits 0 when every guard reached an outcome and 2
+  otherwise, so a cron line or Cloud Run job needs no wrapper script. `Backends` gains the
+  defaulted `list_objects` and `read_object` methods, which `CloudBackends` implements over
+  Cloud Storage.
+
 ## [0.5.8] - 2026-11-23
 
 ### Added

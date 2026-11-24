@@ -20,7 +20,7 @@
 //! a [`GuardReport`] is stored named after its guard spec under `guards/` the same way. The
 //! report listing never includes either, and the experiment listing never includes guards.
 
-mod gcs;
+pub(crate) mod gcs;
 mod local;
 
 use std::sync::{Arc, LazyLock};
@@ -45,6 +45,14 @@ const EXPERIMENTS: &str = "experiments";
 
 /// The subdirectory (local) or object prefix segment (GCS) of guard reports.
 const GUARDS: &str = "guards";
+
+/// Whether `bucket` is a bucket name a `gs://` URL may use: non-empty, bytes `[a-z0-9_.-]`.
+pub(crate) fn is_valid_bucket(bucket: &str) -> bool {
+    !bucket.is_empty()
+        && bucket
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b))
+}
 
 /// A stored report's name: `<spec>-<timestamp>[-<n>].json`.
 static NAME: LazyLock<Option<Regex>> =
@@ -221,11 +229,7 @@ impl ReportStore {
         let invalid = || MonitorError::Store(format!("invalid store URL {url:?}"));
         let rest = url.strip_prefix("gs://").ok_or_else(invalid)?;
         let (bucket, prefix) = rest.split_once('/').unwrap_or((rest, ""));
-        let valid_bucket = !bucket.is_empty()
-            && bucket
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b));
-        if !valid_bucket {
+        if !is_valid_bucket(bucket) {
             return Err(invalid());
         }
         Ok(Self::with_backend(Backend::Gcs(gcs::GcsStore::new(

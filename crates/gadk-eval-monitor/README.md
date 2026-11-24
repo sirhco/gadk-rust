@@ -26,6 +26,8 @@ gadk-eval export --source bigquery://my-proj.agent_analytics.agent_events \
   --out evals/regressions.yaml --since 1d --score 'thumbs=true' --rubric "Answers correctly."
 gadk-eval experiment experiments/answer-style.yaml --out gs://my-bucket/monitors
 gadk-eval guard guards/support.yaml --prices prices.yaml --apply --out gs://my-bucket/monitors
+gadk-eval guards gs://my-bucket/guards/ --prices gs://my-bucket/prices.yaml --apply \
+  --out gs://my-bucket/monitors
 ```
 
 ## Monitor spec
@@ -192,16 +194,17 @@ Limits:
 | `gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [options]` | Writes production runs as eval-set cases to a new file, or `--append`s them; see [Exporting runs as eval cases](#exporting-runs-as-eval-cases). |
 | `gadk-eval experiment <spec.yaml> [--out <url>]` | Runs an experiment from an experiment spec (one Gemini agent on Vertex AI per variant), stores it under `experiments/` of `<url>` when `--out` is given, then prints its summary and, with `--out`, `stored report <name>`; see [Experiment spec](#experiment-spec). |
 | `gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]` | Compares both sides of a prompt rollout, prints the report and, with `--out`, stores it under `guards/` of `<url>` and prints `stored report <name>`; with `--apply` it ramps, promotes or aborts the rollout. Exits 0 (advance), 1 (abort), 3 (wait), 4 (no rollout) or 2 (error); see [Guards](#guards). |
+| `gadk-eval guards <source>... [--apply] [--prices <file\|gs://bucket/object>] [--out <url>] [--max-bytes <n>]` | Runs every guard spec in its sources (files, directories, `gs://` objects and prefixes) one at a time, each under a `== <name> ==` line, then prints a summary line; see [Running many guards](#running-many-guards). |
 
 `<url>` is a directory, `file://<dir>` or `gs://<bucket>[/<prefix>]`; other schemes (such as
 `s3://`) are rejected. Reports are named
 `<spec>-<YYYYMMDDTHHMMSSZ>.json`, with `-2`, `-3`, … added when the name is taken.
 
-| Exit | `monitor` | `report` | `export` | `experiment` |
-|---|---|---|---|---|
-| 0 | success | success | at least one case was added | the experiment ran (whatever its case results) and, with `--out`, was stored |
-| 1 | `min_pass_rate` is set and either the pass rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0) | — | no case was added (nothing is written) | — |
-| 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, or a usage error | a store error, an unknown or invalid report name, or a usage error | the file exists (without `--append`) or cannot be read, appended to or written, a query fails, or a usage error | the spec is invalid, the eval set cannot be read or is invalid, the prompt store or a variant's prompt version cannot be loaded, a model or the judge cannot be built, the experiment fails, the report cannot be stored, or a usage error |
+| Exit | `monitor` | `report` | `export` | `experiment` | `guards` |
+|---|---|---|---|---|---|
+| 0 | success | success | at least one case was added | the experiment ran (whatever its case results) and, with `--out`, was stored | every guard reached an outcome (advance, abort, wait or no rollout) |
+| 1 | `min_pass_rate` is set and either the pass rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0) | — | no case was added (nothing is written) | — | — |
+| 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, or a usage error | a store error, an unknown or invalid report name, or a usage error | the file exists (without `--append`) or cannot be read, appended to or written, a query fails, or a usage error | the spec is invalid, the eval set cannot be read or is invalid, the prompt store or a variant's prompt version cannot be loaded, a model or the judge cannot be built, the experiment fails, the report cannot be stored, or a usage error | a guard failed, a check before the run failed (a source, a spec, the price file or `--out`), or a usage error |
 
 A judge call that fails or times out is an error result for that scorer, not exit 2.
 
@@ -580,6 +583,50 @@ action: none
 | 4 | the label has no rollout: nothing to guard, no report stored |
 | 2 | the spec or price file is invalid, the spec sets `min_step_age` without `--out`, the prompt store fails or has no such prompt or label (the message names the prompt and label), the store changed since it was read, a query or the judge fails, the report cannot be stored, or a usage error. The report is printed before it is stored, so when storing fails after `--apply`, the decision printed is already written to the prompt store and stays written |
 
+### Running many guards
+
+`gadk-eval guards <source>...` runs every guard spec its sources name, one at a time, in the
+order given:
+
+| Source | Specs |
+|---|---|
+| a file | that file |
+| a directory | its regular files (symlinks followed) whose names end in `.yaml` or `.yml`, sorted by name; subdirectories are ignored |
+| `gs://<bucket>/<object>` | that object |
+| `gs://<bucket>/<prefix>/` or `gs://<bucket>` | the objects directly under the prefix whose names end in `.yaml` or `.yml`, sorted by name |
+
+`--apply`, `--out` and `--max-bytes` mean what they mean for `guard`, and `--prices` also takes
+a `gs://<bucket>/<object>`. The price file is read once and `--out` is opened once for every
+guard.
+
+Every spec is read and parsed, and every check below is made, before any guard runs; the first
+failure exits 2 with nothing run or written:
+
+- a source is missing (`guard spec <source>: not found`), unreadable, or an empty directory or
+  prefix (`guard spec <source>: no .yaml or .yml specs`);
+- a spec is invalid (`guard spec <origin>: <detail>`, where `<origin>` is the file path or
+  `gs://` URL);
+- there are more than 200 specs;
+- two specs share a `name` (`guards: duplicate guard name <name> in <origin1> and <origin2>`);
+- a spec sets `min_step_age` without `--out`;
+- the price file cannot be read or parsed;
+- `--out` is not a valid store URL.
+
+Each guard's output starts with `== <name> ==`, followed by exactly what `guard` prints for it:
+the report and, with `--out`, `stored report <name>`, or the `no rollout` line. A guard that
+fails (the prompt store, a query, the judge or the report store) prints `error: <message>`
+under its header and the run goes on to the next guard; a decision it already wrote with
+`--apply` stays written. The last line counts the outcomes:
+
+```text
+guards: 3 run — 1 advance, 0 abort, 1 wait, 0 no rollout, 1 errors
+```
+
+| Exit | `guards` |
+|---|---|
+| 0 | every guard reached an outcome: advance, abort, wait or no rollout |
+| 2 | a guard failed (the summary counts it under `errors`), a check before the run failed, stdout could not be written, or a usage error (no summary is printed for these three) |
+
 ### Sample sizes and false aborts
 
 Intervals are wide on small samples, so a guard often says `wait` early, and a tight tolerance
@@ -604,41 +651,33 @@ a few hours, each step judged mostly on calls made before it. With `ramp`, set `
 to about the window, so each step runs a full window before the next `advance` (this needs
 `--out`).
 
-Once the rollout ends (promoted, aborted, or removed by hand) every run exits 4 until a new
-rollout starts. Exits 0, 1, 3 and 4 are all normal outcomes, so a wrapper can map them to
-success and keep 2 as the failure to alert on. An exit 2 after `--apply` does not undo a
-decision already written: check the printed action before retrying.
-
-```sh
-#!/bin/sh
-# guard.sh
-gadk-eval guard /etc/gadk/support-guard.yaml --apply \
-  --prices /etc/gadk/prices.yaml --out gs://my-bucket/monitors
-code=$?
-case $code in
-  0|1|3|4) exit 0 ;;   # advance, abort, wait, no rollout
-  *) exit "$code" ;;
-esac
-```
+Once the rollout ends (promoted, aborted, or removed by hand) its guard reports no rollout until
+a new rollout starts. Schedule `gadk-eval guards` rather than `guard`: advance, abort, wait and
+no rollout all exit 0, so exit 2 is the only failure to alert on, and no wrapper script is
+needed. Keep the specs and the price file in a bucket: editing or adding a guard is then an
+upload, with no image rebuild. The guards run one at a time, so keep a whole run (each query
+bounded by `--max-bytes`) well inside the schedule interval. An exit 2 after `--apply` does not
+undo decisions already written: check the printed actions before retrying.
 
 With cron, every hour:
 
 ```text
-0 * * * * /usr/local/bin/guard.sh >> /var/log/gadk-guard.log 2>&1
+0 * * * * /usr/local/bin/gadk-eval guards gs://my-bucket/guards/ --apply --prices gs://my-bucket/prices.yaml --out gs://my-bucket/monitors >> /var/log/gadk-guards.log 2>&1
 ```
 
-As a Cloud Run job started hourly by Cloud Scheduler (the image holds `gadk-eval`, the spec,
-the price file and `guard.sh`; the job's service account needs the roles in
-[Access (IAM)](#access-iam)):
+As a Cloud Run job started hourly by Cloud Scheduler (the image only needs `gadk-eval`; the
+job's service account needs the roles in [Access (IAM)](#access-iam)):
 
 ```sh
-gcloud run jobs create support-guard --region us-central1 \
+gcloud run jobs create guards --region us-central1 \
   --image us-docker.pkg.dev/my-proj/tools/gadk-eval:latest \
-  --command /usr/local/bin/guard.sh --max-retries 0 \
+  --command gadk-eval \
+  --args guards,gs://my-bucket/guards/,--apply,--prices,gs://my-bucket/prices.yaml,--out,gs://my-bucket/monitors \
+  --max-retries 0 \
   --service-account guard@my-proj.iam.gserviceaccount.com
-gcloud scheduler jobs create http support-guard-hourly --location us-central1 \
+gcloud scheduler jobs create http guards-hourly --location us-central1 \
   --schedule "0 * * * *" --http-method POST \
-  --uri "https://run.googleapis.com/v2/projects/my-proj/locations/us-central1/jobs/support-guard:run" \
+  --uri "https://run.googleapis.com/v2/projects/my-proj/locations/us-central1/jobs/guards:run" \
   --oauth-service-account-email guard@my-proj.iam.gserviceaccount.com
 ```
 
@@ -695,6 +734,8 @@ written to as you would the analytics table.
 - `gadk-eval guard`: the BigQuery roles above, read access to the prompt store, and with
   `--apply` write access to it (Cloud Datastore User for a `firestore://` store); Vertex AI
   User on the judge project with `llm_judge` scorers.
+- `gadk-eval guards`: what `guard` needs for each spec, and Storage Object Viewer
+  (`roles/storage.objectViewer`) on the bucket holding `gs://` specs and the price file.
 - Storage Object Admin on the bucket for `gs://` output (`report` needs only Storage Object
   Viewer).
 

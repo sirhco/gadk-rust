@@ -52,6 +52,7 @@
 //! ```
 
 mod error;
+mod guard_sources;
 mod guard_stats;
 #[cfg(test)]
 mod testutil;

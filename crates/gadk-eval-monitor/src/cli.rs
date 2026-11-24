@@ -22,6 +22,8 @@
 //!     [--rubric T] [--min-good X] [--no-history] [--tool-args]
 //! gadk-eval experiment <spec.yaml> [--out <url>]
 //! gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]
+//! gadk-eval guards <source>... [--apply] [--prices <file|gs://bucket/object>] [--out <url>]
+//!     [--max-bytes <n>]
 //! ```
 //!
 //! `monitor` exits 0 on success, 1 when the spec's `min_pass_rate` is set and either the pass
@@ -45,6 +47,17 @@
 //! error (an unknown prompt or label, or a store changed since it was read), a query or judge
 //! error, or a report store error (after `--apply` the decision stays written). Usage errors
 //! exit 2.
+//!
+//! `guards` runs every guard spec its sources name, one at a time: a file, a directory (its
+//! `.yaml` and `.yml` files), a `gs://<bucket>/<object>` or every `.yaml` and `.yml` object
+//! directly under `gs://<bucket>/<prefix>/`. It reads and checks every spec, the price file
+//! (a path or a `gs://` object) and `--out` before running any guard. Each guard's output
+//! follows a `== <name> ==` line and is what `guard` prints for it; a guard that fails prints
+//! `error: <message>` and the run goes on. The last line counts the outcomes
+//! (`guards: <n> run — <a> advance, <b> abort, <c> wait, <d> no rollout, <e> errors`). It
+//! exits 0 when every guard reached an outcome (advance, abort, wait or no rollout), and 2 when
+//! a guard failed, a source, spec, price file or `--out` check failed (nothing runs and no
+//! summary is printed), stdout could not be written, or on a usage error.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -66,8 +79,10 @@ use crate::experiment_spec::{AgentInstruction, ExperimentSpec};
 use crate::export::{
     ExportOptions, ExportSource, ScoreFilter, cases_text, export_runs, write_set_file,
 };
+use crate::gcp::{AdcTokenSource, GcpHttp};
 use crate::guard::Guard;
 use crate::guard_source::GuardSource;
+use crate::guard_sources::{load_prices, load_specs};
 use crate::guard_spec::GuardSpec;
 use crate::judge::vertex_judge;
 use crate::monitor::Monitor;
@@ -79,7 +94,7 @@ use crate::spec::{
     DEFAULT_JUDGE_TIMEOUT, JudgeSpec, MAX_LIMIT, MonitorSpec, SourceSpec, amount,
     is_dataset_or_table, is_project_id,
 };
-use crate::store::ReportStore;
+use crate::store::{ReportStore, gcs};
 
 /// The default number of reports `report` lists.
 const DEFAULT_REPORT_LIMIT: usize = 20;
@@ -142,6 +157,34 @@ pub trait Backends: Send + Sync {
             "guards are not supported by these backends".into(),
         ))
     }
+
+    /// The full names of the objects directly under `prefix` in the Cloud Storage `bucket`
+    /// (`guards` with a `gs://` source). The default refuses; [`CloudBackends`] lists them with
+    /// Application Default Credentials.
+    async fn list_objects(&self, bucket: &str, prefix: &str) -> Result<Vec<String>, MonitorError> {
+        let _ = (bucket, prefix);
+        Err(MonitorError::Store(GS_REFUSED.into()))
+    }
+
+    /// The contents of the Cloud Storage object `name` in `bucket`, or `None` when it does not
+    /// exist (`guards` with a `gs://` source or price file). The default refuses;
+    /// [`CloudBackends`] reads it with Application Default Credentials.
+    async fn read_object(&self, bucket: &str, name: &str) -> Result<Option<String>, MonitorError> {
+        let _ = (bucket, name);
+        Err(MonitorError::Store(GS_REFUSED.into()))
+    }
+}
+
+/// The error of the default [`Backends::list_objects`] and [`Backends::read_object`].
+const GS_REFUSED: &str = "gs:// sources are not supported by these backends";
+
+/// A fresh Cloud Storage client with Application Default Credentials. It is built per call:
+/// the credentials' token refresh task runs on the runtime that built them, so a client cached
+/// across runtimes could outlive it.
+fn cloud_storage() -> Result<GcpHttp, MonitorError> {
+    let auth = AdcTokenSource::adc()
+        .map_err(|e| MonitorError::Store(format!("Application Default Credentials: {e}")))?;
+    Ok(GcpHttp::new(GcpHttp::default_http(), Arc::new(auth)))
 }
 
 /// The real backends: the BigQuery or Cloud Trace transcript source and Gemini on Vertex AI,
@@ -208,6 +251,18 @@ impl Backends for CloudBackends {
             BigQueryGuardSource::new(project, dataset, table)?.with_max_bytes_billed(max_bytes),
         ))
     }
+
+    async fn list_objects(&self, bucket: &str, prefix: &str) -> Result<Vec<String>, MonitorError> {
+        let names = gcs::list_names(&cloud_storage()?, bucket, prefix).await?;
+        Ok(names
+            .into_iter()
+            .map(|name| format!("{prefix}{name}"))
+            .collect())
+    }
+
+    async fn read_object(&self, bucket: &str, name: &str) -> Result<Option<String>, MonitorError> {
+        gcs::read_text(&cloud_storage()?, bucket, name).await
+    }
 }
 
 fn limit_arg() -> Arg {
@@ -262,6 +317,26 @@ fn cli() -> Command {
                 ),
         )
         .subcommand(guard_cli())
+        .subcommand(guards_cli())
+}
+
+/// The flags `guard` and `guards` share, with `prices` as the `--prices` argument (a path for
+/// `guard`, a path or `gs://` URL for `guards`).
+fn guard_flags(prices: Arg) -> [Arg; 4] {
+    [
+        Arg::new("apply")
+            .long("apply")
+            .action(ArgAction::SetTrue)
+            .help("write the decision to the prompt store (ramp, promote or abort)"),
+        prices.long("prices"),
+        Arg::new("out")
+            .long("out")
+            .help("store the report: <dir>, file://<dir> or gs://<bucket>[/<prefix>]"),
+        Arg::new("max-bytes")
+            .long("max-bytes")
+            .value_parser(value_parser!(i64).range(1..))
+            .help("most bytes billed per BigQuery query (default 1073741824)"),
+    ]
 }
 
 fn guard_cli() -> Command {
@@ -269,29 +344,30 @@ fn guard_cli() -> Command {
         .about("Compare both sides of a prompt rollout and advance, abort or wait")
         .after_help("Exit codes: 0 advance, 1 abort, 3 wait, 4 no rollout, 2 error.")
         .arg(Arg::new("spec").required(true).help("guard spec YAML file"))
-        .arg(
-            Arg::new("apply")
-                .long("apply")
-                .action(ArgAction::SetTrue)
-                .help("write the decision to the prompt store (ramp, promote or abort)"),
-        )
-        .arg(
+        .args(guard_flags(
             Arg::new("prices")
-                .long("prices")
                 .value_parser(value_parser!(PathBuf))
                 .help("price file (YAML) for cost_per_call checks"),
-        )
+        ))
+}
+
+fn guards_cli() -> Command {
+    Command::new("guards")
+        .about("Run every guard spec in files, directories or gs:// locations, one at a time")
+        .after_help("Exit codes: 0 every guard reached an outcome, 2 a guard failed or an error.")
         .arg(
-            Arg::new("out")
-                .long("out")
-                .help("store the report: <dir>, file://<dir> or gs://<bucket>[/<prefix>]"),
+            Arg::new("sources")
+                .value_name("source")
+                .required(true)
+                .num_args(1..)
+                .help(
+                    "guard spec file, directory, gs://<bucket>/<object> or \
+                     gs://<bucket>/<prefix>/",
+                ),
         )
-        .arg(
-            Arg::new("max-bytes")
-                .long("max-bytes")
-                .value_parser(value_parser!(i64).range(1..))
-                .help("most bytes billed per BigQuery query (default 1073741824)"),
-        )
+        .args(guard_flags(Arg::new("prices").help(
+            "price file (YAML) for cost_per_call checks: <file> or gs://<bucket>/<object>",
+        )))
 }
 
 fn export_cli() -> Command {
@@ -456,6 +532,7 @@ pub async fn run(
             experiment(spec, out, backends, stdout).await
         }
         Some(("guard", m)) => guard(m, backends, stdout).await,
+        Some(("guards", m)) => guards(m, backends, stdout).await,
         _ => Ok(2),
     };
     match result {
@@ -561,6 +638,25 @@ async fn report(
     Ok(())
 }
 
+/// Where [`run_one_guard`] gets model prices.
+enum Prices {
+    /// A price file read when the guard runs, after the prompt store opens (`guard`).
+    Path(Option<PathBuf>),
+    /// A table read before any guard runs (`guards`).
+    Loaded(Option<PriceTable>),
+}
+
+/// The settings of one guard run, shared by `guard` and `guards`.
+struct GuardRunOpts {
+    /// Write the decision to the prompt store.
+    apply: bool,
+    prices: Prices,
+    /// The report store, already opened.
+    out: Option<ReportStore>,
+    /// The most bytes billed per BigQuery query.
+    max_bytes: i64,
+}
+
 /// `guard`: 0 (advance), 1 (abort), 3 (wait) or 4 (no rollout); errors map to 2.
 async fn guard(
     m: &ArgMatches,
@@ -577,20 +673,40 @@ async fn guard(
     }
     // Opened before the run, so a bad URL fails before anything is written.
     let out = out_url.map(|url| ReportStore::open(url)).transpose()?;
-    let previous = match (&out, spec.min_step_age) {
+    let opts = GuardRunOpts {
+        apply: m.get_flag("apply"),
+        prices: Prices::Path(m.get_one::<PathBuf>("prices").cloned()),
+        out,
+        max_bytes: m
+            .get_one::<i64>("max-bytes")
+            .copied()
+            .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED),
+    };
+    run_one_guard(&spec, &opts, backends, stdout).await
+}
+
+/// Runs `spec` once and prints what `guard` prints: 0 (advance), 1 (abort), 3 (wait) or 4 (no
+/// rollout).
+async fn run_one_guard(
+    spec: &GuardSpec,
+    opts: &GuardRunOpts,
+    backends: &dyn Backends,
+    stdout: &mut dyn Write,
+) -> Result<i32, MonitorError> {
+    let previous = match (&opts.out, spec.min_step_age) {
         (Some(out), Some(_)) => out.latest_applied_ramp(&spec.name).await?,
         _ => None,
     };
     let store = gadk_prompts_cli::open_store(&spec.store)
         .map_err(|e| MonitorError::Store(format!("prompt store: {e}")))?;
-    let prices = m
-        .get_one::<PathBuf>("prices")
-        .map(PriceTable::load)
-        .transpose()?;
-    let max_bytes = m
-        .get_one::<i64>("max-bytes")
-        .copied()
-        .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED);
+    let read;
+    let prices = match &opts.prices {
+        Prices::Path(path) => {
+            read = path.as_ref().map(PriceTable::load).transpose()?;
+            read.as_ref()
+        }
+        Prices::Loaded(table) => table.as_ref(),
+    };
     let SourceSpec::BigQuery {
         project,
         dataset,
@@ -602,20 +718,20 @@ async fn guard(
             spec.source.describe()
         )));
     };
-    let source = backends.guard_source(project, dataset, table, max_bytes)?;
+    let source = backends.guard_source(project, dataset, table, opts.max_bytes)?;
     let judge = match &spec.judge {
         Some(j) if spec.wants_judge() => Some(backends.judge(j).await?),
         _ => None,
     };
     let report = Guard::new()
         .run(
-            &spec,
+            spec,
             store.as_ref(),
             source.as_ref(),
-            prices.as_ref(),
+            prices,
             judge,
             previous.as_ref(),
-            m.get_flag("apply"),
+            opts.apply,
         )
         .await?;
     let Some(report) = report else {
@@ -629,11 +745,100 @@ async fn guard(
     // Print before storing: with --apply the decision is already written to the prompt store,
     // so the operator must see it even when storing the report fails.
     write!(stdout, "{}", report.summary())?;
-    if let Some(out) = out {
+    if let Some(out) = &opts.out {
         let name = out.put_guard(&report).await?;
         writeln!(stdout, "stored report {name}")?;
     }
     Ok(report.exit_code())
+}
+
+/// `guards`: 0 when every guard reached an outcome, 2 when one failed; errors map to 2.
+async fn guards(
+    m: &ArgMatches,
+    backends: &dyn Backends,
+    stdout: &mut dyn Write,
+) -> Result<i32, MonitorError> {
+    let sources: Vec<String> = m
+        .get_many::<String>("sources")
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect();
+    let specs = load_specs(&sources, backends).await?;
+    let out_url = m.get_one::<String>("out");
+    if out_url.is_none()
+        && let Some(s) = specs.iter().find(|s| s.spec.min_step_age.is_some())
+    {
+        return Err(MonitorError::Spec(format!(
+            "guard spec {}: min_step_age needs --out",
+            s.origin
+        )));
+    }
+    let prices = match m.get_one::<String>("prices") {
+        Some(source) => Some(load_prices(source, backends).await?),
+        None => None,
+    };
+    let out = out_url.map(|url| ReportStore::open(url)).transpose()?;
+    let opts = GuardRunOpts {
+        apply: m.get_flag("apply"),
+        prices: Prices::Loaded(prices),
+        out,
+        max_bytes: m
+            .get_one::<i64>("max-bytes")
+            .copied()
+            .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED),
+    };
+    let mut stdout = Watched {
+        inner: stdout,
+        failed: false,
+    };
+    let (mut advance, mut abort, mut wait, mut idle, mut errors) = (0, 0, 0, 0, 0);
+    for s in &specs {
+        writeln!(stdout, "== {} ==", s.spec.name)?;
+        match run_one_guard(&s.spec, &opts, backends, &mut stdout).await {
+            Ok(0) => advance += 1,
+            Ok(1) => abort += 1,
+            Ok(3) => wait += 1,
+            Ok(4) => idle += 1,
+            Ok(code) => {
+                writeln!(stdout, "error: unexpected exit code {code}")?;
+                errors += 1;
+            }
+            // A stdout failure ends the run, as it does for `guard`.
+            Err(e) if stdout.failed => return Err(e),
+            Err(e) => {
+                writeln!(stdout, "error: {e}")?;
+                errors += 1;
+            }
+        }
+    }
+    writeln!(
+        stdout,
+        "guards: {} run — {advance} advance, {abort} abort, {wait} wait, {idle} no rollout, \
+         {errors} errors",
+        specs.len()
+    )?;
+    Ok(if errors == 0 { 0 } else { 2 })
+}
+
+/// A writer that remembers whether a write to `inner` failed.
+struct Watched<'a> {
+    inner: &'a mut dyn Write,
+    failed: bool,
+}
+
+impl Write for Watched<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.inner.write(buf).inspect_err(|e| {
+            if e.kind() != std::io::ErrorKind::Interrupted {
+                self.failed = true;
+            }
+        })
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush().inspect_err(|_| self.failed = true)
+    }
 }
 
 /// An error about the eval-set file `path`.
@@ -893,6 +1098,42 @@ mod tests {
     use crate::testutil::{FakeJudge, FakeSource, at, run as prod_run};
 
     use super::*;
+
+    /// A writer that is interrupted on its first write.
+    struct InterruptedOnce {
+        interrupted: bool,
+        written: Vec<u8>,
+    }
+
+    impl Write for InterruptedOnce {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if !self.interrupted {
+                self.interrupted = true;
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn an_interrupted_write_is_not_a_failure() {
+        let mut inner = InterruptedOnce {
+            interrupted: false,
+            written: Vec::new(),
+        };
+        let mut w = Watched {
+            inner: &mut inner,
+            failed: false,
+        };
+        w.write_all(b"hello").unwrap();
+        assert!(!w.failed);
+        assert_eq!(inner.written, b"hello");
+    }
 
     const VERDICT: &str = r#"{"pass": true, "score": 5, "rationale": "ok"}"#;
 
@@ -1741,6 +1982,23 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn backends_without_gs_refuse_it() {
+        let fake = Fake::new(Vec::new());
+        let refused = "report store: gs:// sources are not supported by these backends";
+        assert_eq!(
+            fake.list_objects("b", "p/").await.unwrap_err().to_string(),
+            refused
+        );
+        assert_eq!(
+            fake.read_object("b", "p/a.yaml")
+                .await
+                .unwrap_err()
+                .to_string(),
+            refused
+        );
+    }
+
     // ---- experiment ----
 
     mod experiment_command {
@@ -2168,6 +2426,8 @@ mod tests {
             source: Arc<FakeGuardSource>,
             judge_error: Option<String>,
             calls: Mutex<Vec<String>>,
+            /// Cloud Storage objects by `<bucket>/<name>`.
+            objects: BTreeMap<String, String>,
         }
 
         impl Guarded {
@@ -2193,6 +2453,7 @@ mod tests {
                     }),
                     judge_error: None,
                     calls: Mutex::new(Vec::new()),
+                    objects: BTreeMap::new(),
                 }
             }
 
@@ -2232,6 +2493,32 @@ mod tests {
                     "guard_source {project}.{dataset}.{table} {max_bytes}"
                 ));
                 Ok(self.source.clone())
+            }
+
+            async fn list_objects(
+                &self,
+                bucket: &str,
+                prefix: &str,
+            ) -> Result<Vec<String>, MonitorError> {
+                let start = format!("{bucket}/");
+                Ok(self
+                    .objects
+                    .keys()
+                    .filter_map(|k| k.strip_prefix(&start))
+                    .filter(|n| {
+                        n.strip_prefix(prefix)
+                            .is_some_and(|rest| !rest.contains('/'))
+                    })
+                    .map(str::to_owned)
+                    .collect())
+            }
+
+            async fn read_object(
+                &self,
+                bucket: &str,
+                name: &str,
+            ) -> Result<Option<String>, MonitorError> {
+                Ok(self.objects.get(&format!("{bucket}/{name}")).cloned())
             }
         }
 
@@ -2302,18 +2589,32 @@ mod tests {
         /// Writes `g.yaml` in `dir`: guard `g` on `support`/`production` in the file store
         /// `<dir>/prompts`, ramp `[10, 25, 50]`, the YAML list `checks`.
         fn guard_file(dir: &Path, checks: &str) -> String {
-            let p = dir.join("g.yaml");
-            std::fs::write(
-                &p,
-                format!(
-                    "name: g\nsource: {{ bigquery: {{ project: p, dataset: d, table: t }} }}\n\
-                     store: file://{}\nprompt: support\nlabel: production\nwindow: 1h\n\
-                     ramp: [10, 25, 50]\nchecks:\n{checks}",
-                    dir.join("prompts").display()
-                ),
-            )
-            .unwrap();
+            named_guard_file(dir, "g.yaml", "g", &dir.join("prompts"), checks)
+        }
+
+        /// Writes `file` in `dir`: guard `name` on `support`/`production` in the file store
+        /// `prompts`, ramp `[10, 25, 50]`, then `checks` (the YAML list `checks:` and any
+        /// top-level keys after it).
+        fn named_guard_file(
+            dir: &Path,
+            file: &str,
+            name: &str,
+            prompts: &Path,
+            checks: &str,
+        ) -> String {
+            let p = dir.join(file);
+            std::fs::write(&p, guard_yaml(name, prompts, checks)).unwrap();
             p.display().to_string()
+        }
+
+        /// The text of [`named_guard_file`].
+        fn guard_yaml(name: &str, prompts: &Path, checks: &str) -> String {
+            format!(
+                "name: {name}\nsource: {{ bigquery: {{ project: p, dataset: d, table: t }} }}\n\
+                 store: file://{}\nprompt: support\nlabel: production\nwindow: 1h\n\
+                 ramp: [10, 25, 50]\nchecks:\n{checks}",
+                prompts.display()
+            )
         }
 
         const ERROR_RATE: &str = "  - error_rate: { max_increase: 0.01 }\n";
@@ -2696,6 +2997,27 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn a_bad_prompt_store_is_reported_before_a_missing_price_file() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            let text = std::fs::read_to_string(&spec).unwrap().replace(
+                &format!("store: file://{}", dir.path().join("prompts").display()),
+                "store: s3://bucket/prompts",
+            );
+            std::fs::write(&spec, text).unwrap();
+            let missing = dir.path().join("missing.yaml").display().to_string();
+            let fake = healthy();
+            let (code, stdout, stderr) =
+                cli_run(&["guard", &spec, "--prices", &missing], &fake).await;
+            assert_eq!(code, 2, "{stdout}");
+            assert!(
+                stderr.starts_with("gadk-eval: report store: prompt store: "),
+                "{stderr}"
+            );
+            assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+        }
+
+        #[tokio::test]
         async fn the_judge_is_built_only_for_llm_judge_scorers() {
             let dir = tempfile::tempdir().unwrap();
             prompts(dir.path(), Some(10)).await;
@@ -2737,6 +3059,338 @@ mod tests {
             let (code, _, stderr) = cli_run(&["guard"], &healthy()).await;
             assert_eq!(code, 2);
             assert!(stderr.contains("<spec>"), "{stderr}");
+        }
+
+        // ---- guards ----
+
+        /// A `wait` check: `min_calls` above the 1000 calls per side the fake returns.
+        const NOT_ENOUGH_CALLS: &str = "  - error_rate: { max_increase: 0.01 }\nmin_calls: 5000\n";
+
+        /// Specs in `<dir>/specs`: `advance` and `wait` on the rollout at 10% in
+        /// `<dir>/prompts`, and `idle` on `<dir>/idle/prompts`, whose label has no rollout.
+        async fn three_specs(dir: &Path) -> (String, [String; 3]) {
+            prompts(dir, Some(10)).await;
+            prompts(&dir.join("idle"), None).await;
+            let specs = dir.join("specs");
+            std::fs::create_dir(&specs).unwrap();
+            let files = [
+                named_guard_file(
+                    &specs,
+                    "1.yaml",
+                    "advance",
+                    &dir.join("prompts"),
+                    ERROR_RATE,
+                ),
+                named_guard_file(
+                    &specs,
+                    "2.yaml",
+                    "wait",
+                    &dir.join("prompts"),
+                    NOT_ENOUGH_CALLS,
+                ),
+                named_guard_file(
+                    &specs,
+                    "3.yaml",
+                    "idle",
+                    &dir.join("idle").join("prompts"),
+                    ERROR_RATE,
+                ),
+            ];
+            (specs.display().to_string(), files)
+        }
+
+        #[tokio::test]
+        async fn guards_runs_each_spec_under_its_header_and_sums_up() {
+            let dir = tempfile::tempdir().unwrap();
+            let (specs, files) = three_specs(dir.path()).await;
+            // What `guard` prints for each spec on its own (without --out).
+            let mut alone = Vec::new();
+            for file in &files {
+                let (_, stdout, _) = cli_run(&["guard", file], &healthy()).await;
+                alone.push(stdout);
+            }
+            let out = dir.path().join("reports").display().to_string();
+            let fake = healthy();
+            let (code, stdout, stderr) = cli_run(&["guards", &specs, "--out", &out], &fake).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(stderr, "");
+            let reports = ReportStore::open(&out).unwrap();
+            let stored = reports.guard_names(10).await.unwrap();
+            let named = |prefix: &str| {
+                stored
+                    .iter()
+                    .find(|n| n.starts_with(prefix))
+                    .unwrap_or_else(|| panic!("{prefix}: {stored:?}"))
+                    .clone()
+            };
+            let expected = format!(
+                "== advance ==\n{}stored report {}\n\
+                 == wait ==\n{}stored report {}\n\
+                 == idle ==\n{}\
+                 guards: 3 run — 1 advance, 0 abort, 1 wait, 1 no rollout, 0 errors\n",
+                alone[0],
+                named("advance-"),
+                alone[1],
+                named("wait-"),
+                alone[2]
+            );
+            assert_eq!(stdout, expected);
+            assert_eq!(stored.len(), 2, "{stored:?}");
+            assert!(
+                alone[1].ends_with("verdict: wait\naction: none\n"),
+                "{}",
+                alone[1]
+            );
+            assert_eq!(alone[2], "guard idle: support/production has no rollout\n");
+        }
+
+        #[tokio::test]
+        async fn a_failing_guard_prints_its_error_and_the_rest_still_run() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), Some(10)).await;
+            let specs = dir.path().join("specs");
+            std::fs::create_dir(&specs).unwrap();
+            let store = dir.path().join("prompts");
+            named_guard_file(&specs, "a.yaml", "first", &store, ERROR_RATE);
+            // A store without the prompt.
+            named_guard_file(
+                &specs,
+                "b.yaml",
+                "broken",
+                &dir.path().join("empty"),
+                ERROR_RATE,
+            );
+            named_guard_file(&specs, "c.yaml", "third", &store, ERROR_RATE);
+            let fake = healthy();
+            let (code, stdout, stderr) =
+                cli_run(&["guards", &specs.display().to_string()], &fake).await;
+            assert_eq!(code, 2, "{stdout}{stderr}");
+            assert_eq!(stderr, "");
+            assert!(
+                stdout.contains(
+                    "== broken ==\nerror: report store: prompt store: support/production: \
+                     no such prompt\n== third ==\nguard third: "
+                ),
+                "{stdout}"
+            );
+            assert!(
+                stdout.ends_with(
+                    "verdict: advance\naction: would ramp to 25%\n\
+                     guards: 3 run — 2 advance, 0 abort, 0 wait, 0 no rollout, 1 errors\n"
+                ),
+                "{stdout}"
+            );
+        }
+
+        #[tokio::test]
+        async fn guards_reads_specs_and_prices_from_gs() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), Some(10)).await;
+            let mut fake = healthy();
+            let cost = "  - cost_per_call: { max_increase: 0.2 }\n";
+            fake.objects.insert(
+                "evals/guards/cost.yaml".into(),
+                guard_yaml("cost", &dir.path().join("prompts"), cost),
+            );
+            fake.objects
+                .insert("evals/guards/readme.txt".into(), "not a spec".into());
+            fake.objects.insert(
+                "evals/prices.yaml".into(),
+                "- { model: m-flash, input: 0.3, output: 2.5 }\n".into(),
+            );
+            let (code, stdout, stderr) = cli_run(
+                &[
+                    "guards",
+                    "gs://evals/guards/",
+                    "--prices",
+                    "gs://evals/prices.yaml",
+                ],
+                &fake,
+            )
+            .await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert!(stdout.starts_with("== cost ==\nguard cost: "), "{stdout}");
+            assert!(stdout.contains("$0.000300 (n=1000)"), "{stdout}");
+            assert!(
+                stdout.ends_with(
+                    "guards: 1 run — 1 advance, 0 abort, 0 wait, 0 no rollout, 0 errors\n"
+                ),
+                "{stdout}"
+            );
+        }
+
+        /// Runs `guards` with `args` and checks it exits 2 with `stderr` (exactly, or as a
+        /// prefix when `prefix`), printing nothing and running no guard.
+        async fn refused(args: &[&str], fake: &Guarded, stderr: &str, prefix: bool) {
+            let mut argv = vec!["guards"];
+            argv.extend_from_slice(args);
+            let (code, out, err) = cli_run(&argv, fake).await;
+            assert_eq!(code, 2, "{args:?}: {err}");
+            assert_eq!(out, "", "{args:?}");
+            if prefix {
+                assert!(err.starts_with(stderr), "{args:?}: {err}");
+            } else {
+                assert_eq!(err, stderr, "{args:?}");
+            }
+            assert!(fake.calls().is_empty(), "{args:?}: {:?}", fake.calls());
+        }
+
+        #[tokio::test]
+        async fn pre_run_checks_exit_2_before_any_guard_runs() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), Some(10)).await;
+            let store = dir.path().join("prompts");
+            let a = named_guard_file(dir.path(), "a.yaml", "a", &store, ERROR_RATE);
+            let fake = healthy();
+
+            // An invalid second spec.
+            let bad = dir.path().join("bad.yaml");
+            std::fs::write(&bad, "name: bad\n").unwrap();
+            let bad = bad.display().to_string();
+            let want = format!("gadk-eval: monitor spec: guard spec {bad}: ");
+            refused(&[&a, &bad], &fake, &want, true).await;
+
+            // Two specs named `a`.
+            let dup = named_guard_file(dir.path(), "dup.yaml", "a", &store, ERROR_RATE);
+            let want = format!(
+                "gadk-eval: monitor spec: guards: duplicate guard name a in {a} and {dup}\n"
+            );
+            refused(&[&a, &dup], &fake, &want, false).await;
+
+            // 201 specs.
+            let many = dir.path().join("many");
+            std::fs::create_dir(&many).unwrap();
+            for i in 0..=200 {
+                let name = format!("g{i:03}");
+                named_guard_file(&many, &format!("{name}.yaml"), &name, &store, ERROR_RATE);
+            }
+            let many = many.display().to_string();
+            refused(
+                &[&many],
+                &fake,
+                "gadk-eval: monitor spec: guards: more than 200 specs\n",
+                false,
+            )
+            .await;
+
+            // min_step_age without --out names the spec, and comes before a bad --prices.
+            let aged = named_guard_file(dir.path(), "aged.yaml", "aged", &store, ERROR_RATE);
+            with_min_step_age(&aged);
+            let missing = dir.path().join("missing.yaml").display().to_string();
+            let want =
+                format!("gadk-eval: monitor spec: guard spec {aged}: min_step_age needs --out\n");
+            refused(&[&a, &aged, "--prices", &missing], &fake, &want, false).await;
+
+            // A bad --prices, local or gs://.
+            let want = format!("gadk-eval: monitor spec: price file {missing}: ");
+            refused(&[&a, "--prices", &missing], &fake, &want, true).await;
+            refused(
+                &[&a, "--prices", "gs://evals/missing.yaml"],
+                &fake,
+                "gadk-eval: monitor spec: price file gs://evals/missing.yaml: not found\n",
+                false,
+            )
+            .await;
+
+            // A bad --out.
+            refused(
+                &[&a, "--out", "s3://bucket/reports"],
+                &fake,
+                "gadk-eval: report store: unsupported store URL scheme",
+                true,
+            )
+            .await;
+
+            // A missing source.
+            let want = format!("gadk-eval: monitor spec: guard spec {missing}: not found\n");
+            refused(&[&a, &missing], &fake, &want, false).await;
+        }
+
+        #[tokio::test]
+        async fn a_stdout_failure_ends_guards_with_exit_2() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), Some(10)).await;
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            let fake = healthy();
+            let mut err = Vec::new();
+            let argv = vec!["gadk-eval".to_owned(), "guards".to_owned(), spec];
+            let code = run(argv, &fake, &mut BrokenPipe, &mut err).await;
+            assert_eq!(code, 2);
+            let err = String::from_utf8(err).unwrap();
+            assert!(err.starts_with("gadk-eval: "), "{err}");
+            assert!(!err.contains("guards: "), "{err}");
+            assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+        }
+
+        #[tokio::test]
+        async fn help_lists_guards_and_its_flags() {
+            let (code, stdout, _) = cli_run(&["--help"], &healthy()).await;
+            assert_eq!(code, 0);
+            assert!(stdout.contains("guards"), "{stdout}");
+            let (code, stdout, _) = cli_run(&["guards", "--help"], &healthy()).await;
+            assert_eq!(code, 0);
+            for flag in ["--apply", "--prices", "--out", "--max-bytes", "<source>..."] {
+                assert!(stdout.contains(flag), "{flag}: {stdout}");
+            }
+            assert!(
+                stdout.contains(
+                    "Exit codes: 0 every guard reached an outcome, 2 a guard failed or an error."
+                ),
+                "{stdout}"
+            );
+            let (code, _, stderr) = cli_run(&["guards"], &healthy()).await;
+            assert_eq!(code, 2);
+            assert!(stderr.contains("<source>..."), "{stderr}");
+            let fake = healthy();
+            let (code, _, stderr) = cli_run(&["guards", "x.yaml", "--max-bytes=0"], &fake).await;
+            assert_eq!(code, 2);
+            assert!(stderr.contains("--max-bytes"), "{stderr}");
+        }
+
+        /// A writer that takes `left` bytes, then fails every later write.
+        struct FailsAfter {
+            left: usize,
+            taken: Vec<u8>,
+        }
+
+        impl Write for FailsAfter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                if self.left == 0 {
+                    return Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+                }
+                let n = buf.len().min(self.left);
+                self.left -= n;
+                self.taken.extend_from_slice(&buf[..n]);
+                Ok(n)
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        #[tokio::test]
+        async fn a_stdout_failure_mid_report_ends_guards_with_exit_2() {
+            let dir = tempfile::tempdir().unwrap();
+            prompts(dir.path(), Some(10)).await;
+            let spec = guard_file(dir.path(), ERROR_RATE);
+            let fake = healthy();
+            // The `== g ==` header (8 bytes) succeeds; the failure lands in the report.
+            let mut stdout = FailsAfter {
+                left: 8 + 10,
+                taken: Vec::new(),
+            };
+            let mut err = Vec::new();
+            let argv = vec!["gadk-eval".to_owned(), "guards".to_owned(), spec];
+            let code = run(argv, &fake, &mut stdout, &mut err).await;
+            assert_eq!(code, 2);
+            let taken = String::from_utf8(stdout.taken).unwrap();
+            assert!(taken.starts_with("== g ==\nguard g: "), "{taken}");
+            assert!(!taken.contains("error:"), "{taken}");
+            assert!(!taken.contains("guards: "), "{taken}");
+            let err = String::from_utf8(err).unwrap();
+            assert!(err.starts_with("gadk-eval: "), "{err}");
+            assert!(!err.contains("guards: "), "{err}");
         }
     }
 }
