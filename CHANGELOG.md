@@ -9,8 +9,9 @@ the public API.
 
 ### Changed
 
-- `gadk-console`: the review queue's `version` must be ASCII digits, so `version=+3` now gets
-  `version: must be a positive integer`. Drop the `+` from such a URL.
+- `gadk-console`: the review queue's `version` must be ASCII digits, so a `version` with a
+  leading `+` (`version=%2B3` in a URL) now gets `version: must be a positive integer`.
+  Drop the `+` from such a URL.
 
 ### Fixed
 
