@@ -68,7 +68,7 @@ fn bad_request(text: &str) -> Response {
 }
 
 /// The first value of URL parameter `key` (empty when absent).
-fn first<'a>(params: &'a [(String, String)], key: &str) -> &'a str {
+pub(super) fn first<'a>(params: &'a [(String, String)], key: &str) -> &'a str {
     params
         .iter()
         .find(|(k, _)| k == key)

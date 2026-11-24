@@ -32,6 +32,7 @@ mod guards;
 pub(crate) mod pages;
 mod prompts;
 mod review;
+mod sessions;
 #[cfg(test)]
 pub(crate) mod testutil;
 mod traces;
@@ -51,6 +52,8 @@ pub(crate) struct AppState {
     pub usage: Option<Arc<crate::usage::UsageSource>>, // Some with --traces bigquery://… only
     pub author: String,                             // the author of console scores
     pub datasets: Option<Arc<crate::datasets::Datasets>>, // Some with --datasets and BigQuery
+    // Some with BigQuery: the conversation text of `/sessions/{id}`, or why it is unavailable.
+    pub export: Option<Result<Arc<dyn gadk_eval_monitor::ExportSource>, String>>,
 }
 
 const CONSOLE_CSS: &str = include_str!("assets/console.css");
@@ -59,8 +62,9 @@ const WATERFALL_JS: &str = include_str!("assets/waterfall.js");
 /// GET / → 303 /traces; GET /assets/console.css and /assets/waterfall.js (include_str!, with
 /// text/css and text/javascript; charset=utf-8 content types); merges traces::routes(),
 /// prompts::routes(), evals::routes(), experiments::routes(), guards::routes(),
-/// review::routes() and usage::routes(); wraps everything in guard::layer (Host 421, POST
-/// Origin 403) and adds the CSP header to every response; unknown paths → error page 404.
+/// review::routes(), sessions::routes() and usage::routes(); wraps everything in guard::layer
+/// (Host 421, POST Origin 403) and adds the CSP header to every response; unknown paths → error
+/// page 404.
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(root))
@@ -72,6 +76,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .merge(experiments::routes())
         .merge(guards::routes())
         .merge(review::routes())
+        .merge(sessions::routes())
         .merge(usage::routes())
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(state.clone(), guard::check))
@@ -314,6 +319,11 @@ mod tests {
         assert!(fresh().reports.is_none());
     }
 
+    #[test]
+    fn test_states_have_no_export_source() {
+        assert!(fresh().export.is_none());
+    }
+
     #[tokio::test]
     async fn state_with_guards_carries_the_cache() {
         let (_dir, cache, _) = super::testutil::guard_cache(&[], 4).await;
@@ -321,5 +331,14 @@ mod tests {
         assert!(st.guards.is_some());
         assert!(st.reports.is_none() && st.experiments.is_none());
         assert!(fresh().guards.is_none());
+    }
+
+    #[test]
+    fn stylesheet_rules_are_not_diff_pasted() {
+        assert!(super::CONSOLE_CSS.contains(".bubble {"));
+        assert!(
+            super::CONSOLE_CSS.lines().all(|l| !l.starts_with('+')),
+            "a stylesheet line starts with a diff `+`"
+        );
     }
 }

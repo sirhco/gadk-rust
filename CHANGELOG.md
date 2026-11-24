@@ -7,6 +7,17 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-console`: Sessions and Users pages (BigQuery trace source) under a new Sessions tab after
+  Review. `/sessions` lists the sessions with activity in the window (`1h` to `7d`, default
+  `24h`; optional `user` and `agent`), newest first, 100 per page with a `Next →` link, each with
+  its user, root agent, first and last activity, turns, tokens, cost, errors and 👍/👎 counts.
+  `/sessions/{id}` shows the session's totals and its turns as a conversation (user and agent
+  chat bubbles, run errors and incomplete-content notes), each with its latency, tokens, cost,
+  tools, errors, latest scores and trace link. `/users` groups the same metrics by user (default
+  `7d`) and links each user to their sessions.
+
 ## [0.5.7] - 2026-11-23
 
 ### Changed

@@ -452,7 +452,7 @@ LIMIT @limit"
 /// The per-call columns of `c` read from the `res` (`LLM_RESPONSE`) row: prompt name and
 /// version, the four token counts (missing values 0, all from `attributes.usage_metadata`, so the
 /// `content` column is never read) and `latency_ms.total_ms`.
-const CALL_COLUMNS: &str = r"JSON_VALUE(res.attributes, '$.prompt.name') AS prompt_name,
+pub(crate) const CALL_COLUMNS: &str = r"JSON_VALUE(res.attributes, '$.prompt.name') AS prompt_name,
     SAFE_CAST(JSON_VALUE(res.attributes, '$.prompt.version') AS INT64) AS prompt_version,
     IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.prompt_token_count') AS INT64), 0)
       + IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.tool_use_prompt_token_count') AS INT64), 0) AS input,

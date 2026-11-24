@@ -6,9 +6,10 @@ registry: versions, diffs and labels. With `--reports`, it also shows the report
 `gadk-eval-monitor` monitors, compares the variants of its experiments and shows the decisions of
 its rollout guards. With a price file (`--prices`) it prices token counts. With the BigQuery trace
 source it also shows usage and cost by model, agent, prompt version and trace, lists and adds
-scores, walks a review queue of the traces not yet scored, and, with `--datasets`, adds a trace's
-runs to an eval set. It runs on your machine, listens on 127.0.0.1 only, and reads Google Cloud with
-your Application Default Credentials.
+scores, walks a review queue of the traces not yet scored, browses sessions and users (each
+session's turns as a conversation, with tokens, cost, errors and thumbs), and, with `--datasets`,
+adds a trace's runs to an eval set. It runs on your machine, listens on 127.0.0.1 only, and reads
+Google Cloud with your Application Default Credentials.
 
 ```sh
 cargo install gadk-console
@@ -74,6 +75,9 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/guards/{report}` | One guard report: the rollout and its percent, window, source and when it was made, then one row per check (baseline and rollout values with their sample sizes, harm, the interval of the harm, and a status badge with its reason), the verdict, the note and the action, marked `applied` or `dry run`. |
 | `/review` | BigQuery source only. A review queue: `?score=<name>` (required) with optional `prompt`, `version`, `flagged=1` and `range` (`1h`, `6h`, `24h`, `7d` default) lists the recent traces with no console score of that name, newest first, at most 100, with a "Start reviewing" link. Without `score` it shows the form alone. See [Review](#review). |
 | `/review/next` | BigQuery source only. `?<queue>&after=<time>&after_id=<trace id>` redirects (303) to the queue's next trace after that one, or back to `/review?<queue>&done=1` when none is left. |
+| `/sessions` | BigQuery source only. The sessions with activity in the window, newest last activity first, at most 100 per page, with their user, agent, turns, tokens, cost, errors and thumbs. `?range=` (`1h`, `6h`, `24h` default, `7d`), `user`, `agent`. See [Sessions and users](#sessions-and-users). |
+| `/sessions/{id}` | BigQuery source only. One session's turns as a conversation, oldest first, each with its metrics. `?range=` (default `7d`). |
+| `/users` | BigQuery source only. The users with activity in the window, at most 100, with their sessions, turns, tokens, cost, errors and thumbs. `?range=` (default `7d`), `agent`. |
 | `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`): totals, then LLM calls, tokens and cost by model, by agent and by prompt version, and the 20 traces with the most tokens. |
 
 ## Evals
@@ -281,6 +285,41 @@ answer 404 with a note.
   response is older than the range.
 - The pending query reads the window's rows and the `FEEDBACK` rows from a day before it, under
   `--bigquery-max-bytes`. The score name and filters are query parameters.
+
+## Sessions and users
+
+The Sessions tab groups the agent-analytics rows by session and by user. It needs
+`--traces bigquery://…`; with the Cloud Trace source `/sessions`, `/sessions/{id}` and `/users`
+answer 404 with a note.
+
+- A session's activity rows are its rows in the window other than `FEEDBACK` rows. Its user and root
+  agent come from its earliest `INVOCATION_STARTING` row in the window (the user shows `(none)` when
+  it has none, and the agent cell is left empty). Turns are its distinct invocations; errors are its
+  `LLM_ERROR` and `TOOL_ERROR` rows and rows with status `ERROR`; tokens are input + output +
+  reasoning of its `LLM_RESPONSE` rows, and the cost prices them per model (`—` without prices,
+  `$x*` when some models have none). 👍 and 👎 count the latest boolean score per invocation, name and
+  source. Every count covers the window only, so a session that started before it shows only its
+  later turns.
+- `/sessions` lists at most 100 sessions per page, newest last activity first, with a `Next →`
+  link to the following ones. `range` is `1h`, `6h`, `24h` (the default) or `7d`; `user` and
+  `agent` (at most 128 bytes each, trimmed) keep only the sessions of that user or root agent.
+  Each session links to its page.
+- `/sessions/{id}` (`range` defaults to `7d`) shows the session's user, agent, first and last
+  activity and totals, a link to its traces, and then its turns, oldest first (at most 200): the
+  user's message and the agent's reply as chat bubbles (a run error follows the reply), and a
+  line with the start time, latency, tokens and cost, the tools called, errors, the latest
+  scores (`name=value`) and a link to the trace. The text comes from the same transcripts as
+  `gadk-eval export`: a turn with no transcript run (for example one whose run started before
+  the window) shows `(no content logged)`, and a transcript that could not be fully rebuilt says
+  `content incomplete` with the reasons.
+  If the transcripts cannot be read, the page keeps the metrics and says why in a banner.
+- `/users` (`range` defaults to `7d`, optional `agent`) lists at most 100 users, most recent first,
+  with their sessions, turns, tokens, cost, errors, thumbs and last activity; each links to its
+  sessions. Sessions without a user count as `(none)`.
+- The queries read only the window (at most 7 days) under `--bigquery-max-bytes`, with every
+  filter and id as a query parameter. With the BigQuery source the console builds the transcript
+  reader at startup, which loads Application Default Credentials; without `--datasets` a failure
+  there does not stop the console, and the session page shows it.
 
 ## Datasets
 

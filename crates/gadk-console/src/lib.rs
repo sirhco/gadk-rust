@@ -20,7 +20,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gadk_eval_monitor::{BigQueryTranscriptSource, MonitorError, ReportStore};
+use gadk_eval_monitor::{BigQueryTranscriptSource, ExportSource, MonitorError, ReportStore};
 
 use crate::datasets::Datasets;
 use crate::evals::{CACHE_CAP, ReportCache};
@@ -40,6 +40,7 @@ mod prices;
 mod prompts;
 mod review;
 mod scores;
+mod sessions;
 pub mod traces;
 mod url;
 mod usage;
@@ -233,6 +234,36 @@ pub(crate) struct Extras {
     pub(crate) author: Option<String>,
     /// The `--datasets` directory and its export source (BigQuery trace source only).
     pub(crate) datasets: Option<Arc<Datasets>>,
+    /// The export source of the BigQuery trace source (see [`export_source`]).
+    pub(crate) export: Option<Result<Arc<dyn ExportSource>, String>>,
+}
+
+/// The export source that reads conversation text from the agent-analytics table: `None`
+/// without the BigQuery trace source, else the [`BigQueryTranscriptSource`] of its table, billed
+/// to `billing_project` under its byte cap, or the text of the error that kept it from being
+/// built (it loads Application Default Credentials eagerly).
+fn export_source(
+    traces: Option<&TracesFrom>,
+    billing_project: &str,
+) -> Option<Result<Arc<dyn ExportSource>, String>> {
+    let Some(TracesFrom::BigQuery {
+        table,
+        max_bytes_billed,
+    }) = traces
+    else {
+        return None;
+    };
+    Some(
+        BigQueryTranscriptSource::new(&table.project, &table.dataset, &table.table)
+            .map(|source| {
+                Arc::new(
+                    source
+                        .with_billing_project(billing_project)
+                        .with_max_bytes_billed(*max_bytes_billed),
+                ) as Arc<dyn ExportSource>
+            })
+            .map_err(|e| e.to_string()),
+    )
 }
 
 /// The author of console scores without `--author`: the first non-empty of the `USER` and
@@ -313,6 +344,7 @@ pub(crate) async fn bind_full(
         usage: extras.usage,
         author: resolve_author(extras.author, env_var),
         datasets: extras.datasets,
+        export: extras.export,
     };
     Ok(Bound {
         listener,
@@ -343,20 +375,11 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
     if let Some(dir) = &cli.datasets {
         check_datasets_dir(dir)?;
     }
-    let datasets = match (&cli.datasets, &cli.traces) {
-        (
-            Some(dir),
-            Some(TracesFrom::BigQuery {
-                table,
-                max_bytes_billed,
-            }),
-        ) => {
-            let source =
-                BigQueryTranscriptSource::new(&table.project, &table.dataset, &table.table)
-                    .map_err(|e| ConsoleError::Datasets(e.to_string()))?
-                    .with_billing_project(&cli.config.project)
-                    .with_max_bytes_billed(*max_bytes_billed);
-            Some(Arc::new(Datasets::new(dir.clone(), Arc::new(source))))
+    let export = export_source(cli.traces.as_ref(), &cli.config.project);
+    let datasets = match (&cli.datasets, &export) {
+        (Some(dir), Some(source)) => {
+            let source = source.clone().map_err(ConsoleError::Datasets)?;
+            Some(Arc::new(Datasets::new(dir.clone(), source)))
         }
         _ => None,
     };
@@ -392,6 +415,7 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
             usage,
             author: Some(author),
             datasets,
+            export,
         },
     )
     .await?;
@@ -521,6 +545,25 @@ mod tests {
                 "{text}"
             );
             assert!(out.is_empty(), "no URL is printed");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_export_source_is_none_with_cloud_trace() {
+        assert!(super::export_source(None, "billing-proj").is_none());
+    }
+
+    #[tokio::test]
+    async fn the_export_source_is_built_for_the_bigquery_source() {
+        let traces = super::TracesFrom::bigquery(
+            crate::traces::BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
+            1_000,
+        );
+        // Ok with Application Default Credentials, the build error without: never None.
+        match super::export_source(Some(&traces), "billing-proj") {
+            Some(Ok(_)) => {}
+            Some(Err(text)) => assert!(!text.is_empty()),
+            None => panic!("the BigQuery source has an export source"),
         }
     }
 
