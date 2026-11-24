@@ -191,7 +191,7 @@ pub trait Backends: Send + Sync {
     /// `timed out` or `connection failed`, never a `reqwest::Error`'s `Display` (it embeds the
     /// URL).
     ///
-    /// The default's error is not retried.
+    /// An error of exactly the default's text is not retried.
     async fn post_webhook(&self, url: &str, body: &serde_json::Value) -> Result<u16, String> {
         let _ = (url, body);
         Err(WEBHOOKS_UNSUPPORTED.into())
