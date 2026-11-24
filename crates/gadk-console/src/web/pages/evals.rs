@@ -82,6 +82,11 @@ fn stamp(r: &MonitorReport) -> String {
 /// (116 for a single rate), y = 30 − 28·rate; a `polyline` per run of two or more known rates,
 /// a `circle` on each isolated known rate and on the newest known rate.
 pub(crate) fn trend(rates: &[Option<f64>]) -> Markup {
+    trend_labeled(rates, "pass rate trend")
+}
+
+/// [`trend`] with `label` as the SVG's `aria-label`.
+pub(crate) fn trend_labeled(rates: &[Option<f64>], label: &str) -> Markup {
     let n = rates.len();
     let x = |i: usize| {
         if n <= 1 {
@@ -119,7 +124,7 @@ pub(crate) fn trend(rates: &[Option<f64>]) -> Markup {
         dots.push(p);
     }
     html! {
-        svg class="trend" viewBox="0 0 120 32" width="120" height="32" role="img" aria-label="pass rate trend" {
+        svg class="trend" viewBox="0 0 120 32" width="120" height="32" role="img" aria-label=(label) {
             @for s in segments.iter().filter(|s| s.len() > 1) {
                 polyline points=(points(s)) fill="none" {}
             }
@@ -130,7 +135,8 @@ pub(crate) fn trend(rates: &[Option<f64>]) -> Markup {
     }
 }
 
-fn points(segment: &[(f64, f64)]) -> String {
+/// `x,y` pairs (one decimal each) joined by single spaces, for a `polyline`'s `points`.
+pub(crate) fn points(segment: &[(f64, f64)]) -> String {
     segment
         .iter()
         .map(|(x, y)| format!("{x:.1},{y:.1}"))
@@ -144,7 +150,7 @@ mod tests {
 
     use gadk_eval::Outcome;
 
-    use super::{render, trend};
+    use super::{render, trend, trend_labeled};
     use crate::web::testutil::report;
 
     fn named(
@@ -282,6 +288,17 @@ mod tests {
         assert!(
             !none.contains("<polyline") && !none.contains("<circle"),
             "{none}"
+        );
+    }
+
+    #[test]
+    fn trend_labeled_names_the_svg() {
+        let rates = [Some(1.0), None, Some(0.5), Some(0.0)];
+        let out = trend_labeled(&rates, "usage trend").into_string();
+        assert!(out.starts_with(r#"<svg class="trend" viewBox="0 0 120 32" width="120" height="32" role="img" aria-label="usage trend">"#), "{out}");
+        assert_eq!(
+            trend(&rates).into_string(),
+            trend_labeled(&rates, "pass rate trend").into_string()
         );
     }
 }

@@ -7,6 +7,15 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-console`: `/usage` shows usage over time. A chart under `Over time` plots the cost per
+  bucket (tokens without `--prices`), and the Totals, By model, By agent and By prompt tables
+  gain a `Trend` column with a sparkline per row. `?range=` also takes `30d`. Each range has
+  fixed buckets aligned to its start, from 5 minutes for `1h` to 1 day for `30d`. The trends
+  come from one more BigQuery query per page load, capped at 20,000 groups; past the cap the
+  page says so and keeps the tables. Other pages and `TimeRange` are unchanged.
+
 ## [0.5.12] - 2026-11-24
 
 ### Added

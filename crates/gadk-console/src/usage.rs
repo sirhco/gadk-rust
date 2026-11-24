@@ -21,7 +21,7 @@
 //! `timestamp` to the window and stops at the byte cap. Costs are computed by the pages, so
 //! every result is grouped by model.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use gadk_bigquery::{BigQueryClient, QueryOptions, QueryResult};
 use serde_json::{Map, Value, json};
 
@@ -40,6 +40,8 @@ const VERSION_CAP: usize = 1_000;
 const VERSION_MODEL_CAP: usize = 5_000;
 /// The most invocation × version rows the pass-rate mapping returns.
 const MAPPING_CAP: usize = 20_000;
+/// The most bucket × model × agent × prompt rows the trend query returns.
+pub(crate) const TREND_CAP: usize = 20_000;
 
 /// The byte cap floor of a DML statement: BigQuery bills every one at least 10 MiB.
 pub(crate) const DML_MIN_BYTES: i64 = 10_485_760;
@@ -73,6 +75,91 @@ pub(crate) struct Breakdown {
     pub(crate) cells: Vec<Cell>,
     /// More than [`BREAKDOWN_CAP`] groups exist.
     pub(crate) truncated: bool,
+}
+
+/// One trend group: the calls of one model by one agent with one prompt version in one bucket.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TrendCell {
+    /// The bucket index, `0..count` from the window start.
+    pub(crate) bucket: usize,
+    /// The agent, prompt version, model and calls.
+    pub(crate) cell: Cell,
+}
+
+/// The trend groups of a window.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Trend {
+    /// The groups, ordered by bucket, model, agent, prompt.
+    pub(crate) cells: Vec<TrendCell>,
+    /// More than [`TREND_CAP`] groups exist.
+    pub(crate) truncated: bool,
+}
+
+/// The `/usage` time window: the trace-list ranges plus 30 days, each cut into fixed buckets
+/// for the trends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum UsageRange {
+    /// The last hour.
+    Hour1,
+    /// The last 6 hours.
+    Hours6,
+    /// The last 24 hours (the default).
+    #[default]
+    Hours24,
+    /// The last 7 days.
+    Days7,
+    /// The last 30 days.
+    Days30,
+}
+
+impl UsageRange {
+    /// Every range, shortest first.
+    pub(crate) const ALL: [UsageRange; 5] = [
+        UsageRange::Hour1,
+        UsageRange::Hours6,
+        UsageRange::Hours24,
+        UsageRange::Days7,
+        UsageRange::Days30,
+    ];
+
+    /// "1h" | "6h" | "24h" | "7d" | "30d"; anything else is None.
+    pub(crate) fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.as_str() == s)
+    }
+
+    /// The query-string form: "1h", "6h", "24h", "7d" or "30d".
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            UsageRange::Hour1 => "1h",
+            UsageRange::Hours6 => "6h",
+            UsageRange::Hours24 => "24h",
+            UsageRange::Days7 => "7d",
+            UsageRange::Days30 => "30d",
+        }
+    }
+
+    /// The window length.
+    pub(crate) fn duration(self) -> TimeDelta {
+        match self {
+            UsageRange::Hour1 => TimeDelta::hours(1),
+            UsageRange::Hours6 => TimeDelta::hours(6),
+            UsageRange::Hours24 => TimeDelta::hours(24),
+            UsageRange::Days7 => TimeDelta::days(7),
+            UsageRange::Days30 => TimeDelta::days(30),
+        }
+    }
+
+    /// The trend buckets: their width in seconds, how many tile the window, and the width as
+    /// words (`cost per <label>`).
+    pub(crate) fn bucket(self) -> (i64, usize, &'static str) {
+        match self {
+            UsageRange::Hour1 => (300, 12, "5 minutes"),
+            UsageRange::Hours6 => (900, 24, "15 minutes"),
+            UsageRange::Hours24 => (3600, 24, "hour"),
+            UsageRange::Days7 => (21600, 28, "6 hours"),
+            UsageRange::Days30 => (86400, 30, "day"),
+        }
+    }
 }
 
 /// One of the traces with the most tokens.
@@ -262,6 +349,42 @@ impl UsageSource {
             }
         }
         Ok(out)
+    }
+
+    /// The model calls of `[start, end)` grouped by `bucket_seconds`-wide bucket (aligned to
+    /// `start`), model, agent and prompt version. Rows whose bucket falls outside the window are
+    /// dropped.
+    pub(crate) async fn trend(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        bucket_seconds: i64,
+    ) -> Result<Trend, SourceError> {
+        debug_assert!(bucket_seconds > 0, "bucket width {bucket_seconds}");
+        let sql = trend_sql(&self.table.sql_path()?);
+        let mut params = window_params(start, end);
+        params.push(param("bucket", "INT64", Some(bucket_seconds.to_string())));
+        let (rows, truncated) = self.run_capped(&sql, params, TREND_CAP).await?;
+        let window = (end - start).num_seconds();
+        let count = (window + bucket_seconds - 1) / bucket_seconds;
+        let cells = rows
+            .iter()
+            .filter_map(|row| {
+                let bucket = row.get("bucket").and_then(Value::as_i64)?;
+                if !(0..count).contains(&bucket) {
+                    return None;
+                }
+                Some(TrendCell {
+                    bucket: usize::try_from(bucket).ok()?,
+                    cell: Cell {
+                        agent: text(row, "agent").unwrap_or_default(),
+                        prompt: text(row, "prompt"),
+                        calls: model_calls(row),
+                    },
+                })
+            })
+            .collect();
+        Ok(Trend { cells, truncated })
     }
 
     /// Runs `sql` with `params` plus `@limit` = `cap + 1`: the first `cap` rows and whether more
@@ -464,6 +587,16 @@ pub(crate) const CALL_COLUMNS: &str = r"JSON_VALUE(res.attributes, '$.prompt.nam
 /// The `req` and `c` CTEs: `c` has one row per `LLM_RESPONSE` row in `[@start, @end)` with its
 /// trace, agent, model and the [`CALL_COLUMNS`].
 fn calls_cte(table: &str) -> String {
+    calls_cte_builder(table, false)
+}
+
+/// [`calls_cte`], with `with_ts` also projecting the response timestamp as `ts`.
+fn calls_cte_builder(table: &str, with_ts: bool) -> String {
+    let ts = if with_ts {
+        ",\n    res.timestamp AS ts"
+    } else {
+        ""
+    };
     format!(
         r"WITH req AS (
   SELECT trace_id, span_id, ANY_VALUE(JSON_VALUE(attributes, '$.model')) AS model
@@ -473,7 +606,7 @@ fn calls_cte(table: &str) -> String {
 c AS (
   SELECT res.trace_id AS trace_id, res.agent AS agent,
     COALESCE(NULLIF(req.model, ''), NULLIF(JSON_VALUE(res.attributes, '$.model_version'), ''), '(unknown)') AS model,
-    {CALL_COLUMNS}
+    {CALL_COLUMNS}{ts}
   FROM {table} AS res
   LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id
   WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end)"
@@ -505,6 +638,24 @@ SELECT model, IFNULL(agent, '') AS agent,
 FROM c
 GROUP BY 1, 2, 3
 ORDER BY 1, 2, 3
+LIMIT @limit"
+    )
+}
+
+/// Calls and tokens per `@bucket`-second bucket from `@start` × model × agent × prompt, with
+/// the groups of [`breakdown_sql`].
+fn trend_sql(table: &str) -> String {
+    let cte = calls_cte_builder(table, true);
+    format!(
+        r"{cte}
+SELECT DIV(UNIX_SECONDS(ts) - UNIX_SECONDS(@start), @bucket) AS bucket, model, IFNULL(agent, '') AS agent,
+  IF(prompt_name IS NULL OR prompt_version IS NULL, NULL,
+     CONCAT(prompt_name, '@', CAST(prompt_version AS STRING))) AS prompt,
+  COUNT(*) AS calls, SUM(input) AS input, SUM(cached) AS cached, SUM(output) AS output,
+  SUM(reasoning) AS reasoning
+FROM c
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 2, 3, 4
 LIMIT @limit"
     )
 }
@@ -1012,5 +1163,305 @@ mod tests {
             .unwrap();
         assert!(v.truncated);
         assert_eq!(v.pairs, vec![("inv-0".to_owned(), 2)]);
+    }
+
+    /// The table path the byte-identical SQL tests use.
+    const TABLE: &str = "`data-proj.agent_analytics.agent_events`";
+
+    /// `calls_cte(TABLE)`, pinned byte for byte.
+    const CALLS_CTE: &str = r"WITH req AS (
+  SELECT trace_id, span_id, ANY_VALUE(JSON_VALUE(attributes, '$.model')) AS model
+  FROM `data-proj.agent_analytics.agent_events`
+  WHERE event_type = 'LLM_REQUEST' AND timestamp >= @start AND timestamp < @end
+  GROUP BY trace_id, span_id),
+c AS (
+  SELECT res.trace_id AS trace_id, res.agent AS agent,
+    COALESCE(NULLIF(req.model, ''), NULLIF(JSON_VALUE(res.attributes, '$.model_version'), ''), '(unknown)') AS model,
+    JSON_VALUE(res.attributes, '$.prompt.name') AS prompt_name,
+    SAFE_CAST(JSON_VALUE(res.attributes, '$.prompt.version') AS INT64) AS prompt_version,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.prompt_token_count') AS INT64), 0)
+      + IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.tool_use_prompt_token_count') AS INT64), 0) AS input,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.cached_content_token_count') AS INT64), 0) AS cached,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.candidates_token_count') AS INT64), 0) AS output,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.thoughts_token_count') AS INT64), 0) AS reasoning,
+    SAFE_CAST(JSON_VALUE(res.latency_ms, '$.total_ms') AS FLOAT64) AS total_ms
+  FROM `data-proj.agent_analytics.agent_events` AS res
+  LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id
+  WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end)";
+
+    #[test]
+    fn calls_cte_is_pinned() {
+        assert_eq!(calls_cte(TABLE), CALLS_CTE);
+    }
+
+    #[test]
+    fn breakdown_sql_is_pinned() {
+        assert_eq!(
+            breakdown_sql(TABLE),
+            format!(
+                r"{CALLS_CTE}
+SELECT model, IFNULL(agent, '') AS agent,
+  IF(prompt_name IS NULL OR prompt_version IS NULL, NULL,
+     CONCAT(prompt_name, '@', CAST(prompt_version AS STRING))) AS prompt,
+  COUNT(*) AS calls, SUM(input) AS input, SUM(cached) AS cached, SUM(output) AS output,
+  SUM(reasoning) AS reasoning
+FROM c
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3
+LIMIT @limit"
+            )
+        );
+    }
+
+    #[test]
+    fn top_traces_sql_is_pinned() {
+        assert_eq!(
+            top_traces_sql(TABLE),
+            format!(
+                r"{CALLS_CTE},
+ranked AS (
+  SELECT trace_id, SUM(input + output + reasoning) AS total
+  FROM c
+  WHERE REGEXP_CONTAINS(trace_id, r'^[0-9a-fA-F]{{32}}$')
+  GROUP BY trace_id
+  ORDER BY total DESC, trace_id
+  LIMIT @limit)
+SELECT c.trace_id AS trace_id, ranked.total AS total, c.model AS model, COUNT(*) AS calls,
+  SUM(c.input) AS input, SUM(c.cached) AS cached, SUM(c.output) AS output,
+  SUM(c.reasoning) AS reasoning
+FROM c JOIN ranked ON ranked.trace_id = c.trace_id
+GROUP BY 1, 2, 3
+ORDER BY 2 DESC, 1, 3"
+            )
+        );
+    }
+
+    #[test]
+    fn version_models_sql_is_pinned() {
+        assert_eq!(
+            version_models_sql(TABLE),
+            format!(
+                r"{CALLS_CTE}
+SELECT prompt_version AS version, model, COUNT(*) AS calls, SUM(input) AS input,
+  SUM(cached) AS cached, SUM(output) AS output, SUM(reasoning) AS reasoning
+FROM c
+WHERE prompt_name = @prompt AND prompt_version IS NOT NULL
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2
+LIMIT @limit"
+            )
+        );
+    }
+
+    #[test]
+    fn usage_range_parses_its_five_ranges_in_order() {
+        assert_eq!(
+            UsageRange::ALL.map(UsageRange::as_str),
+            ["1h", "6h", "24h", "7d", "30d"]
+        );
+        for r in UsageRange::ALL {
+            assert_eq!(UsageRange::parse(r.as_str()), Some(r));
+        }
+        for bogus in ["", "bogus", "30D", "1d", "2h"] {
+            assert_eq!(UsageRange::parse(bogus), None, "{bogus:?}");
+        }
+        assert_eq!(UsageRange::default(), UsageRange::Hours24);
+    }
+
+    #[test]
+    fn usage_range_buckets_tile_the_window() {
+        assert_eq!(UsageRange::Hour1.bucket(), (300, 12, "5 minutes"));
+        assert_eq!(UsageRange::Hours6.bucket(), (900, 24, "15 minutes"));
+        assert_eq!(UsageRange::Hours24.bucket(), (3600, 24, "hour"));
+        assert_eq!(UsageRange::Days7.bucket(), (21600, 28, "6 hours"));
+        assert_eq!(UsageRange::Days30.bucket(), (86400, 30, "day"));
+        assert_eq!(UsageRange::Days30.duration(), chrono::TimeDelta::days(30));
+        for r in UsageRange::ALL {
+            let (seconds, count, _) = r.bucket();
+            assert_eq!(r.duration().num_seconds(), seconds * count as i64, "{r:?}");
+        }
+    }
+
+    /// `trend_sql(TABLE)`, pinned byte for byte.
+    const TREND_SQL: &str = r"WITH req AS (
+  SELECT trace_id, span_id, ANY_VALUE(JSON_VALUE(attributes, '$.model')) AS model
+  FROM `data-proj.agent_analytics.agent_events`
+  WHERE event_type = 'LLM_REQUEST' AND timestamp >= @start AND timestamp < @end
+  GROUP BY trace_id, span_id),
+c AS (
+  SELECT res.trace_id AS trace_id, res.agent AS agent,
+    COALESCE(NULLIF(req.model, ''), NULLIF(JSON_VALUE(res.attributes, '$.model_version'), ''), '(unknown)') AS model,
+    JSON_VALUE(res.attributes, '$.prompt.name') AS prompt_name,
+    SAFE_CAST(JSON_VALUE(res.attributes, '$.prompt.version') AS INT64) AS prompt_version,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.prompt_token_count') AS INT64), 0)
+      + IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.tool_use_prompt_token_count') AS INT64), 0) AS input,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.cached_content_token_count') AS INT64), 0) AS cached,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.candidates_token_count') AS INT64), 0) AS output,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.thoughts_token_count') AS INT64), 0) AS reasoning,
+    SAFE_CAST(JSON_VALUE(res.latency_ms, '$.total_ms') AS FLOAT64) AS total_ms,
+    res.timestamp AS ts
+  FROM `data-proj.agent_analytics.agent_events` AS res
+  LEFT JOIN req ON req.trace_id = res.trace_id AND req.span_id = res.span_id
+  WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @start AND res.timestamp < @end)
+SELECT DIV(UNIX_SECONDS(ts) - UNIX_SECONDS(@start), @bucket) AS bucket, model, IFNULL(agent, '') AS agent,
+  IF(prompt_name IS NULL OR prompt_version IS NULL, NULL,
+     CONCAT(prompt_name, '@', CAST(prompt_version AS STRING))) AS prompt,
+  COUNT(*) AS calls, SUM(input) AS input, SUM(cached) AS cached, SUM(output) AS output,
+  SUM(reasoning) AS reasoning
+FROM c
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 2, 3, 4
+LIMIT @limit";
+
+    #[test]
+    fn trend_sql_is_pinned() {
+        assert_eq!(trend_sql(TABLE), TREND_SQL);
+    }
+
+    const TREND_FIELDS: [(&str, &str); 9] = [
+        ("bucket", "INT64"),
+        ("model", "STRING"),
+        ("agent", "STRING"),
+        ("prompt", "STRING"),
+        ("calls", "INT64"),
+        ("input", "INT64"),
+        ("cached", "INT64"),
+        ("output", "INT64"),
+        ("reasoning", "INT64"),
+    ];
+
+    /// A trend row in bucket `bucket` for model `m`, agent `triage`, no prompt, one call.
+    fn trend_row(bucket: Value, m: &str) -> Vec<Value> {
+        vec![
+            bucket,
+            json!(m),
+            json!("triage"),
+            Value::Null,
+            json!("1"),
+            json!("10"),
+            json!("0"),
+            json!("5"),
+            json!("0"),
+        ]
+    }
+
+    #[tokio::test]
+    async fn trend_reads_buckets_and_drops_rows_outside_the_window() {
+        let fake = FakeHttp::new(vec![reply(
+            &TREND_FIELDS,
+            vec![
+                vec![
+                    json!("0"),
+                    json!("gemini-3.8-flash"),
+                    json!("triage"),
+                    json!("triage@2"),
+                    json!("3"),
+                    json!("3000"),
+                    json!("1000"),
+                    json!("600"),
+                    json!("0"),
+                ],
+                trend_row(json!("23"), "other-model"),
+                trend_row(json!("-1"), "before"),
+                trend_row(json!("24"), "after"),
+                trend_row(Value::Null, "no-bucket"),
+            ],
+            false,
+        )]);
+        let t = source(&fake).trend(start(), end(), 3600).await.unwrap();
+        assert_eq!(
+            t,
+            Trend {
+                cells: vec![
+                    TrendCell {
+                        bucket: 0,
+                        cell: Cell {
+                            agent: "triage".into(),
+                            prompt: Some("triage@2".into()),
+                            calls: ModelCalls {
+                                model: "gemini-3.8-flash".into(),
+                                calls: 3,
+                                usage: usage(3000, 1000, 600, 0),
+                            },
+                        },
+                    },
+                    TrendCell {
+                        bucket: 23,
+                        cell: Cell {
+                            agent: "triage".into(),
+                            prompt: None,
+                            calls: ModelCalls {
+                                model: "other-model".into(),
+                                calls: 1,
+                                usage: usage(10, 0, 5, 0),
+                            },
+                        },
+                    },
+                ],
+                truncated: false,
+            }
+        );
+
+        assert_eq!(fake.uris(), [QUERIES]);
+        let body = fake.body(0);
+        assert_eq!(
+            body["query"].as_str().unwrap(),
+            TREND_SQL,
+            "the trend query"
+        );
+        assert_eq!(body["maximumBytesBilled"], json!("1000"));
+        assert_eq!(body["maxResults"], json!(20001));
+        assert_eq!(body["parameterMode"], json!("NAMED"));
+        assert_eq!(
+            param_value(&body, "start"),
+            json!({
+                "name": "start",
+                "parameterType": { "type": "TIMESTAMP" },
+                "parameterValue": { "value": "2026-11-19 12:00:00.000000+00:00" }
+            })
+        );
+        assert_eq!(
+            param_value(&body, "end")["parameterValue"]["value"],
+            json!("2026-11-20 12:00:00.000000+00:00")
+        );
+        assert_eq!(
+            param_value(&body, "bucket"),
+            json!({
+                "name": "bucket",
+                "parameterType": { "type": "INT64" },
+                "parameterValue": { "value": "3600" }
+            })
+        );
+        assert_eq!(
+            param_value(&body, "limit"),
+            json!({
+                "name": "limit",
+                "parameterType": { "type": "INT64" },
+                "parameterValue": { "value": "20001" }
+            })
+        );
+        assert_eq!(body["queryParameters"].as_array().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn trend_is_truncated_past_its_cap() {
+        let rows = (0..=TREND_CAP)
+            .map(|i| trend_row(json!((i % 24).to_string()), &format!("m{i}")))
+            .collect();
+        let fake = FakeHttp::new(vec![
+            reply(&TREND_FIELDS, rows, false),
+            reply(&TREND_FIELDS, vec![trend_row(json!("1"), "m")], true),
+            reply(&TREND_FIELDS, vec![trend_row(json!("1"), "m")], false),
+        ]);
+        let src = source(&fake);
+        let over = src.trend(start(), end(), 3600).await.unwrap();
+        assert!(over.truncated);
+        assert_eq!(over.cells.len(), TREND_CAP);
+        assert_eq!(over.cells[TREND_CAP - 1].cell.calls.model, "m19999");
+        let more = src.trend(start(), end(), 3600).await.unwrap();
+        assert!(more.truncated, "a next page means more rows");
+        assert_eq!(more.cells.len(), 1);
+        let under = src.trend(start(), end(), 3600).await.unwrap();
+        assert!(!under.truncated);
     }
 }
