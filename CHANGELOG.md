@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-11-23
+
 ### Added
 
 - `gadk-eval-monitor`: `gadk-eval guards <source>...` runs every guard spec found in files,
@@ -767,7 +769,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.8...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.9...HEAD
+[0.5.9]: https://github.com/sirhco/gadk-rust/compare/v0.5.8...v0.5.9
 [0.5.8]: https://github.com/sirhco/gadk-rust/compare/v0.5.7...v0.5.8
 [0.5.7]: https://github.com/sirhco/gadk-rust/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/sirhco/gadk-rust/compare/v0.5.5...v0.5.6
