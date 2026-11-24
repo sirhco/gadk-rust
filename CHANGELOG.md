@@ -7,6 +7,18 @@ the public API.
 
 ## [Unreleased]
 
+### Changed
+
+- `gadk-console`: the review queue's `version` must be ASCII digits, so `version=+3` now gets
+  `version: must be a positive integer`. Drop the `+` from such a URL.
+
+### Fixed
+
+- `gadk-console`: a score with no source and one with an empty source, for the same invocation
+  and name, now count once (the later of the two) in the thumbs of the sessions and users pages,
+  the scores of the session page and a prompt version's Feedback table. Before, both were
+  counted.
+
 ## [0.5.9] - 2026-11-23
 
 ### Added
