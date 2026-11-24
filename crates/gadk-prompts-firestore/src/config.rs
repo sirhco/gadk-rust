@@ -36,9 +36,12 @@ pub struct FirestoreConfig {
     /// e.g. `envs/prod`) under which the `prompts` collection lives; `None` or empty for the
     /// database root.
     ///
-    /// Every registry refresh reads every prompt and every version under the root. With an
-    /// empty root the versions query scans every `versions` collection in the database (other
-    /// data's included, billed before it is filtered out), so prefer a dedicated non-empty root.
+    /// Every registry refresh reads every prompt document under the root (one `runQuery` over the
+    /// root's own `prompts` collection, which reads no other collection) and only the version
+    /// documents it has not read before; `load_prompt` reads one prompt document and its new
+    /// versions. A dedicated non-empty root still keeps environments apart (`envs/prod`,
+    /// `envs/staging`) and keeps the store out of any other `prompts` collection at the
+    /// database root.
     pub root: Option<String>,
     /// `scheme://host[:port]`; `None` uses `http://{FIRESTORE_EMULATOR_HOST}` when set, else
     /// `https://firestore.googleapis.com`.

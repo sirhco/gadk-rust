@@ -91,7 +91,7 @@ impl Guard {
     /// (nothing to guard).
     ///
     /// Reads the label's version B and its rollout (version R at p%) from `store` in one
-    /// `load_all_with_rollouts`, gets both versions' calls in `[now − window, now)` from
+    /// `load_prompt`, gets both versions' calls in `[now − window, now)` from
     /// `source`, and classifies each check: `insufficient` when a side has fewer than
     /// `min_calls` calls (then neither feedback nor eval runs are queried), for `feedback`
     /// fewer than `min_count` scores, for `eval` fewer
@@ -308,14 +308,13 @@ fn store_error(e: StoreError) -> MonitorError {
     MonitorError::Store(format!("prompt store: {e}"))
 }
 
-/// The label's version and its rollout (`None`: no rollout), read with one
-/// `load_all_with_rollouts`.
+/// The label's version and its rollout (`None`: no rollout), read with one `load_prompt`.
 async fn read_rollout(
     store: &dyn PromptStore,
     prompt: &str,
     label: &Label,
 ) -> Result<(u32, Option<Rollout>), MonitorError> {
-    let (prompts, rollouts) = store.load_all_with_rollouts().await.map_err(store_error)?;
+    let (prompts, rollouts) = store.load_prompt(prompt).await.map_err(store_error)?;
     let named = |what: &str| MonitorError::Store(format!("prompt store: {prompt}/{label}: {what}"));
     let entry = prompts
         .prompts
@@ -360,7 +359,7 @@ async fn write(
             .await
             .map_err(fail),
         Action::Promote => {
-            let (prompts, rollouts) = store.load_all_with_rollouts().await.map_err(store_error)?;
+            let (prompts, rollouts) = store.load_prompt(prompt).await.map_err(store_error)?;
             let now = prompts
                 .prompts
                 .get(prompt)

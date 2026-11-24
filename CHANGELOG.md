@@ -7,6 +7,20 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-prompts`: `PromptStore::load_prompt(name)` returns one prompt and its rollouts, the
+  same entry and rollouts `load_all_with_rollouts` holds for that name; an unknown or invalid
+  name gives empty snapshots. The default implementation reads the whole store and keeps
+  `name`, so existing stores keep working. `FirestoreStore` overrides it to read the one prompt
+  document and only that prompt's versions it has not read before, sharing its in-memory
+  versions with `load_all_with_rollouts`.
+- `gadk-prompts-cli`, `gadk-eval-monitor`, `gadk-console`: `gadk-prompts show`, `diff`,
+  `rollout --promote` and `rollout <version> --percent <p>`, `gadk-eval guard` and `guards`,
+  and the console's prompt page (`/prompts/{name}`, also after a failed write) read only the
+  prompt they work on through `load_prompt`. On Firestore, a fresh process now reads one prompt
+  and its versions instead of every version of every prompt. Output and errors are unchanged.
+
 ## [0.5.10] - 2026-11-24
 
 ### Changed
