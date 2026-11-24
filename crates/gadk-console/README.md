@@ -78,7 +78,7 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/sessions` | BigQuery source only. The sessions with activity in the window, newest last activity first, at most 100 per page, with their user, agent, turns, tokens, cost, errors and thumbs. `?range=` (`1h`, `6h`, `24h` default, `7d`), `user`, `agent`. See [Sessions and users](#sessions-and-users). |
 | `/sessions/{id}` | BigQuery source only. One session's turns as a conversation, oldest first, each with its metrics. `?range=` (default `7d`). |
 | `/users` | BigQuery source only. The users with activity in the window, at most 100, with their sessions, turns, tokens, cost, errors and thumbs. `?range=` (default `7d`), `agent`. |
-| `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`): totals, then LLM calls, tokens and cost by model, by agent and by prompt version, and the 20 traces with the most tokens. |
+| `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`, `30d`): totals, a chart of cost (or tokens) over time, then LLM calls, tokens, cost and a trend sparkline by model, by agent and by prompt version, and the 20 traces with the most tokens. See [Usage and cost](#usage-and-cost). |
 
 ## Evals
 
@@ -232,6 +232,28 @@ leaves out calls to models without a price.
   newest first; the page notes when capped), and maps each invocation to the prompt versions its
   `LLM_REQUEST` rows recorded (rows from one day before to one hour after the range). A run that
   used several versions counts for each.
+
+`/usage` also shows how usage changes across its range. Under `Over time`, a chart plots the
+cost per bucket (without `--prices`, the input + output + reasoning tokens per bucket), labeled
+with the largest and the latest bucket's value and the first and last buckets' start times in
+UTC. With a price file, calls to models without a price count as 0, and a note under the chart
+says so. The Totals, By model, By agent and By prompt tables end with a `Trend` column: a
+sparkline of the same metric per bucket for each row, scaled to the row's own largest bucket
+(the row's size is in its other columns). The buckets are aligned to the start of the range:
+
+| Range | Bucket | Buckets |
+|---|---|---|
+| `1h` | 5 minutes | 12 |
+| `6h` | 15 minutes | 24 |
+| `24h` (default) | 1 hour | 24 |
+| `7d` | 6 hours | 28 |
+| `30d` | 1 day | 30 |
+
+The trends come from one more query over the same rows, grouped by bucket as well as by model,
+agent and prompt version, under the same `--bigquery-max-bytes` cap, and it returns at most
+20,000 groups. Past that, the chart and the `Trend` cells give way to `Too many groups to chart
+for this range.`, and the tables still show. `30d` is offered on `/usage` only; the other pages
+keep their ranges.
 
 ## Scores
 
