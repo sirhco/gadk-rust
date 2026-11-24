@@ -889,7 +889,8 @@ async fn apply_ramps_promotes_and_aborts() {
 }
 
 /// A file store that replaces the rollout with `change` right after the first
-/// `load_all_with_rollouts`, as a concurrent writer would.
+/// `load_all_with_rollouts`, which the default `load_prompt` makes (the guard's first
+/// `load_prompt`), as a concurrent writer would.
 struct Racing {
     inner: FileStore,
     change: Option<Rollout>,

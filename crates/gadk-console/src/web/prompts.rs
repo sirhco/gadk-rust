@@ -132,7 +132,7 @@ async fn detail(
         .as_deref()
         .and_then(TimeRange::parse)
         .unwrap_or(TimeRange::Days7);
-    match store.load_all_with_rollouts().await {
+    match store.load_prompt(&name).await {
         Ok((snap, rollouts)) => {
             let metrics = if prompt_detail(&snap, &rollouts, &name).is_some() {
                 Some(production_metrics(&state, &name, range).await)
@@ -397,7 +397,7 @@ async fn write_failed(state: &AppState, name: &str, e: &StoreError) -> Response 
     let Some(store) = &state.store else {
         return no_store_404();
     };
-    let Ok((snap, rollouts)) = store.load_all_with_rollouts().await else {
+    let Ok((snap, rollouts)) = store.load_prompt(name).await else {
         return store_error(e);
     };
     if prompt_detail(&snap, &rollouts, name).is_none() {
