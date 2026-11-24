@@ -15,11 +15,11 @@
 //! The sessions page: the sessions of a window with their turns, tokens, cost, errors and
 //! thumbs.
 
-use chrono::{DateTime, Utc};
 use maud::{Markup, html};
 
 use super::cost::{NO_PRICES, PARTIAL_NOTE};
 use super::layout::{Nav, page};
+use super::millis;
 use crate::prices::{CostSum, PriceTable, Usage, cost_of, thousands};
 use crate::sessions::{SessionPage, SessionQuery};
 use crate::traces::TimeRange;
@@ -28,11 +28,6 @@ use crate::web::sessions::{next_link, session_link};
 /// The note shown when a query hit its row cap.
 pub(crate) const TRUNCATED: &str =
     "results truncated: the query hit its 5,000-row cap, so some rows or models are left out.";
-
-/// `%Y-%m-%dT%H:%M:%S%.3fZ`, as the other tables show times.
-pub(crate) fn millis(t: DateTime<Utc>) -> String {
-    t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
-}
 
 /// Input + output + reasoning tokens over `tokens`, and their cost (each model priced on its
 /// own).

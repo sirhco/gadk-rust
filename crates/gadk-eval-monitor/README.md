@@ -602,14 +602,17 @@ guard.
 Every spec is read and parsed, and every check below is made, before any guard runs; the first
 failure exits 2 with nothing run or written:
 
-- a source is missing (`guard spec <source>: not found`), unreadable, or an empty directory or
-  prefix (`guard spec <source>: no .yaml or .yml specs`);
+- a source is missing (`guard spec <source>: not found`), unreadable, an empty directory or
+  prefix (`guard spec <source>: no .yaml or .yml specs`), or a `gs://` URL with an invalid bucket
+  (`guard spec <source>: invalid bucket`);
 - a spec is invalid (`guard spec <origin>: <detail>`, where `<origin>` is the file path or
   `gs://` URL);
 - there are more than 200 specs;
 - two specs share a `name` (`guards: duplicate guard name <name> in <origin1> and <origin2>`);
 - a spec sets `min_step_age` without `--out`;
-- the price file cannot be read or parsed;
+- the price file cannot be read or parsed, including a `gs://` price file that is missing, has
+  an invalid bucket or does not name an object (`price file <source>: not found`,
+  `invalid bucket` or `not an object`);
 - `--out` is not a valid store URL.
 
 Each guard's output starts with `== <name> ==`, followed by exactly what `guard` prints for it:

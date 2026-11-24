@@ -598,6 +598,23 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn a_missing_table_is_a_502_page() {
+        let detail =
+            "Not found: Table data-proj:agent_analytics.agent_events was not found in location US";
+        for path in ["/sessions", "/users"] {
+            let fake = FakeHttp::new(vec![Ok((
+                404,
+                json!({ "error": { "code": 404, "message": detail, "errors": [{ "reason": "notFound" }] } }).to_string(),
+            ))]);
+            let (status, _, body) = get(bq_state(&fake, false), path).await;
+            assert_eq!(status, StatusCode::BAD_GATEWAY, "{path}");
+            assert!(body.contains(detail), "{path}: {body}");
+            assert!(body.contains(ACTIVE), "{path}: {body}");
+            assert!(!body.contains(r#"class="hint""#), "{path}: {body}");
+        }
+    }
+
     /// Run `inv` of session `s-1` with one turn per `(user, reply)`, complete, no error.
     fn run(inv: &str, turns: &[(&str, &str)]) -> ProductionRun {
         ProductionRun {

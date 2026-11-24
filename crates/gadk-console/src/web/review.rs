@@ -344,6 +344,10 @@ mod tests {
                 "/review?score=q&version=0&prompt=p",
                 "version: must be a positive integer",
             ),
+            (
+                "/review?score=q&prompt=p&version=%2B3",
+                "version: must be a positive integer",
+            ),
             ("/review?score=q&version=2", "version: needs a prompt"),
             (
                 "/review?score=q&range=30d",
@@ -357,6 +361,15 @@ mod tests {
             assert!(body.contains(ACTIVE), "{body}");
             assert!(fake.uris().is_empty(), "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_literal_plus_in_version_decodes_to_a_space_and_is_accepted() {
+        let fake = FakeHttp::new(vec![pending_reply(vec![])]);
+        let (status, _, body) = get(bq_state(&fake), "/review?score=q&prompt=p&version=+3").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(!body.contains("must be a positive integer"), "{body}");
+        assert_eq!(fake.uris().len(), 1);
     }
 
     #[tokio::test]

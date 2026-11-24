@@ -32,3 +32,10 @@ pub(crate) mod trace;
 pub(crate) mod traces;
 pub(crate) mod usage;
 pub(crate) mod users;
+
+use chrono::{DateTime, Utc};
+
+/// `%Y-%m-%dT%H:%M:%S%.3fZ`: a time as the tables show it, to the millisecond in UTC.
+pub(crate) fn millis(t: DateTime<Utc>) -> String {
+    t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+}

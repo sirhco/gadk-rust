@@ -19,7 +19,8 @@ use maud::{Markup, html};
 
 use super::cost::{NO_PRICES, PARTIAL_NOTE};
 use super::layout::{Nav, page};
-use super::sessions::{TRUNCATED, millis, totals, user_text};
+use super::millis;
+use super::sessions::{TRUNCATED, totals, user_text};
 use crate::prices::{PriceTable, thousands};
 use crate::sessions::{MAX_ID_LEN, USER_CAP, UserPage, UserQuery};
 use crate::traces::TimeRange;
