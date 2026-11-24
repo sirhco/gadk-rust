@@ -49,7 +49,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use chrono::{DateTime, TimeDelta, Utc};
@@ -66,6 +66,7 @@ use crate::experiment_spec::{AgentInstruction, ExperimentSpec};
 use crate::export::{
     ExportOptions, ExportSource, ScoreFilter, cases_text, export_runs, write_set_file,
 };
+use crate::gcp::{AdcTokenSource, GcpHttp};
 use crate::guard::Guard;
 use crate::guard_source::GuardSource;
 use crate::guard_spec::GuardSpec;
@@ -79,7 +80,7 @@ use crate::spec::{
     DEFAULT_JUDGE_TIMEOUT, JudgeSpec, MAX_LIMIT, MonitorSpec, SourceSpec, amount,
     is_dataset_or_table, is_project_id,
 };
-use crate::store::ReportStore;
+use crate::store::{ReportStore, gcs};
 
 /// The default number of reports `report` lists.
 const DEFAULT_REPORT_LIMIT: usize = 20;
@@ -142,6 +143,38 @@ pub trait Backends: Send + Sync {
             "guards are not supported by these backends".into(),
         ))
     }
+
+    /// The full names of the objects directly under `prefix` in the Cloud Storage `bucket`
+    /// (`guards` with a `gs://` source). The default refuses; [`CloudBackends`] lists them with
+    /// Application Default Credentials.
+    async fn list_objects(&self, bucket: &str, prefix: &str) -> Result<Vec<String>, MonitorError> {
+        let _ = (bucket, prefix);
+        Err(MonitorError::Store(GS_REFUSED.into()))
+    }
+
+    /// The contents of the Cloud Storage object `name` in `bucket`, or `None` when it does not
+    /// exist (`guards` with a `gs://` source or price file). The default refuses;
+    /// [`CloudBackends`] reads it with Application Default Credentials.
+    async fn read_object(&self, bucket: &str, name: &str) -> Result<Option<String>, MonitorError> {
+        let _ = (bucket, name);
+        Err(MonitorError::Store(GS_REFUSED.into()))
+    }
+}
+
+/// The error of the default [`Backends::list_objects`] and [`Backends::read_object`].
+const GS_REFUSED: &str = "gs:// sources are not supported by these backends";
+
+/// The Cloud Storage client of [`CloudBackends`], built on first use.
+fn cloud_storage() -> Result<GcpHttp, MonitorError> {
+    static GCS: OnceLock<GcpHttp> = OnceLock::new();
+    if let Some(gcp) = GCS.get() {
+        return Ok(gcp.clone());
+    }
+    let auth = AdcTokenSource::adc()
+        .map_err(|e| MonitorError::Store(format!("Application Default Credentials: {e}")))?;
+    Ok(GCS
+        .get_or_init(|| GcpHttp::new(GcpHttp::default_http(), Arc::new(auth)))
+        .clone())
 }
 
 /// The real backends: the BigQuery or Cloud Trace transcript source and Gemini on Vertex AI,
@@ -207,6 +240,18 @@ impl Backends for CloudBackends {
         Ok(Arc::new(
             BigQueryGuardSource::new(project, dataset, table)?.with_max_bytes_billed(max_bytes),
         ))
+    }
+
+    async fn list_objects(&self, bucket: &str, prefix: &str) -> Result<Vec<String>, MonitorError> {
+        let names = gcs::list_names(&cloud_storage()?, bucket, prefix).await?;
+        Ok(names
+            .into_iter()
+            .map(|name| format!("{prefix}{name}"))
+            .collect())
+    }
+
+    async fn read_object(&self, bucket: &str, name: &str) -> Result<Option<String>, MonitorError> {
+        gcs::read_text(&cloud_storage()?, bucket, name).await
     }
 }
 
@@ -1738,6 +1783,23 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "transcript source: guards are not supported by these backends"
+        );
+    }
+
+    #[tokio::test]
+    async fn backends_without_gs_refuse_it() {
+        let fake = Fake::new(Vec::new());
+        let refused = "report store: gs:// sources are not supported by these backends";
+        assert_eq!(
+            fake.list_objects("b", "p/").await.unwrap_err().to_string(),
+            refused
+        );
+        assert_eq!(
+            fake.read_object("b", "p/a.yaml")
+                .await
+                .unwrap_err()
+                .to_string(),
+            refused
         );
     }
 

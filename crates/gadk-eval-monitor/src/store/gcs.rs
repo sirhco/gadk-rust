@@ -80,65 +80,78 @@ impl GcsStore {
 
     /// The object names directly under the prefix, with the prefix removed.
     pub(super) async fn names(&self) -> Result<Vec<String>, MonitorError> {
-        let mut names = Vec::new();
-        let mut page: Option<String> = None;
-        loop {
-            let mut url = format!(
-                "{API}/{}/o?prefix={}&delimiter=%2F",
-                encode(&self.bucket),
-                encode(&self.prefix)
-            );
-            if let Some(p) = &page {
-                url.push_str(&format!("&pageToken={}", encode(p)));
-            }
-            let v = self
-                .gcp
-                .json(Method::GET, &url, None)
-                .await
-                .map_err(MonitorError::Store)?;
-            for item in v
-                .get("items")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                if let Some(name) = item
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .and_then(|n| n.strip_prefix(self.prefix.as_str()))
-                {
-                    names.push(name.to_owned());
-                }
-            }
-            page = v
-                .get("nextPageToken")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            if page.is_none() {
-                return Ok(names);
-            }
-        }
+        list_names(&self.gcp, &self.bucket, &self.prefix).await
     }
 
     /// The contents of `name`, or `None` when the object does not exist.
     pub(super) async fn read(&self, name: &str) -> Result<Option<String>, MonitorError> {
-        let url = format!(
-            "{API}/{}/o/{}?alt=media",
-            encode(&self.bucket),
-            encode(&format!("{}{name}", self.prefix))
+        read_text(&self.gcp, &self.bucket, &format!("{}{name}", self.prefix)).await
+    }
+}
+
+/// The names of the objects directly under `prefix` in `bucket` (`delimiter=/`, every page),
+/// with `prefix` removed.
+pub(crate) async fn list_names(
+    gcp: &GcpHttp,
+    bucket: &str,
+    prefix: &str,
+) -> Result<Vec<String>, MonitorError> {
+    let mut names = Vec::new();
+    let mut page: Option<String> = None;
+    loop {
+        let mut url = format!(
+            "{API}/{}/o?prefix={}&delimiter=%2F",
+            encode(bucket),
+            encode(prefix)
         );
-        let reply = self
-            .gcp
-            .send(Method::GET, &url, None)
+        if let Some(p) = &page {
+            url.push_str(&format!("&pageToken={}", encode(p)));
+        }
+        let v = gcp
+            .json(Method::GET, &url, None)
             .await
             .map_err(MonitorError::Store)?;
-        match reply.status {
-            404 => Ok(None),
-            _ if reply.ok() => String::from_utf8(reply.body.to_vec())
-                .map(Some)
-                .map_err(|e| MonitorError::Store(format!("{name}: {e}"))),
-            _ => Err(MonitorError::Store(reply.error_text())),
+        for item in v
+            .get("items")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(name) = item
+                .get("name")
+                .and_then(Value::as_str)
+                .and_then(|n| n.strip_prefix(prefix))
+            {
+                names.push(name.to_owned());
+            }
         }
+        page = v
+            .get("nextPageToken")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if page.is_none() {
+            return Ok(names);
+        }
+    }
+}
+
+/// The contents of the object `name` in `bucket`, or `None` when it does not exist.
+pub(crate) async fn read_text(
+    gcp: &GcpHttp,
+    bucket: &str,
+    name: &str,
+) -> Result<Option<String>, MonitorError> {
+    let url = format!("{API}/{}/o/{}?alt=media", encode(bucket), encode(name));
+    let reply = gcp
+        .send(Method::GET, &url, None)
+        .await
+        .map_err(MonitorError::Store)?;
+    match reply.status {
+        404 => Ok(None),
+        _ if reply.ok() => String::from_utf8(reply.body.to_vec())
+            .map(Some)
+            .map_err(|e| MonitorError::Store(format!("{name}: {e}"))),
+        _ => Err(MonitorError::Store(reply.error_text())),
     }
 }
 
@@ -146,7 +159,7 @@ impl GcsStore {
 mod tests {
     use std::sync::Arc;
 
-    use crate::gcp::NoAuth;
+    use crate::gcp::{GcpHttp, NoAuth};
     use crate::store::ReportStore;
     use crate::store::tests::{experiment, guard, report};
     use crate::testutil::{exchange, replay};
@@ -567,6 +580,100 @@ mod tests {
         assert_eq!(
             store.experiment_names(10).await.unwrap(),
             ["exp-e2e-20270115T090000Z.json"]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_names_pages_with_the_delimiter() {
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=guards%2F&delimiter=%2F"),
+                    "",
+                    200,
+                    r#"{"items":[{"name":"guards/b.yaml"},{"name":"guards/a.yml"}],"prefixes":["guards/old/"],"nextPageToken":"t 2"}"#,
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=guards%2F&delimiter=%2F&pageToken=t%202"),
+                    "",
+                    200,
+                    r#"{"items":[{"name":"guards/readme.txt"}]}"#,
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=&delimiter=%2F"),
+                    "",
+                    200,
+                    r#"{"prefixes":["guards/"]}"#,
+                ),
+            ],
+        );
+        let gcp = GcpHttp::new(http, Arc::new(NoAuth));
+        assert_eq!(
+            super::list_names(&gcp, "evals", "guards/").await.unwrap(),
+            ["b.yaml", "a.yml", "readme.txt"]
+        );
+        assert!(
+            super::list_names(&gcp, "evals", "")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn read_text_reads_an_object_and_is_none_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}/guards%2Fa.yaml?alt=media"),
+                    "",
+                    200,
+                    "name: a\n",
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}/guards%2Fmissing.yaml?alt=media"),
+                    "",
+                    404,
+                    r#"{"error":{"code":404,"message":"No such object"}}"#,
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}/guards%2Fdenied.yaml?alt=media"),
+                    "",
+                    403,
+                    r#"{"error":{"code":403,"message":"caller lacks storage.objects.get"}}"#,
+                ),
+            ],
+        );
+        let gcp = GcpHttp::new(http, Arc::new(NoAuth));
+        assert_eq!(
+            super::read_text(&gcp, "evals", "guards/a.yaml")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("name: a\n")
+        );
+        assert_eq!(
+            super::read_text(&gcp, "evals", "guards/missing.yaml")
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            super::read_text(&gcp, "evals", "guards/denied.yaml")
+                .await
+                .unwrap_err()
+                .to_string(),
+            "report store: HTTP 403: caller lacks storage.objects.get"
         );
     }
 }
