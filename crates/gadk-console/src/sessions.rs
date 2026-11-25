@@ -58,10 +58,11 @@ pub(crate) const USER_FIELDS: [(&str, &str); 12] = [
     ("reasoning", "INT64"),
 ];
 use chrono::{DateTime, Utc};
+use gadk_analytics::row::{param, text, timestamp, ts_param};
 use serde_json::{Map, Value};
 
 use crate::prices::Usage;
-use crate::traces::{SourceError, TimeRange, param, text, timestamp, ts_param};
+use crate::traces::{SourceError, TimeRange};
 use crate::usage::{CALL_COLUMNS, UsageSource, count, window_params};
 
 /// The most sessions `/sessions` lists.
@@ -543,11 +544,8 @@ fn array<'a>(row: &'a Map<String, Value>, key: &str) -> &'a [Value] {
 /// A row of [`session_turns_sql`]: the tools deduplicated in first-call order (empty names
 /// dropped), the token and score structs read from their arrays.
 fn turn_row(row: &Map<String, Value>) -> Result<TurnRow, SourceError> {
-    let invocation_id = text(row, "invocation_id").ok_or_else(|| SourceError::BigQuery {
-        status: None,
-        reason: None,
-        detail: "row without a valid invocation_id".to_owned(),
-    })?;
+    let invocation_id = text(row, "invocation_id")
+        .ok_or_else(|| SourceError::bigquery(None, None, "row without a valid invocation_id"))?;
     let mut tools: Vec<String> = Vec::new();
     for tool in array(row, "tools").iter().filter_map(Value::as_str) {
         if !tool.is_empty() && !tools.iter().any(|t| t == tool) {
@@ -746,7 +744,7 @@ pub(crate) fn turn_reply(rows: Vec<Vec<Value>>) -> Result<(u16, String), String>
             field("value", "STRING"),
         ] }),
     ];
-    crate::traces::test_http::schema_reply(schema, rows, false)
+    gadk_analytics::testutil::schema_reply(schema, rows, false)
 }
 
 /// The cells of one [`session_turns_sql`] row.
@@ -790,7 +788,7 @@ impl<'a> TurnCells<'a> {
 
     /// The row's cells.
     pub(crate) fn cells(&self) -> Vec<Value> {
-        use crate::traces::test_http::{record, repeated};
+        use gadk_analytics::testutil::{record, repeated};
         vec![
             Value::from(self.invocation_id),
             self.trace_id.map_or(Value::Null, Value::from),
@@ -831,7 +829,7 @@ mod tests {
 
     use super::*;
     use crate::traces::BigQueryTable;
-    use crate::traces::test_http::{FakeHttp, param_value, reply};
+    use gadk_analytics::testutil::{FakeHttp, param_value, reply};
     const TURNS_SQL: &str = r"WITH inv AS (
   SELECT invocation_id, MIN(timestamp) AS start, ANY_VALUE(NULLIF(trace_id, '')) AS trace_id,
     MAX(IF(event_type = 'INVOCATION_COMPLETED', timestamp, NULL)) AS completed,
@@ -1524,11 +1522,7 @@ ORDER BY last DESC, user_id, model";
             .unwrap_err();
         assert_eq!(
             err,
-            SourceError::BigQuery {
-                status: Some(500),
-                reason: Some("backendError".into()),
-                detail: "backend error".into()
-            }
+            SourceError::bigquery(Some(500), Some("backendError".into()), "backend error")
         );
     }
 
@@ -1630,11 +1624,7 @@ ORDER BY last DESC, user_id, model";
             .unwrap_err();
         assert_eq!(
             err,
-            SourceError::BigQuery {
-                status: None,
-                reason: None,
-                detail: "row without a valid invocation_id".into()
-            }
+            SourceError::bigquery(None, None, "row without a valid invocation_id")
         );
     }
 }

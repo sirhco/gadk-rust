@@ -150,10 +150,10 @@ mod tests {
     use super::{next_link, review_link};
     use crate::review::{Cursor, ReviewQueue, pending_cells, pending_reply};
     use crate::traces::BigQueryTable;
-    use crate::traces::test_http::{FakeHttp, param_value};
     use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{FakeSource, fixed_now, get, state, test_rubrics};
+    use gadk_analytics::testutil::{FakeHttp, param_value};
 
     const ACTIVE: &str = r#"<a class="active" href="/review">Review</a>"#;
     const A: &str = "0123456789abcdef0123456789abcdef";

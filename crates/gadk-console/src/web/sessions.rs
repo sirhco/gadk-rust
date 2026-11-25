@@ -421,10 +421,10 @@ mod tests {
         SESSION_FIELDS, TurnCells, USER_FIELDS, session_cells, turn_reply, user_cells,
     };
     use crate::traces::BigQueryTable;
-    use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{FakeExport, FakeSource, fixed_now, get, state};
+    use gadk_analytics::testutil::{FakeHttp, param_value, reply};
 
     const ACTIVE: &str = r#"<a class="active" href="/sessions">Sessions</a>"#;
     const PRICES: &str = "- model: gemini-3.8-flash\n  input: 1\n  output: 2\n";

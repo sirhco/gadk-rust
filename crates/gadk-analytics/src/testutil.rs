@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A scripted fake HTTP client for the trace-source tests.
+//! Test doubles for code that runs the queries (feature `test-util`): [`FakeHttp`], a scripted
+//! HTTP client to build a `gadk_bigquery::BigQueryClient` over, and the `jobs.query` reply
+//! builders.
+
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::VecDeque;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
@@ -24,30 +30,37 @@ use http::{HeaderMap, Method, StatusCode};
 use serde_json::{Value, json};
 
 /// One request the fake client saw.
-pub(crate) struct Seen {
-    pub(crate) method: Method,
-    pub(crate) uri: String,
-    pub(crate) headers: HeaderMap,
-    pub(crate) body: Bytes,
+pub struct Seen {
+    /// The request method.
+    pub method: Method,
+    /// The request URI.
+    pub uri: String,
+    /// The request headers.
+    pub headers: HeaderMap,
+    /// The request body.
+    pub body: Bytes,
 }
 
 /// Records requests; answers each with the next scripted reply
 /// (`Ok((status, body))`, or `Err(detail)` for a transport failure).
 #[derive(Default)]
-pub(crate) struct FakeHttp {
+pub struct FakeHttp {
     replies: Mutex<VecDeque<Result<(u16, String), String>>>,
-    pub(crate) seen: Mutex<Vec<Seen>>,
+    /// Every request seen, in order.
+    pub seen: Mutex<Vec<Seen>>,
 }
 
 impl FakeHttp {
-    pub(crate) fn new(replies: Vec<Result<(u16, String), String>>) -> Arc<Self> {
+    /// A client that answers with `replies`, in order; a request past the last reply panics.
+    pub fn new(replies: Vec<Result<(u16, String), String>>) -> Arc<Self> {
         Arc::new(Self {
             replies: Mutex::new(replies.into()),
             seen: Mutex::default(),
         })
     }
 
-    pub(crate) fn uris(&self) -> Vec<String> {
+    /// The URIs of the requests seen, in order.
+    pub fn uris(&self) -> Vec<String> {
         self.seen
             .lock()
             .unwrap()
@@ -56,46 +69,60 @@ impl FakeHttp {
             .collect()
     }
 
-    pub(crate) fn body(&self, i: usize) -> Value {
+    /// The JSON body of the `i`th request seen.
+    pub fn body(&self, i: usize) -> Value {
         serde_json::from_slice(&self.seen.lock().unwrap()[i].body).unwrap()
     }
 }
 
-#[async_trait::async_trait]
+// `HttpClient` is an `async_trait` trait; this is the method that attribute generates, written
+// out so the crate does not depend on `async-trait`.
 impl HttpClient for FakeHttp {
-    async fn send(
-        &self,
+    fn send<'life0, 'async_trait>(
+        &'life0 self,
         req: http::Request<Bytes>,
-    ) -> Result<http::Response<BodyStream>, ModelError> {
-        let (parts, body) = req.into_parts();
-        self.seen.lock().unwrap().push(Seen {
-            method: parts.method,
-            uri: parts.uri.to_string(),
-            headers: parts.headers,
-            body,
-        });
-        let reply = self
-            .replies
-            .lock()
-            .unwrap()
-            .pop_front()
-            .expect("unscripted request");
-        match reply {
-            Ok((status, text)) => {
-                let stream: BodyStream =
-                    futures::stream::once(async move { Ok(Bytes::from(text)) }).boxed();
-                let mut resp = http::Response::new(stream);
-                *resp.status_mut() = StatusCode::from_u16(status).unwrap();
-                Ok(resp)
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<http::Response<BodyStream>, ModelError>>
+                + Send
+                + 'async_trait,
+        >,
+    >
+    where
+        'life0: 'async_trait,
+        Self: 'async_trait,
+    {
+        Box::pin(async move {
+            let (parts, body) = req.into_parts();
+            self.seen.lock().unwrap().push(Seen {
+                method: parts.method,
+                uri: parts.uri.to_string(),
+                headers: parts.headers,
+                body,
+            });
+            let reply = self
+                .replies
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("unscripted request");
+            match reply {
+                Ok((status, text)) => {
+                    let stream: BodyStream =
+                        futures::stream::once(async move { Ok(Bytes::from(text)) }).boxed();
+                    let mut resp = http::Response::new(stream);
+                    *resp.status_mut() = StatusCode::from_u16(status).unwrap();
+                    Ok(resp)
+                }
+                Err(detail) => Err(ModelError::Transport(detail.into())),
             }
-            Err(detail) => Err(ModelError::Transport(detail.into())),
-        }
+        })
     }
 }
 
 /// A completed `jobs.query` reply with `fields` (name, type) and `rows` (one JSON per cell);
 /// `page_token` adds a `pageToken` (more rows exist).
-pub(crate) fn reply(
+pub fn reply(
     fields: &[(&str, &str)],
     rows: Vec<Vec<Value>>,
     page_token: bool,
@@ -109,7 +136,7 @@ pub(crate) fn reply(
 
 /// [`reply`] with whole `jobs.query` schema fields, so a field can be `REPEATED` or a `RECORD`
 /// with its own `fields` (see [`record`] and [`repeated`] for such cells).
-pub(crate) fn schema_reply(
+pub fn schema_reply(
     schema: Vec<Value>,
     rows: Vec<Vec<Value>>,
     page_token: bool,
@@ -128,17 +155,17 @@ pub(crate) fn schema_reply(
 }
 
 /// A `RECORD` value (or a whole row) as `jobs.query` sends it: `{"f": [{"v": cell}, …]}`.
-pub(crate) fn record(cells: Vec<Value>) -> Value {
+pub fn record(cells: Vec<Value>) -> Value {
     json!({ "f": cells.into_iter().map(|v| json!({ "v": v })).collect::<Vec<_>>() })
 }
 
 /// A `REPEATED` cell as `jobs.query` sends it: `[{"v": item}, …]`.
-pub(crate) fn repeated(items: Vec<Value>) -> Value {
+pub fn repeated(items: Vec<Value>) -> Value {
     Value::Array(items.into_iter().map(|v| json!({ "v": v })).collect())
 }
 
 /// The query parameter `name` of a `jobs.query` request body.
-pub(crate) fn param_value(body: &Value, name: &str) -> Value {
+pub fn param_value(body: &Value, name: &str) -> Value {
     body["queryParameters"]
         .as_array()
         .unwrap()

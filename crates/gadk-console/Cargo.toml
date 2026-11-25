@@ -16,6 +16,7 @@ name = "gadk-console"
 path = "src/main.rs"
 
 [dependencies]
+gadk-analytics = { workspace = true }
 gadk-model = { workspace = true }
 gadk-bigquery = { workspace = true }
 gadk-cloudtrace = { workspace = true }
@@ -40,8 +41,8 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-# Builds the fake HTTP client's `BodyStream` in the traces/test_http.rs tests.
-futures = { workspace = true }
+# `gadk_analytics::testutil`: the fake HTTP client and row fixtures of the query tests.
+gadk-analytics = { workspace = true, features = ["test-util"] }
 tower = { workspace = true, features = ["util"] }
 tempfile = { workspace = true }
 gadk-telemetry = { workspace = true }

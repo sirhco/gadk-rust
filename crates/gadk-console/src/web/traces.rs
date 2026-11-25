@@ -482,7 +482,6 @@ mod tests {
     use crate::datasets::Datasets;
     use crate::prices::PriceTable;
     use crate::traces::BigQueryTable;
-    use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::traces::{
         LogEntry, LogSet, RawSpan, Service, SourceError, TimeRange, TraceDetail, TraceId,
         TracePage, TraceQuery, TraceSource, TraceSummary,
@@ -491,6 +490,7 @@ mod tests {
     use crate::web::AppState;
     use crate::web::testutil::{AUTHOR, CSRF, FakeExport, post_form, test_rubrics};
     use crate::web::testutil::{FakeSource, fixed_now, get, state};
+    use gadk_analytics::testutil::{FakeHttp, param_value, reply};
     use gadk_bigquery::{BigQueryClient, NoAuth};
     use http::header::LOCATION;
 

@@ -490,7 +490,7 @@ class EdgeTest(unittest.TestCase):
     def test_console_may_depend_on_cloudtrace_eval_eval_monitor_and_bigquery(self):
         self.assertEqual(cwd.ALLOWED["gadk-console"],
                          {"gadk-cloudtrace", "gadk-model", "gadk-prompts", "gadk-prompts-cli",
-                          "gadk-eval", "gadk-eval-monitor", "gadk-bigquery"})
+                          "gadk-eval", "gadk-eval-monitor", "gadk-bigquery", "gadk-analytics"})
         self.assertEqual(cwd.check(self.repo), [])
 
     def test_cloudtrace_depends_only_on_model(self):
@@ -527,7 +527,7 @@ class EdgeTest(unittest.TestCase):
 
     def test_facade_bigquery_edge_is_optional(self):
         self.assertEqual(sorted(c for c, deps in cwd.ALLOWED.items() if "gadk-bigquery" in deps),
-                         ["gadk", "gadk-console"])
+                         ["gadk", "gadk-analytics", "gadk-console"])
         self.assertNotIn(("gadk-console", "gadk-bigquery"), cwd.OPTIONAL)
         self.assertIn(("gadk", "gadk-bigquery"), cwd.OPTIONAL)
         self.edit("gadk", "gadk-bigquery = { workspace = true, optional = true }",

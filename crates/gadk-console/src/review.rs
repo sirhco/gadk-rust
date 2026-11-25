@@ -21,10 +21,11 @@
 //! `timestamp`.
 
 use chrono::{DateTime, SecondsFormat, Utc};
+use gadk_analytics::row::{param, text, timestamp, ts_param};
 use serde_json::{Map, Value};
 
 use crate::rubrics::Rubrics;
-use crate::traces::{SourceError, TimeRange, TraceId, param, text, timestamp, ts_param};
+use crate::traces::{SourceError, TimeRange, TraceId};
 use crate::url::percent_encode;
 use crate::usage::{UsageSource, count, string_array_param, window_params};
 
@@ -289,11 +290,8 @@ fn pending_params(
 
 /// A row of [`pending_sql`]; a NULL `prompts` array is empty.
 fn pending_row(row: &Map<String, Value>) -> Result<PendingTrace, SourceError> {
-    let trace_id = text(row, "trace_id").ok_or_else(|| SourceError::BigQuery {
-        status: None,
-        reason: None,
-        detail: "row without a valid trace_id".to_owned(),
-    })?;
+    let trace_id = text(row, "trace_id")
+        .ok_or_else(|| SourceError::bigquery(None, None, "row without a valid trace_id"))?;
     let prompts = row
         .get("prompts")
         .and_then(Value::as_array)
@@ -402,7 +400,7 @@ pub(crate) const PENDING_FIELDS: [(&str, &str); 4] = [
 /// `REPEATED`.
 #[cfg(test)]
 pub(crate) fn pending_reply(rows: Vec<Vec<Value>>) -> Result<(u16, String), String> {
-    let (status, body) = crate::traces::test_http::reply(&PENDING_FIELDS, rows, false)?;
+    let (status, body) = gadk_analytics::testutil::reply(&PENDING_FIELDS, rows, false)?;
     let mut body: Value = serde_json::from_str(&body).unwrap();
     body["schema"]["fields"][2]["mode"] = Value::from("REPEATED");
     Ok((status, body.to_string()))
@@ -445,7 +443,7 @@ mod tests {
 
     use super::*;
     use crate::traces::BigQueryTable;
-    use crate::traces::test_http::{FakeHttp, param_value};
+    use gadk_analytics::testutil::{FakeHttp, param_value};
 
     const TRACE: &str = "0123456789abcdef0123456789abcdef";
 

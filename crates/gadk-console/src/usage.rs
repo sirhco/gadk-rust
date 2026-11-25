@@ -22,11 +22,12 @@
 //! every result is grouped by model.
 
 use chrono::{DateTime, TimeDelta, Utc};
+use gadk_analytics::row::{from_bigquery, param, text, ts_param};
 use gadk_bigquery::{BigQueryClient, QueryOptions, QueryResult};
 use serde_json::{Map, Value, json};
 
 use crate::prices::{UNKNOWN_MODEL, Usage};
-use crate::traces::{BigQueryTable, SourceError, from_bigquery, param, text, ts_param};
+use crate::traces::{BigQueryTable, SourceError};
 
 /// The most model × agent × prompt groups the breakdown query returns.
 pub(crate) const BREAKDOWN_CAP: usize = 5_000;
@@ -692,7 +693,7 @@ pub(crate) mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::traces::test_http::{FakeHttp, param_value, reply};
+    use gadk_analytics::testutil::{FakeHttp, param_value, reply};
 
     const QUERIES: &str =
         "https://bigquery.googleapis.com/bigquery/v2/projects/billing-proj/queries";
@@ -957,11 +958,7 @@ pub(crate) mod tests {
         let err = source(&fake).breakdown(start(), end()).await.unwrap_err();
         assert_eq!(
             err,
-            SourceError::BigQuery {
-                status: Some(403),
-                reason: Some("accessDenied".into()),
-                detail: "Access Denied".into()
-            }
+            SourceError::bigquery(Some(403), Some("accessDenied".into()), "Access Denied")
         );
     }
 

@@ -618,11 +618,11 @@ mod tests {
     use crate::evals::ReportCache;
     use crate::prices::PriceTable;
     use crate::traces::BigQueryTable;
-    use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{CSRF, FakeSource, get, post_form, state};
     use crate::web::testutil::{fixed_now, guard_cache, report, report_cache, state_with_reports};
+    use gadk_analytics::testutil::{FakeHttp, param_value, reply};
     use gadk_bigquery::{BigQueryClient, NoAuth};
     use gadk_eval::Outcome;
     use serde_json::Value;

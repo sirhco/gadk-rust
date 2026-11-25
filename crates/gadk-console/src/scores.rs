@@ -21,9 +21,10 @@
 //! (the insert at no less than 10 MiB); every read filters `timestamp`.
 
 use chrono::{DateTime, Utc};
+use gadk_analytics::row::{param, text, timestamp, ts_param};
 use serde_json::{Map, Value, json};
 
-use crate::traces::{SourceError, param, text, timestamp, ts_param};
+use crate::traces::SourceError;
 use crate::usage::{UsageSource, count, string_array_param, version_of, window_params};
 
 /// The most scores `/traces/{id}` shows.
@@ -515,7 +516,7 @@ mod tests {
 
     use super::*;
     use crate::traces::BigQueryTable;
-    use crate::traces::test_http::{FakeHttp, param_value, reply};
+    use gadk_analytics::testutil::{FakeHttp, param_value, reply};
 
     const TRACE: &str = "0123456789abcdef0123456789abcdef";
 

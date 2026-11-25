@@ -1440,6 +1440,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "gadk-analytics"
+version = "0.5.17"
+dependencies = [
+ "bytes",
+ "chrono",
+ "futures",
+ "gadk-analytics",
+ "gadk-bigquery",
+ "gadk-model",
+ "http",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "gadk-anthropic"
 version = "0.5.17"
 dependencies = [
@@ -1634,7 +1651,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "futures",
+ "gadk-analytics",
  "gadk-bigquery",
  "gadk-cloudtrace",
  "gadk-eval",

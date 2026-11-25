@@ -214,11 +214,11 @@ mod tests {
 
     use crate::prices::{PriceTable, thousands};
     use crate::traces::BigQueryTable;
-    use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::usage::UsageSource;
     use crate::usage::tests::TREND_FIELDS;
     use crate::web::AppState;
     use crate::web::testutil::{FakeSource, get, state};
+    use gadk_analytics::testutil::{FakeHttp, param_value, reply};
 
     const PRICES: &str =
         "- model: gemini-3.8-flash\n  input: 0.30\n  output: 2.50\n  cached_input: 0.075\n";

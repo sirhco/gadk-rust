@@ -32,6 +32,7 @@ members = [
   "crates/gadk-prompts-firestore",
   "crates/gadk-prompts-cli",
   "crates/gadk-cloudtrace",
+  "crates/gadk-analytics",
   "crates/gadk-console",
   "crates/gadk-eval",
   "crates/gadk-eval-monitor",
@@ -84,6 +85,7 @@ gadk-eval = { path = "crates/gadk-eval", version = "0.5.17" }
 gadk-eval-monitor = { path = "crates/gadk-eval-monitor", version = "0.5.17" }
 gadk-cloudtrace = { path = "crates/gadk-cloudtrace", version = "0.5.17" }
 gadk-bigquery = { path = "crates/gadk-bigquery", version = "0.5.17" }
+gadk-analytics = { path = "crates/gadk-analytics", version = "0.5.17" }
 similar = "2.7.0"
 maud = { version = "0.27.0", default-features = false }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
