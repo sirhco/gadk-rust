@@ -59,11 +59,12 @@ pub(crate) const USER_FIELDS: [(&str, &str); 12] = [
 ];
 use chrono::{DateTime, Utc};
 use gadk_analytics::cost::Usage;
+use gadk_analytics::plumbing::{CALL_COLUMNS, count, window_params};
 use gadk_analytics::row::{param, text, timestamp, ts_param};
 use serde_json::{Map, Value};
 
 use crate::traces::{SourceError, TimeRange};
-use crate::usage::{CALL_COLUMNS, UsageSource, count, window_params};
+use crate::usage::UsageSource;
 
 /// The most sessions `/sessions` lists.
 pub(crate) const SESSION_CAP: usize = 100;

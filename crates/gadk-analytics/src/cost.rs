@@ -19,6 +19,49 @@
 //! 1,000,000 tokens from a [`gadk_eval_monitor::PriceTable`]; [`cost_of`] prices a usage and
 //! [`CostSum`] adds up call costs, remembering calls without a price. The `LABEL_*` constants
 //! are the span labels that carry a model call's model and tokens.
+//!
+//! ```
+//! use std::sync::Arc;
+//!
+//! use chrono::{TimeZone, Utc};
+//! use gadk_analytics::cost::{CostSum, cost_of};
+//! use gadk_analytics::testutil::{FakeHttp, reply};
+//! use gadk_analytics::{AnalyticsSource, BigQueryTable};
+//! use gadk_bigquery::{BigQueryClient, NoAuth};
+//!
+//! # tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+//! // One scripted `jobs.query` reply: a single breakdown row.
+//! let http = FakeHttp::new(vec![reply(
+//!     &[
+//!         ("model", "STRING"), ("agent", "STRING"), ("prompt", "STRING"), ("calls", "INT64"),
+//!         ("input", "INT64"), ("cached", "INT64"), ("output", "INT64"), ("reasoning", "INT64"),
+//!     ],
+//!     vec![vec![
+//!         "gemini-3.8-flash".into(), "triage".into(), "triage@2".into(), "3".into(),
+//!         "3000".into(), "1000".into(), "600".into(), "0".into(),
+//!     ]],
+//!     false,
+//! )]);
+//! let source = AnalyticsSource::new(
+//!     BigQueryClient::with_client(http.clone(), Arc::new(NoAuth)),
+//!     "billing-proj",
+//!     BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
+//!     1_073_741_824,
+//! );
+//! let end = Utc.with_ymd_and_hms(2026, 11, 20, 12, 0, 0).unwrap();
+//! let breakdown = source.breakdown(end - chrono::TimeDelta::hours(24), end).await?;
+//! let prices = gadk_eval_monitor::PriceTable::from_yaml(
+//!     "- model: gemini-3.8-flash\n  input: 0.30\n  output: 2.50\n",
+//! )
+//! .unwrap();
+//! let mut total = CostSum::default();
+//! for cell in &breakdown.cells {
+//!     total.add(cost_of(Some(&prices), &cell.calls.model, &cell.calls.usage));
+//! }
+//! assert_eq!(total.text(), "$0.002400");
+//! # Ok::<(), gadk_analytics::SourceError>(())
+//! # }).unwrap();
+//! ```
 
 use std::collections::BTreeMap;
 use std::ops::AddAssign;

@@ -21,11 +21,12 @@
 //! (the insert at no less than 10 MiB); every read filters `timestamp`.
 
 use chrono::{DateTime, Utc};
+use gadk_analytics::plumbing::{count, string_array_param, version_of, window_params};
 use gadk_analytics::row::{param, text, timestamp, ts_param};
 use serde_json::{Map, Value, json};
 
 use crate::traces::SourceError;
-use crate::usage::{UsageSource, count, string_array_param, version_of, window_params};
+use crate::usage::UsageSource;
 
 /// The most scores `/traces/{id}` shows.
 pub(crate) const TRACE_SCORES_CAP: usize = 200;

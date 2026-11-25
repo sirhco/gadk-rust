@@ -15,6 +15,7 @@
 //! The JSON shape of the public types (`serde::Serialize`).
 
 use gadk_analytics::cost::{CostSum, Usage};
+use gadk_analytics::usage::{Breakdown, Cell, ModelCalls, TopTrace, Trend, TrendCell};
 use gadk_analytics::{BigQueryTable, Service, SourceError, TimeRange, TraceId};
 use serde_json::json;
 
@@ -58,5 +59,29 @@ fn the_cost_types_serialize() {
     assert_eq!(
         serde_json::to_value(sum).unwrap(),
         json!({ "usd": 0.5, "priced": true, "unpriced": true })
+    );
+}
+
+#[test]
+fn the_usage_types_serialize() {
+    let calls = ModelCalls::new("m".into(), 2, Usage::new(10, 0, 5, 1));
+    let calls_json = json!({
+        "model": "m",
+        "calls": 2,
+        "usage": { "input": 10, "cached": 0, "output": 5, "reasoning": 1 },
+    });
+    let cell = Cell::new("triage".into(), Some("triage@2".into()), calls.clone());
+    let cell_json = json!({ "agent": "triage", "prompt": "triage@2", "calls": calls_json });
+    assert_eq!(
+        serde_json::to_value(Breakdown::new(vec![cell.clone()], true)).unwrap(),
+        json!({ "cells": [cell_json], "truncated": true })
+    );
+    assert_eq!(
+        serde_json::to_value(Trend::new(vec![TrendCell::new(3, cell)], false)).unwrap(),
+        json!({ "cells": [{ "bucket": 3, "cell": cell_json }], "truncated": false })
+    );
+    assert_eq!(
+        serde_json::to_value(TopTrace::new("t".into(), 16, vec![calls])).unwrap(),
+        json!({ "trace_id": "t", "total": 16, "models": [calls_json] })
     );
 }

@@ -15,6 +15,10 @@
 //! gadk-analytics: typed, parameterized BigQuery reads over the agent-analytics table
 //! (`agent_events`) that `gadk-agentanalytics` writes.
 //!
+//! [`AnalyticsSource`] runs the queries: build it over a `gadk_bigquery::BigQueryClient`, the
+//! project that runs and pays for the queries, the table and a byte cap per query. The queries
+//! are grouped by module: [`usage`] (token usage per model, agent and prompt version).
+//!
 //! The shared types are at the root: [`BigQueryTable`] names the table, [`TimeRange`] and
 //! [`TraceId`] are the trace-list window and id, and every query fails with a [`SourceError`].
 //! [`row`] holds the cell readers and query-parameter builders the queries share, and [`cost`]
@@ -25,11 +29,21 @@
 pub mod cost;
 mod error;
 pub mod row;
+mod source;
 mod table;
 #[cfg(any(test, feature = "test-util"))]
 pub mod testutil;
 mod time;
+pub mod usage;
 
 pub use error::{Service, SourceError};
+pub use source::AnalyticsSource;
 pub use table::BigQueryTable;
 pub use time::{TimeRange, TraceId};
+
+/// Query plumbing that gadk-console's queries use until they move into this crate.
+#[doc(hidden)]
+pub mod plumbing {
+    pub use crate::source::{count, string_array_param, version_of, window_params};
+    pub use crate::usage::{CALL_COLUMNS, calls_cte, model_calls, responses_cte};
+}

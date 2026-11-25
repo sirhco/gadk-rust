@@ -15,6 +15,45 @@
 //! Test doubles for code that runs the queries (feature `test-util`): [`FakeHttp`], a scripted
 //! HTTP client to build a `gadk_bigquery::BigQueryClient` over, and the `jobs.query` reply
 //! builders.
+//!
+//! ```
+//! use std::sync::Arc;
+//!
+//! use chrono::{TimeZone, Utc};
+//! use gadk_analytics::testutil::{FakeHttp, reply};
+//! use gadk_analytics::{AnalyticsSource, BigQueryTable};
+//! use gadk_bigquery::{BigQueryClient, NoAuth};
+//!
+//! # tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+//! // One scripted `jobs.query` reply: a single breakdown row.
+//! let http = FakeHttp::new(vec![reply(
+//!     &[
+//!         ("model", "STRING"), ("agent", "STRING"), ("prompt", "STRING"), ("calls", "INT64"),
+//!         ("input", "INT64"), ("cached", "INT64"), ("output", "INT64"), ("reasoning", "INT64"),
+//!     ],
+//!     vec![vec![
+//!         "gemini-3.8-flash".into(), "triage".into(), "triage@2".into(), "3".into(),
+//!         "3000".into(), "1000".into(), "600".into(), "0".into(),
+//!     ]],
+//!     false,
+//! )]);
+//! let source = AnalyticsSource::new(
+//!     BigQueryClient::with_client(http.clone(), Arc::new(NoAuth)),
+//!     "billing-proj",
+//!     BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
+//!     1_073_741_824,
+//! );
+//! let end = Utc.with_ymd_and_hms(2026, 11, 20, 12, 0, 0).unwrap();
+//! let breakdown = source.breakdown(end - chrono::TimeDelta::hours(24), end).await?;
+//! assert_eq!(breakdown.cells.len(), 1);
+//! // The fake records each request: here the one `jobs.query` call, run in the billing project.
+//! assert_eq!(
+//!     http.uris(),
+//!     ["https://bigquery.googleapis.com/bigquery/v2/projects/billing-proj/queries"]
+//! );
+//! # Ok::<(), gadk_analytics::SourceError>(())
+//! # }).unwrap();
+//! ```
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -174,3 +213,17 @@ pub fn param_value(body: &Value, name: &str) -> Value {
         .unwrap_or_else(|| panic!("no parameter {name}: {body}"))
         .clone()
 }
+
+/// The columns of the trend query ([`AnalyticsSource::trend`](crate::AnalyticsSource::trend)),
+/// for [`reply`].
+pub const TREND_FIELDS: [(&str, &str); 9] = [
+    ("bucket", "INT64"),
+    ("model", "STRING"),
+    ("agent", "STRING"),
+    ("prompt", "STRING"),
+    ("calls", "INT64"),
+    ("input", "INT64"),
+    ("cached", "INT64"),
+    ("output", "INT64"),
+    ("reasoning", "INT64"),
+];

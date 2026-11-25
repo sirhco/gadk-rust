@@ -20,6 +20,7 @@ use axum::response::Response;
 use axum::routing::get;
 use chrono::TimeDelta;
 use gadk_analytics::cost::CostSum;
+use gadk_analytics::usage::{TOP_TRACES, UsageRange};
 use http::StatusCode;
 use serde::Deserialize;
 
@@ -29,7 +30,6 @@ use super::pages::layout::{Nav, html};
 use super::pages::usage::{self, NEEDS_BIGQUERY, Totals, agent_label, group, prompt_label};
 use crate::csv::{Csv, Field, filename, response};
 use crate::prices::cost_of;
-use crate::usage::{TOP_TRACES, UsageRange};
 
 /// The text of the 400 page for a missing or unknown `/usage.csv` table.
 const BAD_TABLE: &str = "table: must be model, agent, prompt or trend";
@@ -216,10 +216,9 @@ mod tests {
     use crate::prices::{PriceTable, thousands};
     use crate::traces::BigQueryTable;
     use crate::usage::UsageSource;
-    use crate::usage::tests::TREND_FIELDS;
     use crate::web::AppState;
     use crate::web::testutil::{FakeSource, get, state};
-    use gadk_analytics::testutil::{FakeHttp, param_value, reply};
+    use gadk_analytics::testutil::{FakeHttp, TREND_FIELDS, param_value, reply};
 
     const PRICES: &str =
         "- model: gemini-3.8-flash\n  input: 0.30\n  output: 2.50\n  cached_input: 0.075\n";

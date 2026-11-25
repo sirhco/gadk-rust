@@ -17,6 +17,49 @@
 //!
 //! Rows are the JSON objects of [`gadk_bigquery::QueryResult::rows`]; parameters are
 //! `jobs.query` `queryParameters` entries.
+//!
+//! ```
+//! use std::sync::Arc;
+//!
+//! use chrono::{TimeZone, Utc};
+//! use gadk_analytics::row::param;
+//! use gadk_analytics::testutil::{FakeHttp, reply};
+//! use gadk_analytics::{AnalyticsSource, BigQueryTable};
+//! use gadk_bigquery::{BigQueryClient, NoAuth};
+//!
+//! # tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+//! // One scripted `jobs.query` reply: a single breakdown row.
+//! let http = FakeHttp::new(vec![reply(
+//!     &[
+//!         ("model", "STRING"), ("agent", "STRING"), ("prompt", "STRING"), ("calls", "INT64"),
+//!         ("input", "INT64"), ("cached", "INT64"), ("output", "INT64"), ("reasoning", "INT64"),
+//!     ],
+//!     vec![vec![
+//!         "gemini-3.8-flash".into(), "triage".into(), "triage@2".into(), "3".into(),
+//!         "3000".into(), "1000".into(), "600".into(), "0".into(),
+//!     ]],
+//!     false,
+//! )]);
+//! let source = AnalyticsSource::new(
+//!     BigQueryClient::with_client(http.clone(), Arc::new(NoAuth)),
+//!     "billing-proj",
+//!     BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
+//!     1_073_741_824,
+//! );
+//! let end = Utc.with_ymd_and_hms(2026, 11, 20, 12, 0, 0).unwrap();
+//! let breakdown = source.breakdown(end - chrono::TimeDelta::hours(24), end).await?;
+//! assert_eq!(breakdown.cells.len(), 1);
+//! assert_eq!(
+//!     param("limit", "INT64", Some("5001".into())),
+//!     serde_json::json!({
+//!         "name": "limit",
+//!         "parameterType": { "type": "INT64" },
+//!         "parameterValue": { "value": "5001" },
+//!     })
+//! );
+//! # Ok::<(), gadk_analytics::SourceError>(())
+//! # }).unwrap();
+//! ```
 
 use chrono::{DateTime, Utc};
 use gadk_bigquery::BigQueryError;

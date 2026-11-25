@@ -32,3 +32,5 @@ http = { workspace = true, optional = true }
 # Unit tests and doc tests get `testutil` without `--all-features`.
 gadk-analytics = { path = ".", features = ["test-util"] }
 pretty_assertions = { workspace = true }
+# `#[tokio::test]` and the doc examples' runtime.
+tokio = { workspace = true }
