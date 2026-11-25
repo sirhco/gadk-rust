@@ -27,8 +27,11 @@ use crate::web::pages::prompt::NEEDS_BIGQUERY_METRICS;
 use crate::web::prompts::metrics_range;
 use crate::web::review::first;
 
+/// The prompt versions' path, relative to `/api`.
+pub(super) const VERSIONS: &str = "/v1/prompts/{name}/versions";
+
 pub(super) fn routes() -> Router<AppState> {
-    Router::new().route("/v1/prompts/{name}/versions", get(versions))
+    Router::new().route(VERSIONS, get(versions))
 }
 
 /// `GET /api/v1/prompts/{name}/versions?range=`: the production metrics of prompt `name` over

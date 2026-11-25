@@ -32,11 +32,18 @@ use crate::web::pages::usage::NEEDS_BIGQUERY;
 use crate::web::review::first;
 use crate::web::usage::usage_range;
 
+/// The breakdown's path, relative to `/api`.
+pub(super) const BREAKDOWN: &str = "/v1/usage/breakdown";
+/// The trend's path, relative to `/api`.
+pub(super) const TREND: &str = "/v1/usage/trend";
+/// The top traces' path, relative to `/api`.
+pub(super) const TOP: &str = "/v1/usage/top-traces";
+
 pub(super) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/usage/breakdown", get(breakdown))
-        .route("/v1/usage/trend", get(trend))
-        .route("/v1/usage/top-traces", get(top_traces))
+        .route(BREAKDOWN, get(breakdown))
+        .route(TREND, get(trend))
+        .route(TOP, get(top_traces))
 }
 
 /// The usage source and the window of one request.

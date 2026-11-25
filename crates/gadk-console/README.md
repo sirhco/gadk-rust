@@ -83,7 +83,7 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/users` | BigQuery source only. The users with activity in the window, at most 100, with their sessions, turns, tokens, cost, errors and thumbs. `?range=` (default `7d`), `agent`. |
 | `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`, `30d`): totals, a chart of cost (or tokens) over time, then LLM calls, tokens, cost and a trend sparkline by model, by agent and by prompt version, and the 20 traces with the most tokens. See [Usage and cost](#usage-and-cost). |
 | `/usage.csv`, `/sessions.csv`, `/users.csv` | BigQuery source only. CSV downloads of the `/usage` tables (`?table=model`, `agent`, `prompt` or `trend`) and of every session or user of the window, up to 5,000. See [CSV export](#csv-export). |
-| `/api/v1/…` | BigQuery source only. Read-only JSON of the usage, sessions, users, prompt-version, trace-score and review views, for custom dashboards. See [JSON API](#json-api). |
+| `/api/v1/…` | BigQuery source only, except `/api/v1/openapi.json`. Read-only JSON of the usage, sessions, users, prompt-version, trace-score and review views, for custom dashboards. See [JSON API](#json-api). |
 
 ## Evals
 
@@ -476,7 +476,8 @@ With the BigQuery source, the console serves the data of its usage, sessions, us
 prompt-version, trace-score and review views as JSON, for custom dashboards and frontends. The
 routes are read-only `GET`s under `/api/v1`. They run the pages' own queries with the pages'
 parameters, defaults, caps and 400 texts, under `--bigquery-max-bytes`, and their shapes are the
-[`gadk-analytics`](../gadk-analytics/README.md) result types (timestamps as RFC 3339).
+[`gadk-analytics`](../gadk-analytics/README.md) result types (timestamps as RFC 3339). The OpenAPI
+document at `/api/v1/openapi.json` is served without the BigQuery source too.
 
 | Route | Parameters | `data` |
 |---|---|---|
@@ -489,6 +490,7 @@ parameters, defaults, caps and 400 texts, under `--bigquery-max-bytes`, and thei
 | `/api/v1/prompts/{name}/versions` | `range` as on `/prompts/{name}` (`1h`, `6h`, `24h`, `7d`; unknown or missing is `7d`) | `{"metrics": {"stats", "models", "truncated"}, "feedback"}`: per-version calls, mean tokens and latency with their cost, the calls per version and model with theirs, and the scores per version |
 | `/api/v1/traces/{id}/scores` | none | `{"rows", "truncated"}`: the trace's scores and its invocations', newest first, as in the trace page's Scores section |
 | `/api/v1/review/pending` | `score` or `rubric` (one is required), `prompt`, `version`, `flagged=1`, `range`, as on `/review` | the queue's pending traces, newest first, at most 100 |
+| `/api/v1/openapi.json` | none | not an envelope: the [OpenAPI](#openapi) document of these routes, also without the BigQuery source |
 
 A name in a path is percent-encoded (`/api/v1/prompts/team%2Fgreet/versions`). The prompt route
 reads only BigQuery, not the prompt store: an unknown name gives empty rows, and it has no eval
@@ -550,6 +552,23 @@ application/json`:
 | 502 | the source's kind (`bigquery`, `transport`, …) | A failed query; `message` and `hint` are the error banner's text and hint. |
 
 A wrong `Host` still gets the HTML 421 of the [Security model](#security-model).
+
+### OpenAPI
+
+`GET /api/v1/openapi.json` answers 200 with an OpenAPI 3.1 description of the routes above:
+their parameters, the envelope and `data` schema of each, and their errors. Its `info.version`
+is the console's version. It answers with or without the BigQuery source, under the same `Host`
+check, security headers and `--api-origin` CORS as the other routes.
+
+```sh
+curl -s http://127.0.0.1:8765/api/v1/openapi.json > openapi.json
+```
+
+Any OpenAPI 3.1 generator can make a typed client from it. For example,
+[openapi-typescript](https://openapi-ts.dev/) writes TypeScript types with
+`npx openapi-typescript openapi.json -o api.d.ts`; the console neither ships nor needs one. Each
+schema lists every field the console always writes as required and allows other fields, so a
+field added later does not break a client.
 
 ### Browser apps on another origin
 

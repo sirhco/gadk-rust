@@ -32,11 +32,18 @@ use crate::web::sessions::{
     NEEDS_BIGQUERY_SESSIONS, next_link, session_query, turns_query, user_query,
 };
 
+/// The sessions' path, relative to `/api`.
+pub(super) const SESSIONS: &str = "/v1/sessions";
+/// A session's turns' path, relative to `/api`.
+pub(super) const TURNS: &str = "/v1/sessions/{id}/turns";
+/// The users' path, relative to `/api`.
+pub(super) const USERS: &str = "/v1/users";
+
 pub(super) fn routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/sessions", get(sessions))
-        .route("/v1/sessions/{id}/turns", get(turns))
-        .route("/v1/users", get(users))
+        .route(SESSIONS, get(sessions))
+        .route(TURNS, get(turns))
+        .route(USERS, get(users))
 }
 
 /// The cost of a row's per-model tokens, as the session pages and CSVs price it.

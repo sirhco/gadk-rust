@@ -27,6 +27,7 @@ use super::AppState;
 use crate::prices::{PriceTable, cost_of};
 use crate::traces::SourceError;
 
+mod openapi;
 mod prompts;
 mod review;
 mod scores;
@@ -38,6 +39,24 @@ pub(crate) const NO_SUCH_ROUTE: &str = "no such API route";
 /// The message of the 405 for a write method on an API path.
 pub(crate) const READ_ONLY: &str = "the API is read-only";
 
+/// Every API path, relative to `/api`: the OpenAPI document lists exactly these.
+///
+/// Every route constant must be listed here: the path-sync test compares the OpenAPI document
+/// with this list, not with the router.
+#[cfg(test)]
+pub(crate) const PATHS: [&str; 10] = [
+    usage::BREAKDOWN,
+    usage::TREND,
+    usage::TOP,
+    sessions::SESSIONS,
+    sessions::TURNS,
+    sessions::USERS,
+    prompts::VERSIONS,
+    scores::SCORES,
+    review::PENDING,
+    openapi::PATH,
+];
+
 /// The routes of the API, relative to `/api`.
 fn routes() -> Router<AppState> {
     Router::new()
@@ -46,6 +65,7 @@ fn routes() -> Router<AppState> {
         .merge(prompts::routes())
         .merge(scores::routes())
         .merge(review::routes())
+        .merge(openapi::routes())
 }
 
 /// The router nested at `/api`: [`routes`], a JSON 405 for other methods on a known route, and
@@ -157,6 +177,8 @@ pub(crate) fn cost_sum<'a>(
     sum
 }
 
+#[cfg(test)]
+mod openapi_tests;
 #[cfg(test)]
 mod prompts_tests;
 #[cfg(test)]

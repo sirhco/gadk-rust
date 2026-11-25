@@ -26,8 +26,11 @@ use crate::web::AppState;
 use crate::web::pages::trace::NEEDS_BIGQUERY_SCORES;
 use crate::web::traces::score_lookup;
 
+/// The trace scores' path, relative to `/api`.
+pub(super) const SCORES: &str = "/v1/traces/{id}/scores";
+
 pub(super) fn routes() -> Router<AppState> {
-    Router::new().route("/v1/traces/{id}/scores", get(scores))
+    Router::new().route(SCORES, get(scores))
 }
 
 /// `GET /api/v1/traces/{id}/scores`: the scores of trace `id` and of the invocations its spans
