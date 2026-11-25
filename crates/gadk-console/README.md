@@ -574,6 +574,10 @@ can read the API only when the console lists that origin:
   on 127.0.0.1 with its own `Host`, so the app calls `http://127.0.0.1:<port>/api/v1/…` (or
   `localhost`) directly, without a proxy that rewrites `Host`.
 
+The [console example dashboard](../../examples/console-dashboard/README.md) is such an app:
+three static files, with no build step, that read the usage, sessions, users and review routes
+from `http://localhost:5173`.
+
 ## Datasets
 
 With `--datasets <dir>` and `--traces bigquery://…`, `/traces/{id}` shows an "Add to dataset"
