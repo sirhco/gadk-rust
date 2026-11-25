@@ -31,7 +31,7 @@ The console prints its URL and serves until you stop it (Ctrl-C).
 | `--prices <file>` | none | Price file (YAML, USD per 1,000,000 tokens per model). Without it, cost cells show `—`; token counts still show. See [Usage and cost](#usage-and-cost). |
 | `--author <name>` | `$USER`, else `$USERNAME`, else `console` | Author of the scores you add on `/traces/{id}` (BigQuery source). See [Scores](#scores). |
 | `--datasets <dir>` | none | Directory of eval-set YAML files that `/traces/{id}` adds runs to (BigQuery trace source only; ignored with Cloud Trace). It must exist. See [Datasets](#datasets). |
-| `--rubrics <file>` | none | YAML file of review rubrics: named sets of criteria, each scored on a small integer scale (1-5 by default), on `/traces/{id}` and in `/review` queues (BigQuery trace source only). See [Rubrics](#rubrics). |
+| `--rubrics <file>` | none | YAML file of review rubrics: named sets of criteria, each scored on a small integer scale (1-5 by default), on `/traces/{id}` and in `/review` queues (BigQuery trace source only; with Cloud Trace the file is still checked at startup but unused). See [Rubrics](#rubrics). |
 
 Exit codes: 2 for a usage error (clap's message), 1 when startup fails (a bad store URL, a bad
 report store URL, a bad price file, a bad rubric file, a `--datasets` directory that does not

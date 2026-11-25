@@ -18,8 +18,10 @@ the public API.
   guard `feedback` checks read them unchanged. `/review?rubric=<name>` is a review queue whose
   traces stay pending until every criterion has a console score; its trace pages show the
   rubric's form in review mode. `Cli` gains `rubrics` and `with_rubrics`, and `ConsoleError`
-  gains `Rubrics`. Without `--rubrics` every page is unchanged; the pending query now takes the
-  score names as an `@names` array parameter instead of `@score`.
+  gains `Rubrics`. Without `--rubrics` every page is unchanged, except that `/review` and
+  `/review/next` now reject a `rubric` parameter with a 400 (`rubric: unknown rubric …`, or
+  `score and rubric: choose one` beside `score`) instead of ignoring it; the pending query now
+  takes the score names as an `@names` array parameter instead of `@score`.
 
 ## [0.5.15] - 2026-11-24
 
