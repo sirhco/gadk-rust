@@ -40,7 +40,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.14"
+version = "0.5.15"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
@@ -48,42 +48,42 @@ repository = "https://github.com/sirhco/gadk-rust"
 keywords = ["agent", "llm", "ai", "gemini", "adk"]
 
 [workspace.dependencies]
-gadk-genai = { path = "crates/gadk-genai", version = "0.5.14" }
-gadk-platform = { path = "crates/gadk-platform", version = "0.5.14" }
-gadk-model = { path = "crates/gadk-model", version = "0.5.14" }
-gadk-gemini = { path = "crates/gadk-gemini", version = "0.5.14" }
-gadk-session = { path = "crates/gadk-session", version = "0.5.14" }
-gadk-httprr = { path = "crates/gadk-httprr", version = "0.5.14" }
-gadk-artifact = { path = "crates/gadk-artifact", version = "0.5.14" }
-gadk-artifact-gcs = { path = "crates/gadk-artifact-gcs", version = "0.5.14" }
-gadk-memory = { path = "crates/gadk-memory", version = "0.5.14" }
-gadk-agent = { path = "crates/gadk-agent", version = "0.5.14" }
-gadk-engine = { path = "crates/gadk-engine", version = "0.5.14" }
-gadk-tools = { path = "crates/gadk-tools", version = "0.5.14" }
-gadk-auth = { path = "crates/gadk-auth", version = "0.5.14", default-features = false }
-gadk-mcp = { path = "crates/gadk-mcp", version = "0.5.14" }
-gadk-anthropic = { path = "crates/gadk-anthropic", version = "0.5.14" }
-gadk-openai = { path = "crates/gadk-openai", version = "0.5.14" }
-gadk-session-database = { path = "crates/gadk-session-database", version = "0.5.14" }
-gadk-vertexai = { path = "crates/gadk-vertexai", version = "0.5.14" }
-gadk-server = { path = "crates/gadk-server", version = "0.5.14" }
+gadk-genai = { path = "crates/gadk-genai", version = "0.5.15" }
+gadk-platform = { path = "crates/gadk-platform", version = "0.5.15" }
+gadk-model = { path = "crates/gadk-model", version = "0.5.15" }
+gadk-gemini = { path = "crates/gadk-gemini", version = "0.5.15" }
+gadk-session = { path = "crates/gadk-session", version = "0.5.15" }
+gadk-httprr = { path = "crates/gadk-httprr", version = "0.5.15" }
+gadk-artifact = { path = "crates/gadk-artifact", version = "0.5.15" }
+gadk-artifact-gcs = { path = "crates/gadk-artifact-gcs", version = "0.5.15" }
+gadk-memory = { path = "crates/gadk-memory", version = "0.5.15" }
+gadk-agent = { path = "crates/gadk-agent", version = "0.5.15" }
+gadk-engine = { path = "crates/gadk-engine", version = "0.5.15" }
+gadk-tools = { path = "crates/gadk-tools", version = "0.5.15" }
+gadk-auth = { path = "crates/gadk-auth", version = "0.5.15", default-features = false }
+gadk-mcp = { path = "crates/gadk-mcp", version = "0.5.15" }
+gadk-anthropic = { path = "crates/gadk-anthropic", version = "0.5.15" }
+gadk-openai = { path = "crates/gadk-openai", version = "0.5.15" }
+gadk-session-database = { path = "crates/gadk-session-database", version = "0.5.15" }
+gadk-vertexai = { path = "crates/gadk-vertexai", version = "0.5.15" }
+gadk-server = { path = "crates/gadk-server", version = "0.5.15" }
 # default-features off so members can pick `client` / `server` alone (Cargo 1.95 refuses a member-side
 # `default-features = false` over a workspace entry that keeps them on).
-gadk-a2a = { path = "crates/gadk-a2a", version = "0.5.14", default-features = false }
-gadk-launcher = { path = "crates/gadk-launcher", version = "0.5.14" }
-gadk-agentregistry = { path = "crates/gadk-agentregistry", version = "0.5.14" }
-gadk-telemetry = { path = "crates/gadk-telemetry", version = "0.5.14" }
-gadk-cli = { path = "crates/gadk-cli", version = "0.5.14" }
-gadk-goyaml = { path = "crates/gadk-goyaml", version = "0.5.14" }
-gadk-configurable = { path = "crates/gadk-configurable", version = "0.5.14" }
-gadk-agentanalytics = { path = "crates/gadk-agentanalytics", version = "0.5.14" }
-gadk-prompts = { path = "crates/gadk-prompts", version = "0.5.14" }
-gadk-prompts-firestore = { path = "crates/gadk-prompts-firestore", version = "0.5.14" }
-gadk-prompts-cli = { path = "crates/gadk-prompts-cli", version = "0.5.14" }
-gadk-eval = { path = "crates/gadk-eval", version = "0.5.14" }
-gadk-eval-monitor = { path = "crates/gadk-eval-monitor", version = "0.5.14" }
-gadk-cloudtrace = { path = "crates/gadk-cloudtrace", version = "0.5.14" }
-gadk-bigquery = { path = "crates/gadk-bigquery", version = "0.5.14" }
+gadk-a2a = { path = "crates/gadk-a2a", version = "0.5.15", default-features = false }
+gadk-launcher = { path = "crates/gadk-launcher", version = "0.5.15" }
+gadk-agentregistry = { path = "crates/gadk-agentregistry", version = "0.5.15" }
+gadk-telemetry = { path = "crates/gadk-telemetry", version = "0.5.15" }
+gadk-cli = { path = "crates/gadk-cli", version = "0.5.15" }
+gadk-goyaml = { path = "crates/gadk-goyaml", version = "0.5.15" }
+gadk-configurable = { path = "crates/gadk-configurable", version = "0.5.15" }
+gadk-agentanalytics = { path = "crates/gadk-agentanalytics", version = "0.5.15" }
+gadk-prompts = { path = "crates/gadk-prompts", version = "0.5.15" }
+gadk-prompts-firestore = { path = "crates/gadk-prompts-firestore", version = "0.5.15" }
+gadk-prompts-cli = { path = "crates/gadk-prompts-cli", version = "0.5.15" }
+gadk-eval = { path = "crates/gadk-eval", version = "0.5.15" }
+gadk-eval-monitor = { path = "crates/gadk-eval-monitor", version = "0.5.15" }
+gadk-cloudtrace = { path = "crates/gadk-cloudtrace", version = "0.5.15" }
+gadk-bigquery = { path = "crates/gadk-bigquery", version = "0.5.15" }
 similar = "2.7.0"
 maud = { version = "0.27.0", default-features = false }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
