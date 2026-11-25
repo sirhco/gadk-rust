@@ -57,15 +57,17 @@ struct UsageParams {
     range: Option<String>,
 }
 
+/// The `range` of `/usage`, `/usage.csv` and the usage API routes: an unknown or missing value
+/// is 24h.
+pub(crate) fn usage_range(raw: Option<&str>) -> UsageRange {
+    raw.and_then(UsageRange::parse).unwrap_or_default()
+}
+
 /// An unknown or missing `range` is 24h. Without the BigQuery source the page is a note and
 /// nothing is queried; otherwise the breakdown, top traces and trend queries run concurrently,
 /// and a failed query is the error page with the source's hint.
 async fn usage_page(State(state): State<AppState>, Query(p): Query<UsageParams>) -> Response {
-    let range = p
-        .range
-        .as_deref()
-        .and_then(UsageRange::parse)
-        .unwrap_or_default();
+    let range = usage_range(p.range.as_deref());
     let Some(source) = &state.usage else {
         return html(StatusCode::OK, usage::render_unavailable(range));
     };
@@ -140,11 +142,7 @@ async fn usage_csv(State(state): State<AppState>, Query(p): Query<UsageCsvParams
         Some(t @ ("model" | "agent" | "prompt" | "trend")) => t,
         _ => return error_page(StatusCode::BAD_REQUEST, Nav::Usage, BAD_TABLE, None),
     };
-    let range = p
-        .range
-        .as_deref()
-        .and_then(UsageRange::parse)
-        .unwrap_or_default();
+    let range = usage_range(p.range.as_deref());
     let end = (state.now)();
     let start = end - range.duration();
     let prices = state.prices.as_deref();

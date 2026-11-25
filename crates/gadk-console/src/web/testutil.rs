@@ -187,6 +187,7 @@ pub(crate) fn state_with_reports(
         datasets: None,
         export: None,
         rubrics: None,
+        api_origins: Arc::from(Vec::new()),
     }
 }
 

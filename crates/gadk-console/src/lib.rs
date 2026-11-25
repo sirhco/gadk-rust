@@ -87,6 +87,9 @@ pub struct Cli {
     pub datasets: Option<PathBuf>,
     /// The rubric file (`--rubrics`); `None` offers no rubric forms or rubric queues.
     pub rubrics: Option<PathBuf>,
+    /// The origins (`--api-origin`, `scheme://host[:port]`) whose browser apps may read the JSON
+    /// API under `/api/v1`; empty sends no CORS headers.
+    pub api_origins: Vec<String>,
 }
 
 impl Cli {
@@ -99,6 +102,7 @@ impl Cli {
             author: None,
             datasets: None,
             rubrics: None,
+            api_origins: Vec::new(),
         }
     }
 
@@ -130,6 +134,13 @@ impl Cli {
     /// (BigQuery trace source only).
     pub fn with_rubrics(mut self, path: PathBuf) -> Self {
         self.rubrics = Some(path);
+        self
+    }
+
+    /// Lets a browser app at `origin` (exactly `scheme://host[:port]`, as a browser sends it)
+    /// read the JSON API under `/api/v1`; each call adds one origin.
+    pub fn with_api_origin(mut self, origin: impl Into<String>) -> Self {
+        self.api_origins.push(origin.into());
         self
     }
 }
@@ -198,6 +209,12 @@ pub enum ConsoleError {
         /// What was wrong with it.
         detail: String,
     },
+    /// An `--api-origin` value is not an exact `scheme://host[:port]` origin.
+    #[error("--api-origin: invalid origin {origin} (expected scheme://host[:port])")]
+    ApiOrigin {
+        /// The value given.
+        origin: String,
+    },
 }
 
 /// A console bound to its port, not yet serving.
@@ -257,6 +274,8 @@ pub(crate) struct Extras {
     pub(crate) export: Option<Result<Arc<dyn ExportSource>, String>>,
     /// The loaded rubric file.
     pub(crate) rubrics: Option<Arc<Rubrics>>,
+    /// The `--api-origin` allow-list, validated.
+    pub(crate) api_origins: Vec<String>,
 }
 
 /// The export source that reads conversation text from the agent-analytics table: `None`
@@ -367,6 +386,7 @@ pub(crate) async fn bind_full(
         datasets: extras.datasets,
         export: extras.export,
         rubrics: extras.rubrics,
+        api_origins: Arc::from(extras.api_origins),
     };
     Ok(Bound {
         listener,
@@ -386,8 +406,13 @@ pub async fn run(
 /// Like [`run`], reading traces from the source `cli.traces` names, prices from `cli.prices`
 /// and rubrics from `cli.rubrics` (both read before anything is bound); console scores are
 /// written by `cli.author`, else `USER`, else `USERNAME`, else `console`. `cli.datasets` must be
-/// an existing directory.
+/// an existing directory, and each of `cli.api_origins` an exact `scheme://host[:port]` origin.
 pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<(), ConsoleError> {
+    if let Some(origin) = cli.api_origins.iter().find(|o| !web::cors::is_origin(o)) {
+        return Err(ConsoleError::ApiOrigin {
+            origin: origin.clone(),
+        });
+    }
     let author = resolve_author(cli.author, env_var);
     let prices = cli
         .prices
@@ -447,6 +472,7 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
             datasets,
             export,
             rubrics,
+            api_origins: cli.api_origins,
         },
     )
     .await?;
