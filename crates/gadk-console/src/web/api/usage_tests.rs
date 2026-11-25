@@ -44,7 +44,8 @@ pub(super) fn denied_body() -> Value {
     } })
 }
 
-fn breakdown_reply(page_token: bool) -> Result<(u16, String), String> {
+/// Two breakdown cells: `gemini-3.8-flash` (priced) and `other-model`.
+pub(super) fn breakdown_reply(page_token: bool) -> Result<(u16, String), String> {
     let fields = [
         ("model", "STRING"),
         ("agent", "STRING"),

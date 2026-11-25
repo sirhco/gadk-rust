@@ -28,7 +28,7 @@ use http::header::{
 use http::{HeaderMap, Request, StatusCode};
 use serde_json::{Value, json};
 
-use super::openapi_tests::{METHOD_NOT_ALLOWED, assert_matches_pointer};
+use super::openapi_tests::{METHOD_NOT_ALLOWED, assert_matches_openapi, assert_matches_pointer};
 use super::{Priced, cost_sum, ok, rejected, source_failure};
 use crate::prices::PriceTable;
 use crate::traces::{BigQueryTable, SourceError};
@@ -55,10 +55,12 @@ pub(super) fn bq_state(fake: &Arc<FakeHttp>, prices: bool) -> AppState {
     st
 }
 
-/// GET `path` through the router: the status, the headers and the body as JSON.
+/// GET `path` through the router: the status, the headers and the body as JSON, which must
+/// match the OpenAPI document.
 pub(super) async fn api_get(state: AppState, path: &str) -> (StatusCode, HeaderMap, Value) {
     let (status, headers, body) = get(state, path).await;
     let json = serde_json::from_str(&body).unwrap_or_else(|e| panic!("{path}: {e}: {body}"));
+    assert_matches_openapi(path, status, &json);
     (status, headers, json)
 }
 

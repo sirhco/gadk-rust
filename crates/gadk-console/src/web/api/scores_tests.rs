@@ -206,3 +206,19 @@ async fn without_bigquery_it_is_the_scores_note_404_before_the_id_check() {
     }
     assert_eq!(src.calls.load(Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn a_rejected_id_is_a_json_400() {
+    let fake = FakeHttp::new(vec![]);
+    let (status, headers, body) = api_get(bq_state(&fake, true), "/api/v1/traces/%FF/scores").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_api_headers(&headers);
+    assert_eq!(
+        body,
+        error_body(
+            "bad_request",
+            "invalid request: Invalid URL: Invalid UTF-8 in `id`"
+        )
+    );
+    assert!(fake.uris().is_empty(), "nothing is queried");
+}

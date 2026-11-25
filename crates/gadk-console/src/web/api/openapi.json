@@ -11,72 +11,201 @@
       "get": {
         "operationId": "getUsageBreakdown",
         "summary": "Calls and tokens per model, agent and prompt version",
-        "responses": {"200": {"description": "The breakdown."}}
+        "description": "The usage breakdown over the range, as on /usage, each cell priced. truncated: the query hit its row cap.",
+        "parameters": [{"$ref": "#/components/parameters/UsageRange"}],
+        "responses": {
+          "200": {
+            "description": "The envelope with the route's data.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/UsageBreakdownResponse"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NeedsBigQuery"},
+          "502": {"$ref": "#/components/responses/QueryFailed"}
+        }
       }
     },
     "/api/v1/usage/trend": {
       "get": {
         "operationId": "getUsageTrend",
         "summary": "Calls and tokens per time bucket",
-        "responses": {"200": {"description": "The trend."}}
+        "description": "The window start, the bucket width and one priced cell per bucket, model, agent and prompt version. truncated: the query hit its row cap.",
+        "parameters": [{"$ref": "#/components/parameters/UsageRange"}],
+        "responses": {
+          "200": {
+            "description": "The envelope with the route's data.",
+            "content": {
+              "application/json": {"schema": {"$ref": "#/components/schemas/UsageTrendResponse"}}
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NeedsBigQuery"},
+          "502": {"$ref": "#/components/responses/QueryFailed"}
+        }
       }
     },
     "/api/v1/usage/top-traces": {
       "get": {
         "operationId": "getUsageTopTraces",
         "summary": "The traces with the most tokens",
-        "responses": {"200": {"description": "The top traces."}}
+        "description": "The 20 traces with the most tokens over the range, each with its calls per model, priced. truncated is always false.",
+        "parameters": [{"$ref": "#/components/parameters/UsageRange"}],
+        "responses": {
+          "200": {
+            "description": "The envelope with the route's data.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/UsageTopTracesResponse"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NeedsBigQuery"},
+          "502": {"$ref": "#/components/responses/QueryFailed"}
+        }
       }
     },
     "/api/v1/sessions": {
       "get": {
         "operationId": "listSessions",
         "summary": "Sessions, newest last activity first",
-        "responses": {"200": {"description": "A page of sessions."}}
+        "description": "At most 100 sessions, as on /sessions, each priced. next is the next page when there are more sessions. truncated: the query hit its row cap. 400 for a too-long user or agent or an invalid cursor.",
+        "parameters": [
+          {"$ref": "#/components/parameters/SessionsRange"},
+          {"$ref": "#/components/parameters/User"},
+          {"$ref": "#/components/parameters/Agent"},
+          {"$ref": "#/components/parameters/After"},
+          {"$ref": "#/components/parameters/AfterId"}
+        ],
+        "responses": {
+          "200": {
+            "description": "The envelope with the route's data.",
+            "content": {
+              "application/json": {"schema": {"$ref": "#/components/schemas/SessionsResponse"}}
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NeedsBigQuery"},
+          "502": {"$ref": "#/components/responses/QueryFailed"}
+        }
       }
     },
     "/api/v1/sessions/{id}/turns": {
       "get": {
         "operationId": "getSessionTurns",
         "summary": "A session's row and its turns",
+        "description": "The session's row and its first 200 turns, oldest first, each priced, as on /sessions/{id}. truncated: the session has more than 200 turns. 400 for an invalid session id.",
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"$ref": "#/components/parameters/SessionId"},
+          {"$ref": "#/components/parameters/WeekRange"}
         ],
-        "responses": {"200": {"description": "The session and its turns."}}
+        "responses": {
+          "200": {
+            "description": "The envelope with the route's data.",
+            "content": {
+              "application/json": {"schema": {"$ref": "#/components/schemas/SessionTurnsResponse"}}
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/SessionNotFound"},
+          "502": {"$ref": "#/components/responses/QueryFailed"}
+        }
       }
     },
     "/api/v1/users": {
       "get": {
         "operationId": "listUsers",
         "summary": "Users and their activity",
-        "responses": {"200": {"description": "The users."}}
+        "description": "At most 100 users, as on /users, each priced. truncated: the query hit its row cap or there are more than 100 users. 400 for a too-long agent.",
+        "parameters": [
+          {"$ref": "#/components/parameters/WeekRange"},
+          {"$ref": "#/components/parameters/Agent"}
+        ],
+        "responses": {
+          "200": {
+            "description": "The envelope with the route's data.",
+            "content": {
+              "application/json": {"schema": {"$ref": "#/components/schemas/UsersResponse"}}
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NeedsBigQuery"},
+          "502": {"$ref": "#/components/responses/QueryFailed"}
+        }
       }
     },
     "/api/v1/prompts/{name}/versions": {
       "get": {
         "operationId": "getPromptVersions",
         "summary": "Production metrics and feedback per prompt version",
+        "description": "Per-version calls, mean tokens and latency with their cost, the calls per version and model with theirs, and the scores per version, as on /prompts/{name}. The prompt store is not read: an unknown name has empty rows. truncated: the metrics or the feedback were truncated.",
         "parameters": [
-          {"name": "name", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"$ref": "#/components/parameters/PromptName"},
+          {"$ref": "#/components/parameters/WeekRange"}
         ],
-        "responses": {"200": {"description": "The prompt's metrics and feedback."}}
+        "responses": {
+          "200": {
+            "description": "The envelope with the route's data.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/PromptVersionsResponse"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NeedsBigQuery"},
+          "502": {"$ref": "#/components/responses/QueryFailed"}
+        }
       }
     },
     "/api/v1/traces/{id}/scores": {
       "get": {
         "operationId": "getTraceScores",
         "summary": "The scores of a trace and its invocations",
-        "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
-        "responses": {"200": {"description": "The trace's scores."}}
+        "description": "The trace's scores and its invocations', newest first, as in the trace page's Scores section. truncated: the query hit its row cap.",
+        "parameters": [{"$ref": "#/components/parameters/TraceId"}],
+        "responses": {
+          "200": {
+            "description": "The envelope with the route's data.",
+            "content": {
+              "application/json": {"schema": {"$ref": "#/components/schemas/TraceScoresResponse"}}
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/TraceNotFound"},
+          "502": {"$ref": "#/components/responses/QueryFailed"}
+        }
       }
     },
     "/api/v1/review/pending": {
       "get": {
         "operationId": "listPendingReviews",
         "summary": "The pending traces of a review queue",
-        "responses": {"200": {"description": "The pending traces."}}
+        "description": "The queue's pending traces, newest first, at most 100, as on /review. A queue needs a score or a rubric, not both. truncated: the queue has more than 100 traces.",
+        "parameters": [
+          {"$ref": "#/components/parameters/Score"},
+          {"$ref": "#/components/parameters/Rubric"},
+          {"$ref": "#/components/parameters/Prompt"},
+          {"$ref": "#/components/parameters/Version"},
+          {"$ref": "#/components/parameters/Flagged"},
+          {"$ref": "#/components/parameters/ReviewRange"}
+        ],
+        "responses": {
+          "200": {
+            "description": "The envelope with the route's data.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/PendingReviewsResponse"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NeedsBigQuery"},
+          "502": {"$ref": "#/components/responses/QueryFailed"}
+        }
       }
     },
     "/api/v1/openapi.json": {
@@ -94,6 +223,152 @@
     }
   },
   "components": {
+    "parameters": {
+      "UsageRange": {
+        "name": "range",
+        "in": "query",
+        "required": false,
+        "description": "The window ending now: 1h, 6h, 24h, 7d, 30d. Unknown or missing is 24h.",
+        "schema": {"type": "string", "enum": ["1h", "6h", "24h", "7d", "30d"], "default": "24h"}
+      },
+      "SessionsRange": {
+        "name": "range",
+        "in": "query",
+        "required": false,
+        "description": "The window ending now: 1h, 6h, 24h, 7d. Unknown or missing is 24h.",
+        "schema": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"}
+      },
+      "WeekRange": {
+        "name": "range",
+        "in": "query",
+        "required": false,
+        "description": "The window ending now: 1h, 6h, 24h, 7d. Unknown or missing is 7d.",
+        "schema": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "7d"}
+      },
+      "ReviewRange": {
+        "name": "range",
+        "in": "query",
+        "required": false,
+        "description": "The window ending now: 1h, 6h, 24h, 7d; missing is 7d. Anything else is a 400.",
+        "schema": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "7d"}
+      },
+      "User": {
+        "name": "user",
+        "in": "query",
+        "required": false,
+        "description": "Only this user's sessions (at most 128 bytes, trimmed; longer is a 400).",
+        "schema": {"type": "string"}
+      },
+      "Agent": {
+        "name": "agent",
+        "in": "query",
+        "required": false,
+        "description": "Only this root agent's rows (at most 128 bytes, trimmed; longer is a 400).",
+        "schema": {"type": "string"}
+      },
+      "After": {
+        "name": "after",
+        "in": "query",
+        "required": false,
+        "description": "The cursor: the last activity of the previous page's last session. Comes with after_id; next carries both.",
+        "schema": {"type": "string", "format": "date-time"}
+      },
+      "AfterId": {
+        "name": "after_id",
+        "in": "query",
+        "required": false,
+        "description": "The cursor: the previous page's last session id. Comes with after.",
+        "schema": {"type": "string"}
+      },
+      "Score": {
+        "name": "score",
+        "in": "query",
+        "required": false,
+        "description": "The queue's score name (1-100 bytes, trimmed): traces without a console score of that name. One of score or rubric is required.",
+        "schema": {"type": "string"}
+      },
+      "Rubric": {
+        "name": "rubric",
+        "in": "query",
+        "required": false,
+        "description": "Instead of score: the name of a rubric loaded with --rubrics. One of score or rubric is required.",
+        "schema": {"type": "string"}
+      },
+      "Prompt": {
+        "name": "prompt",
+        "in": "query",
+        "required": false,
+        "description": "Only traces whose LLM requests used this prompt.",
+        "schema": {"type": "string"}
+      },
+      "Version": {
+        "name": "version",
+        "in": "query",
+        "required": false,
+        "description": "Only traces that used this version of prompt; needs prompt.",
+        "schema": {"type": "integer", "minimum": 1}
+      },
+      "Flagged": {
+        "name": "flagged",
+        "in": "query",
+        "required": false,
+        "description": "1: only traces with an app thumbs-down. Any other value is ignored.",
+        "schema": {"type": "string", "enum": ["1"]}
+      },
+      "SessionId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The session id, percent-encoded. An id that is too long or has control characters is a 400.",
+        "schema": {"type": "string"}
+      },
+      "TraceId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "The trace id: 32 hexadecimal digits. Any other id is the not_found 404.",
+        "schema": {"type": "string"}
+      },
+      "PromptName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "description": "The prompt name, percent-encoded (team%2Fgreet).",
+        "schema": {"type": "string"}
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "bad_request: a bad parameter, with the page's text, or a request the router cannot read (invalid request: …).",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiError"}}}
+      },
+      "NeedsBigQuery": {
+        "description": "needs_bigquery: the console is not using the BigQuery source; the message is the page's note. This comes before any other check.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiError"}}}
+      },
+      "SessionNotFound": {
+        "description": "needs_bigquery: the console is not using the BigQuery source (checked first); or not_found: the session has no activity in the range (no activity for session <id> in the last <range>).",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiError"}}}
+      },
+      "TraceNotFound": {
+        "description": "needs_bigquery: the console is not using the BigQuery source (checked first); or not_found: an unknown or invalid trace id (trace not found).",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiError"}}}
+      },
+      "QueryFailed": {
+        "description": "A failed query: kind is the source's (bigquery, transport, …), and message and hint are the error banner's text and hint.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiError"}}}
+      },
+      "MethodNotAllowed": {
+        "description": "method_not_allowed: the API is read-only. Every /api path answers it for a method other than GET, HEAD or OPTIONS.",
+        "headers": {
+          "Allow": {
+            "description": "GET, HEAD, OPTIONS",
+            "schema": {"type": "string", "const": "GET, HEAD, OPTIONS"}
+          }
+        },
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiError"}}}
+      }
+    },
     "schemas": {
       "ApiError": {
         "type": "object",
@@ -113,18 +388,443 @@
             }
           }
         }
-      }
-    },
-    "responses": {
-      "MethodNotAllowed": {
-        "description": "method_not_allowed: the API is read-only. Every /api path answers it for a method other than GET, HEAD or OPTIONS.",
-        "headers": {
-          "Allow": {
-            "description": "GET, HEAD, OPTIONS",
-            "schema": {"type": "string", "const": "GET, HEAD, OPTIONS"}
+      },
+      "Cost": {
+        "type": "object",
+        "description": "The cost fields of a priced row.",
+        "required": ["cost_usd", "cost_partial"],
+        "properties": {
+          "cost_usd": {
+            "type": ["number", "null"],
+            "description": "The sum of the priced calls in USD, unrounded; null when no call had a price (always, without --prices)."
+          },
+          "cost_partial": {
+            "type": "boolean",
+            "description": "Some calls had a price and some did not."
           }
-        },
-        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiError"}}}
+        }
+      },
+      "Usage": {
+        "type": "object",
+        "description": "Token counts.",
+        "required": ["input", "cached", "output", "reasoning"],
+        "properties": {
+          "input": {"type": "integer", "minimum": 0},
+          "cached": {"type": "integer", "minimum": 0},
+          "output": {"type": "integer", "minimum": 0},
+          "reasoning": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ModelCalls": {
+        "type": "object",
+        "description": "The calls of one model and their tokens.",
+        "required": ["model", "calls", "usage"],
+        "properties": {
+          "model": {"type": "string"},
+          "calls": {"type": "integer", "minimum": 0},
+          "usage": {"$ref": "#/components/schemas/Usage"}
+        }
+      },
+      "ModelTokens": {
+        "type": "array",
+        "description": "[model, usage]: one model's tokens.",
+        "prefixItems": [{"type": "string"}, {"$ref": "#/components/schemas/Usage"}],
+        "items": false,
+        "minItems": 2
+      },
+      "Cell": {
+        "type": "object",
+        "description": "The calls of one model by one agent with one prompt version (name@version, or null).",
+        "required": ["agent", "prompt", "calls"],
+        "properties": {
+          "agent": {"type": "string"},
+          "prompt": {"type": ["string", "null"]},
+          "calls": {"$ref": "#/components/schemas/ModelCalls"}
+        }
+      },
+      "PricedCell": {
+        "description": "A usage cell with its cost.",
+        "allOf": [{"$ref": "#/components/schemas/Cell"}, {"$ref": "#/components/schemas/Cost"}]
+      },
+      "TrendCell": {
+        "type": "object",
+        "description": "One cell of one trend bucket.",
+        "required": ["bucket", "cell"],
+        "properties": {
+          "bucket": {"type": "integer", "minimum": 0, "description": "Buckets from start."},
+          "cell": {"$ref": "#/components/schemas/Cell"}
+        }
+      },
+      "PricedTrendCell": {
+        "description": "A trend cell with its cost.",
+        "allOf": [
+          {"$ref": "#/components/schemas/TrendCell"},
+          {"$ref": "#/components/schemas/Cost"}
+        ]
+      },
+      "TopTrace": {
+        "type": "object",
+        "description": "A trace with its total tokens and its calls per model.",
+        "required": ["trace_id", "total", "models"],
+        "properties": {
+          "trace_id": {"type": "string"},
+          "total": {"type": "integer", "minimum": 0},
+          "models": {"type": "array", "items": {"$ref": "#/components/schemas/ModelCalls"}}
+        }
+      },
+      "PricedTopTrace": {
+        "description": "A top trace with its cost.",
+        "allOf": [{"$ref": "#/components/schemas/TopTrace"}, {"$ref": "#/components/schemas/Cost"}]
+      },
+      "SessionRow": {
+        "type": "object",
+        "description": "One session.",
+        "required": [
+          "session_id",
+          "user",
+          "agent",
+          "first",
+          "last",
+          "turns",
+          "errors",
+          "ups",
+          "downs",
+          "tokens"
+        ],
+        "properties": {
+          "session_id": {"type": "string"},
+          "user": {"type": "string"},
+          "agent": {"type": "string"},
+          "first": {"type": "string", "format": "date-time"},
+          "last": {"type": "string", "format": "date-time"},
+          "turns": {"type": "integer", "minimum": 0},
+          "errors": {"type": "integer", "minimum": 0},
+          "ups": {"type": "integer", "minimum": 0},
+          "downs": {"type": "integer", "minimum": 0},
+          "tokens": {"type": "array", "items": {"$ref": "#/components/schemas/ModelTokens"}}
+        }
+      },
+      "PricedSessionRow": {
+        "description": "A session with its cost.",
+        "allOf": [
+          {"$ref": "#/components/schemas/SessionRow"},
+          {"$ref": "#/components/schemas/Cost"}
+        ]
+      },
+      "TurnScore": {
+        "type": "object",
+        "description": "A score of one turn.",
+        "required": ["name", "source", "value"],
+        "properties": {
+          "name": {"type": "string"},
+          "source": {"type": "string"},
+          "value": {"type": "string"}
+        }
+      },
+      "TurnRow": {
+        "type": "object",
+        "description": "One turn (invocation) of a session.",
+        "required": [
+          "invocation_id",
+          "trace_id",
+          "start",
+          "end",
+          "errors",
+          "tools",
+          "tokens",
+          "scores"
+        ],
+        "properties": {
+          "invocation_id": {"type": "string"},
+          "trace_id": {"type": ["string", "null"]},
+          "start": {"type": "string", "format": "date-time"},
+          "end": {"type": ["string", "null"], "format": "date-time"},
+          "errors": {"type": "integer", "minimum": 0},
+          "tools": {"type": "array", "items": {"type": "string"}},
+          "tokens": {"type": "array", "items": {"$ref": "#/components/schemas/ModelTokens"}},
+          "scores": {"type": "array", "items": {"$ref": "#/components/schemas/TurnScore"}}
+        }
+      },
+      "PricedTurnRow": {
+        "description": "A turn with its cost.",
+        "allOf": [{"$ref": "#/components/schemas/TurnRow"}, {"$ref": "#/components/schemas/Cost"}]
+      },
+      "UserRow": {
+        "type": "object",
+        "description": "One user.",
+        "required": ["user", "sessions", "turns", "errors", "ups", "downs", "last", "tokens"],
+        "properties": {
+          "user": {"type": "string"},
+          "sessions": {"type": "integer", "minimum": 0},
+          "turns": {"type": "integer", "minimum": 0},
+          "errors": {"type": "integer", "minimum": 0},
+          "ups": {"type": "integer", "minimum": 0},
+          "downs": {"type": "integer", "minimum": 0},
+          "last": {"type": "string", "format": "date-time"},
+          "tokens": {"type": "array", "items": {"$ref": "#/components/schemas/ModelTokens"}}
+        }
+      },
+      "PricedUserRow": {
+        "description": "A user with their cost.",
+        "allOf": [{"$ref": "#/components/schemas/UserRow"}, {"$ref": "#/components/schemas/Cost"}]
+      },
+      "VersionStats": {
+        "type": "object",
+        "description": "Calls, mean tokens and latency percentiles of one prompt version.",
+        "required": ["version", "calls", "mean_input", "mean_output", "p50_ms", "p95_ms"],
+        "properties": {
+          "version": {"type": "integer", "minimum": 0},
+          "calls": {"type": "integer", "minimum": 0},
+          "mean_input": {"type": "number"},
+          "mean_output": {"type": "number"},
+          "p50_ms": {"type": ["number", "null"]},
+          "p95_ms": {"type": ["number", "null"]}
+        }
+      },
+      "PricedVersionStats": {
+        "description": "A version's stats with the cost of its calls.",
+        "allOf": [
+          {"$ref": "#/components/schemas/VersionStats"},
+          {"$ref": "#/components/schemas/Cost"}
+        ]
+      },
+      "VersionModel": {
+        "type": "object",
+        "description": "The calls of one prompt version on one model.",
+        "required": ["version", "calls"],
+        "properties": {
+          "version": {"type": "integer", "minimum": 0},
+          "calls": {"$ref": "#/components/schemas/ModelCalls"}
+        }
+      },
+      "PricedVersionModel": {
+        "description": "A version's calls on one model with their cost.",
+        "allOf": [
+          {"$ref": "#/components/schemas/VersionModel"},
+          {"$ref": "#/components/schemas/Cost"}
+        ]
+      },
+      "FeedbackRow": {
+        "type": "object",
+        "description": "The scores of one prompt version with one name, source and data type.",
+        "required": ["version", "name", "source", "data_type", "count", "positive", "mean", "mode"],
+        "properties": {
+          "version": {"type": "integer", "minimum": 0},
+          "name": {"type": "string"},
+          "source": {"type": "string"},
+          "data_type": {"type": "string"},
+          "count": {"type": "integer", "minimum": 0},
+          "positive": {"type": "integer", "minimum": 0},
+          "mean": {"type": ["number", "null"]},
+          "mode": {"type": ["string", "null"]}
+        }
+      },
+      "ScoreRow": {
+        "type": "object",
+        "description": "One score as /traces/{id} lists it.",
+        "required": ["timestamp", "source", "author", "name", "data_type", "value", "comment"],
+        "properties": {
+          "timestamp": {"type": "string", "format": "date-time"},
+          "source": {"type": "string"},
+          "author": {"type": "string"},
+          "name": {"type": "string"},
+          "data_type": {"type": "string"},
+          "value": {"type": "string"},
+          "comment": {"type": "string"}
+        }
+      },
+      "PendingTrace": {
+        "type": "object",
+        "description": "A trace waiting for review.",
+        "required": ["trace_id", "first", "prompts", "thumbs_down"],
+        "properties": {
+          "trace_id": {"type": "string"},
+          "first": {"type": "string", "format": "date-time"},
+          "prompts": {"type": "array", "items": {"type": "string"}},
+          "thumbs_down": {"type": "integer", "minimum": 0}
+        }
+      },
+      "UsageBreakdown": {
+        "type": "object",
+        "description": "The usage breakdown.",
+        "required": ["cells", "truncated"],
+        "properties": {
+          "cells": {"type": "array", "items": {"$ref": "#/components/schemas/PricedCell"}},
+          "truncated": {"type": "boolean"}
+        }
+      },
+      "UsageTrend": {
+        "type": "object",
+        "description": "The window start, the bucket width in seconds and the trend cells.",
+        "required": ["start", "bucket_seconds", "cells"],
+        "properties": {
+          "start": {"type": "string", "format": "date-time"},
+          "bucket_seconds": {"type": "integer", "minimum": 1},
+          "cells": {"type": "array", "items": {"$ref": "#/components/schemas/PricedTrendCell"}}
+        }
+      },
+      "SessionTurns": {
+        "type": "object",
+        "description": "A session's row and its turns.",
+        "required": ["session", "turns"],
+        "properties": {
+          "session": {"$ref": "#/components/schemas/PricedSessionRow"},
+          "turns": {"type": "array", "items": {"$ref": "#/components/schemas/PricedTurnRow"}}
+        }
+      },
+      "VersionMetrics": {
+        "type": "object",
+        "description": "Per-version metrics, newest version first.",
+        "required": ["stats", "models", "truncated"],
+        "properties": {
+          "stats": {"type": "array", "items": {"$ref": "#/components/schemas/PricedVersionStats"}},
+          "models": {"type": "array", "items": {"$ref": "#/components/schemas/PricedVersionModel"}},
+          "truncated": {"type": "boolean"}
+        }
+      },
+      "VersionFeedback": {
+        "type": "object",
+        "description": "The scores per version.",
+        "required": ["rows", "truncated"],
+        "properties": {
+          "rows": {"type": "array", "items": {"$ref": "#/components/schemas/FeedbackRow"}},
+          "truncated": {"type": "boolean"}
+        }
+      },
+      "PromptVersions": {
+        "type": "object",
+        "description": "A prompt's metrics and feedback per version.",
+        "required": ["metrics", "feedback"],
+        "properties": {
+          "metrics": {"$ref": "#/components/schemas/VersionMetrics"},
+          "feedback": {"$ref": "#/components/schemas/VersionFeedback"}
+        }
+      },
+      "TraceScores": {
+        "type": "object",
+        "description": "A trace's scores, newest first.",
+        "required": ["rows", "truncated"],
+        "properties": {
+          "rows": {"type": "array", "items": {"$ref": "#/components/schemas/ScoreRow"}},
+          "truncated": {"type": "boolean"}
+        }
+      },
+      "UsageBreakdownResponse": {
+        "type": "object",
+        "description": "The usage breakdown's envelope.",
+        "required": ["data", "truncated", "next"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/UsageBreakdown"},
+          "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
+          "next": {
+            "type": ["string", "null"],
+            "description": "The relative URL of the next page (sessions only); null everywhere else."
+          }
+        }
+      },
+      "UsageTrendResponse": {
+        "type": "object",
+        "description": "The usage trend's envelope.",
+        "required": ["data", "truncated", "next"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/UsageTrend"},
+          "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
+          "next": {
+            "type": ["string", "null"],
+            "description": "The relative URL of the next page (sessions only); null everywhere else."
+          }
+        }
+      },
+      "UsageTopTracesResponse": {
+        "type": "object",
+        "description": "The top traces' envelope.",
+        "required": ["data", "truncated", "next"],
+        "properties": {
+          "data": {"type": "array", "items": {"$ref": "#/components/schemas/PricedTopTrace"}},
+          "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
+          "next": {
+            "type": ["string", "null"],
+            "description": "The relative URL of the next page (sessions only); null everywhere else."
+          }
+        }
+      },
+      "SessionsResponse": {
+        "type": "object",
+        "description": "The sessions' envelope.",
+        "required": ["data", "truncated", "next"],
+        "properties": {
+          "data": {"type": "array", "items": {"$ref": "#/components/schemas/PricedSessionRow"}},
+          "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
+          "next": {
+            "type": ["string", "null"],
+            "description": "The relative URL of the next page (sessions only); null everywhere else."
+          }
+        }
+      },
+      "SessionTurnsResponse": {
+        "type": "object",
+        "description": "A session's turns' envelope.",
+        "required": ["data", "truncated", "next"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/SessionTurns"},
+          "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
+          "next": {
+            "type": ["string", "null"],
+            "description": "The relative URL of the next page (sessions only); null everywhere else."
+          }
+        }
+      },
+      "UsersResponse": {
+        "type": "object",
+        "description": "The users' envelope.",
+        "required": ["data", "truncated", "next"],
+        "properties": {
+          "data": {"type": "array", "items": {"$ref": "#/components/schemas/PricedUserRow"}},
+          "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
+          "next": {
+            "type": ["string", "null"],
+            "description": "The relative URL of the next page (sessions only); null everywhere else."
+          }
+        }
+      },
+      "PromptVersionsResponse": {
+        "type": "object",
+        "description": "The prompt versions' envelope.",
+        "required": ["data", "truncated", "next"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/PromptVersions"},
+          "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
+          "next": {
+            "type": ["string", "null"],
+            "description": "The relative URL of the next page (sessions only); null everywhere else."
+          }
+        }
+      },
+      "TraceScoresResponse": {
+        "type": "object",
+        "description": "The trace scores' envelope.",
+        "required": ["data", "truncated", "next"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/TraceScores"},
+          "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
+          "next": {
+            "type": ["string", "null"],
+            "description": "The relative URL of the next page (sessions only); null everywhere else."
+          }
+        }
+      },
+      "PendingReviewsResponse": {
+        "type": "object",
+        "description": "The review queue's envelope.",
+        "required": ["data", "truncated", "next"],
+        "properties": {
+          "data": {"type": "array", "items": {"$ref": "#/components/schemas/PendingTrace"}},
+          "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
+          "next": {
+            "type": ["string", "null"],
+            "description": "The relative URL of the next page (sessions only); null everywhere else."
+          }
+        }
       }
     }
   }

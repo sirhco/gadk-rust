@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use super::PATHS;
 use super::openapi::document;
 use super::tests::{api_get, assert_api_headers, bq_state};
+use super::usage_tests::breakdown_reply;
 use crate::web::AppState;
 use crate::web::testutil::{FakeSource, PORT, send, state};
 
@@ -442,4 +443,21 @@ async fn the_document_route_has_the_api_cors_head_and_host_guard() {
         .unwrap();
     let (status, _, _) = send(state(Arc::new(FakeSource::new()), None), req).await;
     assert_eq!(status, StatusCode::MISDIRECTED_REQUEST);
+}
+
+#[tokio::test]
+async fn the_checker_rejects_a_real_body_without_a_required_field() {
+    let fake = FakeHttp::new(vec![breakdown_reply(false)]);
+    let path = "/api/v1/usage/breakdown";
+    let (status, _, body) = api_get(bq_state(&fake, true), path).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(validate(path, status, &body), Ok(()));
+
+    let mut broken = body.clone();
+    broken["data"]["cells"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("cost_partial");
+    let e = validate(path, status, &broken).unwrap_err();
+    assert!(e.contains("\"cost_partial\" is a required property"), "{e}");
 }
