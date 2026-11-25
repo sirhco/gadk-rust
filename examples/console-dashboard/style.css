@@ -1,0 +1,190 @@
+/*
+ * Copyright 2026 Chris Olson
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/* A plain layout with system fonts; nothing is loaded from the network. */
+
+:root {
+  --fg: #1d1f23;
+  --muted: #5c6370;
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --line: #d8dbe0;
+  --accent: #2f6fdb;
+  --bad-bg: #fdecec;
+  --bad-fg: #8a1c1c;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e6e8eb;
+    --muted: #9aa1ab;
+    --bg: #15171a;
+    --panel: #1e2125;
+    --line: #353a41;
+    --accent: #79a6f2;
+    --bad-bg: #3a1d1d;
+    --bad-fg: #f3b4b4;
+  }
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  padding: 0 16px 32px;
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+header,
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+header {
+  padding: 16px 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+h3 {
+  margin: 16px 0 8px;
+  font-size: 14px;
+}
+
+form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+section {
+  margin: 16px 0;
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+tr.clickable {
+  cursor: pointer;
+}
+
+tr.clickable:hover,
+tr.clickable:focus {
+  background: var(--bg);
+  outline: none;
+}
+
+a {
+  color: var(--accent);
+}
+
+.note,
+.loading {
+  color: var(--muted);
+  margin: 8px 0;
+}
+
+.banner {
+  margin: 8px 0;
+  padding: 8px 12px;
+  color: var(--bad-fg);
+  background: var(--bad-bg);
+  border-radius: 4px;
+}
+
+.banner p {
+  margin: 0;
+}
+
+.banner .hint {
+  margin-top: 4px;
+  opacity: 0.85;
+}
+
+figure {
+  margin: 0;
+}
+
+svg {
+  display: block;
+  width: 100%;
+  height: 160px;
+}
+
+svg .bar {
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+figcaption {
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+#sessions-more {
+  margin-top: 8px;
+}

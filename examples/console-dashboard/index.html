@@ -1,0 +1,80 @@
+<!--
+  Copyright 2026 Chris Olson
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>gadk console dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>gadk console dashboard</h1>
+      <form id="controls">
+        <label>Console
+          <input id="console-url" type="url" size="32" spellcheck="false" autocomplete="off">
+        </label>
+        <label>Range
+          <select id="range">
+            <option value="1h">1h</option>
+            <option value="6h">6h</option>
+            <option value="24h" selected>24h</option>
+            <option value="7d">7d</option>
+            <option value="30d">30d</option>
+          </select>
+        </label>
+      </form>
+      <p id="clamp-note" class="note" hidden>Sessions, users and review show the last 7d.</p>
+    </header>
+    <main>
+      <section id="usage">
+        <h2>Usage</h2>
+        <div id="usage-body"></div>
+        <h3>Trend</h3>
+        <div id="trend-body"></div>
+      </section>
+      <section id="top-traces">
+        <h2>Top traces</h2>
+        <div id="top-traces-body"></div>
+      </section>
+      <section id="sessions">
+        <h2>Sessions</h2>
+        <div id="sessions-body"></div>
+        <button id="sessions-more" type="button" hidden>More</button>
+        <div id="turns" hidden>
+          <h3 id="turns-title">Turns</h3>
+          <div id="turns-body"></div>
+        </div>
+      </section>
+      <section id="users">
+        <h2>Users</h2>
+        <div id="users-body"></div>
+      </section>
+      <section id="review">
+        <h2>Review queue</h2>
+        <form id="review-form">
+          <label>Score
+            <input id="review-score" type="text" value="thumbs_up" spellcheck="false">
+          </label>
+          <button type="submit">Load</button>
+        </form>
+        <div id="review-body"></div>
+      </section>
+    </main>
+  </body>
+</html>
