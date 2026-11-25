@@ -261,17 +261,110 @@ async function load(node, url, render) {
 
 // R3: the totals of the usage breakdown.
 async function loadUsage() {
-  panel("usage-body").replaceChildren();
+  await load(panel("usage-body"), apiUrl(ROUTES.breakdown, { range: state.range }), (res, node) => {
+    const cells = res.data.cells;
+    const sum = { calls: 0, input: 0, cached: 0, output: 0, reasoning: 0 };
+    for (const cell of cells) {
+      sum.calls += cell.calls.calls;
+      for (const key of ["input", "cached", "output", "reasoning"]) {
+        sum[key] += cell.calls.usage[key];
+      }
+    }
+    node.append(
+      table(
+        ["Calls", "Input", "Cached", "Output", "Reasoning", "Cost"],
+        [
+          [
+            num(sum.calls),
+            num(sum.input),
+            num(sum.cached),
+            num(sum.output),
+            num(sum.reasoning),
+            money(cells),
+          ],
+        ],
+      ),
+    );
+  });
+}
+
+// An SVG element with these attributes.
+function svg(tag, attrs = {}) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attrs)) {
+    node.setAttribute(name, String(value));
+  }
+  return node;
+}
+
+// R4: the trend bar chart of `data` for `range`: cost per bucket, or calls when nothing is
+// priced.
+function trendChart(data, range) {
+  const width = 720;
+  const height = 160;
+  const buckets = new Map();
+  let priced = false;
+  for (const c of data.cells) {
+    const b = buckets.get(c.bucket) ?? { cost: 0, calls: 0 };
+    b.cost += c.cost_usd ?? 0;
+    b.calls += c.cell.calls.calls;
+    priced = priced || (c.cost_usd !== null && c.cost_usd !== undefined);
+    buckets.set(c.bucket, b);
+  }
+  const last = data.cells.reduce((max, c) => Math.max(max, c.bucket), -1);
+  const count = Math.max(Math.ceil(RANGE_SECONDS[range] / data.bucket_seconds), last + 1);
+  const values = [];
+  for (let i = 0; i < count; i += 1) {
+    const b = buckets.get(i);
+    values.push(b === undefined ? 0 : priced ? b.cost : b.calls);
+  }
+  const max = values.reduce((m, v) => Math.max(m, v), 0);
+  const start = Date.parse(data.start);
+  const bar = width / count;
+  const chart = svg("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    preserveAspectRatio: "none",
+    role: "img",
+    "aria-label": priced ? "Cost per bucket" : "LLM calls per bucket",
+  });
+  values.forEach((value, i) => {
+    const h = max > 0 ? (value / max) * height : 0;
+    const rect = svg("rect", { class: "bar", x: i * bar, y: height - h, width: bar, height: h });
+    const title = svg("title");
+    const at = new Date(start + i * data.bucket_seconds * 1000).toISOString();
+    title.textContent = `${at}: ${priced ? `$${value.toFixed(6)}` : `${num(value)} calls`}`;
+    rect.append(title);
+    chart.append(rect);
+  });
+  const caption = priced
+    ? `Cost (USD) per ${data.bucket_seconds} s bucket`
+    : `LLM calls per ${data.bucket_seconds} s bucket (no prices)`;
+  return el("figure", {}, chart, el("figcaption", {}, caption));
 }
 
 // R4: the trend chart.
 async function loadTrend() {
-  panel("trend-body").replaceChildren();
+  const range = state.range;
+  await load(panel("trend-body"), apiUrl(ROUTES.trend, { range }), (res, node) => {
+    node.append(trendChart(res.data, range));
+  });
 }
 
 // R5: the top traces by tokens.
 async function loadTopTraces() {
-  panel("top-traces-body").replaceChildren();
+  await load(panel("top-traces-body"), apiUrl(ROUTES.topTraces, { range: state.range }), (res, node) => {
+    if (res.data.length === 0) {
+      note(node, "No traces in this range.");
+      return;
+    }
+    const rows = res.data.map((t) => [
+      traceLink(t.trace_id),
+      num(t.total),
+      num(t.models.reduce((sum, m) => sum + m.calls, 0)),
+      money([t]),
+    ]);
+    node.append(table(["Trace", "Tokens", "LLM calls", "Cost"], rows));
+  });
 }
 
 // R6: the sessions; with `append`, the next page is added below the rows already shown.
