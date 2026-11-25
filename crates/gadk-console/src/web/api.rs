@@ -15,9 +15,6 @@
 //! The read-only JSON API under `/api`: the `{data, truncated, next}` envelope, JSON errors,
 //! the unknown-route 404 and the 405, and the cost fields of priced rows.
 
-// The helpers are for the routes that follow; until then only the tests call them.
-#![allow(dead_code)]
-
 use axum::Json;
 use axum::Router;
 use axum::response::{IntoResponse, Response};
@@ -30,6 +27,8 @@ use super::AppState;
 use crate::prices::{PriceTable, cost_of};
 use crate::traces::SourceError;
 
+mod usage;
+
 /// The message of the 404 for an unknown `/api` path.
 pub(crate) const NO_SUCH_ROUTE: &str = "no such API route";
 /// The message of the 405 for a write method on an API path.
@@ -37,7 +36,7 @@ pub(crate) const READ_ONLY: &str = "the API is read-only";
 
 /// The routes of the API, relative to `/api`.
 fn routes() -> Router<AppState> {
-    Router::new()
+    Router::new().merge(usage::routes())
 }
 
 /// The router nested at `/api`: [`routes`], a JSON 405 for other methods on a known route, and
@@ -145,3 +144,5 @@ pub(crate) fn cost_sum<'a>(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod usage_tests;
