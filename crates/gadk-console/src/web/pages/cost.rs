@@ -14,9 +14,10 @@
 
 //! Shared pieces of the pages that show tokens and cost.
 
+use gadk_analytics::cost::Usage;
 use maud::{Markup, html};
 
-use crate::prices::{Usage, thousands};
+use crate::prices::thousands;
 
 /// The note shown when the console has no price file.
 pub(crate) const NO_PRICES: &str =

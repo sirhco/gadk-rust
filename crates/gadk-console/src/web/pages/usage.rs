@@ -17,12 +17,13 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, TimeDelta, Utc};
+use gadk_analytics::cost::{CostSum, Usage};
 use maud::{Markup, html};
 
 use super::cost::{NO_PRICES, PARTIAL_NOTE, token_cells};
 use super::evals::{points, trend_labeled};
 use super::layout::{Nav, page};
-use crate::prices::{CostSum, PriceTable, Usage, cost_of, cost_text, thousands};
+use crate::prices::{PriceTable, cost_of, cost_text, thousands};
 use crate::traces::TraceId;
 use crate::usage::{BREAKDOWN_CAP, Breakdown, ModelCalls, TopTrace, Trend, TrendCell, UsageRange};
 
@@ -433,12 +434,7 @@ mod tests {
     }
 
     fn tokens(input: u64, output: u64, reasoning: u64) -> Usage {
-        Usage {
-            input,
-            cached: 0,
-            output,
-            reasoning,
-        }
+        Usage::new(input, 0, output, reasoning)
     }
 
     /// Bucket 1 and 3 are empty; bucket 5 is past the 4 buckets.

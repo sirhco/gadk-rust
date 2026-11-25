@@ -151,7 +151,7 @@ ALLOWED = {
     "gadk-prompts-cli": {"gadk-prompts", "gadk-prompts-firestore"},
     "gadk-cloudtrace": {"gadk-model"},
     "gadk-bigquery": {"gadk-agent", "gadk-engine", "gadk-model", "gadk-session"},
-    "gadk-analytics": {"gadk-bigquery", "gadk-model"},
+    "gadk-analytics": {"gadk-bigquery", "gadk-eval-monitor", "gadk-model"},
     "gadk-console": {"gadk-cloudtrace", "gadk-model", "gadk-prompts", "gadk-prompts-cli",
                      "gadk-eval", "gadk-eval-monitor", "gadk-bigquery", "gadk-analytics"},
     "gadk-eval": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",

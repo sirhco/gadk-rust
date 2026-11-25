@@ -14,6 +14,7 @@
 
 //! The JSON shape of the public types (`serde::Serialize`).
 
+use gadk_analytics::cost::{CostSum, Usage};
 use gadk_analytics::{BigQueryTable, Service, SourceError, TimeRange, TraceId};
 use serde_json::json;
 
@@ -42,5 +43,20 @@ fn the_shared_types_serialize() {
     assert_eq!(
         serde_json::to_value(SourceError::NotFound).unwrap(),
         json!("NotFound")
+    );
+}
+
+#[test]
+fn the_cost_types_serialize() {
+    assert_eq!(
+        serde_json::to_value(Usage::new(1200, 200, 300, 50)).unwrap(),
+        json!({ "input": 1200, "cached": 200, "output": 300, "reasoning": 50 })
+    );
+    let mut sum = CostSum::default();
+    sum.add(Some(0.5));
+    sum.add(None);
+    assert_eq!(
+        serde_json::to_value(sum).unwrap(),
+        json!({ "usd": 0.5, "priced": true, "unpriced": true })
     );
 }

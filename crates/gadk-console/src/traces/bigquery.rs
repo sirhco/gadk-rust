@@ -20,6 +20,10 @@
 use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Utc};
+use gadk_analytics::cost::{
+    LABEL_CACHED, LABEL_INPUT, LABEL_MODEL, LABEL_OPERATION, LABEL_OUTPUT, LABEL_REASONING,
+    OP_GENERATE_CONTENT,
+};
 use gadk_analytics::row::{from_bigquery, param, text, timestamp, ts_param};
 use gadk_bigquery::{BigQueryClient, QueryOptions};
 use serde_json::{Map, Value, json};
@@ -27,11 +31,6 @@ use serde_json::{Map, Value, json};
 use super::{
     BigQueryTable, LogEntry, LogSet, RawSpan, SourceError, TraceDetail, TraceId, TracePage,
     TraceQuery, TraceSource, TraceSummary,
-};
-
-use crate::prices::{
-    LABEL_CACHED, LABEL_INPUT, LABEL_MODEL, LABEL_OPERATION, LABEL_OUTPUT, LABEL_REASONING,
-    OP_GENERATE_CONTENT,
 };
 
 /// How an event type joins a span family.
@@ -620,8 +619,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::prices::Usage;
     use crate::traces::{LogEntry, RawSpan, SourceError, TimeRange, TraceQuery, TraceSource};
+    use gadk_analytics::cost::Usage;
     use gadk_analytics::testutil::{FakeHttp, param_value, reply};
 
     /// `list_sql("`p.d.t`")` as the list query was written before the span-family table, plus
@@ -1374,12 +1373,7 @@ ORDER BY timestamp, event_type LIMIT @limit"
         }
         assert_eq!(
             Usage::from_labels(&llm),
-            Usage {
-                input: 1200,
-                cached: 200,
-                output: 300,
-                reasoning: 50
-            },
+            Usage::new(1200, 200, 300, 50),
             "the BigQuery row mapping of R6"
         );
         let bare = labels(BARE);

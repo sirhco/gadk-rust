@@ -17,10 +17,12 @@
 //!
 //! The shared types are at the root: [`BigQueryTable`] names the table, [`TimeRange`] and
 //! [`TraceId`] are the trace-list window and id, and every query fails with a [`SourceError`].
-//! [`row`] holds the cell readers and query-parameter builders the queries share.
+//! [`row`] holds the cell readers and query-parameter builders the queries share, and [`cost`]
+//! the token counts of model calls and their cost.
 
 #![deny(missing_docs)]
 
+pub mod cost;
 mod error;
 pub mod row;
 mod table;

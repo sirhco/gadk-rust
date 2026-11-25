@@ -20,7 +20,7 @@ use chrono::{DateTime, Utc};
 use http::StatusCode;
 use http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 
-use crate::prices::CostSum;
+use gadk_analytics::cost::CostSum;
 
 /// The response header set on a truncated download.
 pub(crate) const TRUNCATED_HEADER: &str = "x-gadk-truncated";

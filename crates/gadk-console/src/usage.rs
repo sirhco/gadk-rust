@@ -22,11 +22,11 @@
 //! every result is grouped by model.
 
 use chrono::{DateTime, TimeDelta, Utc};
+use gadk_analytics::cost::{UNKNOWN_MODEL, Usage};
 use gadk_analytics::row::{from_bigquery, param, text, ts_param};
 use gadk_bigquery::{BigQueryClient, QueryOptions, QueryResult};
 use serde_json::{Map, Value, json};
 
-use crate::prices::{UNKNOWN_MODEL, Usage};
 use crate::traces::{BigQueryTable, SourceError};
 
 /// The most model × agent × prompt groups the breakdown query returns.
@@ -498,12 +498,12 @@ fn model_calls(row: &Map<String, Value>) -> ModelCalls {
     ModelCalls {
         model: text(row, "model").unwrap_or_else(|| UNKNOWN_MODEL.to_owned()),
         calls: count(row, "calls"),
-        usage: Usage {
-            input: count(row, "input"),
-            cached: count(row, "cached"),
-            output: count(row, "output"),
-            reasoning: count(row, "reasoning"),
-        },
+        usage: Usage::new(
+            count(row, "input"),
+            count(row, "cached"),
+            count(row, "output"),
+            count(row, "reasoning"),
+        ),
     }
 }
 
@@ -738,12 +738,7 @@ pub(crate) mod tests {
     ];
 
     fn usage(input: u64, cached: u64, output: u64, reasoning: u64) -> Usage {
-        Usage {
-            input,
-            cached,
-            output,
-            reasoning,
-        }
+        Usage::new(input, cached, output, reasoning)
     }
 
     #[tokio::test]

@@ -19,6 +19,7 @@ use axum::extract::{Query, State};
 use axum::response::Response;
 use axum::routing::get;
 use chrono::TimeDelta;
+use gadk_analytics::cost::CostSum;
 use http::StatusCode;
 use serde::Deserialize;
 
@@ -27,7 +28,7 @@ use super::pages::error::{error_page, source_error_in};
 use super::pages::layout::{Nav, html};
 use super::pages::usage::{self, NEEDS_BIGQUERY, Totals, agent_label, group, prompt_label};
 use crate::csv::{Csv, Field, filename, response};
-use crate::prices::{CostSum, cost_of};
+use crate::prices::cost_of;
 use crate::usage::{TOP_TRACES, UsageRange};
 
 /// The text of the 400 page for a missing or unknown `/usage.csv` table.

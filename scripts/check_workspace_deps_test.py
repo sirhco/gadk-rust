@@ -483,7 +483,7 @@ class EdgeTest(unittest.TestCase):
                           "gadk-prompts-cli"})
         # Only the console (its Evals pages) depends on it; the façade does not.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-eval-monitor" in deps],
-                         ["gadk-console"])
+                         ["gadk-analytics", "gadk-console"])
         # The `experiment` command builds LlmAgents, so it may depend on the engine.
         self.assertIn("gadk-eval-monitor", cwd.ENGINE_DEPENDENTS)
 
