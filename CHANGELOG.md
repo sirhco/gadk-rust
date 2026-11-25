@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.18] - 2026-11-25
+
 ### Added
 
 - New crate `gadk-analytics`: the console's BigQuery queries over the agent-analytics table as a
@@ -914,7 +916,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.17...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.18...HEAD
+[0.5.18]: https://github.com/sirhco/gadk-rust/compare/v0.5.17...v0.5.18
 [0.5.17]: https://github.com/sirhco/gadk-rust/compare/v0.5.16...v0.5.17
 [0.5.16]: https://github.com/sirhco/gadk-rust/compare/v0.5.15...v0.5.16
 [0.5.15]: https://github.com/sirhco/gadk-rust/compare/v0.5.14...v0.5.15
