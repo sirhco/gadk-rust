@@ -133,7 +133,11 @@ tr.clickable {
 tr.clickable:hover,
 tr.clickable:focus {
   background: var(--bg);
-  outline: none;
+}
+
+tr.clickable:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
 }
 
 a {

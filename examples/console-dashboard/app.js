@@ -75,12 +75,15 @@ function apiUrl(route, params = {}) {
 }
 
 // GETs `url` and returns the envelope `{data, truncated, next}`, or throws an `ApiError` or a
-// `NetworkError`.
-async function api(url) {
+// `NetworkError`. A fetch aborted through `signal` rethrows the browser's `AbortError`.
+async function api(url, signal) {
   let resp;
   try {
-    resp = await fetch(url, { method: "GET" });
+    resp = await fetch(url, { method: "GET", signal });
   } catch (err) {
+    if (signal !== undefined && signal.aborted) {
+      throw err;
+    }
     throw new NetworkError(url, err);
   }
   let body = null;
@@ -92,7 +95,12 @@ async function api(url) {
   if (!resp.ok) {
     const error = body && body.error;
     if (error && typeof error.kind === "string") {
-      throw new ApiError(resp.status, error.kind, String(error.message), error.hint ?? null);
+      throw new ApiError(
+        resp.status,
+        error.kind,
+        String(error.message ?? `HTTP ${resp.status}`),
+        error.hint ?? null,
+      );
     }
     throw new ApiError(resp.status, "http", `HTTP ${resp.status} from ${url}`, null);
   }
@@ -222,26 +230,32 @@ function panel(id) {
   return document.getElementById(id);
 }
 
-// The latest load of each panel body, so that a slow answer of an older load is dropped.
+// The latest load of each panel body and its abort controller, so that an older load is
+// aborted and a slow answer of it is dropped.
 const loads = new WeakMap();
 
-// Starts a load of `node` (clearing it unless `keep`) and returns a check that stays true until
-// a newer load of `node` starts.
+// Starts a load of `node` (clearing it unless `keep`), aborting the previous one, and returns
+// `{live, signal}`: a check that stays true until a newer load of `node` starts, and the signal
+// to pass to `api`.
 function begin(node, keep = false) {
-  const token = Symbol("load");
+  const previous = loads.get(node);
+  if (previous !== undefined) {
+    previous.controller.abort();
+  }
+  const token = { controller: new AbortController() };
   loads.set(node, token);
   if (!keep) {
     node.replaceChildren(el("p", { class: "loading" }, "Loading…"));
   }
-  return () => loads.get(node) === token;
+  return { live: () => loads.get(node) === token, signal: token.controller.signal };
 }
 
 // Loads `url` into `node`: `render(res, node)` on success, then the truncation note; a banner
 // on failure.
 async function load(node, url, render) {
-  const live = begin(node);
+  const { live, signal } = begin(node);
   try {
-    const res = await api(url);
+    const res = await api(url, signal);
     if (!live()) {
       return;
     }
@@ -379,7 +393,7 @@ const SESSION_HEADERS = [
   "👍/👎",
 ];
 
-// One sessions row; a click (or Enter) loads its turns.
+// One sessions row; a click (or Enter or Space) loads its turns.
 function sessionRow(s) {
   const open = () => loadTurns(s.session_id);
   return tr(
@@ -399,7 +413,8 @@ function sessionRow(s) {
       tabindex: "0",
       onclick: open,
       onkeydown: (event) => {
-        if (event.key === "Enter") {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
           open();
         }
       },
@@ -415,13 +430,13 @@ async function loadSessions(append = false) {
     return;
   }
   const url = append ? state.console + state.next : apiUrl(ROUTES.sessions, { range: r7(state.range) });
-  const live = begin(node, append);
+  const { live, signal } = begin(node, append);
   more.hidden = true;
   if (!append) {
     state.next = null;
   }
   try {
-    const res = await api(url);
+    const res = await api(url, signal);
     if (!live()) {
       return;
     }
@@ -450,7 +465,7 @@ async function loadSessions(append = false) {
   }
 }
 
-// Hides the turns detail and drops any load of it still running.
+// Hides the turns detail and aborts any load of it still running.
 function clearTurns() {
   document.getElementById("turns").hidden = true;
   const node = panel("turns-body");
@@ -464,6 +479,10 @@ async function loadTurns(id) {
   document.getElementById("turns-title").textContent = `Turns of ${id}`;
   const url = apiUrl(path(ROUTES.turns, { id }), { range: r7(state.range) });
   await load(panel("turns-body"), url, (res, node) => {
+    if (res.data.turns.length === 0) {
+      note(node, "No turns in this range.");
+      return;
+    }
     const rows = res.data.turns.map((t) => [
       when(t.start),
       t.end === null || t.end === undefined ? "" : when(t.end),
@@ -520,16 +539,36 @@ async function loadReview() {
   });
 }
 
-// Reads the header controls into `state`.
+// The origin of `value` when it is an absolute `http:` or `https:` URL, otherwise `null`.
+function consoleOrigin(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  return url.protocol === "http:" || url.protocol === "https:" ? url.origin : null;
+}
+
+// Reads the header controls into `state`; the console field shows the origin in use.
 function readControls() {
-  const value = document.getElementById("console-url").value.trim().replace(/\/+$/, "");
-  state.console = value === "" ? DEFAULT_CONSOLE : value;
+  const input = document.getElementById("console-url");
+  state.console = consoleOrigin(input.value.trim()) ?? DEFAULT_CONSOLE;
+  input.value = state.console;
   state.range = document.getElementById("range").value;
 }
+
+// The `console|range` of the last reload, so that one edit seen by two listeners reloads once.
+let lastReload = null;
 
 // R2: reloads every loaded panel with the header's console URL and range.
 async function reload() {
   readControls();
+  const key = `${state.console}|${state.range}`;
+  if (key === lastReload) {
+    return;
+  }
+  lastReload = key;
   document.getElementById("clamp-note").hidden = state.range !== "30d";
   clearTurns();
   const loaders = [loadUsage(), loadTrend(), loadTopTraces(), loadSessions(), loadUsers()];

@@ -27,8 +27,9 @@ python3 -m http.server 5173
 
 Open <http://localhost:5173/>. The page reads the console at `http://127.0.0.1:8765` unless the
 `console` query parameter names another one, such as
-<http://localhost:5173/?console=http://127.0.0.1:9000>. The header's field and range picker
-change both; every loaded panel then reloads.
+<http://localhost:5173/?console=http://127.0.0.1:9000>. Only an `http:` or `https:` URL is
+accepted, and only its origin is used; anything else falls back to `http://127.0.0.1:8765`. The
+header's field and range picker change both; every loaded panel then reloads.
 
 The page's origin must match an `--api-origin` value exactly: open `http://localhost:5173`, not
 `http://127.0.0.1:5173`, or list that origin too.
