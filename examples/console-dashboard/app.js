@@ -367,9 +367,87 @@ async function loadTopTraces() {
   });
 }
 
+const SESSION_HEADERS = [
+  "Session",
+  "User",
+  "Agent",
+  "Last activity",
+  "Turns",
+  "Tokens",
+  "Cost",
+  "Errors",
+  "👍/👎",
+];
+
+// One sessions row; a click (or Enter) loads its turns.
+function sessionRow(s) {
+  const open = () => loadTurns(s.session_id);
+  return tr(
+    [
+      s.session_id,
+      s.user,
+      s.agent,
+      when(s.last),
+      num(s.turns),
+      num(sumTokens(s.tokens)),
+      money([s]),
+      num(s.errors),
+      `${s.ups} / ${s.downs}`,
+    ],
+    {
+      class: "clickable",
+      tabindex: "0",
+      onclick: open,
+      onkeydown: (event) => {
+        if (event.key === "Enter") {
+          open();
+        }
+      },
+    },
+  );
+}
+
 // R6: the sessions; with `append`, the next page is added below the rows already shown.
 async function loadSessions(append = false) {
-  panel("sessions-body").replaceChildren();
+  const node = panel("sessions-body");
+  const more = document.getElementById("sessions-more");
+  if (append && state.next === null) {
+    return;
+  }
+  const url = append ? state.console + state.next : apiUrl(ROUTES.sessions, { range: r7(state.range) });
+  const live = begin(node, append);
+  more.hidden = true;
+  if (!append) {
+    state.next = null;
+  }
+  try {
+    const res = await api(url);
+    if (!live()) {
+      return;
+    }
+    if (!append) {
+      node.replaceChildren(table(SESSION_HEADERS, []));
+      if (res.data.length === 0) {
+        note(node, "No sessions in this range.");
+      }
+    }
+    node.querySelector("tbody").append(...res.data.map(sessionRow));
+    if (res.truncated) {
+      note(node, TRUNCATED);
+    }
+    const next = typeof res.next === "string" && res.next.startsWith(`${ROUTES.sessions}?`) ? res.next : null;
+    state.next = next;
+    more.hidden = next === null;
+  } catch (err) {
+    if (!live()) {
+      return;
+    }
+    if (!append) {
+      node.replaceChildren();
+    }
+    banner(node, err);
+    more.hidden = state.next === null;
+  }
 }
 
 // Hides the turns detail and drops any load of it still running.
@@ -380,15 +458,66 @@ function clearTurns() {
   node.replaceChildren();
 }
 
+// R7: the turns of session `id` in the detail panel.
+async function loadTurns(id) {
+  document.getElementById("turns").hidden = false;
+  document.getElementById("turns-title").textContent = `Turns of ${id}`;
+  const url = apiUrl(path(ROUTES.turns, { id }), { range: r7(state.range) });
+  await load(panel("turns-body"), url, (res, node) => {
+    const rows = res.data.turns.map((t) => [
+      when(t.start),
+      t.end === null || t.end === undefined ? "" : when(t.end),
+      num(sumTokens(t.tokens)),
+      money([t]),
+      num(t.errors),
+      t.tools.length === 0 ? "—" : t.tools.join(", "),
+      t.scores.length === 0 ? "—" : t.scores.map((s) => `${s.name}=${s.value}`).join(", "),
+      traceLink(t.trace_id),
+    ]);
+    node.append(
+      table(["Start", "End", "Tokens", "Cost", "Errors", "Tools", "Scores", "Trace"], rows),
+    );
+  });
+}
+
 // R8: the users.
 async function loadUsers() {
-  panel("users-body").replaceChildren();
+  await load(panel("users-body"), apiUrl(ROUTES.users, { range: r7(state.range) }), (res, node) => {
+    if (res.data.length === 0) {
+      note(node, "No users in this range.");
+      return;
+    }
+    const rows = res.data.map((u) => [
+      u.user,
+      num(u.sessions),
+      num(u.turns),
+      num(sumTokens(u.tokens)),
+      money([u]),
+      num(u.errors),
+      `${u.ups} / ${u.downs}`,
+    ]);
+    node.append(table(["User", "Sessions", "Turns", "Tokens", "Cost", "Errors", "👍/👎"], rows));
+  });
 }
 
 // R9: the review queue of the score in the score field.
 async function loadReview() {
   state.reviewLoaded = true;
-  panel("review-body").replaceChildren();
+  const score = document.getElementById("review-score").value.trim();
+  const url = apiUrl(ROUTES.review, { score, range: r7(state.range) });
+  await load(panel("review-body"), url, (res, node) => {
+    if (res.data.length === 0) {
+      note(node, "No pending traces.");
+      return;
+    }
+    const rows = res.data.map((r) => [
+      traceLink(r.trace_id),
+      when(r.first),
+      r.prompts.length === 0 ? "—" : r.prompts.join(", "),
+      num(r.thumbs_down),
+    ]);
+    node.append(table(["Trace", "First", "Prompts", "👎"], rows));
+  });
 }
 
 // Reads the header controls into `state`.
