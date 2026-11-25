@@ -413,3 +413,41 @@ impl<'a> TurnCells<'a> {
         ]
     }
 }
+
+/// The columns of the pending query (`prompts` is `ARRAY<STRING>`).
+const PENDING_FIELDS: [(&str, &str); 4] = [
+    ("trace_id", "STRING"),
+    ("first", "TIMESTAMP"),
+    ("prompts", "STRING"),
+    ("thumbs_down", "INT64"),
+];
+
+/// A `jobs.query` reply of pending-query rows
+/// ([`AnalyticsSource::pending`](crate::AnalyticsSource::pending); see [`pending_cells`]), with
+/// `prompts` `REPEATED`.
+pub fn pending_reply(rows: Vec<Vec<Value>>) -> Result<(u16, String), String> {
+    let (status, body) = reply(&PENDING_FIELDS, rows, false)?;
+    let mut body: Value = serde_json::from_str(&body).unwrap();
+    body["schema"]["fields"][2]["mode"] = Value::from("REPEATED");
+    Ok((status, body.to_string()))
+}
+
+/// The cells of one pending row; no `prompts` is a NULL array.
+pub fn pending_cells(
+    trace_id: &str,
+    first: DateTime<Utc>,
+    prompts: &[&str],
+    thumbs_down: u64,
+) -> Vec<Value> {
+    let prompts = if prompts.is_empty() {
+        Value::Null
+    } else {
+        Value::Array(prompts.iter().map(|p| json!({ "v": p })).collect())
+    };
+    vec![
+        Value::from(trace_id),
+        Value::from(first.timestamp_micros().to_string()),
+        prompts,
+        Value::from(thumbs_down.to_string()),
+    ]
+}

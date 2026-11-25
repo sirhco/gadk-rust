@@ -215,9 +215,9 @@ mod tests {
 
     use crate::prices::{PriceTable, thousands};
     use crate::traces::BigQueryTable;
-    use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{FakeSource, get, state};
+    use gadk_analytics::AnalyticsSource;
     use gadk_analytics::testutil::{FakeHttp, TREND_FIELDS, param_value, reply};
 
     const PRICES: &str =
@@ -225,7 +225,7 @@ mod tests {
 
     fn bq_state(fake: &Arc<FakeHttp>, prices: bool) -> AppState {
         let mut st = state(Arc::new(FakeSource::new()), None);
-        st.usage = Some(Arc::new(UsageSource::with_client(
+        st.usage = Some(Arc::new(AnalyticsSource::new(
             BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
             "billing-proj",
             BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),

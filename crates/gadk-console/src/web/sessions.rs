@@ -37,9 +37,9 @@ use super::pages::session::{self, Conversation};
 use super::pages::{sessions, users};
 use super::review::first;
 use crate::csv::{Csv, Field, filename, response};
-use crate::review::at_text;
 use crate::traces::TimeRange;
 use crate::url::percent_encode;
+use gadk_analytics::review::at_text;
 
 /// The note shown by the session pages when the trace source is not BigQuery.
 pub(crate) const NEEDS_BIGQUERY_SESSIONS: &str = "Sessions need the BigQuery trace source: start the console with --traces bigquery://<project>.<dataset>.<table>.";
@@ -404,9 +404,9 @@ mod tests {
 
     use crate::prices::PriceTable;
     use crate::traces::BigQueryTable;
-    use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{FakeExport, FakeSource, fixed_now, get, state};
+    use gadk_analytics::AnalyticsSource;
     use gadk_analytics::testutil::{
         FakeHttp, SESSION_FIELDS, TurnCells, USER_FIELDS, param_value, reply, session_cells,
         turn_reply, user_cells,
@@ -417,7 +417,7 @@ mod tests {
 
     fn bq_state(fake: &Arc<FakeHttp>, prices: bool) -> AppState {
         let mut st = state(Arc::new(FakeSource::new()), None);
-        st.usage = Some(Arc::new(UsageSource::with_client(
+        st.usage = Some(Arc::new(AnalyticsSource::new(
             BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
             "billing-proj",
             BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),

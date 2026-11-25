@@ -69,14 +69,12 @@ impl AnalyticsSource {
     }
 
     /// The table as a backquoted SQL path.
-    #[doc(hidden)]
-    pub fn table_path(&self) -> Result<String, SourceError> {
+    pub(crate) fn table_path(&self) -> Result<String, SourceError> {
         self.table.sql_path()
     }
 
     /// Runs `sql` with `params`, the byte cap and at most `max_rows` rows.
-    #[doc(hidden)]
-    pub async fn run(
+    pub(crate) async fn run(
         &self,
         sql: &str,
         params: Vec<Value>,
@@ -94,8 +92,7 @@ impl AnalyticsSource {
 
     /// Runs the DML statement `sql` with `params` under the byte cap, raised to
     /// [`DML_MIN_BYTES`] (BigQuery bills every DML statement at least 10 MiB).
-    #[doc(hidden)]
-    pub async fn run_dml(&self, sql: &str, params: Vec<Value>) -> Result<(), SourceError> {
+    pub(crate) async fn run_dml(&self, sql: &str, params: Vec<Value>) -> Result<(), SourceError> {
         let opts = QueryOptions::new()
             .with_maximum_bytes_billed(self.max_bytes_billed.max(DML_MIN_BYTES))
             .with_query_parameters(params);
@@ -108,8 +105,7 @@ impl AnalyticsSource {
 
     /// Runs `sql` with `params` plus `@limit` = `cap + 1`: the first `cap` rows and whether more
     /// existed.
-    #[doc(hidden)]
-    pub async fn run_capped(
+    pub(crate) async fn run_capped(
         &self,
         sql: &str,
         mut params: Vec<Value>,
@@ -124,8 +120,7 @@ impl AnalyticsSource {
 }
 
 /// The `@start` and `@end` TIMESTAMP parameters.
-#[doc(hidden)]
-pub fn window_params(start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<Value> {
+pub(crate) fn window_params(start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<Value> {
     vec![
         param("start", "TIMESTAMP", Some(ts_param(start))),
         param("end", "TIMESTAMP", Some(ts_param(end))),
@@ -133,8 +128,7 @@ pub fn window_params(start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<Value> {
 }
 
 /// An INT64 cell as a count; 0 when NULL or not a non-negative integer.
-#[doc(hidden)]
-pub fn count(row: &Map<String, Value>, key: &str) -> u64 {
+pub(crate) fn count(row: &Map<String, Value>, key: &str) -> u64 {
     row.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
@@ -146,8 +140,7 @@ pub(crate) fn version_of(row: &Map<String, Value>) -> Option<u32> {
 }
 
 /// An `ARRAY<STRING>` query parameter.
-#[doc(hidden)]
-pub fn string_array_param(name: &str, values: &[String]) -> Value {
+pub(crate) fn string_array_param(name: &str, values: &[String]) -> Value {
     let values: Vec<Value> = values.iter().map(|v| json!({ "value": v })).collect();
     json!({
         "name": name,

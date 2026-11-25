@@ -19,6 +19,7 @@ use gadk_analytics::cost::{CostSum, Usage};
 use gadk_analytics::prompts::{
     FeedbackRow, InvocationVersions, VersionFeedback, VersionMetrics, VersionModel, VersionStats,
 };
+use gadk_analytics::review::{Cursor, PendingTrace};
 use gadk_analytics::scores::{ScoreRow, TraceRoot, TraceScores};
 use gadk_analytics::sessions::{
     SessionCursor, SessionPage, SessionRow, TurnRow, TurnScore, UserPage, UserRow,
@@ -245,5 +246,29 @@ fn the_score_types_serialize_timestamps_as_rfc3339() {
         ))
         .unwrap(),
         json!({ "user_id": null, "session_id": "s1", "invocation_id": "inv-1", "app_name": null })
+    );
+}
+
+#[test]
+fn the_review_types_serialize_timestamps_as_rfc3339() {
+    let at = Utc.with_ymd_and_hms(2026, 11, 23, 11, 0, 0).unwrap();
+    assert_eq!(
+        serde_json::to_value(PendingTrace::new(
+            "0123456789abcdef0123456789abcdef".into(),
+            at,
+            vec!["triage@2".into()],
+            1,
+        ))
+        .unwrap(),
+        json!({
+            "trace_id": "0123456789abcdef0123456789abcdef",
+            "first": "2026-11-23T11:00:00Z",
+            "prompts": ["triage@2"],
+            "thumbs_down": 1,
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(Cursor::new(at, "0123456789abcdef0123456789abcdef".into())).unwrap(),
+        json!({ "at": "2026-11-23T11:00:00Z", "trace_id": "0123456789abcdef0123456789abcdef" })
     );
 }

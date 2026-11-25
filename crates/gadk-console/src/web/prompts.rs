@@ -22,6 +22,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use chrono::{DateTime, Utc};
+use gadk_analytics::AnalyticsSource;
 use gadk_analytics::cost::CostSum;
 use gadk_analytics::prompts::VersionMetrics;
 use gadk_eval_monitor::MonitorError;
@@ -40,7 +41,6 @@ use crate::evals::ReportCache;
 use crate::prices::{PriceTable, cost_of};
 use crate::prompts::{diff_view, prompt_detail, prompt_rows, version_view};
 use crate::traces::TimeRange;
-use crate::usage::UsageSource;
 
 const NO_STORE: &str = "No prompt store configured (start with --store)";
 
@@ -254,7 +254,7 @@ async fn production_metrics(state: &AppState, name: &str, range: TimeRange) -> P
 /// started in `[start, end)`, mapped to versions by their invocations' `LLM_REQUEST` rows.
 async fn pass_rates(
     reports: Option<&ReportCache>,
-    source: &UsageSource,
+    source: &AnalyticsSource,
     name: &str,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
@@ -620,10 +620,10 @@ mod tests {
     use crate::evals::ReportCache;
     use crate::prices::PriceTable;
     use crate::traces::BigQueryTable;
-    use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{CSRF, FakeSource, get, post_form, state};
     use crate::web::testutil::{fixed_now, guard_cache, report, report_cache, state_with_reports};
+    use gadk_analytics::AnalyticsSource;
     use gadk_analytics::testutil::{FakeHttp, param_value, reply};
     use gadk_bigquery::{BigQueryClient, NoAuth};
     use gadk_eval::Outcome;
@@ -1610,7 +1610,7 @@ mod tests {
     ) -> AppState {
         let store: Arc<dyn PromptStore> = store.clone();
         let mut st = state_with_reports(Arc::new(FakeSource::new()), Some(store), reports);
-        st.usage = Some(Arc::new(UsageSource::with_client(
+        st.usage = Some(Arc::new(AnalyticsSource::new(
             BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
             "billing-proj",
             BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),

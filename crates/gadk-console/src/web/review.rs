@@ -19,13 +19,14 @@ use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use chrono::{DateTime, Utc};
+use gadk_analytics::review::{Cursor, at_text};
 use http::StatusCode;
 
 use super::AppState;
 use super::pages::error::{error_page, source_error_in};
 use super::pages::layout::{Nav, html};
 use super::pages::review;
-use crate::review::{Cursor, NEEDS_BIGQUERY_REVIEW, ReviewQueue, at_text};
+use crate::review::{NEEDS_BIGQUERY_REVIEW, ReviewQueue};
 use crate::url::percent_encode;
 
 pub(crate) fn routes() -> Router<AppState> {
@@ -91,7 +92,10 @@ async fn list(
         Ok(None) => return html(StatusCode::OK, review::render(None, None, false, rubrics)),
         Err(text) => return bad_request(&text),
     };
-    match usage.pending(&queue, rubrics, (state.now)()).await {
+    match usage
+        .pending(&queue.analytics(), &queue.names(rubrics), (state.now)())
+        .await
+    {
         Ok(rows) => html(
             StatusCode::OK,
             review::render(
@@ -126,7 +130,12 @@ async fn next(
         Err(text) => return bad_request(&text),
     };
     match usage
-        .next_pending(&queue, rubrics, (state.now)(), &after)
+        .next_pending(
+            &queue.analytics(),
+            &queue.names(rubrics),
+            (state.now)(),
+            &after,
+        )
         .await
     {
         Ok(Some(t)) => Redirect::to(&review_link(&queue, &t.trace_id, t.first)).into_response(),
@@ -148,12 +157,13 @@ mod tests {
     use serde_json::json;
 
     use super::{next_link, review_link};
-    use crate::review::{Cursor, ReviewQueue, pending_cells, pending_reply};
+    use crate::review::ReviewQueue;
     use crate::traces::BigQueryTable;
-    use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{FakeSource, fixed_now, get, state, test_rubrics};
-    use gadk_analytics::testutil::{FakeHttp, param_value};
+    use gadk_analytics::AnalyticsSource;
+    use gadk_analytics::review::Cursor;
+    use gadk_analytics::testutil::{FakeHttp, param_value, pending_cells, pending_reply};
 
     const ACTIVE: &str = r#"<a class="active" href="/review">Review</a>"#;
     const A: &str = "0123456789abcdef0123456789abcdef";
@@ -161,7 +171,7 @@ mod tests {
 
     fn bq_state(fake: &Arc<FakeHttp>) -> AppState {
         let mut st = state(Arc::new(FakeSource::new()), None);
-        st.usage = Some(Arc::new(UsageSource::with_client(
+        st.usage = Some(Arc::new(AnalyticsSource::new(
             BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
             "billing-proj",
             BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
@@ -199,10 +209,7 @@ mod tests {
                 "/traces/{A}?score=a%26b&prompt=team%2Fgreet&range=24h&at=2026-11-16T11%3A58%3A59.999750Z"
             )
         );
-        let after = Cursor {
-            at: ago(60),
-            trace_id: B.into(),
-        };
+        let after = Cursor::new(ago(60), B.into());
         assert_eq!(
             next_link(&q, &after),
             format!(
@@ -693,10 +700,7 @@ mod tests {
             review_link(&q, A, ago(60)),
             format!("/traces/{A}?rubric=safety&range=1h&at=2026-11-16T11%3A58%3A59.999750Z")
         );
-        let after = Cursor {
-            at: ago(60),
-            trace_id: B.into(),
-        };
+        let after = Cursor::new(ago(60), B.into());
         assert_eq!(
             next_link(&q, &after),
             format!(

@@ -19,6 +19,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
 use chrono::TimeDelta;
+use gadk_analytics::review::{Cursor, at_text};
 use gadk_analytics::scores::{BQ_EDITOR_HINT, NewScore};
 use http::StatusCode;
 use serde::Deserialize;
@@ -34,7 +35,7 @@ use super::pages::{trace, traces};
 use super::review::next_link;
 use crate::datasets::{AddError, NEEDS_DATASETS, is_dataset_name};
 use crate::model::{attach_logs, build_tree, trace_end};
-use crate::review::{Cursor, ReviewQueue, at_text};
+use crate::review::ReviewQueue;
 use crate::rubrics::{NO_RUBRICS, Rubrics};
 use crate::traces::{RawSpan, SourceError, TimeRange, TraceId, TraceQuery};
 use crate::url::percent_encode;
@@ -486,10 +487,10 @@ mod tests {
         LogEntry, LogSet, RawSpan, Service, SourceError, TimeRange, TraceDetail, TraceId,
         TracePage, TraceQuery, TraceSource, TraceSummary,
     };
-    use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{AUTHOR, CSRF, FakeExport, post_form, test_rubrics};
     use crate::web::testutil::{FakeSource, fixed_now, get, state};
+    use gadk_analytics::AnalyticsSource;
     use gadk_analytics::testutil::{FakeHttp, param_value, reply};
     use gadk_bigquery::{BigQueryClient, NoAuth};
     use http::header::LOCATION;
@@ -1211,7 +1212,7 @@ mod tests {
     /// `with_get(Ok(d))` plus the BigQuery usage source over `fake`.
     fn bq_get(d: TraceDetail, fake: &Arc<FakeHttp>) -> AppState {
         let (_, mut st) = with_get(Ok(d));
-        st.usage = Some(Arc::new(UsageSource::with_client(
+        st.usage = Some(Arc::new(AnalyticsSource::new(
             BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
             "billing-proj",
             BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
