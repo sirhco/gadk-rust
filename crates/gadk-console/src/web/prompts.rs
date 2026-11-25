@@ -129,11 +129,7 @@ async fn detail(
         Ok(show) => show,
         Err(resp) => return resp,
     };
-    let range = q
-        .range
-        .as_deref()
-        .and_then(TimeRange::parse)
-        .unwrap_or(TimeRange::Days7);
+    let range = metrics_range(q.range.as_deref());
     match store.load_prompt(&name).await {
         Ok((snap, rollouts)) => {
             let metrics = if prompt_detail(&snap, &rollouts, &name).is_some() {
@@ -207,6 +203,12 @@ fn detail_page(
             state.guards.is_some(),
         ),
     )
+}
+
+/// The `range` of the production metrics on `/prompts/{name}` and
+/// `/api/v1/prompts/{name}/versions`: an unknown or missing value is 7d.
+pub(crate) fn metrics_range(raw: Option<&str>) -> TimeRange {
+    raw.and_then(TimeRange::parse).unwrap_or(TimeRange::Days7)
 }
 
 /// The newest monitor reports read for the eval pass-rate column.

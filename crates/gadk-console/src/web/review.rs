@@ -29,6 +29,10 @@ use super::pages::review;
 use crate::review::{NEEDS_BIGQUERY_REVIEW, ReviewQueue};
 use crate::url::percent_encode;
 
+/// The text of the 400 for a queue without `score` or `rubric` where one is needed
+/// (`/review/next` and `/api/v1/review/pending`).
+pub(crate) const SCORE_REQUIRED: &str = "score: required";
+
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/review", get(list))
@@ -122,7 +126,7 @@ async fn next(
     let rubrics = state.rubrics.as_deref();
     let queue = match ReviewQueue::from_params(&params, rubrics) {
         Ok(Some(q)) => q,
-        Ok(None) => return bad_request("score: required"),
+        Ok(None) => return bad_request(SCORE_REQUIRED),
         Err(text) => return bad_request(&text),
     };
     let after = match Cursor::parse(first(&params, "after"), first(&params, "after_id")) {

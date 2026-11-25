@@ -27,6 +27,9 @@ use super::AppState;
 use crate::prices::{PriceTable, cost_of};
 use crate::traces::SourceError;
 
+mod prompts;
+mod review;
+mod scores;
 mod sessions;
 mod usage;
 
@@ -40,6 +43,9 @@ fn routes() -> Router<AppState> {
     Router::new()
         .merge(usage::routes())
         .merge(sessions::routes())
+        .merge(prompts::routes())
+        .merge(scores::routes())
+        .merge(review::routes())
 }
 
 /// The router nested at `/api`: [`routes`], a JSON 405 for other methods on a known route, and
@@ -145,6 +151,12 @@ pub(crate) fn cost_sum<'a>(
     sum
 }
 
+#[cfg(test)]
+mod prompts_tests;
+#[cfg(test)]
+mod review_tests;
+#[cfg(test)]
+mod scores_tests;
 #[cfg(test)]
 mod sessions_tests;
 #[cfg(test)]

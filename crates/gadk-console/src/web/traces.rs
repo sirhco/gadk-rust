@@ -18,7 +18,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
-use chrono::TimeDelta;
+use chrono::{DateTime, TimeDelta, Utc};
 use gadk_analytics::review::{Cursor, at_text};
 use gadk_analytics::scores::{BQ_EDITOR_HINT, NewScore};
 use http::StatusCode;
@@ -170,23 +170,30 @@ async fn detail(
     )
 }
 
-/// The Scores section of trace `id`: with the BigQuery source, the scores of the trace and of
-/// the invocations its spans name (`invocation_id` labels) since a day before its first span.
-async fn trace_scores(state: &AppState, id: &TraceId, spans: &[RawSpan]) -> ScoresView {
-    let Some(usage) = &state.usage else {
-        return ScoresView::NeedsBigQuery;
-    };
+/// What the scores of a trace are looked up by, on `/traces/{id}` and
+/// `/api/v1/traces/{id}/scores`: the distinct `invocation_id` labels of `spans`, sorted, and the
+/// earliest span start (`now()` without spans).
+pub(crate) fn score_lookup(
+    spans: &[RawSpan],
+    now: fn() -> DateTime<Utc>,
+) -> (Vec<String>, DateTime<Utc>) {
     let mut ids: Vec<String> = spans
         .iter()
         .filter_map(|s| s.labels.get("invocation_id").cloned())
         .collect();
     ids.sort();
     ids.dedup();
-    let start = spans
-        .iter()
-        .map(|s| s.start)
-        .min()
-        .unwrap_or_else(state.now);
+    let start = spans.iter().map(|s| s.start).min().unwrap_or_else(now);
+    (ids, start)
+}
+
+/// The Scores section of trace `id`: with the BigQuery source, the scores of the trace and of
+/// the invocations its spans name (`invocation_id` labels) since a day before its first span.
+async fn trace_scores(state: &AppState, id: &TraceId, spans: &[RawSpan]) -> ScoresView {
+    let Some(usage) = &state.usage else {
+        return ScoresView::NeedsBigQuery;
+    };
+    let (ids, start) = score_lookup(spans, state.now);
     match usage.trace_scores(id.as_str(), &ids, start).await {
         Ok(scores) => ScoresView::Loaded(scores),
         Err(e) => ScoresView::Failed(e.to_string(), e.hint()),
