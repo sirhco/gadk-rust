@@ -290,7 +290,6 @@ impl UsageSource {
 
     /// Inserts `scores` by `author` on trace `trace_id` as `FEEDBACK` rows of `root`'s
     /// invocation, in order: one DML statement (all rows or none), billed at least 10 MiB.
-    #[allow(dead_code)] // the rubric form posts here
     pub(crate) async fn insert_scores(
         &self,
         trace_id: &str,

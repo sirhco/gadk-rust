@@ -39,6 +39,10 @@ const MAX_SCALE_SPAN: u64 = 10;
 /// The scale of a criterion without one.
 const DEFAULT_SCALE: (u32, u32) = (1, 5);
 
+/// The 404 text of `POST /traces/{id}/rubric` without `--rubrics`.
+pub(crate) const NO_RUBRICS: &str =
+    "no rubrics are loaded (start the console with --rubrics <file>)";
+
 /// One criterion of a rubric: an integer score from `min` to `max`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Criterion {

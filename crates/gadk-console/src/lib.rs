@@ -40,7 +40,6 @@ mod model;
 mod prices;
 mod prompts;
 mod review;
-#[allow(dead_code)] // the review queue and the trace page read the rubrics
 mod rubrics;
 mod scores;
 mod sessions;
