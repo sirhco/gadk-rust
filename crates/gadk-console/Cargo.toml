@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 keywords.workspace = true
+# The example-dashboard guard reads `examples/console-dashboard/app.js` from the repository,
+# which the package does not contain.
+exclude = ["tests/dashboard_routes.rs"]
 
 [lints]
 workspace = true

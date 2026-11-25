@@ -61,6 +61,6 @@ Each panel loads on its own. A failed request shows a banner in that panel only:
 
 `app.js` renders API data only through `textContent`, `createElement` and attribute setters,
 never through HTML strings, and encodes every id it puts in a path with `encodeURIComponent`.
-`fetch` keeps its default mode, so cross-origin requests carry no cookies. A unit test in
-`gadk-console` (`src/web/api/dashboard_tests.rs`) checks that every `/api/v1/` path in `app.js`
+`fetch` keeps its default mode, so cross-origin requests carry no cookies. An integration test in
+`gadk-console` (`tests/dashboard_routes.rs`) checks that every `/api/v1/` path in `app.js`
 is a console route and that the file has none of the HTML-string sinks.

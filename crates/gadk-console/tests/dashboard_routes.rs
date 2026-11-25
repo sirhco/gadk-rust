@@ -14,17 +14,17 @@
 
 //! Guards of the example dashboard in `examples/console-dashboard/app.js`: every API path it
 //! calls is a console route, and it never builds HTML from strings.
+//!
+//! The script lives outside this crate, so `Cargo.toml` leaves this file out of the published
+//! package (`exclude`); it runs only in the repository.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
-use http::StatusCode;
+use gadk_console::{ConsoleConfig, bind};
+use serde_json::Value;
 
-use super::tests::api_get;
-use crate::web::testutil::{FakeSource, state};
-
-/// The example dashboard's script. Test-only, so publishing the crate does not need the file.
-const APP_JS: &str = include_str!("../../../../../examples/console-dashboard/app.js");
+/// The example dashboard's script.
+const APP_JS: &str = include_str!("../../../examples/console-dashboard/app.js");
 
 /// The API paths the dashboard must call, as written in its `ROUTES`.
 const ROUTES: [&str; 7] = [
@@ -55,9 +55,9 @@ fn api_paths(src: &str) -> BTreeSet<String> {
     let mut rest = src;
     while let Some(at) = rest.find(OPEN) {
         let literal = &rest[at + 1..];
-        let end = literal
-            .find('"')
-            .expect("a /api/v1/ string literal without its closing quote");
+        let Some(end) = literal.find('"') else {
+            panic!("a /api/v1/ string literal without its closing quote");
+        };
         paths.insert(literal[..end].to_string());
         rest = &literal[end + 1..];
     }
@@ -96,18 +96,45 @@ fn probe_paths_fill_placeholders_and_drop_the_query() {
     );
 }
 
+/// Every `/api/v1/` path of `app.js`, requested from a bound console without the BigQuery
+/// source, answers the API's `needs_bigquery` 404, which only a real route gives (an unknown
+/// path is `not_found`). Binding reads no GCP: the Cloud Trace source loads credentials on its
+/// first call, and no request here reaches it.
 #[tokio::test]
 async fn every_api_path_of_the_dashboard_is_a_console_route() {
+    let bound = bind(ConsoleConfig {
+        project: "dashboard-test".into(),
+        store: None,
+        reports: None,
+        port: 0,
+        log_id: "gadk".into(),
+    })
+    .await
+    .expect("bind the console");
+    let addr = bound.local_addr();
+    let server = tokio::spawn(bound.serve());
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("an HTTP client");
+
     let paths = api_paths(APP_JS);
     for template in &paths {
         let probe = probe_path(template);
-        let (status, _, body) = api_get(state(Arc::new(FakeSource::new()), None), &probe).await;
+        let resp = client
+            .get(format!("http://{addr}{probe}"))
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("GET {probe}: {e}"));
+        let status = resp.status().as_u16();
+        let body: Value = resp.json().await.unwrap_or_else(|e| panic!("{probe}: {e}"));
         assert_eq!(
             (status, body["error"]["kind"].as_str()),
-            (StatusCode::NOT_FOUND, Some("needs_bigquery")),
+            (404, Some("needs_bigquery")),
             "app.js calls {template} ({probe}), which is not a console API route: {body}"
         );
     }
+    server.abort();
     let expected: BTreeSet<String> = ROUTES.iter().map(|r| r.to_string()).collect();
     assert_eq!(paths, expected, "the /api/v1/ string literals of app.js");
 }
