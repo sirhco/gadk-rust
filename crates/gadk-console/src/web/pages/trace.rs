@@ -14,6 +14,8 @@
 
 //! The trace detail page: waterfall, span details and log payloads.
 
+use std::sync::Arc;
+
 use maud::{Markup, PreEscaped, html};
 use serde_json::{Value, json};
 
@@ -26,7 +28,8 @@ use crate::prices::{
     CostSum, LABEL_MODEL, LABEL_OPERATION, OP_GENERATE_CONTENT, PriceTable, UNKNOWN_MODEL, Usage,
     cost_of, cost_text, thousands,
 };
-use crate::review::{Cursor, ReviewQueue, at_text};
+use crate::review::{Cursor, ReviewQueue, Target, at_text};
+use crate::rubrics::{Rubric, Rubrics};
 use crate::scores::{ScoreRow, TRACE_SCORES_CAP, TraceScores};
 use crate::traces::{LogEntry, RawSpan, SourceError, TraceId};
 use crate::url::percent_encode;
@@ -55,6 +58,8 @@ pub(crate) struct Annotations {
     pub dataset: DatasetView,
     /// `Some` in review mode (a valid queue and `at` with the BigQuery source).
     pub review: Option<ReviewBar>,
+    /// The `--rubrics` file, if any: rubric forms in the Scores section.
+    pub rubrics: Option<Arc<Rubrics>>,
 }
 
 /// A trace page in review mode: the queue and the trace's place in it.
@@ -139,7 +144,13 @@ pub(crate) fn render(
             }
         }
         (llm_calls(rows, prices))
-        (scores_section(id, &annotations.scores, annotations.review.as_ref(), csrf))
+        (scores_section(
+            id,
+            &annotations.scores,
+            annotations.review.as_ref(),
+            annotations.rubrics.as_deref(),
+            csrf,
+        ))
         (dataset_section(id, &annotations.dataset, annotations.review.as_ref(), csrf))
         @if let Ok(view) = logs {
             (log_sections(rows, view))
@@ -250,13 +261,17 @@ fn score_value_text(r: &ScoreRow) -> &str {
     }
 }
 
-/// The review bar: the queue's score name, `Skip →` (the next trace) and `Back to queue`.
+/// The review bar: the queue's score name (or `rubric` and its name), `Skip →` (the next
+/// trace) and `Back to queue`.
 fn review_bar(bar: &ReviewBar) -> Markup {
     let qs = bar.queue.query_string();
     html! {
         div class="banner info" {
             p {
-                "Reviewing " strong { (bar.queue.score) }
+                @match &bar.queue.target {
+                    Target::Score(score) => { "Reviewing " strong { (score) } }
+                    Target::Rubric(rubric) => { "Reviewing rubric " strong { (rubric) } }
+                }
                 " · " a href=(next_link(&bar.queue, &bar.cursor)) { "Skip →" }
                 " · " a href={ "/review?" (qs) } { "Back to queue" }
             }
@@ -264,12 +279,16 @@ fn review_bar(bar: &ReviewBar) -> Markup {
     }
 }
 
-/// The hidden `q_*` fields that carry the review queue and `at` through the score and dataset
-/// forms.
+/// The hidden `q_*` fields that carry the review queue and `at` through the score, rubric and
+/// dataset forms: `q_score` for a score queue, `q_rubric` for a rubric queue.
 fn review_fields(bar: &ReviewBar) -> Markup {
     let q = &bar.queue;
+    let target = match &q.target {
+        Target::Score(_) => "q_score",
+        Target::Rubric(_) => "q_rubric",
+    };
     html! {
-        input type="hidden" name="q_score" value=(q.score);
+        input type="hidden" name=(target) value=(q.target.name());
         input type="hidden" name="q_prompt" value=(q.prompt.as_deref().unwrap_or_default());
         input type="hidden" name="q_version"
             value=(q.version.map(|v| v.to_string()).unwrap_or_default());
@@ -280,9 +299,13 @@ fn review_fields(bar: &ReviewBar) -> Markup {
 }
 
 /// The form that adds a score to trace `id` (`POST /traces/{id}/scores`, confirmed first). In
-/// review mode the name is pre-filled with the queue's score and the queue and `at` ride along
-/// as hidden `q_*` fields.
+/// review mode the queue and `at` ride along as hidden `q_*` fields, and a score queue's name
+/// pre-fills the name.
 fn score_form(id: &TraceId, review: Option<&ReviewBar>, csrf: &str) -> Markup {
+    let name = review.and_then(|bar| match &bar.queue.target {
+        Target::Score(score) => Some(score.as_str()),
+        Target::Rubric(_) => None,
+    });
     html! {
         form method="post" action={ "/traces/" (id.as_str()) "/scores" }
             data-confirm="Add this score to the trace?" class="inline" {
@@ -291,7 +314,7 @@ fn score_form(id: &TraceId, review: Option<&ReviewBar>, csrf: &str) -> Markup {
                 (review_fields(bar))
             }
             input type="text" name="name" placeholder="score name"
-                value=[review.map(|bar| bar.queue.score.as_str())] required maxlength="100";
+                value=[name] required maxlength="100";
             " "
             select name="kind" {
                 option value="up" { "thumbs up" }
@@ -309,14 +332,57 @@ fn score_form(id: &TraceId, review: Option<&ReviewBar>, csrf: &str) -> Markup {
     }
 }
 
+/// The form that saves one score per criterion of `rubric` on trace `id` (`POST
+/// /traces/{id}/rubric`, confirmed first): the rubric's description, a fieldset of radio
+/// buttons per criterion (min to max), a shared comment. In review mode the queue and `at`
+/// ride along as hidden `q_*` fields.
+fn rubric_form(id: &TraceId, rubric: &Rubric, review: Option<&ReviewBar>, csrf: &str) -> Markup {
+    html! {
+        form method="post" action={ "/traces/" (id.as_str()) "/rubric" }
+            data-confirm="Save these scores to the trace?" class="rubric" {
+            input type="hidden" name="csrf" value=(csrf);
+            input type="hidden" name="rubric" value=(rubric.name);
+            @if let Some(bar) = review {
+                (review_fields(bar))
+            }
+            @if let Some(description) = &rubric.description {
+                p { (description) }
+            }
+            @for c in &rubric.criteria {
+                fieldset {
+                    legend {
+                        (c.name)
+                        @if let Some(description) = &c.description { " — " (description) }
+                    }
+                    @for n in c.min..=c.max {
+                        label {
+                            input type="radio" name={ "c_" (c.name) } value=(n) required;
+                            (n)
+                        }
+                    }
+                }
+            }
+            input type="text" name="comment" placeholder="comment (optional)" maxlength="1000";
+            " "
+            button type="submit" { "Save scores" }
+        }
+    }
+}
+
 /// The Scores section: the needs-BigQuery note, or the scores newest first (or the error
-/// banner) and the form that adds one.
+/// banner) and the forms that add them: in a rubric review the rubric's form, then the score
+/// form, then outside review mode one collapsed form per loaded rubric.
 fn scores_section(
     id: &TraceId,
     scores: &ScoresView,
     review: Option<&ReviewBar>,
+    rubrics: Option<&Rubrics>,
     csrf: &str,
 ) -> Markup {
+    let review_rubric = review.and_then(|bar| match &bar.queue.target {
+        Target::Rubric(name) => rubrics.and_then(|r| r.get(name)),
+        Target::Score(_) => None,
+    });
     html! {
         h2 { "Scores" }
         @match scores {
@@ -357,7 +423,18 @@ fn scores_section(
             }
         }
         @if !matches!(scores, ScoresView::NeedsBigQuery) {
+            @if let (Some(bar), Some(rubric)) = (review, review_rubric) {
+                (rubric_form(id, rubric, Some(bar), csrf))
+            }
             (score_form(id, review, csrf))
+            @if let (None, Some(rubrics)) = (review, rubrics) {
+                @for rubric in rubrics.iter() {
+                    details {
+                        summary { "Score with rubric " (rubric.name) }
+                        (rubric_form(id, rubric, None, csrf))
+                    }
+                }
+            }
         }
     }
 }

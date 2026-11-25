@@ -26,6 +26,7 @@ use crate::datasets::Datasets;
 use crate::evals::{CACHE_CAP, ReportCache};
 use crate::experiments::ExperimentCache;
 use crate::guards::GuardCache;
+use crate::rubrics::Rubrics;
 use crate::traces::{BigQueryTable, BigQueryTraceSource, CloudTraceSource, TraceSource};
 use crate::usage::UsageSource;
 
@@ -39,6 +40,7 @@ mod model;
 mod prices;
 mod prompts;
 mod review;
+mod rubrics;
 mod scores;
 mod sessions;
 pub mod traces;
@@ -84,6 +86,8 @@ pub struct Cli {
     /// The directory of eval-set files that traces are added to (`--datasets`); `None` shows
     /// no "Add to dataset" form.
     pub datasets: Option<PathBuf>,
+    /// The rubric file (`--rubrics`); `None` offers no rubric forms or rubric queues.
+    pub rubrics: Option<PathBuf>,
 }
 
 impl Cli {
@@ -95,6 +99,7 @@ impl Cli {
             prices: None,
             author: None,
             datasets: None,
+            rubrics: None,
         }
     }
 
@@ -119,6 +124,13 @@ impl Cli {
     /// Adds traces as eval cases to the eval-set files in `dir` (BigQuery trace source only).
     pub fn with_datasets(mut self, dir: PathBuf) -> Self {
         self.datasets = Some(dir);
+        self
+    }
+
+    /// Offers the review rubrics of the YAML file at `path` on `/review` and `/traces/{id}`
+    /// (BigQuery trace source only).
+    pub fn with_rubrics(mut self, path: PathBuf) -> Self {
+        self.rubrics = Some(path);
         self
     }
 }
@@ -179,6 +191,14 @@ pub enum ConsoleError {
     /// The `--datasets` directory does not exist, or its export source could not be built.
     #[error("datasets: {0}")]
     Datasets(String),
+    /// The rubric file could not be read or parsed.
+    #[error("rubric file {}: {detail}", path.display())]
+    Rubrics {
+        /// The rubric file.
+        path: PathBuf,
+        /// What was wrong with it.
+        detail: String,
+    },
 }
 
 /// A console bound to its port, not yet serving.
@@ -236,6 +256,8 @@ pub(crate) struct Extras {
     pub(crate) datasets: Option<Arc<Datasets>>,
     /// The export source of the BigQuery trace source (see [`export_source`]).
     pub(crate) export: Option<Result<Arc<dyn ExportSource>, String>>,
+    /// The loaded rubric file.
+    pub(crate) rubrics: Option<Arc<Rubrics>>,
 }
 
 /// The export source that reads conversation text from the agent-analytics table: `None`
@@ -345,6 +367,7 @@ pub(crate) async fn bind_full(
         author: resolve_author(extras.author, env_var),
         datasets: extras.datasets,
         export: extras.export,
+        rubrics: extras.rubrics,
     };
     Ok(Bound {
         listener,
@@ -361,15 +384,22 @@ pub async fn run(
     run_cli(Cli::new(cfg), out).await
 }
 
-/// Like [`run`], reading traces from the source `cli.traces` names and prices from
-/// `cli.prices` (read before anything is bound); console scores are written by `cli.author`,
-/// else `USER`, else `USERNAME`, else `console`. `cli.datasets` must be an existing directory.
+/// Like [`run`], reading traces from the source `cli.traces` names, prices from `cli.prices`
+/// and rubrics from `cli.rubrics` (both read before anything is bound); console scores are
+/// written by `cli.author`, else `USER`, else `USERNAME`, else `console`. `cli.datasets` must be
+/// an existing directory.
 pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<(), ConsoleError> {
     let author = resolve_author(cli.author, env_var);
     let prices = cli
         .prices
         .as_deref()
         .map(PriceTable::load)
+        .transpose()?
+        .map(Arc::new);
+    let rubrics = cli
+        .rubrics
+        .as_deref()
+        .map(Rubrics::load)
         .transpose()?
         .map(Arc::new);
     if let Some(dir) = &cli.datasets {
@@ -416,6 +446,7 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
             author: Some(author),
             datasets,
             export,
+            rubrics,
         },
     )
     .await?;
@@ -516,6 +547,29 @@ mod tests {
             err.to_string(),
             format!(
                 "price file {}: model m: prices must be finite and not negative",
+                path.display()
+            )
+        );
+        assert!(out.is_empty(), "no URL is printed");
+    }
+
+    #[tokio::test]
+    async fn run_cli_fails_on_a_bad_rubric_file_before_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rubrics.yaml");
+        std::fs::write(&path, "- name: support\n").unwrap();
+        let mut out = Vec::new();
+        let err = super::run_cli(
+            super::Cli::new(cfg(None)).with_rubrics(path.clone()),
+            &mut out,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, ConsoleError::Rubrics { .. }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "rubric file {}: rubrics[1].criteria must be a list of 1 to 10 criteria",
                 path.display()
             )
         );

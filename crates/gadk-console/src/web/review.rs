@@ -75,8 +75,9 @@ pub(super) fn first<'a>(params: &'a [(String, String)], key: &str) -> &'a str {
         .map_or("", |(_, v)| v.as_str())
 }
 
-/// `GET /review`: the form alone without a score, else the queue's pending traces (`done=1`
-/// marks a finished review). An invalid queue is a 400 page, a failed query a 502 page.
+/// `GET /review`: the form alone without a score or rubric, else the queue's pending traces
+/// (`done=1` marks a finished review). An invalid queue is a 400 page, a failed query a 502
+/// page.
 async fn list(
     State(state): State<AppState>,
     Query(params): Query<Vec<(String, String)>>,
@@ -84,15 +85,21 @@ async fn list(
     let Some(usage) = &state.usage else {
         return needs_bigquery();
     };
-    let queue = match ReviewQueue::from_params(&params) {
+    let rubrics = state.rubrics.as_deref();
+    let queue = match ReviewQueue::from_params(&params, rubrics) {
         Ok(Some(q)) => q,
-        Ok(None) => return html(StatusCode::OK, review::render(None, None, false)),
+        Ok(None) => return html(StatusCode::OK, review::render(None, None, false, rubrics)),
         Err(text) => return bad_request(&text),
     };
-    match usage.pending(&queue, (state.now)()).await {
+    match usage.pending(&queue, rubrics, (state.now)()).await {
         Ok(rows) => html(
             StatusCode::OK,
-            review::render(Some(&queue), Some(&rows), first(&params, "done") == "1"),
+            review::render(
+                Some(&queue),
+                Some(&rows),
+                first(&params, "done") == "1",
+                rubrics,
+            ),
         ),
         Err(e) => source_error_in(Nav::Review, &e),
     }
@@ -108,7 +115,8 @@ async fn next(
     let Some(usage) = &state.usage else {
         return needs_bigquery();
     };
-    let queue = match ReviewQueue::from_params(&params) {
+    let rubrics = state.rubrics.as_deref();
+    let queue = match ReviewQueue::from_params(&params, rubrics) {
         Ok(Some(q)) => q,
         Ok(None) => return bad_request("score: required"),
         Err(text) => return bad_request(&text),
@@ -117,7 +125,10 @@ async fn next(
         Ok(c) => c,
         Err(text) => return bad_request(&text),
     };
-    match usage.next_pending(&queue, (state.now)(), &after).await {
+    match usage
+        .next_pending(&queue, rubrics, (state.now)(), &after)
+        .await
+    {
         Ok(Some(t)) => Redirect::to(&review_link(&queue, &t.trace_id, t.first)).into_response(),
         Ok(None) => {
             Redirect::to(&format!("/review?{}&done=1", queue.query_string())).into_response()
@@ -142,7 +153,7 @@ mod tests {
     use crate::traces::test_http::{FakeHttp, param_value};
     use crate::usage::UsageSource;
     use crate::web::AppState;
-    use crate::web::testutil::{FakeSource, fixed_now, get, state};
+    use crate::web::testutil::{FakeSource, fixed_now, get, state, test_rubrics};
 
     const ACTIVE: &str = r#"<a class="active" href="/review">Review</a>"#;
     const A: &str = "0123456789abcdef0123456789abcdef";
@@ -169,7 +180,7 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
-        ReviewQueue::from_params(&params).unwrap().unwrap()
+        ReviewQueue::from_params(&params, None).unwrap().unwrap()
     }
 
     fn denied() -> Result<(u16, String), String> {
@@ -330,8 +341,8 @@ mod tests {
         );
         let sent = fake.body(0);
         assert_eq!(
-            param_value(&sent, "score")["parameterValue"]["value"],
-            json!("<script>&\"")
+            param_value(&sent, "names")["parameterValue"],
+            json!({ "arrayValues": [{ "value": "<script>&\"" }] })
         );
         let sql = sent["query"].as_str().unwrap();
         assert!(!sql.contains("<script>"), "{sql}");
@@ -493,5 +504,204 @@ mod tests {
             assert!(body.contains(text), "{path}: {body}");
             assert!(fake.uris().is_empty(), "{path}");
         }
+    }
+
+    /// [`bq_state`] with the test rubrics loaded.
+    fn rubric_state(fake: &Arc<FakeHttp>) -> AppState {
+        let mut st = bq_state(fake);
+        st.rubrics = Some(test_rubrics());
+        st
+    }
+
+    #[tokio::test]
+    async fn with_rubrics_the_start_form_offers_them_and_needs_neither_field() {
+        let fake = FakeHttp::new(vec![]);
+        let (status, _, body) = get(rubric_state(&fake), "/review").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains("<h1>Review</h1>"), "{body}");
+        assert!(
+            body.contains(r#"<label>Score name<input type="text" name="score" maxlength="100"></label><label>Rubric<select name="rubric"><option value=""></option><option value="support">support</option><option value="safety">safety</option></select></label><label>Prompt"#),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"<p class="empty">Enter a score name or choose a rubric to list the recent traces that are not yet scored.</p>"#),
+            "{body}"
+        );
+        assert!(fake.uris().is_empty());
+
+        // Blank score and rubric (the form submitted empty) is the start form too.
+        let fake = FakeHttp::new(vec![]);
+        let (status, _, blank) = get(rubric_state(&fake), "/review?score=&rubric=").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(blank, body);
+        assert!(fake.uris().is_empty());
+    }
+
+    #[tokio::test]
+    async fn without_rubrics_the_start_form_has_no_rubric_select() {
+        let fake = FakeHttp::new(vec![]);
+        let (_, _, body) = get(bq_state(&fake), "/review").await;
+        assert!(
+            body.contains(r#"<label>Score name<input type="text" name="score" required maxlength="100"></label><label>Prompt"#),
+            "{body}"
+        );
+        assert!(!body.contains("rubric"), "{body}");
+        assert!(
+            body.contains(r#"<p class="empty">Enter a score name to list the recent traces that have no console score with that name yet.</p>"#),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rubric_queue_lists_its_pending_traces_and_sends_the_criterion_names() {
+        let fake = FakeHttp::new(vec![pending_reply(vec![
+            pending_cells(A, ago(60), &["triage@2"], 0),
+            pending_cells(B, ago(120), &[], 1),
+        ])]);
+        let (status, _, body) = get(rubric_state(&fake), "/review?rubric=support&range=24h").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains("<h1>Review: rubric support</h1>"), "{body}");
+        assert!(body.contains("<title>Review: rubric support"), "{body}");
+        assert!(body.contains("<p>2 pending</p>"), "{body}");
+        for piece in [
+            r#"<input type="text" name="score" maxlength="100">"#.to_owned(),
+            r#"<option value="support" selected>support</option><option value="safety">safety</option>"#.to_owned(),
+            r#"<option value="24h" selected>24h</option>"#.to_owned(),
+            format!(
+                r#"<p><a href="/traces/{A}?rubric=support&amp;range=24h&amp;at=2026-11-16T11%3A58%3A59.999750Z">Start reviewing</a></p>"#
+            ),
+            format!(
+                r#"<a href="/traces/{B}?rubric=support&amp;range=24h&amp;at=2026-11-16T11%3A57%3A59.999750Z">{B}</a>"#
+            ),
+        ] {
+            assert!(body.contains(&piece), "{piece}: {body}");
+        }
+        let sent = fake.body(0);
+        assert_eq!(
+            param_value(&sent, "names")["parameterValue"],
+            json!({ "arrayValues": [{ "value": "support/accuracy" }, { "value": "support/tone" }] })
+        );
+        assert_eq!(
+            param_value(&sent, "start")["parameterValue"]["value"],
+            json!("2026-11-15 12:00:00.000000+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_score_queue_with_rubrics_loaded_selects_no_rubric() {
+        let fake = FakeHttp::new(vec![pending_reply(vec![])]);
+        let (status, _, body) = get(rubric_state(&fake), "/review?score=quality&rubric=").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains("<h1>Review: quality</h1>"), "{body}");
+        assert!(
+            body.contains(r#"<input type="text" name="score" value="quality" maxlength="100">"#),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"<option value=""></option><option value="support">support</option>"#),
+            "{body}"
+        );
+        assert_eq!(
+            param_value(&fake.body(0), "names")["parameterValue"],
+            json!({ "arrayValues": [{ "value": "quality" }] })
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_rubric_queues_are_400_and_query_nothing() {
+        for (with_rubrics, path, text) in [
+            (
+                true,
+                "/review?score=q&rubric=support",
+                "score and rubric: choose one",
+            ),
+            (
+                false,
+                "/review?score=q&rubric=support",
+                "score and rubric: choose one",
+            ),
+            (true, "/review?rubric=nope", "rubric: unknown rubric `nope`"),
+            (
+                false,
+                "/review?rubric=support",
+                "rubric: unknown rubric `support`",
+            ),
+            (
+                true,
+                "/review?rubric=nope&version=x",
+                "rubric: unknown rubric `nope`",
+            ),
+            (
+                true,
+                "/review/next?score=q&rubric=support&after=2026-11-16T11:00:00Z",
+                "score and rubric: choose one",
+            ),
+            (
+                false,
+                "/review/next?rubric=support&after=2026-11-16T11:00:00Z",
+                "rubric: unknown rubric `support`",
+            ),
+        ] {
+            let fake = FakeHttp::new(vec![]);
+            let st = if with_rubrics {
+                rubric_state(&fake)
+            } else {
+                bq_state(&fake)
+            };
+            let (status, _, body) = get(st, path).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+            assert!(body.contains(text), "{path}: {body}");
+            assert!(body.contains(ACTIVE), "{body}");
+            assert!(fake.uris().is_empty(), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn next_in_a_rubric_queue_keeps_the_rubric() {
+        let fake = FakeHttp::new(vec![
+            pending_reply(vec![pending_cells(B, ago(120), &[], 0)]),
+            pending_reply(vec![]),
+        ]);
+        let path = format!(
+            "/review/next?rubric=support&flagged=1&after=2026-11-16T11%3A58%3A59.999750Z&after_id={A}"
+        );
+        let (status, headers, body) = get(rubric_state(&fake), &path).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+        assert_eq!(
+            headers[LOCATION],
+            format!("/traces/{B}?rubric=support&flagged=1&at=2026-11-16T11%3A57%3A59.999750Z")
+        );
+        assert_eq!(
+            param_value(&fake.body(0), "names")["parameterValue"],
+            json!({ "arrayValues": [{ "value": "support/accuracy" }, { "value": "support/tone" }] })
+        );
+        let (status, headers, _) = get(rubric_state(&fake), &path).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        assert_eq!(headers[LOCATION], "/review?rubric=support&flagged=1&done=1");
+    }
+
+    #[test]
+    fn rubric_links_carry_the_rubric_first() {
+        let params = vec![
+            ("range".to_owned(), "1h".to_owned()),
+            ("rubric".to_owned(), "safety".to_owned()),
+        ];
+        let q = ReviewQueue::from_params(&params, Some(&test_rubrics()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            review_link(&q, A, ago(60)),
+            format!("/traces/{A}?rubric=safety&range=1h&at=2026-11-16T11%3A58%3A59.999750Z")
+        );
+        let after = Cursor {
+            at: ago(60),
+            trace_id: B.into(),
+        };
+        assert_eq!(
+            next_link(&q, &after),
+            format!(
+                "/review/next?rubric=safety&range=1h&after=2026-11-16T11%3A58%3A59.999750Z&after_id={B}"
+            )
+        );
     }
 }

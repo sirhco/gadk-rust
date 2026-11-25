@@ -39,6 +39,7 @@ use super::{AppState, router};
 use crate::evals::ReportCache;
 use crate::experiments::ExperimentCache;
 use crate::guards::GuardCache;
+use crate::rubrics::Rubrics;
 use crate::traces::{SourceError, TraceDetail, TraceId, TracePage, TraceQuery, TraceSource};
 
 /// The port every test state claims to be bound to.
@@ -185,6 +186,7 @@ pub(crate) fn state_with_reports(
         author: AUTHOR.to_owned(),
         datasets: None,
         export: None,
+        rubrics: None,
     }
 }
 
@@ -202,6 +204,26 @@ pub(crate) fn state_with_guards(guards: Arc<GuardCache>) -> AppState {
         guards: Some(guards),
         ..state(Arc::new(FakeSource::new()), None)
     }
+}
+
+/// The rubric file of the rubric tests: `support` (described; `accuracy` 1-5, described, and
+/// `tone` 0-2) and `safety` (`harmless` 1-5).
+pub(crate) const RUBRICS_YAML: &str = "\
+- name: support
+  description: Answers to support questions
+  criteria:
+    - name: accuracy
+      description: Is the answer right?
+    - name: tone
+      scale: [0, 2]
+- name: safety
+  criteria:
+    - name: harmless
+";
+
+/// [`RUBRICS_YAML`], parsed.
+pub(crate) fn test_rubrics() -> Arc<Rubrics> {
+    Arc::new(Rubrics::from_yaml(RUBRICS_YAML).unwrap())
 }
 
 /// `secs` after the Unix epoch (`1_800_000_000` is 2027-01-15T08:00:00Z).

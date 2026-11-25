@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The review queue: the recent traces that have no console score of a given name yet.
+//! The review queue: the recent traces that have no console score of a given name yet, or
+//! that miss a console score for some criterion of a rubric.
 //!
 //! A queue is defined by URL parameters ([`ReviewQueue`]). The pending query reads the
 //! agent-analytics table: one parameterized statement for every filter combination (unset
@@ -22,9 +23,10 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Map, Value};
 
+use crate::rubrics::Rubrics;
 use crate::traces::{SourceError, TimeRange, TraceId, param, text, timestamp, ts_param};
 use crate::url::percent_encode;
-use crate::usage::{UsageSource, count, window_params};
+use crate::usage::{UsageSource, count, string_array_param, window_params};
 
 /// The most pending traces `/review` lists.
 pub(crate) const REVIEW_CAP: usize = 100;
@@ -36,13 +38,31 @@ pub(crate) const NEEDS_BIGQUERY_REVIEW: &str = "Review needs the BigQuery trace 
 /// `maxlength="100"`).
 const MAX_SCORE_LEN: usize = 100;
 
-/// A review queue: the traces of the last `range` with an LLM response and no console score
-/// named `score`, optionally only those that called `prompt` (at `version`) or that carry an
-/// app thumbs-down.
+/// What a queue's traces are waiting for.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Target {
+    /// A console score with this name, trimmed (1-100 bytes).
+    Score(String),
+    /// A console score for every criterion of the loaded rubric with this name.
+    Rubric(String),
+}
+
+impl Target {
+    /// The score name or the rubric name.
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Target::Score(name) | Target::Rubric(name) => name,
+        }
+    }
+}
+
+/// A review queue: the traces of the last `range` with an LLM response that still miss the
+/// console scores of `target`, optionally only those that called `prompt` (at `version`) or
+/// that carry an app thumbs-down.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ReviewQueue {
-    /// The score name, trimmed (1-100 bytes).
-    pub(crate) score: String,
+    /// The score or rubric the queue waits for.
+    pub(crate) target: Target,
     /// Only traces whose LLM requests used this prompt.
     pub(crate) prompt: Option<String>,
     /// Only that version of `prompt` (never set without `prompt`).
@@ -54,17 +74,22 @@ pub(crate) struct ReviewQueue {
 }
 
 impl ReviewQueue {
-    /// The queue of the URL parameters `score`, `prompt`, `version`, `flagged` and `range`
-    /// (the first value of each counts and is trimmed; a blank `prompt`, `version` or `range`
-    /// is absent).
+    /// The queue of the URL parameters `score` or `rubric` (one of the `rubrics`), `prompt`,
+    /// `version`, `flagged` and `range` (the first value of each counts and is trimmed; a
+    /// blank `score`, `rubric`, `prompt`, `version` or `range` is absent).
     ///
-    /// `Ok(None)` when `score` is absent or blank, before any other parameter is checked.
+    /// `Ok(None)` when both `score` and `rubric` are absent, before any other parameter is
+    /// checked.
     ///
     /// # Errors
     ///
-    /// The text of the 400 page: `score: must be at most 100 bytes`, `version: must be a
-    /// positive integer`, `version: needs a prompt`, `range: must be 1h, 6h, 24h or 7d`.
-    pub(crate) fn from_params(params: &[(String, String)]) -> Result<Option<ReviewQueue>, String> {
+    /// The text of the 400 page: `score and rubric: choose one`, `` rubric: unknown rubric
+    /// `<name>` ``, `score: must be at most 100 bytes`, `version: must be a positive integer`,
+    /// `version: needs a prompt`, `range: must be 1h, 6h, 24h or 7d`.
+    pub(crate) fn from_params(
+        params: &[(String, String)],
+        rubrics: Option<&Rubrics>,
+    ) -> Result<Option<ReviewQueue>, String> {
         let first = |key: &str| {
             params
                 .iter()
@@ -72,12 +97,25 @@ impl ReviewQueue {
                 .map(|(_, v)| v.as_str())
         };
         let present = |key: &str| first(key).filter(|v| !v.trim().is_empty());
-        let Some(score) = present("score").map(str::trim) else {
-            return Ok(None);
+        let target = match (
+            present("score").map(str::trim),
+            present("rubric").map(str::trim),
+        ) {
+            (None, None) => return Ok(None),
+            (Some(_), Some(_)) => return Err("score and rubric: choose one".to_owned()),
+            (None, Some(rubric)) => {
+                if rubrics.and_then(|r| r.get(rubric)).is_none() {
+                    return Err(format!("rubric: unknown rubric `{rubric}`"));
+                }
+                Target::Rubric(rubric.to_owned())
+            }
+            (Some(score), None) => {
+                if score.len() > MAX_SCORE_LEN {
+                    return Err(format!("score: must be at most {MAX_SCORE_LEN} bytes"));
+                }
+                Target::Score(score.to_owned())
+            }
         };
-        if score.len() > MAX_SCORE_LEN {
-            return Err(format!("score: must be at most {MAX_SCORE_LEN} bytes"));
-        }
         let prompt = present("prompt").map(|p| p.trim().to_owned());
         let version = match present("version") {
             None => None,
@@ -99,7 +137,7 @@ impl ReviewQueue {
                 .ok_or_else(|| "range: must be 1h, 6h, 24h or 7d".to_owned())?,
         };
         Ok(Some(ReviewQueue {
-            score: score.to_owned(),
+            target,
             prompt,
             version,
             flagged: first("flagged") == Some("1"),
@@ -107,11 +145,26 @@ impl ReviewQueue {
         }))
     }
 
-    /// The queue as URL parameters, in the order `score`, `prompt`, `version`, `flagged`,
-    /// `range`, each value percent-encoded. Absent filters, `flagged` off and the default
-    /// range (7d) are left out.
+    /// The score names a trace needs to leave the queue: the score, or `<rubric>/<criterion>`
+    /// for each criterion of the rubric in `rubrics` (none when it is not there).
+    pub(crate) fn names(&self, rubrics: Option<&Rubrics>) -> Vec<String> {
+        match &self.target {
+            Target::Score(score) => vec![score.clone()],
+            Target::Rubric(name) => rubrics
+                .and_then(|r| r.get(name))
+                .map(|r| r.score_names())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// The queue as URL parameters, in the order `score` (or `rubric`), `prompt`, `version`,
+    /// `flagged`, `range`, each value percent-encoded. Absent filters, `flagged` off and the
+    /// default range (7d) are left out.
     pub(crate) fn query_string(&self) -> String {
-        let mut out = format!("score={}", percent_encode(&self.score));
+        let mut out = match &self.target {
+            Target::Score(score) => format!("score={}", percent_encode(score)),
+            Target::Rubric(rubric) => format!("rubric={}", percent_encode(rubric)),
+        };
         if let Some(prompt) = &self.prompt {
             out.push_str(&format!("&prompt={}", percent_encode(prompt)));
         }
@@ -179,44 +232,50 @@ pub(crate) struct PendingTrace {
 }
 
 impl UsageSource {
-    /// The pending traces of `q` in `[end - q.range, end)`, newest first: at most
-    /// [`REVIEW_CAP`] + 1 rows, so the caller can tell whether the cap was hit.
+    /// The pending traces of `q` (a rubric queue's rubric read from `rubrics`) in
+    /// `[end - q.range, end)`, newest first: at most [`REVIEW_CAP`] + 1 rows, so the caller can
+    /// tell whether the cap was hit.
     pub(crate) async fn pending(
         &self,
         q: &ReviewQueue,
+        rubrics: Option<&Rubrics>,
         end: DateTime<Utc>,
     ) -> Result<Vec<PendingTrace>, SourceError> {
         let sql = pending_sql(&self.table_path()?, false);
-        let params = pending_params(q, end, None, REVIEW_CAP + 1);
+        let params = pending_params(q, &q.names(rubrics), end, None, REVIEW_CAP + 1);
         let result = self.run(&sql, params, (REVIEW_CAP + 1) as u32).await?;
         result.rows.iter().map(pending_row).collect()
     }
 
-    /// The pending trace of `q` in `[end - q.range, end)` that comes right after `after`
-    /// (the largest sort key strictly below it); `None` when the queue has no more.
+    /// The pending trace of `q` (a rubric queue's rubric read from `rubrics`) in
+    /// `[end - q.range, end)` that comes right after `after` (the largest sort key strictly
+    /// below it); `None` when the queue has no more.
     pub(crate) async fn next_pending(
         &self,
         q: &ReviewQueue,
+        rubrics: Option<&Rubrics>,
         end: DateTime<Utc>,
         after: &Cursor,
     ) -> Result<Option<PendingTrace>, SourceError> {
         let sql = pending_sql(&self.table_path()?, true);
-        let params = pending_params(q, end, Some(after), 1);
+        let params = pending_params(q, &q.names(rubrics), end, Some(after), 1);
         let result = self.run(&sql, params, 1).await?;
         result.rows.first().map(pending_row).transpose()
     }
 }
 
-/// The parameters of [`pending_sql`]: the window, the queue (unset filters are typed NULLs),
-/// `@limit` and, with a cursor, `@after` and `@after_id`.
+/// The parameters of [`pending_sql`]: the window, the score `names` as `@names`, the queue's
+/// filters (unset filters are typed NULLs), `@limit` and, with a cursor, `@after` and
+/// `@after_id`.
 fn pending_params(
     q: &ReviewQueue,
+    names: &[String],
     end: DateTime<Utc>,
     after: Option<&Cursor>,
     limit: usize,
 ) -> Vec<Value> {
     let mut params = window_params(end - q.range.duration(), end);
-    params.push(param("score", "STRING", Some(q.score.clone())));
+    params.push(string_array_param("names", names));
     params.push(param("prompt", "STRING", q.prompt.clone()));
     params.push(param("version", "INT64", q.version.map(|v| v.to_string())));
     params.push(param("flagged", "BOOL", Some(q.flagged.to_string())));
@@ -262,8 +321,8 @@ fn pending_row(row: &Map<String, Value>) -> Result<PendingTrace, SourceError> {
 /// - `inv`: the trace's invocations in the window.
 /// - `f`, `fm`: `FEEDBACK` rows since a day before `@start`, mapped to traces by `trace_id`
 ///   or by invocation.
-/// - `agg`: per trace, whether a console score named `@score` exists and how many distinct app
-///   thumbs-down scores there are.
+/// - `agg`: per trace, whether it has a console score for every name in `@names` and how many
+///   distinct app thumbs-down scores there are.
 fn pending_sql(table: &str, with_cursor: bool) -> String {
     let cursor = if with_cursor {
         "\n  AND (t.first < @after OR (t.first = @after AND t.trace_id < @after_id))"
@@ -312,7 +371,9 @@ fm AS (
   SELECT inv.trace_id AS tid, f.event_id, f.source, f.name, f.data_type, f.value
   FROM f JOIN inv USING (invocation_id)),
 agg AS (
-  SELECT tid, LOGICAL_OR(source = 'console' AND name = @score) AS scored,
+  SELECT tid,
+    COUNT(DISTINCT IF(source = 'console' AND name IN UNNEST(@names), name, NULL))
+      = ARRAY_LENGTH(@names) AS scored,
     COUNT(DISTINCT IF(source = 'app' AND data_type = 'bool' AND value = 'false', event_id, NULL))
       AS thumbs_down
   FROM fm
@@ -421,7 +482,9 @@ mod tests {
     }
 
     fn queue(pairs: &[(&str, &str)]) -> ReviewQueue {
-        ReviewQueue::from_params(&params(pairs)).unwrap().unwrap()
+        ReviewQueue::from_params(&params(pairs), None)
+            .unwrap()
+            .unwrap()
     }
 
     fn source(fake: &Arc<FakeHttp>) -> UsageSource {
@@ -442,7 +505,7 @@ mod tests {
         assert_eq!(
             queue(&[("score", "  quality ")]),
             ReviewQueue {
-                score: "quality".into(),
+                target: Target::Score("quality".into()),
                 prompt: None,
                 version: None,
                 flagged: false,
@@ -459,7 +522,7 @@ mod tests {
                 ("score", "ignored"),
             ]),
             ReviewQueue {
-                score: "quality".into(),
+                target: Target::Score("quality".into()),
                 prompt: Some("triage".into()),
                 version: Some(3),
                 flagged: true,
@@ -477,7 +540,10 @@ mod tests {
             ]),
             queue(&[("score", "q")])
         );
-        assert_eq!(queue(&[("score", &"x".repeat(100))]).score.len(), 100);
+        assert_eq!(
+            queue(&[("score", &"x".repeat(100))]).target.name().len(),
+            100
+        );
     }
 
     #[test]
@@ -498,7 +564,7 @@ mod tests {
             &[("score", "  "), ("version", "x"), ("range", "1y")][..],
         ] {
             assert_eq!(
-                ReviewQueue::from_params(&params(pairs)),
+                ReviewQueue::from_params(&params(pairs), None),
                 Ok(None),
                 "{pairs:?}"
             );
@@ -507,7 +573,8 @@ mod tests {
 
     #[test]
     fn invalid_values_are_errors() {
-        let err = |pairs: &[(&str, &str)]| ReviewQueue::from_params(&params(pairs)).unwrap_err();
+        let err =
+            |pairs: &[(&str, &str)]| ReviewQueue::from_params(&params(pairs), None).unwrap_err();
         assert_eq!(
             err(&[("score", "q"), ("version", "2")]),
             "version: needs a prompt"
@@ -535,8 +602,11 @@ mod tests {
     #[test]
     fn a_version_is_ascii_digits_only() {
         let version = |v: &str| {
-            ReviewQueue::from_params(&params(&[("score", "q"), ("prompt", "p"), ("version", v)]))
-                .map(|q| q.unwrap().version)
+            ReviewQueue::from_params(
+                &params(&[("score", "q"), ("prompt", "p"), ("version", v)]),
+                None,
+            )
+            .map(|q| q.unwrap().version)
         };
         for v in ["+3", " +3 "] {
             assert_eq!(
@@ -564,7 +634,115 @@ mod tests {
             qs,
             "score=a%26b%23c%20d%C3%A9&prompt=team%2Fgreet&version=12&flagged=1&range=1h"
         );
-        assert_eq!(ReviewQueue::from_params(&decode(&qs)), Ok(Some(q)));
+        assert_eq!(ReviewQueue::from_params(&decode(&qs), None), Ok(Some(q)));
+    }
+
+    fn rubrics() -> Arc<Rubrics> {
+        crate::web::testutil::test_rubrics()
+    }
+
+    fn rubric_queue(pairs: &[(&str, &str)]) -> ReviewQueue {
+        ReviewQueue::from_params(&params(pairs), Some(&rubrics()))
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_rubric_queue_takes_a_loaded_rubric_and_the_same_filters() {
+        assert_eq!(
+            rubric_queue(&[
+                ("rubric", " support "),
+                ("score", " "),
+                ("prompt", "triage"),
+                ("version", "2"),
+                ("flagged", "1"),
+                ("range", "6h"),
+            ]),
+            ReviewQueue {
+                target: Target::Rubric("support".into()),
+                prompt: Some("triage".into()),
+                version: Some(2),
+                flagged: true,
+                range: TimeRange::Hours6,
+            }
+        );
+        // A blank rubric is absent: the score queue is unchanged with rubrics loaded.
+        assert_eq!(
+            rubric_queue(&[("score", "quality"), ("rubric", "")]),
+            queue(&[("score", "quality")])
+        );
+        assert_eq!(
+            ReviewQueue::from_params(&params(&[("rubric", " ")]), Some(&rubrics())),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn rubric_errors_come_before_the_other_parameters() {
+        let err = |pairs: &[(&str, &str)], rubrics: Option<&Rubrics>| {
+            ReviewQueue::from_params(&params(pairs), rubrics).unwrap_err()
+        };
+        let loaded = rubrics();
+        for r in [Some(&*loaded), None] {
+            assert_eq!(
+                err(
+                    &[("score", "q"), ("rubric", "support"), ("version", "x")],
+                    r
+                ),
+                "score and rubric: choose one"
+            );
+            assert_eq!(
+                err(&[("score", &"x".repeat(101)), ("rubric", "nope")], r),
+                "score and rubric: choose one"
+            );
+            assert_eq!(
+                err(&[("rubric", "nope"), ("version", "x"), ("range", "1y")], r),
+                "rubric: unknown rubric `nope`"
+            );
+        }
+        assert_eq!(
+            err(&[("rubric", "support")], None),
+            "rubric: unknown rubric `support`",
+            "no rubric is known without --rubrics"
+        );
+        assert_eq!(
+            err(&[("rubric", "Support")], Some(&loaded)),
+            "rubric: unknown rubric `Support`"
+        );
+        assert_eq!(
+            err(&[("rubric", "support"), ("version", "2")], Some(&loaded)),
+            "version: needs a prompt"
+        );
+    }
+
+    #[test]
+    fn a_rubric_queue_string_starts_with_the_rubric_and_round_trips() {
+        let q = rubric_queue(&[("range", "1h"), ("prompt", "a b"), ("rubric", "safety")]);
+        let qs = q.query_string();
+        assert_eq!(qs, "rubric=safety&prompt=a%20b&range=1h");
+        assert_eq!(
+            ReviewQueue::from_params(&decode(&qs), Some(&rubrics())),
+            Ok(Some(q))
+        );
+    }
+
+    #[test]
+    fn names_are_the_score_or_the_rubrics_criteria() {
+        let loaded = rubrics();
+        assert_eq!(
+            queue(&[("score", "quality")]).names(Some(&loaded)),
+            vec!["quality".to_owned()]
+        );
+        assert_eq!(
+            queue(&[("score", "quality")]).names(None),
+            vec!["quality".to_owned()]
+        );
+        let q = rubric_queue(&[("rubric", "support")]);
+        assert_eq!(
+            q.names(Some(&loaded)),
+            vec!["support/accuracy".to_owned(), "support/tone".to_owned()]
+        );
+        assert_eq!(q.names(None), Vec::<String>::new());
     }
 
     #[test]
@@ -630,7 +808,9 @@ fm AS (
   SELECT inv.trace_id AS tid, f.event_id, f.source, f.name, f.data_type, f.value
   FROM f JOIN inv USING (invocation_id)),
 agg AS (
-  SELECT tid, LOGICAL_OR(source = 'console' AND name = @score) AS scored,
+  SELECT tid,
+    COUNT(DISTINCT IF(source = 'console' AND name IN UNNEST(@names), name, NULL))
+      = ARRAY_LENGTH(@names) AS scored,
     COUNT(DISTINCT IF(source = 'app' AND data_type = 'bool' AND value = 'false', event_id, NULL))
       AS thumbs_down
   FROM fm
@@ -675,7 +855,7 @@ WHERE NOT IFNULL(agg.scored, FALSE)
             ),
         ])]);
         let rows = source(&fake)
-            .pending(&queue(&[("score", "quality")]), end())
+            .pending(&queue(&[("score", "quality")]), None, end())
             .await
             .unwrap();
         assert_eq!(
@@ -716,7 +896,11 @@ WHERE NOT IFNULL(agg.scored, FALSE)
                 "TIMESTAMP",
                 json!({ "value": "2026-11-23 12:00:00.000000+00:00" }),
             ),
-            ("score", "STRING", json!({ "value": "quality" })),
+            (
+                "names",
+                "ARRAY",
+                json!({ "arrayValues": [{ "value": "quality" }] }),
+            ),
             ("prompt", "STRING", json!({})),
             ("version", "INT64", json!({})),
             ("flagged", "BOOL", json!({ "value": "false" })),
@@ -748,10 +932,16 @@ WHERE NOT IFNULL(agg.scored, FALSE)
             ("flagged", "1"),
             ("range", "1h"),
         ]);
-        assert!(source(&fake).pending(&q, end()).await.unwrap().is_empty());
+        assert!(
+            source(&fake)
+                .pending(&q, None, end())
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
-            value_of(&fake, 0, "score"),
-            json!({ "value": "<script>\"q\"&" })
+            value_of(&fake, 0, "names"),
+            json!({ "arrayValues": [{ "value": "<script>\"q\"&" }] })
         );
         assert_eq!(
             value_of(&fake, 0, "prompt"),
@@ -780,7 +970,7 @@ WHERE NOT IFNULL(agg.scored, FALSE)
         let src = source(&fake);
         let after = Cursor::parse("2026-11-23T10:00:00.000001Z", &"A".repeat(32)).unwrap();
         let q = queue(&[("score", "quality")]);
-        let next = src.next_pending(&q, end(), &after).await.unwrap();
+        let next = src.next_pending(&q, None, end(), &after).await.unwrap();
         assert_eq!(
             next,
             Some(PendingTrace {
@@ -808,7 +998,53 @@ WHERE NOT IFNULL(agg.scored, FALSE)
             value_of(&fake, 0, "after_id"),
             json!({ "value": "a".repeat(32) })
         );
-        assert_eq!(src.next_pending(&q, end(), &after).await.unwrap(), None);
+        assert_eq!(
+            src.next_pending(&q, None, end(), &after).await.unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rubric_queue_sends_its_criterion_names() {
+        let fake = FakeHttp::new(vec![pending_reply(vec![]), pending_reply(vec![])]);
+        let src = source(&fake);
+        let loaded = rubrics();
+        let q = rubric_queue(&[("rubric", "support")]);
+        assert!(
+            src.pending(&q, Some(&loaded), end())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let after = Cursor::parse("2026-11-23T10:00:00Z", TRACE).unwrap();
+        assert_eq!(
+            src.next_pending(&q, Some(&loaded), end(), &after)
+                .await
+                .unwrap(),
+            None
+        );
+        for i in 0..2 {
+            let p = param_value(&fake.body(i), "names");
+            assert_eq!(
+                p["parameterType"],
+                json!({ "type": "ARRAY", "arrayType": { "type": "STRING" } })
+            );
+            assert_eq!(
+                p["parameterValue"],
+                json!({ "arrayValues": [
+                    { "value": "support/accuracy" },
+                    { "value": "support/tone" },
+                ] })
+            );
+        }
+        let body = fake.body(0);
+        let names: Vec<&str> = body["queryParameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        assert!(!names.contains(&"score"), "{names:?}");
     }
 
     #[tokio::test]
@@ -818,7 +1054,7 @@ WHERE NOT IFNULL(agg.scored, FALSE)
             json!({ "error": { "code": 403, "message": "Access Denied", "errors": [{ "reason": "accessDenied" }] } }).to_string(),
         ))]);
         let err = source(&fake)
-            .pending(&queue(&[("score", "q")]), end())
+            .pending(&queue(&[("score", "q")]), None, end())
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), "BigQuery: HTTP 403: Access Denied");

@@ -54,6 +54,7 @@ pub(crate) struct AppState {
     pub datasets: Option<Arc<crate::datasets::Datasets>>, // Some with --datasets and BigQuery
     // Some with BigQuery: the conversation text of `/sessions/{id}`, or why it is unavailable.
     pub export: Option<Result<Arc<dyn gadk_eval_monitor::ExportSource>, String>>,
+    pub rubrics: Option<Arc<crate::rubrics::Rubrics>>, // the --rubrics file, if any
 }
 
 const CONSOLE_CSS: &str = include_str!("assets/console.css");
@@ -322,6 +323,11 @@ mod tests {
     #[test]
     fn test_states_have_no_export_source() {
         assert!(fresh().export.is_none());
+    }
+
+    #[test]
+    fn test_states_have_no_rubrics() {
+        assert!(fresh().rubrics.is_none());
     }
 
     #[tokio::test]

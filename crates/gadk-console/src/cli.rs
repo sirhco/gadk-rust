@@ -113,6 +113,12 @@ fn full_cli() -> Command {
                 .value_parser(value_parser!(PathBuf))
                 .help("Directory of eval-set YAML files that /traces/{id} adds runs to (with --traces bigquery://…)"),
         )
+        .arg(
+            Arg::new("rubrics")
+                .long("rubrics")
+                .value_parser(value_parser!(PathBuf))
+                .help("YAML file of review rubrics (criteria scored 1-5 by default)"),
+        )
 }
 
 /// Parses the full command line: [`ConsoleConfig`] plus the trace source.
@@ -143,6 +149,9 @@ where
     }
     if let Some(dir) = m.get_one::<PathBuf>("datasets") {
         cli = cli.with_datasets(dir.clone());
+    }
+    if let Some(path) = m.get_one::<PathBuf>("rubrics") {
+        cli = cli.with_rubrics(path.clone());
     }
     Ok(cli)
 }
@@ -294,6 +303,7 @@ mod tests {
             ["--prices", "prices.yaml"],
             ["--author", "chris"],
             ["--datasets", "evals"],
+            ["--rubrics", "rubrics.yaml"],
         ] {
             let err = parse_args(["gadk-console", "--project", "p", flag[0], flag[1]]).unwrap_err();
             assert_eq!(err.kind(), ErrorKind::UnknownArgument, "{flag:?}");
@@ -309,7 +319,9 @@ mod tests {
                 && help.contains("--bigquery-max-bytes")
                 && help.contains("--prices")
                 && help.contains("--author")
-                && help.contains("--datasets"),
+                && help.contains("--datasets")
+                && help.contains("--rubrics")
+                && help.contains("YAML file of review rubrics (criteria scored 1-5 by default)"),
             "{help}"
         );
     }
@@ -358,6 +370,29 @@ mod tests {
             parse_cli(["gadk-console", "--project", "p"])
                 .unwrap()
                 .datasets,
+            None
+        );
+    }
+
+    #[test]
+    fn parse_cli_reads_the_rubric_file_path() {
+        let cli = parse_cli([
+            "gadk-console",
+            "--project",
+            "p",
+            "--rubrics",
+            "rubrics.yaml",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli,
+            Cli::new(parse_args(["gadk-console", "--project", "p"]).unwrap())
+                .with_rubrics(PathBuf::from("rubrics.yaml"))
+        );
+        assert_eq!(
+            parse_cli(["gadk-console", "--project", "p"])
+                .unwrap()
+                .rubrics,
             None
         );
     }

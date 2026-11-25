@@ -31,11 +31,12 @@ The console prints its URL and serves until you stop it (Ctrl-C).
 | `--prices <file>` | none | Price file (YAML, USD per 1,000,000 tokens per model). Without it, cost cells show `—`; token counts still show. See [Usage and cost](#usage-and-cost). |
 | `--author <name>` | `$USER`, else `$USERNAME`, else `console` | Author of the scores you add on `/traces/{id}` (BigQuery source). See [Scores](#scores). |
 | `--datasets <dir>` | none | Directory of eval-set YAML files that `/traces/{id}` adds runs to (BigQuery trace source only; ignored with Cloud Trace). It must exist. See [Datasets](#datasets). |
+| `--rubrics <file>` | none | YAML file of review rubrics: named sets of criteria, each scored on a small integer scale (1-5 by default), on `/traces/{id}` and in `/review` queues (BigQuery trace source only). See [Rubrics](#rubrics). |
 
 Exit codes: 2 for a usage error (clap's message), 1 when startup fails (a bad store URL, a bad
-report store URL, a bad price file, a `--datasets` directory that does not exist, missing
-credentials for a `gs://` report store or for `--datasets`, or a port already in use), with a
-one-line `gadk-console: …` message.
+report store URL, a bad price file, a bad rubric file, a `--datasets` directory that does not
+exist, missing credentials for a `gs://` report store or for `--datasets`, or a port already in
+use), with a one-line `gadk-console: …` message.
 
 ## Prerequisites
 
@@ -290,9 +291,10 @@ yet. It needs `--traces bigquery://…`; with the Cloud Trace source `/review` a
 answer 404 with a note.
 
 - `/review` defines the queue with its form: a score name (required, 1-100 bytes after
-  trimming), optionally a prompt name and version (only traces whose `LLM_REQUEST` rows used that
-  prompt, at that version), "Thumbs-down only" (only traces with an app thumbs-down score) and a
-  range (`1h`, `6h`, `24h` or `7d`, the default). A trace is in the window when it has an
+  trimming; with `--rubrics`, a score name or a rubric, see [Rubrics](#rubrics)), optionally a
+  prompt name and version (only traces whose `LLM_REQUEST` rows used that prompt, at that
+  version), "Thumbs-down only" (only traces with an app thumbs-down score) and a range (`1h`,
+  `6h`, `24h` or `7d`, the default). A trace is in the window when it has an
   `LLM_RESPONSE` row in it, and pending while no console score with exactly that name is on it
   (by `trace_id`, or by one of its invocations).
 - The page lists at most 100 pending traces, newest first by their first LLM response: the time,
@@ -307,6 +309,60 @@ answer 404 with a note.
   response is older than the range.
 - The pending query reads the window's rows and the `FEEDBACK` rows from a day before it, under
   `--bigquery-max-bytes`. The score name and filters are query parameters.
+
+## Rubrics
+
+A rubric scores a trace on several criteria in one submit. `--rubrics <file>` loads the rubrics
+from a YAML file at startup; they need `--traces bigquery://…` like every score. This "rubric"
+is unrelated to the optional judge rubric of the "Add to dataset" form (see
+[Datasets](#datasets)), which is text for an LLM judge stored in an eval set.
+
+```yaml
+- name: support                      # [A-Za-z0-9_-]{1,64}, unique in the file
+  description: Answers to support questions   # optional
+  criteria:                          # 1-10
+    - name: accuracy                 # [A-Za-z0-9_-]{1,64}, unique in the rubric
+      description: Is the answer right?       # optional
+    - name: tone
+      scale: [0, 2]                  # optional [min, max], default [1, 5]
+- name: safety
+  criteria:
+    - name: harmless
+```
+
+- The file is a list of 1-20 rubrics, each a map of exactly `name`, `description` (optional, a
+  non-empty string) and `criteria`. A criterion is a map of exactly `name`, `description`
+  (optional) and `scale` (optional): two integers with `0 <= min < max <= 100` and at most 11
+  steps. `<rubric>/<criterion>` must fit in 100 bytes. Any other key or value stops startup
+  with `rubric file <path>: <detail>`, for example
+  `` rubric file rubrics.yaml: rubrics[1].criteria[2].scale must be [min, max] with 0 <= min < max <= 100 and at most 11 steps ``
+  (indices count from 1).
+- Each criterion is saved as an ordinary console `number` score named `<rubric>/<criterion>`,
+  such as `support/accuracy` with the value `4.0`. The Scores list, the per-version Feedback
+  table on `/prompts/{name}` and rollout guards read them like any other number score, and a
+  guard can watch one criterion:
+
+  ```yaml
+  checks:
+    - feedback: { name: support/accuracy, source: console, max_decrease: 0.1 }
+  ```
+
+- On `/traces/{id}` the Scores section ends with one collapsed "Score with rubric <name>" form
+  per rubric, in file order. A form shows the rubric's description, then each criterion with its
+  description and one radio button per value of its scale, all required, and one optional
+  comment shared by the criteria. "Save scores" asks for confirmation; the console checks its
+  token, the rubric and every criterion (the first missing or out-of-scale one is a 400), looks
+  up the trace's identity like the score form, and inserts one `FEEDBACK` row per criterion with
+  a single parameterized `INSERT` (all rows or none; billed at least 10 MiB, like a score).
+  Without `--rubrics`, `POST /traces/{id}/rubric` answers 404.
+- A rubric queue is `/review?rubric=<name>`: the form's Rubric select (with `--rubrics`, the
+  score name is then optional; choose one or the other, not both). A trace stays pending until
+  it has a console score for every criterion of the rubric, with any value, so a trace scored on
+  some criteria only stays in the queue. The queue page is titled `Review: rubric <name>`, the
+  review bar reads `Reviewing rubric <name>`, and the rubric's form shows above the score form
+  (whose name is then left blank). Saving the rubric opens the next trace.
+- Re-submitting a rubric adds new rows; summaries use the latest score per invocation, name and
+  source.
 
 ## Sessions and users
 

@@ -18,26 +18,29 @@ use maud::{Markup, html};
 
 use super::layout::{Nav, page};
 use super::millis;
-use crate::review::{PendingTrace, REVIEW_CAP, ReviewQueue};
+use crate::review::{PendingTrace, REVIEW_CAP, ReviewQueue, Target};
+use crate::rubrics::Rubrics;
 use crate::traces::TimeRange;
 use crate::web::review::review_link;
 
-/// The review page: the filter form (keeping the queue's values), then, for a queue, the
-/// heading, the count line, the "Start reviewing" link and at most [`REVIEW_CAP`] pending
-/// traces (`pending` may hold one more, which only marks the cap as hit), or the empty state
-/// (`done`: the reviewer just finished the queue).
+/// The review page: the filter form (keeping the queue's values, offering the `rubrics`),
+/// then, for a queue, the heading, the count line, the "Start reviewing" link and at most
+/// [`REVIEW_CAP`] pending traces (`pending` may hold one more, which only marks the cap as
+/// hit), or the empty state (`done`: the reviewer just finished the queue).
 pub(crate) fn render(
     queue: Option<&ReviewQueue>,
     pending: Option<&[PendingTrace]>,
     done: bool,
+    rubrics: Option<&Rubrics>,
 ) -> Markup {
-    let title = match queue {
-        Some(q) => format!("Review: {}", q.score),
+    let title = match queue.map(|q| &q.target) {
+        Some(Target::Score(score)) => format!("Review: {score}"),
+        Some(Target::Rubric(rubric)) => format!("Review: rubric {rubric}"),
         None => "Review".to_owned(),
     };
     let body = html! {
         h1 { (title) }
-        (filter_form(queue))
+        (filter_form(queue, rubrics))
         @match (queue, pending) {
             (Some(q), Some(rows)) => {
                 @if rows.is_empty() {
@@ -58,7 +61,11 @@ pub(crate) fn render(
             }
             _ => {
                 p class="empty" {
-                    "Enter a score name to list the recent traces that have no console score with that name yet."
+                    @if rubrics.is_some() {
+                        "Enter a score name or choose a rubric to list the recent traces that are not yet scored."
+                    } @else {
+                        "Enter a score name to list the recent traces that have no console score with that name yet."
+                    }
                 }
             }
         }
@@ -67,15 +74,36 @@ pub(crate) fn render(
 }
 
 /// The GET form that defines a queue; its fields keep the queue's values (the range defaults
-/// to 7d).
-fn filter_form(queue: Option<&ReviewQueue>) -> Markup {
+/// to 7d). With `rubrics` the score name is optional and a select offers the rubrics.
+fn filter_form(queue: Option<&ReviewQueue>, rubrics: Option<&Rubrics>) -> Markup {
     let range = queue.map_or(TimeRange::Days7, |q| q.range);
+    let score = queue.and_then(|q| match &q.target {
+        Target::Score(score) => Some(score.as_str()),
+        Target::Rubric(_) => None,
+    });
+    let rubric = queue.and_then(|q| match &q.target {
+        Target::Rubric(rubric) => Some(rubric.as_str()),
+        Target::Score(_) => None,
+    });
     html! {
         form class="filters" method="get" action="/review" {
             label {
                 "Score name"
-                input type="text" name="score" value=[queue.map(|q| q.score.as_str())]
-                    required maxlength="100";
+                input type="text" name="score" value=[score]
+                    required[rubrics.is_none()] maxlength="100";
+            }
+            @if let Some(rubrics) = rubrics {
+                label {
+                    "Rubric"
+                    select name="rubric" {
+                        option value="" {}
+                        @for r in rubrics.iter() {
+                            option value=(r.name) selected[rubric == Some(r.name.as_str())] {
+                                (r.name)
+                            }
+                        }
+                    }
+                }
             }
             label {
                 "Prompt"

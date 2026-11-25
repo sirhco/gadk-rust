@@ -34,6 +34,7 @@ use super::review::next_link;
 use crate::datasets::{AddError, NEEDS_DATASETS, is_dataset_name};
 use crate::model::{attach_logs, build_tree, trace_end};
 use crate::review::{Cursor, ReviewQueue, at_text};
+use crate::rubrics::{NO_RUBRICS, Rubrics};
 use crate::scores::{BQ_EDITOR_HINT, NewScore};
 use crate::traces::{RawSpan, SourceError, TimeRange, TraceId, TraceQuery};
 use crate::url::percent_encode;
@@ -46,6 +47,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/traces", get(list))
         .route("/traces/{id}", get(detail))
         .route("/traces/{id}/scores", post(add_score))
+        .route("/traces/{id}/rubric", post(add_rubric_scores))
         .route("/traces/{id}/dataset", post(add_to_dataset))
 }
 
@@ -106,15 +108,15 @@ fn added_notice(params: &[(String, String)]) -> Option<(usize, String)> {
 }
 
 /// The review bar of trace `id`, from the `/traces/{id}` query: with the BigQuery source, a
-/// valid queue (`score` plus optional filters) and a valid `at`; else `None` (never fails the
-/// page).
+/// valid queue (`score` or a loaded `rubric`, plus optional filters) and a valid `at`; else
+/// `None` (never fails the page).
 fn review_bar_from_query(
     state: &AppState,
     id: &TraceId,
     params: &[(String, String)],
 ) -> Option<ReviewBar> {
     state.usage.as_ref()?;
-    let queue = ReviewQueue::from_params(params).ok()??;
+    let queue = ReviewQueue::from_params(params, state.rubrics.as_deref()).ok()??;
     let at = params
         .iter()
         .find(|(k, _)| k == "at")
@@ -146,6 +148,7 @@ async fn detail(
             added: added_notice(&params),
         },
         review: review_bar_from_query(&state, &id, &params),
+        rubrics: state.rubrics.clone(),
     };
     let logs = detail.logs.map(|set| LogView {
         shown: set.entries.len(),
@@ -189,8 +192,8 @@ async fn trace_scores(state: &AppState, id: &TraceId, spans: &[RawSpan]) -> Scor
     }
 }
 
-/// The hidden `q_*` fields of the score and dataset forms: the review queue and `at` in review
-/// mode, empty strings otherwise.
+/// The hidden `q_*` fields of the score, rubric and dataset forms: the review queue and `at` in
+/// review mode, empty strings otherwise.
 ///
 /// The fields must stay `String`: they are flattened into urlencoded forms, which deserialize
 /// only string fields reliably.
@@ -198,6 +201,7 @@ async fn trace_scores(state: &AppState, id: &TraceId, spans: &[RawSpan]) -> Scor
 #[serde(default)]
 struct ReviewFields {
     q_score: String,
+    q_rubric: String,
     q_prompt: String,
     q_version: String,
     q_flagged: String,
@@ -206,11 +210,32 @@ struct ReviewFields {
 }
 
 impl ReviewFields {
-    /// The review queue and the cursor of trace `id`, when the fields are a valid queue and
-    /// `at`; else `None`.
-    fn parse(&self, id: &TraceId) -> Option<(ReviewQueue, Cursor)> {
+    /// The fields of a form read as pairs: the first value of each `q_*` field.
+    fn from_pairs(pairs: &[(String, String)]) -> ReviewFields {
+        let first = |key: &str| {
+            pairs
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        };
+        ReviewFields {
+            q_score: first("q_score"),
+            q_rubric: first("q_rubric"),
+            q_prompt: first("q_prompt"),
+            q_version: first("q_version"),
+            q_flagged: first("q_flagged"),
+            q_range: first("q_range"),
+            q_at: first("q_at"),
+        }
+    }
+
+    /// The review queue (a rubric queue's rubric among `rubrics`) and the cursor of trace
+    /// `id`, when the fields are a valid queue and `at`; else `None`.
+    fn parse(&self, id: &TraceId, rubrics: Option<&Rubrics>) -> Option<(ReviewQueue, Cursor)> {
         let params: Vec<(String, String)> = [
             ("score", &self.q_score),
+            ("rubric", &self.q_rubric),
             ("prompt", &self.q_prompt),
             ("version", &self.q_version),
             ("flagged", &self.q_flagged),
@@ -219,9 +244,18 @@ impl ReviewFields {
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.clone()))
         .collect();
-        let queue = ReviewQueue::from_params(&params).ok()??;
+        let queue = ReviewQueue::from_params(&params, rubrics).ok()??;
         let cursor = Cursor::parse(&self.q_at, id.as_str()).ok()?;
         Some((queue, cursor))
+    }
+
+    /// Where a successful score goes: the next trace of the review queue when the fields are a
+    /// valid queue and `at`, else back to trace `id`.
+    fn after_score(&self, id: &TraceId, rubrics: Option<&Rubrics>) -> String {
+        match self.parse(id, rubrics) {
+            Some((queue, cursor)) => next_link(&queue, &cursor),
+            None => format!("/traces/{}", id.as_str()),
+        }
     }
 }
 
@@ -237,17 +271,6 @@ struct ScoreForm {
     csrf: String,
     #[serde(flatten)]
     review: ReviewFields,
-}
-
-impl ScoreForm {
-    /// Where a successful score goes: the next trace of the review queue when the `q_*` fields
-    /// are a valid queue and `at`, else back to trace `id`.
-    fn redirect(&self, id: &TraceId) -> String {
-        match self.review.parse(id) {
-            Some((queue, cursor)) => next_link(&queue, &cursor),
-            None => format!("/traces/{}", id.as_str()),
-        }
-    }
 }
 
 /// `POST /traces/{id}/scores`: checks the token, validates the score (400), reads the trace's
@@ -286,7 +309,67 @@ async fn add_score(
         .insert_score(id.as_str(), &root, &score, &state.author)
         .await
     {
-        Ok(()) => Redirect::to(&form.redirect(&id)).into_response(),
+        Ok(()) => {
+            Redirect::to(&form.review.after_score(&id, state.rubrics.as_deref())).into_response()
+        }
+        Err(e) => insert_failed(&e),
+    }
+}
+
+/// `POST /traces/{id}/rubric`: checks the token, the trace id, the BigQuery source and the
+/// loaded rubrics (404), then the rubric and each criterion's `c_<criterion>` value (400, the
+/// first failing criterion in file order), reads the trace's identity (404 when it has none in
+/// the last 30 days), inserts one `FEEDBACK` row per criterion in one statement and redirects
+/// (303) to the trace, or in review mode to the queue's next trace.
+async fn add_rubric_scores(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> Response {
+    let field = |key: &str| {
+        form.iter()
+            .find(|(k, _)| k == key)
+            .map_or("", |(_, v)| v.as_str())
+    };
+    if let Err(resp) = check_csrf(&state, field("csrf")) {
+        return resp;
+    }
+    let Some(id) = TraceId::parse(&id) else {
+        return source_error(&SourceError::NotFound);
+    };
+    let Some(usage) = &state.usage else {
+        return error_page(
+            StatusCode::NOT_FOUND,
+            Nav::Traces,
+            NEEDS_BIGQUERY_SCORES,
+            None,
+        );
+    };
+    let Some(rubrics) = state.rubrics.as_deref() else {
+        return error_page(StatusCode::NOT_FOUND, Nav::Traces, NO_RUBRICS, None);
+    };
+    let name = field("rubric").trim();
+    let Some(rubric) = rubrics.get(name) else {
+        let text = format!("rubric: unknown rubric `{name}`");
+        return error_page(StatusCode::BAD_REQUEST, Nav::Traces, &text, None);
+    };
+    let scores = match rubric.scores_from_form(&form, field("comment")) {
+        Ok(scores) => scores,
+        Err(text) => return error_page(StatusCode::BAD_REQUEST, Nav::Traces, &text, None),
+    };
+    let root = match usage.trace_root(id.as_str()).await {
+        Ok(Some(root)) => root,
+        Ok(None) => return source_error(&SourceError::NotFound),
+        Err(e) => return source_error(&e),
+    };
+    match usage
+        .insert_scores(id.as_str(), &root, &scores, &state.author)
+        .await
+    {
+        Ok(()) => {
+            let to = ReviewFields::from_pairs(&form).after_score(&id, Some(rubrics));
+            Redirect::to(&to).into_response()
+        }
         Err(e) => insert_failed(&e),
     }
 }
@@ -319,15 +402,15 @@ struct DatasetForm {
 
 impl DatasetForm {
     /// Where a successful add of `added` cases goes: trace `id` with the added notice, and in
-    /// review mode (valid `q_*` fields) the queue and `at` too, so the page stays in review
-    /// mode.
-    fn redirect(&self, id: &TraceId, added: usize) -> String {
+    /// review mode (valid `q_*` fields, a rubric queue's rubric among `rubrics`) the queue and
+    /// `at` too, so the page stays in review mode.
+    fn redirect(&self, id: &TraceId, added: usize, rubrics: Option<&Rubrics>) -> String {
         let mut url = format!(
             "/traces/{}?added={added}&dataset={}",
             id.as_str(),
             percent_encode(&self.dataset)
         );
-        if let Some((queue, cursor)) = self.review.parse(id) {
+        if let Some((queue, cursor)) = self.review.parse(id, rubrics) {
             url.push_str(&format!(
                 "&{}&at={}",
                 queue.query_string(),
@@ -357,7 +440,9 @@ async fn add_to_dataset(
     };
     let rubric = Some(form.rubric.as_str()).filter(|r| !r.trim().is_empty());
     match datasets.add_trace(id.as_str(), &form.dataset, rubric).await {
-        Ok(added) => Redirect::to(&form.redirect(&id, added)).into_response(),
+        Ok(added) => {
+            Redirect::to(&form.redirect(&id, added, state.rubrics.as_deref())).into_response()
+        }
         Err(e) => dataset_failed(&e),
     }
 }
@@ -404,7 +489,7 @@ mod tests {
     };
     use crate::usage::UsageSource;
     use crate::web::AppState;
-    use crate::web::testutil::{AUTHOR, CSRF, FakeExport, post_form};
+    use crate::web::testutil::{AUTHOR, CSRF, FakeExport, post_form, test_rubrics};
     use crate::web::testutil::{FakeSource, fixed_now, get, state};
     use gadk_bigquery::{BigQueryClient, NoAuth};
     use http::header::LOCATION;
@@ -2183,6 +2268,359 @@ mod tests {
         assert!(
             page.contains("Reviewing <strong>quality</strong>"),
             "{page}"
+        );
+    }
+
+    // ---- rubrics ----
+
+    /// [`bq_get`] with the test rubrics loaded.
+    fn rubric_get(d: TraceDetail, fake: &Arc<FakeHttp>) -> AppState {
+        let mut st = bq_get(d, fake);
+        st.rubrics = Some(test_rubrics());
+        st
+    }
+
+    /// GET `/traces/{ID}{query}` with the test rubrics loaded and the BigQuery source answering
+    /// the scores query with no rows; returns the page.
+    async fn rubric_page(query: &str) -> String {
+        let fake = FakeHttp::new(vec![reply(&SCORE_FIELDS, vec![], false)]);
+        let (status, _, page) = get(
+            rubric_get(invocation_detail(), &fake),
+            &format!("/traces/{ID}{query}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{query}: {page}");
+        page
+    }
+
+    /// The `support` rubric form's fields after its hidden fields: the description, the two
+    /// criteria and the comment and submit button.
+    const SUPPORT_FIELDS: &str = r#"<p>Answers to support questions</p><fieldset><legend>accuracy — Is the answer right?</legend><label><input type="radio" name="c_accuracy" value="1" required>1</label><label><input type="radio" name="c_accuracy" value="2" required>2</label><label><input type="radio" name="c_accuracy" value="3" required>3</label><label><input type="radio" name="c_accuracy" value="4" required>4</label><label><input type="radio" name="c_accuracy" value="5" required>5</label></fieldset><fieldset><legend>tone</legend><label><input type="radio" name="c_tone" value="0" required>0</label><label><input type="radio" name="c_tone" value="1" required>1</label><label><input type="radio" name="c_tone" value="2" required>2</label></fieldset><input type="text" name="comment" placeholder="comment (optional)" maxlength="1000"> <button type="submit">Save scores</button></form>"#;
+
+    fn rubric_form_open() -> String {
+        format!(
+            r#"<form method="post" action="/traces/{ID}/rubric" data-confirm="Save these scores to the trace?" class="rubric"><input type="hidden" name="csrf" value="{CSRF}">"#
+        )
+    }
+
+    #[tokio::test]
+    async fn outside_review_mode_each_rubric_is_a_collapsed_form_after_the_score_form() {
+        let page = rubric_page("").await;
+        let scores = scores_section(&page);
+        let open = rubric_form_open();
+        let support = format!(
+            r#"<details><summary>Score with rubric support</summary>{open}<input type="hidden" name="rubric" value="support">{SUPPORT_FIELDS}</details>"#
+        );
+        let safety = format!(
+            r#"<details><summary>Score with rubric safety</summary>{open}<input type="hidden" name="rubric" value="safety"><fieldset><legend>harmless</legend><label><input type="radio" name="c_harmless" value="1" required>1</label><label><input type="radio" name="c_harmless" value="2" required>2</label><label><input type="radio" name="c_harmless" value="3" required>3</label><label><input type="radio" name="c_harmless" value="4" required>4</label><label><input type="radio" name="c_harmless" value="5" required>5</label></fieldset><input type="text" name="comment" placeholder="comment (optional)" maxlength="1000"> <button type="submit">Save scores</button></form></details>"#
+        );
+        assert!(
+            scores.contains(&format!(
+                r#"<button type="submit">Add score</button></form>{support}{safety}"#
+            )),
+            "{scores}"
+        );
+        assert!(!scores.contains("name=\"q_"), "{scores}");
+    }
+
+    #[tokio::test]
+    async fn a_rubric_review_shows_its_bar_and_form_above_a_blank_score_form() {
+        let page = rubric_page(&format!("?rubric=support&prompt=triage&range=24h&at={AT}")).await;
+        let qs = "rubric=support&amp;prompt=triage&amp;range=24h";
+        let bar = format!(
+            r#"<div class="banner info"><p>Reviewing rubric <strong>support</strong> · <a href="/review/next?{qs}&amp;after=2026-11-16T11%3A58%3A59.999750Z&amp;after_id={ID}">Skip →</a> · <a href="/review?{qs}">Back to queue</a></p></div><h1>Trace "#
+        );
+        assert!(page.contains(&bar), "{page}");
+        let scores = scores_section(&page);
+        let hidden = r#"<input type="hidden" name="q_rubric" value="support"><input type="hidden" name="q_prompt" value="triage"><input type="hidden" name="q_version" value=""><input type="hidden" name="q_flagged" value=""><input type="hidden" name="q_range" value="24h"><input type="hidden" name="q_at" value="2026-11-16T11:58:59.999750Z">"#;
+        let form = format!(
+            r#"{}<input type="hidden" name="rubric" value="support">{hidden}{SUPPORT_FIELDS}<form method="post" action="/traces/{ID}/scores""#,
+            rubric_form_open()
+        );
+        assert!(scores.contains(&form), "{scores}");
+        assert!(
+            scores.contains(&format!(
+                r#"<input type="hidden" name="csrf" value="{CSRF}">{hidden}<input type="text" name="name" placeholder="score name" required maxlength="100">"#
+            )),
+            "the score form keeps the queue with a blank name: {scores}"
+        );
+        assert!(!scores.contains("q_score"), "{scores}");
+        assert!(!scores.contains("<details>"), "{scores}");
+        assert!(!scores.contains(r#"value="safety""#), "{scores}");
+    }
+
+    #[tokio::test]
+    async fn a_score_review_with_rubrics_loaded_has_no_rubric_forms() {
+        let page = rubric_page(&format!("?score=quality&at={AT}")).await;
+        assert!(
+            page.contains("Reviewing <strong>quality</strong>"),
+            "{page}"
+        );
+        let scores = scores_section(&page);
+        assert!(!scores.contains("/rubric\""), "{scores}");
+        assert!(!scores.contains("<details>"), "{scores}");
+        assert!(
+            scores.contains(r#"<input type="text" name="name" placeholder="score name" value="quality" required maxlength="100">"#),
+            "{scores}"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_rubrics_a_rubric_queue_is_no_review_and_the_page_is_unchanged() {
+        let plain = review_page("").await;
+        assert!(!plain.contains("/rubric\""), "{plain}");
+        assert!(!plain.contains("<details>"), "{plain}");
+        assert_eq!(
+            review_page(&format!("?rubric=support&at={AT}")).await,
+            plain
+        );
+        // An unknown rubric or a rubric with a score is no review either.
+        let plain = rubric_page("").await;
+        for query in [
+            format!("?rubric=nope&at={AT}"),
+            format!("?rubric=support&score=quality&at={AT}"),
+        ] {
+            assert_eq!(rubric_page(&query).await, plain, "{query}");
+        }
+    }
+
+    #[tokio::test]
+    async fn rubric_forms_need_the_bigquery_source() {
+        let (_, mut st) = with_get(Ok(detail(600, logs(vec![], false))));
+        st.rubrics = Some(test_rubrics());
+        let (status, _, page) = get(st, &format!("/traces/{ID}")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            page.contains("Scores need the BigQuery trace source"),
+            "{page}"
+        );
+        assert!(!page.contains("/rubric\""), "{page}");
+        assert!(!page.contains("<details>"), "{page}");
+    }
+
+    fn rubric_path() -> String {
+        format!("/traces/{ID}/rubric")
+    }
+
+    #[tokio::test]
+    async fn a_rubric_submit_inserts_one_row_per_criterion_in_one_statement() {
+        let fake = FakeHttp::new(vec![root_reply(), dml_reply()]);
+        let body =
+            format!("csrf={CSRF}&rubric=support&c_tone=2&c_accuracy=4&comment=clear%20and%20kind");
+        let st = rubric_get(invocation_detail(), &fake);
+        let (status, headers, page) = post_form(st, &rubric_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        assert_eq!(headers[LOCATION], format!("/traces/{ID}"));
+        assert_eq!(fake.uris().len(), 2, "the identity, then one insert");
+        let insert = fake.body(1);
+        let sql = insert["query"].as_str().unwrap();
+        assert!(
+            sql.starts_with("INSERT INTO `data-proj.agent_analytics.agent_events`"),
+            "{sql}"
+        );
+        assert!(sql.ends_with("FROM UNNEST(@contents) AS c"), "{sql}");
+        assert_eq!(insert["maximumBytesBilled"], json!("10485760"));
+        assert_eq!(
+            param_value(&insert, "contents")["parameterValue"],
+            json!({ "arrayValues": [
+                { "value": r#"{"comment":"clear and kind","data_type":"number","name":"support/accuracy","value":4.0}"# },
+                { "value": r#"{"comment":"clear and kind","data_type":"number","name":"support/tone","value":2.0}"# },
+            ] })
+        );
+        let attributes: Value = serde_json::from_str(
+            param_value(&insert, "attributes")["parameterValue"]["value"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            attributes,
+            json!({"source": "console", "author": AUTHOR, "adk": {"app_name": "shop", "invocation_id": "e-1"}})
+        );
+        for (name, want) in [("trace_id", ID), ("session_id", "s-1"), ("user_id", "u-1")] {
+            assert_eq!(
+                param_value(&insert, name)["parameterValue"]["value"],
+                json!(want),
+                "{name}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rubric_submit_in_review_mode_redirects_to_the_next_trace() {
+        let fake = FakeHttp::new(vec![root_reply(), dml_reply()]);
+        let body = format!(
+            "csrf={CSRF}&rubric=support&c_accuracy=5&c_tone=0&comment=&q_score=&q_rubric=support&q_prompt=team%2Fgreet&q_version=3&q_flagged=1&q_range=6h&q_at=2026-11-16T11%3A58%3A59.999750Z"
+        );
+        let st = rubric_get(invocation_detail(), &fake);
+        let (status, headers, page) = post_form(st, &rubric_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        assert_eq!(
+            headers[LOCATION],
+            format!(
+                "/review/next?rubric=support&prompt=team%2Fgreet&version=3&flagged=1&range=6h&after={AT}&after_id={ID}"
+            )
+        );
+        assert_eq!(fake.uris().len(), 2);
+        let contents = param_value(&fake.body(1), "contents");
+        assert_eq!(
+            contents["parameterValue"]["arrayValues"][1]["value"],
+            json!(r#"{"data_type":"number","name":"support/tone","value":0.0}"#),
+            "a blank comment is left out"
+        );
+
+        // Invalid review fields go back to the trace.
+        let fake = FakeHttp::new(vec![root_reply(), dml_reply()]);
+        let body = format!(
+            "csrf={CSRF}&rubric=support&c_accuracy=5&c_tone=0&q_rubric=nope&q_at=2026-11-16T11%3A58%3A59.999750Z"
+        );
+        let st = rubric_get(invocation_detail(), &fake);
+        let (status, headers, _) = post_form(st, &rubric_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        assert_eq!(headers[LOCATION], format!("/traces/{ID}"));
+    }
+
+    #[tokio::test]
+    async fn rubric_posts_without_the_token_are_403_and_query_nothing() {
+        for csrf in [String::new(), "b".repeat(64)] {
+            let fake = FakeHttp::new(vec![]);
+            let body = format!("csrf={csrf}&rubric=nope");
+            let st = rubric_get(invocation_detail(), &fake);
+            let (status, _, _) = post_form(st, &rubric_path(), &body, Some(ORIGIN)).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{csrf:?}");
+            assert!(fake.uris().is_empty());
+        }
+        let fake = FakeHttp::new(vec![]);
+        let body = format!("csrf={CSRF}&rubric=support&c_accuracy=1&c_tone=1");
+        let st = rubric_get(invocation_detail(), &fake);
+        let (status, _, _) = post_form(st, &rubric_path(), &body, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "no Origin");
+        assert!(fake.uris().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_bad_id_no_bigquery_or_no_rubrics_is_404_and_queries_nothing() {
+        let body = format!("csrf={CSRF}&rubric=nope");
+        let fake = FakeHttp::new(vec![]);
+        let st = rubric_get(invocation_detail(), &fake);
+        let (status, _, page) =
+            post_form(st, "/traces/not-a-trace/rubric", &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(page.contains("trace not found"), "{page}");
+        assert!(fake.uris().is_empty());
+
+        let (_, mut st) = with_get(Ok(detail(600, logs(vec![], false))));
+        st.rubrics = Some(test_rubrics());
+        let (status, _, page) = post_form(st, &rubric_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(
+            page.contains("Scores need the BigQuery trace source"),
+            "{page}"
+        );
+
+        let fake = FakeHttp::new(vec![]);
+        let st = bq_get(invocation_detail(), &fake);
+        let (status, _, page) = post_form(st, &rubric_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(
+            page.contains("no rubrics are loaded (start the console with --rubrics &lt;file&gt;)"),
+            "{page}"
+        );
+        assert!(fake.uris().is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalid_rubric_submits_are_400_and_query_nothing() {
+        for (form, text) in [
+            ("rubric=nope&c_accuracy=1", "rubric: unknown rubric `nope`"),
+            ("c_accuracy=1&c_tone=1", "rubric: unknown rubric ``"),
+            (
+                "rubric=Support&c_accuracy=1&c_tone=1",
+                "rubric: unknown rubric `Support`",
+            ),
+            ("rubric=support&c_tone=1", "`accuracy`: choose a score"),
+            (
+                "rubric=support&c_accuracy=+&c_tone=1",
+                "`accuracy`: choose a score",
+            ),
+            ("rubric=support&c_accuracy=3", "`tone`: choose a score"),
+            (
+                "rubric=support&c_accuracy=6&c_tone=9",
+                "`accuracy`: must be an integer from 1 to 5",
+            ),
+            (
+                "rubric=support&c_accuracy=2.5&c_tone=1",
+                "`accuracy`: must be an integer from 1 to 5",
+            ),
+            (
+                "rubric=support&c_accuracy=2&c_tone=3",
+                "`tone`: must be an integer from 0 to 2",
+            ),
+        ] {
+            let fake = FakeHttp::new(vec![]);
+            let body = format!("csrf={CSRF}&{form}");
+            let st = rubric_get(invocation_detail(), &fake);
+            let (status, _, page) = post_form(st, &rubric_path(), &body, Some(ORIGIN)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{form}");
+            assert!(page.contains(text), "{form}: {page}");
+            assert!(fake.uris().is_empty(), "{form}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rubric_submit_for_a_trace_without_an_identity_inserts_nothing() {
+        let fake = FakeHttp::new(vec![reply(&ROOT_FIELDS, vec![], false)]);
+        let body = format!("csrf={CSRF}&rubric=safety&c_harmless=5");
+        let st = rubric_get(invocation_detail(), &fake);
+        let (status, _, page) = post_form(st, &rubric_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(page.contains("trace not found"), "{page}");
+        assert_eq!(fake.uris().len(), 1, "no insert");
+
+        let fake = FakeHttp::new(vec![root_reply(), denied()]);
+        let st = rubric_get(invocation_detail(), &fake);
+        let (status, _, page) = post_form(st, &rubric_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert!(
+            page.contains(r#"<p class="hint">needs roles/bigquery.dataEditor on the table and roles/bigquery.jobUser</p>"#),
+            "{page}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_score_in_a_rubric_review_redirects_to_the_rubric_queue() {
+        let fake = FakeHttp::new(vec![root_reply(), dml_reply()]);
+        let body = format!(
+            "name=extra&kind=up&csrf={CSRF}&q_score=&q_rubric=support&q_range=7d&q_at=2026-11-16T11%3A58%3A59.999750Z"
+        );
+        let st = rubric_get(invocation_detail(), &fake);
+        let (status, headers, page) = post_form(st, &score_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        assert_eq!(
+            headers[LOCATION],
+            format!("/review/next?rubric=support&after={AT}&after_id={ID}")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dataset_add_in_a_rubric_review_keeps_the_rubric_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(trace_export());
+        let mut st = with_datasets(dir.path(), &fake);
+        st.rubrics = Some(test_rubrics());
+        let body = format!(
+            "dataset=regressions&rubric=Be+right.&csrf={CSRF}&q_rubric=support&q_range=6h&q_at=2026-11-16T11%3A58%3A59.999750Z"
+        );
+        let (status, headers, page) = post_form(st, &dataset_path(), &body, Some(ORIGIN)).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{page}");
+        assert_eq!(
+            headers[LOCATION],
+            format!("/traces/{ID}?added=2&dataset=regressions&rubric=support&range=6h&at={AT}")
+        );
+        let text = std::fs::read_to_string(dir.path().join("regressions.yaml")).unwrap();
+        assert!(
+            text.contains("Be right."),
+            "the judge rubric is the dataset's: {text}"
         );
     }
 }
