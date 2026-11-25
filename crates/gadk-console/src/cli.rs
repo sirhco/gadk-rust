@@ -16,7 +16,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Arg, ArgMatches, Command, value_parser};
+use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 
 use crate::traces::BigQueryTable;
 use crate::{Cli, ConsoleConfig, DEFAULT_MAX_BYTES, TracesFrom};
@@ -119,6 +119,12 @@ fn full_cli() -> Command {
                 .value_parser(value_parser!(PathBuf))
                 .help("YAML file of review rubrics (criteria scored 1-5 by default)"),
         )
+        .arg(
+            Arg::new("api-origin")
+                .long("api-origin")
+                .action(ArgAction::Append)
+                .help("Origin (scheme://host[:port]) of a browser app allowed to read the JSON API under /api/v1; repeatable"),
+        )
 }
 
 /// Parses the full command line: [`ConsoleConfig`] plus the trace source.
@@ -152,6 +158,9 @@ where
     }
     if let Some(path) = m.get_one::<PathBuf>("rubrics") {
         cli = cli.with_rubrics(path.clone());
+    }
+    for origin in m.get_many::<String>("api-origin").into_iter().flatten() {
+        cli = cli.with_api_origin(origin.clone());
     }
     Ok(cli)
 }

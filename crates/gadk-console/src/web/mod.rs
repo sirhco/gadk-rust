@@ -26,6 +26,7 @@ use http::header::CONTENT_TYPE;
 use crate::traces::TraceSource;
 
 mod api;
+pub(crate) mod cors;
 mod evals;
 mod experiments;
 pub(crate) mod guard;
@@ -56,6 +57,7 @@ pub(crate) struct AppState {
     // Some with BigQuery: the conversation text of `/sessions/{id}`, or why it is unavailable.
     pub export: Option<Result<Arc<dyn gadk_eval_monitor::ExportSource>, String>>,
     pub rubrics: Option<Arc<crate::rubrics::Rubrics>>, // the --rubrics file, if any
+    pub api_origins: Arc<[String]>, // the --api-origin allow-list (empty: no CORS)
 }
 
 const CONSOLE_CSS: &str = include_str!("assets/console.css");
@@ -65,7 +67,7 @@ const WATERFALL_JS: &str = include_str!("assets/waterfall.js");
 /// text/css and text/javascript; charset=utf-8 content types); merges traces::routes(),
 /// prompts::routes(), evals::routes(), experiments::routes(), guards::routes(),
 /// review::routes(), sessions::routes() and usage::routes(); nests the JSON API at `/api`
-/// (api::router(), with its own JSON 404 and 405); wraps everything in guard::layer (Host 421,
+/// (api::router(), with its own JSON 404 and 405, under the cors::cors layer); wraps everything in guard::layer (Host 421,
 /// POST Origin 403) and adds the CSP header to every response; other unknown paths → error page
 /// 404.
 pub(crate) fn router(state: AppState) -> Router {
@@ -81,7 +83,12 @@ pub(crate) fn router(state: AppState) -> Router {
         .merge(review::routes())
         .merge(sessions::routes())
         .merge(usage::routes())
-        .nest_service("/api", api::router().with_state(state.clone()))
+        .nest_service(
+            "/api",
+            api::router()
+                .layer(middleware::from_fn_with_state(state.clone(), cors::cors))
+                .with_state(state.clone()),
+        )
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(state.clone(), guard::check))
         .layer(middleware::map_response(guard::csp))
