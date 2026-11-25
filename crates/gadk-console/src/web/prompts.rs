@@ -23,6 +23,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use chrono::{DateTime, Utc};
 use gadk_analytics::cost::CostSum;
+use gadk_analytics::prompts::VersionMetrics;
 use gadk_eval_monitor::MonitorError;
 use gadk_prompts::{Label, PromptSnapshot, Rollout, RolloutSnapshot, StoreError};
 use http::StatusCode;
@@ -39,7 +40,7 @@ use crate::evals::ReportCache;
 use crate::prices::{PriceTable, cost_of};
 use crate::prompts::{diff_view, prompt_detail, prompt_rows, version_view};
 use crate::traces::TimeRange;
-use crate::usage::{UsageSource, VersionMetrics};
+use crate::usage::UsageSource;
 
 const NO_STORE: &str = "No prompt store configured (start with --store)";
 

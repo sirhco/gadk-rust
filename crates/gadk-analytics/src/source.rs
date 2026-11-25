@@ -22,10 +22,8 @@ use gadk_bigquery::{BigQueryClient, QueryOptions, QueryResult};
 use serde_json::{Map, Value, json};
 
 use crate::row::{from_bigquery, param, ts_param};
+use crate::scores::DML_MIN_BYTES;
 use crate::{BigQueryTable, SourceError};
-
-/// The byte cap floor of a DML statement: BigQuery bills every one at least 10 MiB.
-pub(crate) const DML_MIN_BYTES: i64 = 10_485_760;
 
 /// The queries over one agent-analytics table, run (and billed) in the billing project, each
 /// stopped at the byte cap.
@@ -141,8 +139,7 @@ pub fn count(row: &Map<String, Value>, key: &str) -> u64 {
 }
 
 /// The `version` cell as a prompt version.
-#[doc(hidden)]
-pub fn version_of(row: &Map<String, Value>) -> Option<u32> {
+pub(crate) fn version_of(row: &Map<String, Value>) -> Option<u32> {
     row.get("version")
         .and_then(Value::as_u64)
         .and_then(|v| u32::try_from(v).ok())

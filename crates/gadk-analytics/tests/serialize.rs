@@ -16,6 +16,10 @@
 
 use chrono::{TimeZone, Utc};
 use gadk_analytics::cost::{CostSum, Usage};
+use gadk_analytics::prompts::{
+    FeedbackRow, InvocationVersions, VersionFeedback, VersionMetrics, VersionModel, VersionStats,
+};
+use gadk_analytics::scores::{ScoreRow, TraceRoot, TraceScores};
 use gadk_analytics::sessions::{
     SessionCursor, SessionPage, SessionRow, TurnRow, TurnScore, UserPage, UserRow,
 };
@@ -157,5 +161,89 @@ fn the_session_types_serialize_timestamps_as_rfc3339() {
     assert_eq!(
         serde_json::to_value(SessionCursor::new(at, "s1".into())).unwrap(),
         json!({ "at": "2026-11-20T12:00:00Z", "id": "s1" })
+    );
+}
+
+#[test]
+fn the_prompt_types_serialize() {
+    let stats = VersionStats::new(2, 4, 1250.0, 300.5, Some(820.0), None);
+    let model = VersionModel::new(
+        2,
+        ModelCalls::new("m".into(), 4, Usage::new(5000, 1000, 1202, 0)),
+    );
+    assert_eq!(
+        serde_json::to_value(VersionMetrics::new(vec![stats], vec![model], false)).unwrap(),
+        json!({
+            "stats": [{
+                "version": 2, "calls": 4, "mean_input": 1250.0, "mean_output": 300.5,
+                "p50_ms": 820.0, "p95_ms": null,
+            }],
+            "models": [{
+                "version": 2,
+                "calls": {
+                    "model": "m", "calls": 4,
+                    "usage": { "input": 5000, "cached": 1000, "output": 1202, "reasoning": 0 },
+                },
+            }],
+            "truncated": false,
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(InvocationVersions::new(vec![("inv-1".into(), 2)], true)).unwrap(),
+        json!({ "pairs": [["inv-1", 2]], "truncated": true })
+    );
+    let row = FeedbackRow::new(
+        3,
+        "quality".into(),
+        "app".into(),
+        "bool".into(),
+        5,
+        4,
+        None,
+        None,
+    );
+    assert_eq!(
+        serde_json::to_value(VersionFeedback::new(vec![row], false)).unwrap(),
+        json!({
+            "rows": [{
+                "version": 3, "name": "quality", "source": "app", "data_type": "bool",
+                "count": 5, "positive": 4, "mean": null, "mode": null,
+            }],
+            "truncated": false,
+        })
+    );
+}
+
+#[test]
+fn the_score_types_serialize_timestamps_as_rfc3339() {
+    let at = Utc.with_ymd_and_hms(2026, 11, 20, 12, 0, 0).unwrap();
+    let row = ScoreRow::new(
+        at,
+        "console".into(),
+        "chris".into(),
+        "quality".into(),
+        "bool".into(),
+        "true".into(),
+        String::new(),
+    );
+    assert_eq!(
+        serde_json::to_value(TraceScores::new(vec![row], false)).unwrap(),
+        json!({
+            "rows": [{
+                "timestamp": "2026-11-20T12:00:00Z", "source": "console", "author": "chris",
+                "name": "quality", "data_type": "bool", "value": "true", "comment": "",
+            }],
+            "truncated": false,
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(TraceRoot::new(
+            None,
+            Some("s1".into()),
+            "inv-1".into(),
+            None
+        ))
+        .unwrap(),
+        json!({ "user_id": null, "session_id": "s1", "invocation_id": "inv-1", "app_name": null })
     );
 }

@@ -42,7 +42,6 @@ mod prices;
 mod prompts;
 mod review;
 mod rubrics;
-mod scores;
 pub mod traces;
 mod url;
 mod usage;

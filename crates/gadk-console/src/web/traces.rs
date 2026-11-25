@@ -19,6 +19,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
 use chrono::TimeDelta;
+use gadk_analytics::scores::{BQ_EDITOR_HINT, NewScore};
 use http::StatusCode;
 use serde::Deserialize;
 
@@ -35,7 +36,6 @@ use crate::datasets::{AddError, NEEDS_DATASETS, is_dataset_name};
 use crate::model::{attach_logs, build_tree, trace_end};
 use crate::review::{Cursor, ReviewQueue, at_text};
 use crate::rubrics::{NO_RUBRICS, Rubrics};
-use crate::scores::{BQ_EDITOR_HINT, NewScore};
 use crate::traces::{RawSpan, SourceError, TimeRange, TraceId, TraceQuery};
 use crate::url::percent_encode;
 

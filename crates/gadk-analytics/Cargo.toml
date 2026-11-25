@@ -23,6 +23,8 @@ chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# `tokio::try_join!` runs the two version-metric queries concurrently.
+tokio = { workspace = true }
 gadk-model = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
@@ -32,5 +34,3 @@ http = { workspace = true, optional = true }
 # Unit tests and doc tests get `testutil` without `--all-features`.
 gadk-analytics = { path = ".", features = ["test-util"] }
 pretty_assertions = { workspace = true }
-# `#[tokio::test]` and the doc examples' runtime.
-tokio = { workspace = true }

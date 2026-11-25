@@ -362,8 +362,7 @@ impl AnalyticsSource {
 }
 
 /// The `model`, `calls`, `input`, `cached`, `output` and `reasoning` cells of a row.
-#[doc(hidden)]
-pub fn model_calls(row: &Map<String, Value>) -> ModelCalls {
+pub(crate) fn model_calls(row: &Map<String, Value>) -> ModelCalls {
     ModelCalls {
         model: text(row, "model").unwrap_or_else(|| UNKNOWN_MODEL.to_owned()),
         calls: count(row, "calls"),
@@ -379,8 +378,7 @@ pub fn model_calls(row: &Map<String, Value>) -> ModelCalls {
 /// The per-call columns of `c` read from the `res` (`LLM_RESPONSE`) row: prompt name and
 /// version, the four token counts (missing values 0, all from `attributes.usage_metadata`, so the
 /// `content` column is never read) and `latency_ms.total_ms`.
-#[doc(hidden)]
-pub const CALL_COLUMNS: &str = r"JSON_VALUE(res.attributes, '$.prompt.name') AS prompt_name,
+pub(crate) const CALL_COLUMNS: &str = r"JSON_VALUE(res.attributes, '$.prompt.name') AS prompt_name,
     SAFE_CAST(JSON_VALUE(res.attributes, '$.prompt.version') AS INT64) AS prompt_version,
     IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.prompt_token_count') AS INT64), 0)
       + IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.tool_use_prompt_token_count') AS INT64), 0) AS input,
@@ -391,8 +389,7 @@ pub const CALL_COLUMNS: &str = r"JSON_VALUE(res.attributes, '$.prompt.name') AS 
 
 /// The `req` and `c` CTEs: `c` has one row per `LLM_RESPONSE` row in `[@start, @end)` with its
 /// trace, agent, model and the [`CALL_COLUMNS`].
-#[doc(hidden)]
-pub fn calls_cte(table: &str) -> String {
+pub(crate) fn calls_cte(table: &str) -> String {
     calls_cte_builder(table, false)
 }
 
@@ -421,8 +418,7 @@ c AS (
 
 /// The `c` CTE without the model: [`calls_cte`] minus the `LLM_REQUEST` join, for queries that
 /// do not group by model.
-#[doc(hidden)]
-pub fn responses_cte(table: &str) -> String {
+pub(crate) fn responses_cte(table: &str) -> String {
     format!(
         r"WITH c AS (
   SELECT res.trace_id AS trace_id, res.agent AS agent,
@@ -490,7 +486,7 @@ ORDER BY 2 DESC, 1, 3"
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
 
     use chrono::{DateTime, TimeZone, Utc};
@@ -768,7 +764,7 @@ mod tests {
     const TABLE: &str = "`data-proj.agent_analytics.agent_events`";
 
     /// `calls_cte(TABLE)`, pinned byte for byte.
-    const CALLS_CTE: &str = r"WITH req AS (
+    pub(crate) const CALLS_CTE: &str = r"WITH req AS (
   SELECT trace_id, span_id, ANY_VALUE(JSON_VALUE(attributes, '$.model')) AS model
   FROM `data-proj.agent_analytics.agent_events`
   WHERE event_type = 'LLM_REQUEST' AND timestamp >= @start AND timestamp < @end

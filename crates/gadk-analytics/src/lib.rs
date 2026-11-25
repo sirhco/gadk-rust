@@ -17,8 +17,9 @@
 //!
 //! [`AnalyticsSource`] runs the queries: build it over a `gadk_bigquery::BigQueryClient`, the
 //! project that runs and pays for the queries, the table and a byte cap per query. The queries
-//! are grouped by module: [`usage`] (token usage per model, agent and prompt version) and
-//! [`sessions`] (activity per session, per user and per turn).
+//! are grouped by module: [`usage`] (token usage per model, agent and prompt version),
+//! [`sessions`] (activity per session, per user and per turn), [`prompts`] (the metrics and
+//! feedback of prompt versions) and [`scores`] (the scores of a trace, and adding scores).
 //!
 //! The shared types are at the root: [`BigQueryTable`] names the table, [`TimeRange`] and
 //! [`TraceId`] are the trace-list window and id, and every query fails with a [`SourceError`].
@@ -29,7 +30,9 @@
 
 pub mod cost;
 mod error;
+pub mod prompts;
 pub mod row;
+pub mod scores;
 pub mod sessions;
 mod source;
 mod table;
@@ -46,6 +49,5 @@ pub use time::{TimeRange, TraceId};
 /// Query plumbing that gadk-console's queries use until they move into this crate.
 #[doc(hidden)]
 pub mod plumbing {
-    pub use crate::source::{count, string_array_param, version_of, window_params};
-    pub use crate::usage::{CALL_COLUMNS, calls_cte, model_calls, responses_cte};
+    pub use crate::source::{count, string_array_param, window_params};
 }

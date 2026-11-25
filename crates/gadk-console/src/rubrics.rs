@@ -19,10 +19,10 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use gadk_analytics::scores::NewScore;
 use serde_json::{Map, Value};
 
 use crate::ConsoleError;
-use crate::scores::NewScore;
 
 /// The most rubrics a file may hold.
 const MAX_RUBRICS: usize = 20;
