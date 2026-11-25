@@ -28,6 +28,7 @@ gadk-eval experiment experiments/answer-style.yaml --out gs://my-bucket/monitors
 gadk-eval guard guards/support.yaml --prices prices.yaml --apply --out gs://my-bucket/monitors
 gadk-eval guards gs://my-bucket/guards/ --prices gs://my-bucket/prices.yaml --apply \
   --out gs://my-bucket/monitors
+gadk-eval alerts gs://my-bucket/alerts/ --prices gs://my-bucket/prices.yaml
 ```
 
 ## Monitor spec
@@ -195,6 +196,7 @@ Limits:
 | `gadk-eval experiment <spec.yaml> [--out <url>]` | Runs an experiment from an experiment spec (one Gemini agent on Vertex AI per variant), stores it under `experiments/` of `<url>` when `--out` is given, then prints its summary and, with `--out`, `stored report <name>`; see [Experiment spec](#experiment-spec). |
 | `gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]` | Compares both sides of a prompt rollout, prints the report and, with `--out`, stores it under `guards/` of `<url>` and prints `stored report <name>`; with `--apply` it ramps, promotes or aborts the rollout. Exits 0 (advance), 1 (abort), 3 (wait), 4 (no rollout) or 2 (error); see [Guards](#guards). |
 | `gadk-eval guards <source>... [--apply] [--prices <file\|gs://bucket/object>] [--out <url>] [--max-bytes <n>] [--notify <url\|env:NAME>] [--notify-format slack\|json]` | Runs every guard spec in its sources (files, directories, `gs://` objects and prefixes) one at a time, each under a `== <name> ==` line, then prints a summary line; with `--notify`, posts that summary to a webhook when a guard advanced, aborted or errored; see [Running many guards](#running-many-guards) and [Notifications](#notifications). |
+| `gadk-eval alerts <source>... [--prices <file\|gs://bucket/object>] [--max-bytes <n>] [--notify <url\|env:NAME>] [--notify-format slack\|json]` | Checks the usage limits in every alert spec in its sources, one spec at a time, each under a `== <name> ==` line with one line per rule, then prints a summary line; with `--notify`, posts it to a webhook when a rule fired or a spec failed. Exits 0 (no rule fired), 1 (a rule fired) or 2 (error); see [Alerts](#alerts). |
 
 `<url>` is a directory, `file://<dir>` or `gs://<bucket>[/<prefix>]`; other schemes (such as
 `s3://`) are rejected. Reports are named
@@ -755,6 +757,166 @@ gcloud run jobs update guards --region us-central1 \
 trimmed, so a trailing newline makes every run fail its `--notify` check. The job then posts
 after every run in which a guard advanced, aborted or errored, and exits 2 when the post fails.
 
+## Alerts
+
+`gadk-eval alerts <source>...` checks fixed limits on the model calls in the BigQuery
+agent-analytics table over a recent window: cost, error rate, calls and tokens, each over every
+call or only the calls of one model, agent or prompt. It prints one line per rule, posts to a
+webhook when a rule fires or a spec fails, and exits 1 when a rule fires, so a scheduled run can
+page someone when usage goes over budget.
+
+```sh
+gadk-eval alerts alerts/ --prices prices.yaml
+gadk-eval alerts gs://my-bucket/alerts/ --prices gs://my-bucket/prices.yaml \
+  --notify env:ALERTS_WEBHOOK
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--prices <file\|gs://bucket/object>` | none | Price file for `cost` rules (the format of `gadk-console --prices`; see the [console's Usage and cost](../gadk-console/README.md#usage-and-cost)). Required when a spec has a `cost` rule. |
+| `--max-bytes <n>` | 1073741824 | `maximumBytesBilled` of each spec's BigQuery query (at least 1). |
+| `--notify <url\|env:NAME>` | none | Post a summary to this webhook when a rule fires or a spec fails; see [Alert notifications](#alert-notifications). |
+| `--notify-format slack\|json` | `slack` | The webhook body. |
+
+The sources are read as for [`guards`](#running-many-guards): a file, a directory (its `.yaml`
+and `.yml` files, sorted by name), a `gs://<bucket>/<object>`, or every `.yaml` and `.yml`
+object directly under `gs://<bucket>/<prefix>/`.
+
+### Alert spec
+
+```yaml
+name: prod-usage                  # [A-Za-z0-9_-]{1,64}; unique among the run's specs
+source:                           # BigQuery only
+  bigquery: { project: my-proj, dataset: agent_analytics, table: agent_events }
+window: 24h                       # <n>m | <n>h | <n>d, at most 30d: calls in [now - window, now)
+rules:                            # 1-50 rules, each with exactly one metric
+  - name: daily-cost              # optional, [A-Za-z0-9_-]{1,64}; default: the metric key
+    cost: { max: 50 }             # USD, >= 0 (needs --prices)
+  - error_rate: { max: 0.05, min_calls: 50 }   # 0-1; min_calls >= 1, default 20
+  - name: support-calls
+    where: { agent: support }     # optional: model, agent and/or prompt
+    calls: { max: 10000 }         # integer >= 0
+  - name: answer-tokens
+    where: { model: gemini-3.8-flash, prompt: support/answer }
+    tokens: { max: 5000000 }      # integer >= 0
+```
+
+Rule names, given or by default, are unique within a spec. An unknown key, a missing required
+key, a wrong type or an out-of-range value is an error that names the field, for example
+`` alert spec alerts/prod.yaml: `rules[2].error_rate.max` must be a number from 0 to 1 ``.
+
+### Rules
+
+A call is an `LLM_REQUEST` row logged in the window. Its model is the request's model, else the
+response's model version, else `(unknown)`; its agent is the row's `agent` (`""` when it has
+none); its prompt is the request's prompt name, when it has one. A call failed when it has an
+`LLM_ERROR` row, and its tokens are those of its latest `LLM_RESPONSE` row (a call without a
+response counts 0 tokens).
+
+A rule counts the calls that match its `where`: each field that is set must equal the call's
+model, agent or prompt name exactly, and a field that is not set matches anything. Over those
+calls:
+
+| Metric | Value |
+|---|---|
+| `cost` | the summed token cost in USD of the calls whose model has a price in the price file; the calls of models without a price are counted as unpriced |
+| `error_rate` | failed calls / calls; with fewer than `min_calls` calls the rule is `insufficient` |
+| `calls` | the number of calls |
+| `tokens` | the summed input (cached included), output and reasoning tokens |
+
+A rule fires when its value is strictly greater than `max`; a value equal to `max` is `ok`.
+
+### Output
+
+Each spec's output starts with `== <name> ==`, followed by one line per rule in spec order:
+
+```text
+== prod-usage ==
+daily-cost: cost $62.10 > $50.00 (12 unpriced calls) — FIRED
+error_rate: error_rate 1.2% (14/1180) ≤ 5.0% — ok
+support-calls: calls 980 ≤ 10000 — ok
+answer-tokens: tokens 3412000 ≤ 5000000 — ok
+alerts: 1 specs, 4 rules — 1 fired, 3 ok, 0 insufficient, 0 errors
+```
+
+An `error_rate` rule with too few calls prints
+`error_rate: error_rate — insufficient (8 calls < min_calls 50)`. A spec whose query
+fails prints `error: <message>` under its header, for example
+`error: transcript source: query failed: …`, and the run goes on to the next spec. The last line
+counts the rules of the specs that did not fail, and the specs that failed under `errors`.
+
+Every spec is read and parsed, and every check below is made, before any query; the first
+failure exits 2 with nothing queried or posted:
+
+- a source is missing (`alert spec <source>: not found`), unreadable, an empty directory or
+  prefix (`alert spec <source>: no .yaml or .yml specs`), or a `gs://` URL with an invalid
+  bucket (`alert spec <source>: invalid bucket`);
+- a spec is invalid (`alert spec <origin>: <detail>`);
+- there are more than 200 specs (`alerts: more than 200 specs`);
+- two specs share a `name` (`alerts: duplicate alert name <name> in <origin1> and <origin2>`);
+- a spec has a `cost` rule and there is no `--prices` (`alert spec <origin>: cost rules need
+  --prices`);
+- the price file cannot be read or parsed;
+- `--notify` names an unset or empty environment variable, or is not an `http://` or `https://`
+  URL.
+
+### Alert exit codes
+
+| Exit | `alerts` |
+|---|---|
+| 0 | every spec ran and no rule fired |
+| 1 | every spec ran and at least one rule fired |
+| 2 | a spec failed (the summary counts it under `errors`), the `--notify` post failed (after the summary), a check before the run failed, stdout could not be written, or a usage error (no summary is printed for these three) |
+
+### Alert notifications
+
+With `--notify <target>`, `alerts` posts one body after the summary line when at least one rule
+fired or one spec failed; a run in which every rule was `ok` or `insufficient` posts nothing.
+`<target>`, the retry and the `notify: posted` / `notify: POST <origin> failed: <reason>` lines
+are as for [`guards`](#notifications), and the webhook URL is shown only as its origin.
+
+`--notify-format slack`, the default, sends the summary line, then one line per fired rule
+(`• <spec>/<rule>: ` and its output line without the rule name and ` — FIRED`) and one per failed
+spec, in output order:
+
+```json
+{"text": "alerts: 2 specs, 4 rules — 1 fired, 3 ok, 0 insufficient, 1 errors\n• prod-usage/daily-cost: cost $62.10 > $50.00 (12 unpriced calls)\n• staging-usage: error: transcript source: HTTP 403: denied"}
+```
+
+`--notify-format json` sends the counts, each fired rule and each failed spec. `value` and `max`
+are USD for `cost`, a 0-1 fraction for `error_rate` and integers otherwise; `where` has the
+rule's filter fields; a `cost` entry also has `unpriced_calls`:
+
+```json
+{
+  "summary": {"specs": 2, "rules": 4, "fired": 1, "ok": 3, "insufficient": 0, "errors": 1},
+  "fired": [
+    {"spec": "prod-usage", "rule": "daily-cost", "metric": "cost", "value": 62.1, "max": 50.0,
+     "where": {}, "unpriced_calls": 12}
+  ],
+  "errors": [{"spec": "staging-usage", "error": "transcript source: HTTP 403: denied"}]
+}
+```
+
+### Scheduling alerts
+
+Schedule `gadk-eval alerts` as [guards are scheduled](#scheduling), with cron or a Cloud Run
+job, on an interval no longer than the shortest window. Alerts keep no state between runs: a
+rule that stays over its limit fires, and posts, on every run until usage drops or the limit is
+raised. Exit 1 means a rule fired and exit 2 means the run itself failed, so a scheduler can
+treat them differently.
+
+Each spec issues one BigQuery query (after reading the table schema, which is free). It filters
+on `timestamp` from the window's start, so a table partitioned by `timestamp` scans only the
+window's partitions, and it is capped at `--max-bytes` billed: a long window on a large table
+can hit the cap, and the spec then fails instead of running. A spec whose calls fall into more
+than 5,000 model × agent × prompt groups fails with
+`alert usage: more than 5000 model × agent × prompt groups`.
+
+`alerts` needs the same roles as `guards` minus the prompt store: the BigQuery roles in
+[Access (IAM)](#access-iam), and Storage Object Viewer on the bucket holding `gs://` specs and
+the price file.
+
 ## Library
 
 ```rust
@@ -788,6 +950,12 @@ rollout, else a `GuardReport` (`summary()`, `exit_code()`, JSON), which
 `cli::Backends` implements `guard_source(project, dataset, table, max_bytes)`; the default
 refuses with `guards are not supported by these backends`.
 
+`AlertSpec::from_yaml` parses an alert spec (`AlertRule`, `AlertMetric`, `AlertFilter`), and an
+`AlertSource` returns the calls of an `AlertQuery` window grouped by model × agent × prompt
+(`UsageGroup`); `BigQueryGuardSource` implements it. A custom `cli::Backends` implements
+`alert_source(project, dataset, table, max_bytes)`; the default refuses with
+`alerts are not supported by these backends`.
+
 ## Access (IAM)
 
 Google Cloud access uses Application Default Credentials; specs and reports hold no
@@ -807,6 +975,8 @@ written to as you would the analytics table.
   User on the judge project with `llm_judge` scorers.
 - `gadk-eval guards`: what `guard` needs for each spec, and Storage Object Viewer
   (`roles/storage.objectViewer`) on the bucket holding `gs://` specs and the price file.
+- `gadk-eval alerts`: the BigQuery roles above, and Storage Object Viewer on the bucket holding
+  `gs://` specs and the price file.
 - Storage Object Admin on the bucket for `gs://` output (`report` needs only Storage Object
   Viewer).
 

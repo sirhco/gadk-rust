@@ -33,6 +33,13 @@
 //! the prompt store. `gadk-eval guard <spec.yaml>` ([`cli`]) runs it on a schedule; model prices
 //! for its cost check come from a [`PriceTable`].
 //!
+//! An [`AlertSpec`] (YAML) sets fixed limits on the model calls in a recent window: cost, error
+//! rate, calls and tokens ([`AlertMetric`]), each over every call or only those an
+//! [`AlertFilter`] keeps. An [`AlertSource`] ([`BigQueryGuardSource`]) returns the window's calls
+//! for an [`AlertQuery`] grouped by model, agent and prompt ([`UsageGroup`]), and
+//! `gadk-eval alerts <source>...` ([`cli`]) checks every rule, posts to a webhook when one fires
+//! and exits 1, so a scheduled run can page someone when usage goes over budget.
+//!
 //! ```no_run
 //! # async fn demo() -> Result<(), gadk_eval_monitor::MonitorError> {
 //! use gadk_eval_monitor::{

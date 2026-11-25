@@ -24,6 +24,8 @@
 //! gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]
 //! gadk-eval guards <source>... [--apply] [--prices <file|gs://bucket/object>] [--out <url>]
 //!     [--max-bytes <n>] [--notify <url|env:NAME>] [--notify-format slack|json]
+//! gadk-eval alerts <source>... [--prices <file|gs://bucket/object>] [--max-bytes <n>]
+//!     [--notify <url|env:NAME>] [--notify-format slack|json]
 //! ```
 //!
 //! `monitor` exits 0 on success, 1 when the spec's `min_pass_rate` is set and either the pass
@@ -63,6 +65,18 @@
 //! when every guard reached an outcome (advance, abort, wait or no rollout) and any post
 //! succeeded, and 2 when a guard failed, the post failed, a source, spec, price file, `--out` or
 //! `--notify` check failed (nothing runs and no summary is printed), stdout could not be
+//! written, or on a usage error.
+//!
+//! `alerts` checks every [`AlertSpec`] its sources name (read as for `guards`), one at a time: one
+//! BigQuery query per spec over `[now - window, now)`, capped at `--max-bytes`, then one line per
+//! rule under `== <name> ==` (`<rule>: <metric> <value> > <max> — FIRED`, `≤ … — ok`, or
+//! `insufficient` for an `error_rate` rule with too few calls); a spec that fails prints `error:
+//! <message>` and the run goes on. The last line counts the rules (`alerts: <s> specs, <r> rules —
+//! <f> fired, <o> ok, <i> insufficient, <e> errors`). Every spec, the price file (required by
+//! `cost` rules) and `--notify` are checked before any query. With `--notify`, a run in which a
+//! rule fired or a spec failed posts the summary and each such rule or spec, as `guards` posts. It
+//! exits 0 when no rule fired, 1 when a rule fired, and 2 when a spec failed, the post failed, a
+//! check before the run failed (nothing is queried and no summary is printed), stdout could not be
 //! written, or on a usage error.
 
 use std::collections::{HashMap, HashSet};

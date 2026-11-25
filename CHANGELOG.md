@@ -7,6 +7,23 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval-monitor`: `gadk-eval alerts <source>...` checks fixed usage limits on the model
+  calls in an agent-analytics BigQuery table over a recent window. An alert spec (YAML) has a
+  `name`, a BigQuery `source`, a `window` of at most 30 days and 1-50 rules, each a `cost`
+  (USD, needs `--prices`), `error_rate` (with `min_calls`, default 20), `calls` or `tokens`
+  limit, optionally filtered by model, agent or prompt. Each spec runs one parameterized query,
+  capped at `--max-bytes`, and prints one line per rule under `== <name> ==`, then a summary
+  line. A rule fires when its value is strictly greater than its `max`. `--notify` posts the
+  summary, each fired rule and each failed spec (Slack-style text or `--notify-format json`)
+  when a rule fired or a spec failed. It exits 1 when a rule fired, 2 when a spec or the post
+  failed, and 0 otherwise. Specs, the price file and `--notify` are checked before any query.
+  The library gains `AlertSpec`, `AlertRule`, `AlertMetric`, `AlertFilter`, `AlertQuery`,
+  `UsageGroup` and the `AlertSource` trait, which `BigQueryGuardSource` implements, and
+  `Backends` gains the defaulted `alert_source`, which `CloudBackends` implements. `guards` and
+  the other commands print and exit exactly as before.
+
 ## [0.5.14] - 2026-11-24
 
 ### Fixed
