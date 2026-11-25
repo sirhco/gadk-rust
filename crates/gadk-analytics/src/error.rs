@@ -163,13 +163,13 @@ impl SourceError {
             SourceError::Decode { .. } => "decode",
             SourceError::Credentials(_) => "credentials",
             SourceError::NotFound => "not_found",
-            SourceError::BigQuery { .. } => "big_query",
+            SourceError::BigQuery { .. } => "bigquery",
         }
     }
 }
 
-/// Serializes as `{"kind", "message", "hint"}`: the snake_case variant name (`upstream`,
-/// `transport`, `decode`, `credentials`, `not_found` or `big_query`), the
+/// Serializes as `{"kind", "message", "hint"}`: the error kind (`upstream`,
+/// `transport`, `decode`, `credentials`, `not_found` or `bigquery`), the
 /// [`Display`](fmt::Display) text and [`SourceError::hint`] (`null` when there is none).
 impl Serialize for SourceError {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

@@ -58,7 +58,7 @@ fn the_shared_types_serialize() {
         ))
         .unwrap(),
         json!({
-            "kind": "big_query",
+            "kind": "bigquery",
             "message": "BigQuery: HTTP 403: Access Denied",
             "hint": "needs roles/bigquery.dataViewer and roles/bigquery.jobUser",
         })
