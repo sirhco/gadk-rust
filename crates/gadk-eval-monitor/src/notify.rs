@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The webhook summary `gadk-eval guards --notify` posts after a run in which a guard
-//! advanced, aborted or errored.
+//! The webhook summaries `gadk-eval guards --notify` and `gadk-eval alerts --notify` post:
+//! after a `guards` run in which a guard advanced, aborted or errored ([`body`]), and after an
+//! `alerts` run in which a rule fired or a spec errored (`alert::alerts_body`). Both post
+//! through [`post`].
 //!
 //! The webhook URL is a secret: nothing here formats it into a message, only its
 //! [`origin`].
@@ -38,13 +40,14 @@ const BAD_TARGET: &str = "--notify: expected an http:// or https:// URL or env:N
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NotifyFormat {
     /// `{"text": …}`: the summary line, then one line per guard that advanced, aborted or
-    /// errored.
+    /// errored (`guards`), or per rule that fired and spec that errored (`alerts`).
     Slack,
-    /// `{"summary": {…}, "guards": […]}`.
+    /// `{"summary": {…}, "guards": […]}` (`guards`) or
+    /// `{"summary": {…}, "fired": […], "errors": […]}` (`alerts`).
     Json,
 }
 
-/// Where and how a `guards` run posts its summary.
+/// Where and how a `guards` or `alerts` run posts its summary.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Notifier {
     /// The resolved webhook URL (a secret: print only its [`origin`]).

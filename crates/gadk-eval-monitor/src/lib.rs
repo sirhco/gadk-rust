@@ -50,6 +50,9 @@
 //! ReportStore::open("gs://my-bucket/monitors")?.put(&report).await?;
 //! # Ok(()) }
 //! ```
+// Not used until the `alerts` command is wired into the CLI.
+#[allow(dead_code)]
+mod alert;
 
 mod error;
 mod guard_sources;
