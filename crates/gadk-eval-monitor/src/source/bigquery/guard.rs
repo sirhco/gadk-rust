@@ -20,6 +20,9 @@
 //! `@rollout` (one version, `@version`, for runs) logged in `[@from, @to)`. `LLM_ERROR` and
 //! `LLM_RESPONSE` rows join them on `trace_id` / `span_id` and are read from `@from` to an hour
 //! after `@to`; `FEEDBACK` rows join them by `invocation_id` and are read from `@from` on.
+//!
+//! [`AlertSource`] for the same table: every `LLM_REQUEST` row in `[@from, @to)`, grouped by
+//! model × agent × prompt, with `LLM_ERROR` and `LLM_RESPONSE` rows read from `@from` on.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -31,6 +34,7 @@ use super::{
     BigQueryTranscriptSource, Columns, cell_str, param, run_headers, string_array_param,
     timestamp_param,
 };
+use crate::alert_source::{AlertQuery, AlertSource, UsageGroup};
 use crate::error::MonitorError;
 use crate::gcp::TokenSource;
 use crate::guard_source::{GuardQuery, GuardSource, ModelTokens, VersionCalls, VersionFeedback};
@@ -104,9 +108,9 @@ impl BigQueryGuardSource {
         }
     }
 
-    /// The table's columns: an error when it has no `attributes` column, or no `content` column
-    /// and `content` is needed.
-    async fn columns(&self, content: bool) -> Result<Columns, MonitorError> {
+    /// The table's columns: an error naming `command` (`guards` or `alerts`) when it has no
+    /// `attributes` column, or no `content` column and `content` is needed.
+    async fn columns(&self, command: &str, content: bool) -> Result<Columns, MonitorError> {
         let columns = self.inner.columns().await?;
         for (name, present) in [
             ("attributes", columns.attributes),
@@ -114,7 +118,7 @@ impl BigQueryGuardSource {
         ] {
             if !present {
                 return Err(MonitorError::Source(format!(
-                    "guards need the `{name}` column, which {} does not have \
+                    "{command} need the `{name}` column, which {} does not have \
                      (payload_column_denylist)",
                     self.inner.table
                 )));
@@ -127,7 +131,7 @@ impl BigQueryGuardSource {
 #[async_trait::async_trait]
 impl GuardSource for BigQueryGuardSource {
     async fn version_calls(&self, q: &GuardQuery) -> Result<Vec<VersionCalls>, MonitorError> {
-        self.columns(false).await?;
+        self.columns("guards", false).await?;
         let rows = self
             .inner
             .query(&version_calls_sql(&self.inner.table), call_params(q))
@@ -162,7 +166,7 @@ impl GuardSource for BigQueryGuardSource {
         name: &str,
         source: FeedbackSource,
     ) -> Result<Vec<VersionFeedback>, MonitorError> {
-        let columns = self.columns(true).await?;
+        let columns = self.columns("guards", true).await?;
         let rows = self
             .inner
             .query(
@@ -194,7 +198,7 @@ impl GuardSource for BigQueryGuardSource {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        let columns = self.columns(false).await?;
+        let columns = self.columns("guards", false).await?;
         let headers = run_headers(
             &self
                 .inner
@@ -207,6 +211,43 @@ impl GuardSource for BigQueryGuardSource {
         // The rows of a run are read from 10 minutes before its start, so from the earliest.
         let from = headers.iter().map(|h| h.started_at).min().unwrap_or(q.from);
         self.inner.build_runs(&columns, headers, from).await
+    }
+}
+
+/// The most model × agent × prompt groups [`AlertSource::usage`] returns; more is an error.
+pub(crate) const MAX_USAGE_GROUPS: usize = 5_000;
+
+#[async_trait::async_trait]
+impl AlertSource for BigQueryGuardSource {
+    async fn usage(&self, q: &AlertQuery) -> Result<Vec<UsageGroup>, MonitorError> {
+        self.columns("alerts", false).await?;
+        let rows = self
+            .inner
+            .query(&usage_sql(&self.inner.table), usage_params(q))
+            .await?;
+        if rows.len() > MAX_USAGE_GROUPS {
+            return Err(MonitorError::Source(format!(
+                "alert usage: more than {MAX_USAGE_GROUPS} model × agent × prompt groups"
+            )));
+        }
+        Ok(rows
+            .iter()
+            .map(|r| {
+                UsageGroup::new(
+                    cell_str(r, "model").unwrap_or_default(),
+                    cell_str(r, "agent").unwrap_or_default(),
+                    cell_str(r, "prompt").filter(|p| !p.is_empty()),
+                    cell_count(r, "calls"),
+                    cell_count(r, "errors"),
+                    TokenUsage::new(
+                        cell_count(r, "input"),
+                        cell_count(r, "cached"),
+                        cell_count(r, "output"),
+                        cell_count(r, "reasoning"),
+                    ),
+                )
+            })
+            .collect())
     }
 }
 
@@ -343,6 +384,64 @@ WHERE inv.event_type = 'INVOCATION_STARTING'
 GROUP BY inv.invocation_id
 ORDER BY last_call DESC, invocation_id"
     )
+}
+
+/// Per model × agent × prompt of the `LLM_REQUEST` rows in `[@from, @to)`: calls, calls with
+/// an `LLM_ERROR` row and the summed tokens of their latest `LLM_RESPONSE` rows, at most
+/// `@limit` groups. Errors and responses are read from `@from` on. The model is the request's,
+/// else the response's `model_version`, else `(unknown)`; the prompt is the request's prompt
+/// name, an empty one counting as none. Tokens are read as [`version_calls_sql`] reads them.
+pub(crate) fn usage_sql(table: &str) -> String {
+    format!(
+        r"WITH calls AS (
+  SELECT trace_id, span_id, IFNULL(agent, '') AS agent,
+    JSON_VALUE(attributes, '$.model') AS model,
+    NULLIF(JSON_VALUE(attributes, '$.prompt.name'), '') AS prompt
+  FROM {table}
+  WHERE event_type = 'LLM_REQUEST' AND timestamp >= @from AND timestamp < @to),
+errors AS (
+  SELECT DISTINCT trace_id, span_id
+  FROM {table}
+  WHERE event_type = 'LLM_ERROR' AND timestamp >= @from),
+responses AS (
+  SELECT res.trace_id AS trace_id, res.span_id AS span_id,
+    JSON_VALUE(res.attributes, '$.model_version') AS model_version,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.prompt_token_count') AS INT64), 0)
+      + IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.tool_use_prompt_token_count') AS INT64), 0) AS input,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.cached_content_token_count') AS INT64), 0) AS cached,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.candidates_token_count') AS INT64), 0) AS output,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.thoughts_token_count') AS INT64), 0) AS reasoning
+  FROM {table} AS res
+  WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @from
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY res.trace_id, res.span_id ORDER BY res.timestamp DESC) = 1),
+j AS (
+  SELECT COALESCE(NULLIF(calls.model, ''), NULLIF(responses.model_version, ''), '(unknown)') AS model,
+    calls.agent AS agent, calls.prompt AS prompt,
+    errors.trace_id IS NOT NULL AS failed,
+    responses.input AS input, responses.cached AS cached, responses.output AS output,
+    responses.reasoning AS reasoning
+  FROM calls
+  LEFT JOIN errors ON errors.trace_id = calls.trace_id AND errors.span_id = calls.span_id
+  LEFT JOIN responses
+    ON responses.trace_id = calls.trace_id AND responses.span_id = calls.span_id)
+SELECT model, agent, prompt, COUNT(*) AS calls, COUNTIF(failed) AS errors,
+  IFNULL(SUM(input), 0) AS input, IFNULL(SUM(cached), 0) AS cached,
+  IFNULL(SUM(output), 0) AS output, IFNULL(SUM(reasoning), 0) AS reasoning
+FROM j
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3
+LIMIT @limit"
+    )
+}
+
+/// The parameters of [`usage_sql`]: `@from`, `@to` and `@limit`, one more than
+/// [`MAX_USAGE_GROUPS`] so that too many groups are told apart from exactly the cap.
+pub(crate) fn usage_params(q: &AlertQuery) -> Vec<Value> {
+    vec![
+        timestamp_param("from", q.from),
+        timestamp_param("to", q.to),
+        param("limit", "INT64", (MAX_USAGE_GROUPS + 1).to_string()),
+    ]
 }
 
 /// `@prompt`, `@label`, `@from` and `@to` of `q`.
@@ -999,5 +1098,225 @@ mod tests {
             cell_version(&row).unwrap_err().to_string(),
             "transcript source: invalid prompt version \"v3\" in `version`"
         );
+    }
+
+    // ---- alerts ----
+
+    /// The calls of the day from `T`.
+    fn alert_query() -> AlertQuery {
+        AlertQuery::new(at(T), at(T + 86_400))
+    }
+
+    /// `usage_sql(TBL)`, byte for byte.
+    const USAGE_SQL: &str = r"WITH calls AS (
+  SELECT trace_id, span_id, IFNULL(agent, '') AS agent,
+    JSON_VALUE(attributes, '$.model') AS model,
+    NULLIF(JSON_VALUE(attributes, '$.prompt.name'), '') AS prompt
+  FROM `proj.analytics.agent_events`
+  WHERE event_type = 'LLM_REQUEST' AND timestamp >= @from AND timestamp < @to),
+errors AS (
+  SELECT DISTINCT trace_id, span_id
+  FROM `proj.analytics.agent_events`
+  WHERE event_type = 'LLM_ERROR' AND timestamp >= @from),
+responses AS (
+  SELECT res.trace_id AS trace_id, res.span_id AS span_id,
+    JSON_VALUE(res.attributes, '$.model_version') AS model_version,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.prompt_token_count') AS INT64), 0)
+      + IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.tool_use_prompt_token_count') AS INT64), 0) AS input,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.cached_content_token_count') AS INT64), 0) AS cached,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.candidates_token_count') AS INT64), 0) AS output,
+    IFNULL(SAFE_CAST(JSON_VALUE(res.attributes, '$.usage_metadata.thoughts_token_count') AS INT64), 0) AS reasoning
+  FROM `proj.analytics.agent_events` AS res
+  WHERE res.event_type = 'LLM_RESPONSE' AND res.timestamp >= @from
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY res.trace_id, res.span_id ORDER BY res.timestamp DESC) = 1),
+j AS (
+  SELECT COALESCE(NULLIF(calls.model, ''), NULLIF(responses.model_version, ''), '(unknown)') AS model,
+    calls.agent AS agent, calls.prompt AS prompt,
+    errors.trace_id IS NOT NULL AS failed,
+    responses.input AS input, responses.cached AS cached, responses.output AS output,
+    responses.reasoning AS reasoning
+  FROM calls
+  LEFT JOIN errors ON errors.trace_id = calls.trace_id AND errors.span_id = calls.span_id
+  LEFT JOIN responses
+    ON responses.trace_id = calls.trace_id AND responses.span_id = calls.span_id)
+SELECT model, agent, prompt, COUNT(*) AS calls, COUNTIF(failed) AS errors,
+  IFNULL(SUM(input), 0) AS input, IFNULL(SUM(cached), 0) AS cached,
+  IFNULL(SUM(output), 0) AS output, IFNULL(SUM(reasoning), 0) AS reasoning
+FROM j
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3
+LIMIT @limit";
+
+    const USAGE: [&str; 9] = [
+        "model",
+        "agent",
+        "prompt",
+        "calls",
+        "errors",
+        "input",
+        "cached",
+        "output",
+        "reasoning",
+    ];
+
+    /// A usage row: the model, agent and prompt cells, then `calls`, `errors` and the four
+    /// token sums.
+    fn usage_row(model: &str, agent: &str, prompt: Value, counts: [u64; 6]) -> Vec<Value> {
+        let mut row = vec![json!(model), json!(agent), prompt];
+        row.extend(counts.iter().map(|n| json!(n.to_string())));
+        row
+    }
+
+    /// The exchanges of one `usage` call capped at `bytes` and answered with `rows`.
+    fn usage_exchanges(bytes: i64, rows: &[Vec<Value>]) -> Vec<Exchange> {
+        vec![
+            table_reply(&[]),
+            post(
+                &usage_sql(TBL),
+                usage_params(&alert_query()),
+                bytes,
+                &reply(&USAGE, rows, None),
+            ),
+        ]
+    }
+
+    #[test]
+    fn usage_query_is_pinned_and_parameterised() {
+        let sql = usage_sql(TBL);
+        assert_eq!(sql, USAGE_SQL);
+        let params = usage_params(&alert_query());
+        assert_eq!(sql_params(&sql), param_names(&params));
+        assert_eq!(
+            Value::Array(params),
+            json!([
+                {"name": "from", "parameterType": {"type": "TIMESTAMP"},
+                 "parameterValue": {"value": "2025-11-17 03:26:40.000000+00:00"}},
+                {"name": "to", "parameterType": {"type": "TIMESTAMP"},
+                 "parameterValue": {"value": "2025-11-18 03:26:40.000000+00:00"}},
+                {"name": "limit", "parameterType": {"type": "INT64"},
+                 "parameterValue": {"value": "5001"}},
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn usage_reads_one_group_per_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let rows = [
+            usage_row("(unknown)", "", Value::Null, [2, 2, 0, 0, 0, 0]),
+            usage_row(
+                "gemini-a",
+                "support",
+                json!("support/answer"),
+                [100, 3, 5000, 1000, 700, 50],
+            ),
+            // An empty prompt cell is no prompt, as `NULLIF` makes it.
+            usage_row("gemini-b", "triage", json!(""), [7, 0, 900, 0, 100, 0]),
+            // NULL token sums count 0.
+            vec![
+                json!("gemini-b"),
+                json!("triage"),
+                json!("triage/route"),
+                json!("4"),
+                json!("1"),
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+            ],
+        ];
+        let http = replay(
+            dir.path(),
+            &usage_exchanges(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED, &rows),
+        );
+        let groups = guard(http).usage(&alert_query()).await.unwrap();
+        assert_eq!(
+            groups,
+            vec![
+                UsageGroup::new("(unknown)", "", None, 2, 2, TokenUsage::default()),
+                UsageGroup::new(
+                    "gemini-a",
+                    "support",
+                    Some("support/answer".into()),
+                    100,
+                    3,
+                    TokenUsage::new(5000, 1000, 700, 50),
+                ),
+                UsageGroup::new(
+                    "gemini-b",
+                    "triage",
+                    None,
+                    7,
+                    0,
+                    TokenUsage::new(900, 0, 100, 0),
+                ),
+                UsageGroup::new(
+                    "gemini-b",
+                    "triage",
+                    Some("triage/route".into()),
+                    4,
+                    1,
+                    TokenUsage::default(),
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn usage_carries_the_configured_byte_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        // Replay matches the whole body: a query without this cap finds no answer.
+        let http = replay(
+            dir.path(),
+            &usage_exchanges(
+                5000,
+                &[usage_row("m", "a", Value::Null, [1, 0, 0, 0, 0, 0])],
+            ),
+        );
+        let source = guard(http).with_max_bytes_billed(5000);
+        assert_eq!(source.usage(&alert_query()).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn more_than_5000_groups_is_an_error() {
+        let rows = |n: usize| -> Vec<Vec<Value>> {
+            (0..n)
+                .map(|i| usage_row(&format!("m{i:04}"), "a", Value::Null, [1, 0, 0, 0, 0, 0]))
+                .collect()
+        };
+        let bytes = BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED;
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(dir.path(), &usage_exchanges(bytes, &rows(MAX_USAGE_GROUPS)));
+        assert_eq!(guard(http).usage(&alert_query()).await.unwrap().len(), 5000);
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &usage_exchanges(bytes, &rows(MAX_USAGE_GROUPS + 1)),
+        );
+        assert_eq!(
+            guard(http)
+                .usage(&alert_query())
+                .await
+                .unwrap_err()
+                .to_string(),
+            "transcript source: alert usage: more than 5000 model × agent × prompt groups"
+        );
+    }
+
+    #[tokio::test]
+    async fn alerts_need_the_attributes_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = guard(replay(dir.path(), &[table_reply(&["attributes"])]));
+        assert_eq!(
+            source.usage(&alert_query()).await.unwrap_err().to_string(),
+            "transcript source: alerts need the `attributes` column, which \
+             `proj.analytics.agent_events` does not have (payload_column_denylist)"
+        );
+        // Without `content`, usage still runs.
+        let dir = tempfile::tempdir().unwrap();
+        let mut exchanges = usage_exchanges(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED, &[]);
+        exchanges[0] = table_reply(&["content"]);
+        let source = guard(replay(dir.path(), &exchanges));
+        assert!(source.usage(&alert_query()).await.unwrap().is_empty());
     }
 }
