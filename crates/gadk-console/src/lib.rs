@@ -32,6 +32,7 @@ use crate::usage::UsageSource;
 
 mod cache;
 mod cli;
+mod csv;
 mod datasets;
 mod evals;
 mod experiments;
