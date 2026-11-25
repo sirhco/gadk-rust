@@ -12,23 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Where `gadk-eval guards` finds its guard specs and price file: local files and directories,
-//! and `gs://` objects and prefixes read through [`Backends`].
+//! Where `gadk-eval guards` and `gadk-eval alerts` find their specs and price file: local files
+//! and directories, and `gs://` objects and prefixes read through [`Backends`].
 //!
-//! Every spec is read and parsed before any guard runs, so one bad spec stops the whole run
-//! before anything is written.
+//! Every spec is read and parsed before any guard or alert runs, so one bad spec stops the
+//! whole run before anything is queried or written.
 
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::alert_spec::AlertSpec;
 use crate::cli::Backends;
 use crate::error::MonitorError;
 use crate::guard_spec::GuardSpec;
 use crate::prices::PriceTable;
 use crate::store::is_valid_bucket;
 
-/// The most guard specs one `guards` run takes.
+/// The most guard specs one `guards` run takes, and alert specs one `alerts` run takes.
 pub(crate) const MAX_GUARD_SPECS: usize = 200;
+
+/// Which specs a run loads: it names them in messages.
+#[derive(Debug, Clone, Copy)]
+enum SpecKind {
+    /// Guard specs, for `guards`.
+    Guard,
+    /// Alert specs, for `alerts`.
+    Alert,
+}
+
+impl SpecKind {
+    /// `guard spec` or `alert spec`: the start of a message about one spec or source.
+    fn noun(self) -> &'static str {
+        match self {
+            SpecKind::Guard => "guard spec",
+            SpecKind::Alert => "alert spec",
+        }
+    }
+
+    /// `guards` or `alerts`: the start of a message about the whole run.
+    fn command(self) -> &'static str {
+        match self {
+            SpecKind::Guard => "guards",
+            SpecKind::Alert => "alerts",
+        }
+    }
+}
 
 /// A parsed guard spec and where it came from.
 #[derive(Debug)]
@@ -54,10 +82,7 @@ pub(crate) async fn load_specs(
     sources: &[String],
     backends: &dyn Backends,
 ) -> Result<Vec<LoadedSpec>, MonitorError> {
-    let mut texts = Vec::new();
-    for source in sources {
-        resolve(source, backends, &mut texts).await?;
-    }
+    let texts = read_all(sources, SpecKind::Guard, backends).await?;
     let mut specs = Vec::with_capacity(texts.len());
     for (origin, text) in texts {
         let spec = GuardSpec::from_yaml(&text).map_err(|e| match e {
@@ -69,22 +94,94 @@ pub(crate) async fn load_specs(
         })?;
         specs.push(LoadedSpec { origin, spec });
     }
-    if specs.len() > MAX_GUARD_SPECS {
-        return Err(MonitorError::Spec(format!(
-            "guards: more than {MAX_GUARD_SPECS} specs"
-        )));
+    check_cap(specs.len(), SpecKind::Guard)?;
+    check_unique(
+        SpecKind::Guard,
+        specs
+            .iter()
+            .map(|s| (s.spec.name.as_str(), s.origin.as_str())),
+    )?;
+    Ok(specs)
+}
+
+/// A parsed alert spec and where it came from.
+#[derive(Debug)]
+pub(crate) struct LoadedAlertSpec {
+    /// The file path or `gs://<bucket>/<object>` URL the spec was read from.
+    pub(crate) origin: String,
+    /// The parsed spec.
+    pub(crate) spec: AlertSpec,
+}
+
+/// Reads and parses every alert spec in `sources`, in order, as [`load_specs`] reads guard
+/// specs.
+///
+/// # Errors
+///
+/// [`MonitorError::Spec`] as for [`load_specs`], with `alert spec` in place of `guard spec`,
+/// `alerts: more than 200 specs` and `alerts: duplicate alert name <name> in <origin1> and
+/// <origin2>`. Errors from [`Backends::list_objects`] and [`Backends::read_object`] are
+/// returned unchanged.
+pub(crate) async fn load_alert_specs(
+    sources: &[String],
+    backends: &dyn Backends,
+) -> Result<Vec<LoadedAlertSpec>, MonitorError> {
+    let texts = read_all(sources, SpecKind::Alert, backends).await?;
+    let mut specs = Vec::with_capacity(texts.len());
+    for (origin, text) in texts {
+        let spec = AlertSpec::from_yaml(&text).map_err(|e| match e {
+            MonitorError::Spec(m) => {
+                let detail = m.strip_prefix("alert spec: ").unwrap_or(&m);
+                MonitorError::Spec(format!("alert spec {origin}: {detail}"))
+            }
+            other => other,
+        })?;
+        specs.push(LoadedAlertSpec { origin, spec });
     }
+    check_cap(specs.len(), SpecKind::Alert)?;
+    check_unique(
+        SpecKind::Alert,
+        specs
+            .iter()
+            .map(|s| (s.spec.name.as_str(), s.origin.as_str())),
+    )?;
+    Ok(specs)
+}
+
+/// `(origin, text)` of every spec of `kind` that `sources` name, in order.
+async fn read_all(
+    sources: &[String],
+    kind: SpecKind,
+    backends: &dyn Backends,
+) -> Result<Vec<(String, String)>, MonitorError> {
+    let mut texts = Vec::new();
+    for source in sources {
+        resolve(source, kind, backends, &mut texts).await?;
+    }
+    Ok(texts)
+}
+
+/// Refuses the first `(name, origin)` whose name an earlier one has:
+/// `<command>: duplicate <guard|alert> name <name> in <first origin> and <origin>`.
+fn check_unique<'a>(
+    kind: SpecKind,
+    specs: impl Iterator<Item = (&'a str, &'a str)>,
+) -> Result<(), MonitorError> {
     let mut seen: HashMap<&str, &str> = HashMap::new();
-    for s in &specs {
-        if let Some(first) = seen.get(s.spec.name.as_str()) {
+    for (name, origin) in specs {
+        if let Some(first) = seen.get(name) {
+            let what = match kind {
+                SpecKind::Guard => "guard",
+                SpecKind::Alert => "alert",
+            };
             return Err(MonitorError::Spec(format!(
-                "guards: duplicate guard name {} in {first} and {}",
-                s.spec.name, s.origin
+                "{}: duplicate {what} name {name} in {first} and {origin}",
+                kind.command()
             )));
         }
-        seen.insert(&s.spec.name, &s.origin);
+        seen.insert(name, origin);
     }
-    Ok(specs)
+    Ok(())
 }
 
 /// The price table at `source`: a local file ([`PriceTable::load`]) or a `gs://<bucket>/<object>`
@@ -115,9 +212,10 @@ pub(crate) async fn load_prices(
     PriceTable::from_yaml(&text).map_err(|detail| err(&detail))
 }
 
-/// Adds `(origin, text)` for every spec `source` names to `out`.
+/// Adds `(origin, text)` for every spec `source` names to `out`; messages name `kind`.
 async fn resolve(
     source: &str,
+    kind: SpecKind,
     backends: &dyn Backends,
     out: &mut Vec<(String, String)>,
 ) -> Result<(), MonitorError> {
@@ -125,7 +223,8 @@ async fn resolve(
         Gs::Local => None,
         Gs::BadBucket => {
             return Err(MonitorError::Spec(format!(
-                "guard spec {source}: invalid bucket"
+                "{} {source}: invalid bucket",
+                kind.noun()
             )));
         }
         Gs::Object(bucket, object) => Some((bucket, object)),
@@ -135,7 +234,7 @@ async fn resolve(
             let text = backends
                 .read_object(bucket, object)
                 .await?
-                .ok_or_else(|| not_found(source))?;
+                .ok_or_else(|| not_found(source, kind))?;
             out.push((source.to_owned(), text));
             return Ok(());
         }
@@ -146,48 +245,48 @@ async fn resolve(
             .filter(|n| is_yaml(n))
             .collect();
         if names.is_empty() {
-            return Err(no_specs(source));
+            return Err(no_specs(source, kind));
         }
-        check_cap(out.len() + names.len())?;
+        check_cap(out.len() + names.len(), kind)?;
         names.sort();
         for name in names {
             let origin = format!("gs://{bucket}/{name}");
             let text = backends
                 .read_object(bucket, &name)
                 .await?
-                .ok_or_else(|| not_found(&origin))?;
+                .ok_or_else(|| not_found(&origin, kind))?;
             out.push((origin, text));
         }
         return Ok(());
     }
     let path = Path::new(source);
-    let meta = std::fs::metadata(path).map_err(|e| local_error(source, e))?;
+    let meta = std::fs::metadata(path).map_err(|e| local_error(source, kind, e))?;
     if !meta.is_dir() {
-        let text = std::fs::read_to_string(path).map_err(|e| local_error(source, e))?;
+        let text = std::fs::read_to_string(path).map_err(|e| local_error(source, kind, e))?;
         out.push((source.to_owned(), text));
         return Ok(());
     }
     let dir = source.strip_suffix('/').unwrap_or(source);
     let mut files = Vec::new();
-    for entry in std::fs::read_dir(path).map_err(|e| local_error(source, e))? {
-        let entry = entry.map_err(|e| local_error(source, e))?;
+    for entry in std::fs::read_dir(path).map_err(|e| local_error(source, kind, e))? {
+        let entry = entry.map_err(|e| local_error(source, kind, e))?;
         let name = entry.file_name().to_string_lossy().into_owned();
         if !is_yaml(&name) {
             continue;
         }
         let origin = format!("{dir}/{name}");
-        let meta = std::fs::metadata(entry.path()).map_err(|e| local_error(&origin, e))?;
+        let meta = std::fs::metadata(entry.path()).map_err(|e| local_error(&origin, kind, e))?;
         if meta.is_file() {
             files.push((name, origin, entry.path()));
         }
     }
     if files.is_empty() {
-        return Err(no_specs(source));
+        return Err(no_specs(source, kind));
     }
-    check_cap(out.len() + files.len())?;
+    check_cap(out.len() + files.len(), kind)?;
     files.sort();
     for (_, origin, file) in files {
-        let text = std::fs::read_to_string(&file).map_err(|e| local_error(&origin, e))?;
+        let text = std::fs::read_to_string(&file).map_err(|e| local_error(&origin, kind, e))?;
         out.push((origin, text));
     }
     Ok(())
@@ -216,11 +315,13 @@ fn split_gs(source: &str) -> Gs<'_> {
     }
 }
 
-/// Refuses `count` specs when that is more than [`MAX_GUARD_SPECS`], before any is read.
-fn check_cap(count: usize) -> Result<(), MonitorError> {
+/// Refuses `count` specs when that is more than [`MAX_GUARD_SPECS`], before any is read:
+/// `<command>: more than 200 specs`.
+fn check_cap(count: usize, kind: SpecKind) -> Result<(), MonitorError> {
     if count > MAX_GUARD_SPECS {
         return Err(MonitorError::Spec(format!(
-            "guards: more than {MAX_GUARD_SPECS} specs"
+            "{}: more than {MAX_GUARD_SPECS} specs",
+            kind.command()
         )));
     }
     Ok(())
@@ -231,20 +332,20 @@ fn is_yaml(name: &str) -> bool {
     name.ends_with(".yaml") || name.ends_with(".yml")
 }
 
-fn not_found(source: &str) -> MonitorError {
-    MonitorError::Spec(format!("guard spec {source}: not found"))
+fn not_found(source: &str, kind: SpecKind) -> MonitorError {
+    MonitorError::Spec(format!("{} {source}: not found", kind.noun()))
 }
 
-fn no_specs(source: &str) -> MonitorError {
-    MonitorError::Spec(format!("guard spec {source}: no .yaml or .yml specs"))
+fn no_specs(source: &str, kind: SpecKind) -> MonitorError {
+    MonitorError::Spec(format!("{} {source}: no .yaml or .yml specs", kind.noun()))
 }
 
 /// `not found` for a missing path, else `reading: <error>`.
-fn local_error(source: &str, e: std::io::Error) -> MonitorError {
+fn local_error(source: &str, kind: SpecKind, e: std::io::Error) -> MonitorError {
     if e.kind() == std::io::ErrorKind::NotFound {
-        not_found(source)
+        not_found(source, kind)
     } else {
-        MonitorError::Spec(format!("guard spec {source}: reading: {e}"))
+        MonitorError::Spec(format!("{} {source}: reading: {e}", kind.noun()))
     }
 }
 
@@ -648,6 +749,153 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             "report store: gs:// sources are not supported by these backends"
+        );
+    }
+
+    // ---- alert specs ----
+
+    /// A valid alert spec named `name`.
+    fn alert(name: &str) -> String {
+        format!(
+            "name: {name}\nsource: {{ bigquery: {{ project: p, dataset: d, table: t }} }}\n\
+             window: 1h\nrules: [calls: {{ max: 10 }}]\n"
+        )
+    }
+
+    /// The error text of loading alert specs from `sources`.
+    async fn alert_err(sources: &[String], backends: &dyn Backends) -> String {
+        load_alert_specs(sources, backends)
+            .await
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn alert_specs_load_from_files_directories_and_gs() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = write(dir.path(), "one.txt", &alert("one"));
+        let specs = dir.path().join("specs");
+        std::fs::create_dir(&specs).unwrap();
+        write(&specs, "b.yaml", &alert("b"));
+        write(&specs, "a.yml", &alert("a"));
+        let d = specs.display().to_string();
+        let objects = Objects::new(&[("b", "alerts/c.yaml", &alert("c"))]);
+        let loaded: Vec<(String, String)> = load_alert_specs(
+            &[file.clone(), d.clone(), "gs://b/alerts/".into()],
+            &objects,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|s| (s.origin, s.spec.name))
+        .collect();
+        assert_eq!(
+            loaded,
+            [
+                (file, "one".to_owned()),
+                (format!("{d}/a.yml"), "a".to_owned()),
+                (format!("{d}/b.yaml"), "b".to_owned()),
+                ("gs://b/alerts/c.yaml".to_owned(), "c".to_owned()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn alert_source_errors_say_alert_spec() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.yaml").display().to_string();
+        assert_eq!(
+            alert_err(std::slice::from_ref(&missing), &NoObjects).await,
+            format!("monitor spec: alert spec {missing}: not found")
+        );
+        write(dir.path(), "notes.txt", "x");
+        let d = dir.path().display().to_string();
+        assert_eq!(
+            alert_err(std::slice::from_ref(&d), &NoObjects).await,
+            format!("monitor spec: alert spec {d}: no .yaml or .yml specs")
+        );
+        let file = write(dir.path(), "a-file", "x");
+        let through = format!("{file}/a.yaml");
+        let err = alert_err(std::slice::from_ref(&through), &NoObjects).await;
+        assert!(
+            err.starts_with(&format!("monitor spec: alert spec {through}: reading: ")),
+            "{err}"
+        );
+        let objects = Objects::new(&[("b", "p/notes.txt", "x")]);
+        assert_eq!(
+            alert_err(&["gs://b/missing.yaml".into()], &objects).await,
+            "monitor spec: alert spec gs://b/missing.yaml: not found"
+        );
+        assert_eq!(
+            alert_err(&["gs://b/p/".into()], &objects).await,
+            "monitor spec: alert spec gs://b/p/: no .yaml or .yml specs"
+        );
+        for bad in ["gs://", "gs://Bad/x.yaml"] {
+            assert_eq!(
+                alert_err(&[bad.into()], &objects).await,
+                format!("monitor spec: alert spec {bad}: invalid bucket")
+            );
+        }
+        assert_eq!(
+            alert_err(&["gs://broken/p/".into()], &objects).await,
+            "report store: HTTP 403: denied"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_invalid_alert_spec_names_its_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = write(dir.path(), "a.yaml", &alert("a"));
+        let bad = write(dir.path(), "b.yaml", "name: b\n");
+        let detail = AlertSpec::from_yaml("name: b\n")
+            .unwrap_err()
+            .to_string()
+            .strip_prefix("monitor spec: alert spec: ")
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            alert_err(&[good, bad.clone()], &NoObjects).await,
+            format!("monitor spec: alert spec {bad}: {detail}")
+        );
+    }
+
+    #[tokio::test]
+    async fn more_than_200_alert_specs_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..=MAX_GUARD_SPECS {
+            write(
+                dir.path(),
+                &format!("a{i:03}.yaml"),
+                &alert(&format!("a{i:03}")),
+            );
+        }
+        assert_eq!(
+            alert_err(&[dir.path().display().to_string()], &NoObjects).await,
+            "monitor spec: alerts: more than 200 specs"
+        );
+        // Files named one by one are counted after they are read.
+        let files: Vec<String> = (0..=MAX_GUARD_SPECS)
+            .map(|i| {
+                dir.path()
+                    .join(format!("a{i:03}.yaml"))
+                    .display()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            alert_err(&files, &NoObjects).await,
+            "monitor spec: alerts: more than 200 specs"
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_alert_names_are_errors_naming_both_origins() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = write(dir.path(), "a.yaml", &alert("usage"));
+        let b = write(dir.path(), "b.yaml", &alert("usage"));
+        assert_eq!(
+            alert_err(&[dir.path().display().to_string()], &NoObjects).await,
+            format!("monitor spec: alerts: duplicate alert name usage in {a} and {b}")
         );
     }
 

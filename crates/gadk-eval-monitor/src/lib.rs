@@ -50,10 +50,8 @@
 //! ReportStore::open("gs://my-bucket/monitors")?.put(&report).await?;
 //! # Ok(()) }
 //! ```
-// Not used until the `alerts` command is wired into the CLI.
-#[allow(dead_code)]
-mod alert;
 
+mod alert;
 mod error;
 mod guard_sources;
 mod guard_stats;
@@ -63,7 +61,6 @@ mod testutil;
 
 pub mod alert_source;
 pub mod alert_spec;
-
 pub mod cli;
 pub mod experiment;
 pub mod experiment_spec;
@@ -83,7 +80,6 @@ pub mod store;
 
 pub use alert_source::{AlertQuery, AlertSource, UsageGroup};
 pub use alert_spec::{AlertFilter, AlertMetric, AlertRule, AlertSpec};
-
 pub use error::MonitorError;
 pub use experiment::{
     CaseVerdicts, ExperimentReport, ExperimentVariant, VariantStats, Verdict, run_experiment,
