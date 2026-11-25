@@ -185,6 +185,7 @@ pub(crate) fn state_with_reports(
         author: AUTHOR.to_owned(),
         datasets: None,
         export: None,
+        rubrics: None,
     }
 }
 
