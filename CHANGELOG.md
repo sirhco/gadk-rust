@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.19] - 2026-11-25
+
 ### Added
 
 - `gadk-console`: a read-only JSON API for custom dashboards, with the BigQuery trace source.
@@ -939,7 +941,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.18...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.19...HEAD
+[0.5.19]: https://github.com/sirhco/gadk-rust/compare/v0.5.18...v0.5.19
 [0.5.18]: https://github.com/sirhco/gadk-rust/compare/v0.5.17...v0.5.18
 [0.5.17]: https://github.com/sirhco/gadk-rust/compare/v0.5.16...v0.5.17
 [0.5.16]: https://github.com/sirhco/gadk-rust/compare/v0.5.15...v0.5.16
