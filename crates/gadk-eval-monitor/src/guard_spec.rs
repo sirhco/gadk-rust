@@ -67,8 +67,8 @@ pub const DEFAULT_EVAL_LIMIT: usize = 100;
 /// The fewest scored runs per version an `eval` check compares; fewer is `insufficient`.
 pub const MIN_EVAL_RUNS: u64 = 10;
 
-/// The longest `window` and `min_step_age`.
-const MAX_WINDOW_DAYS: i64 = 30;
+/// The longest `window` and `min_step_age` (and an alert spec's `window`).
+pub(crate) const MAX_WINDOW_DAYS: i64 = 30;
 /// The check kinds, in the order the spec documents them.
 const CHECK_KINDS: [&str; 5] = [
     "error_rate",
@@ -251,7 +251,7 @@ fn parse(doc: &Value) -> Result<GuardSpec, String> {
         is_monitor_name,
         "`name` must match [A-Za-z0-9_-]{1,64}",
     )?;
-    let source = parse_source(top.get("source"))?;
+    let source = parse_source(top.get("source"), "guards")?;
     let store = required(
         top,
         "store",
@@ -323,7 +323,7 @@ fn parse(doc: &Value) -> Result<GuardSpec, String> {
 }
 
 /// The duration `key` (`<n>m`, `<n>h` or `<n>d`, at most 30 days).
-fn duration(v: Option<&Value>, key: &str) -> Result<TimeDelta, String> {
+pub(crate) fn duration(v: Option<&Value>, key: &str) -> Result<TimeDelta, String> {
     let d = v
         .and_then(Value::as_str)
         .and_then(parse_window)
@@ -334,15 +334,16 @@ fn duration(v: Option<&Value>, key: &str) -> Result<TimeDelta, String> {
     Ok(d)
 }
 
-/// `{ bigquery: { project, dataset, table } }`; Cloud Trace sources are refused.
-fn parse_source(v: Option<&Value>) -> Result<SourceSpec, String> {
+/// `{ bigquery: { project, dataset, table } }`; Cloud Trace sources are refused, naming
+/// `command` (`guards` or `alerts`).
+pub(crate) fn parse_source(v: Option<&Value>, command: &str) -> Result<SourceSpec, String> {
     let m = v
         .and_then(Value::as_object)
         .ok_or("`source` must be a mapping with `bigquery`")?;
     if m.contains_key("cloud_trace") {
-        return Err(
-            "`source.cloud_trace` is not supported by guards; use `source.bigquery`".into(),
-        );
+        return Err(format!(
+            "`source.cloud_trace` is not supported by {command}; use `source.bigquery`"
+        ));
     }
     check_keys(m, "`source`: ", &["bigquery"])?;
     let bq = m

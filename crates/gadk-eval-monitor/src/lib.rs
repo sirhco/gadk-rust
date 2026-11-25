@@ -58,6 +58,9 @@ mod notify;
 #[cfg(test)]
 mod testutil;
 
+pub mod alert_source;
+pub mod alert_spec;
+
 pub mod cli;
 pub mod experiment;
 pub mod experiment_spec;
@@ -74,6 +77,9 @@ pub mod report;
 pub mod source;
 pub mod spec;
 pub mod store;
+
+pub use alert_source::{AlertQuery, AlertSource, UsageGroup};
+pub use alert_spec::{AlertFilter, AlertMetric, AlertRule, AlertSpec};
 
 pub use error::MonitorError;
 pub use experiment::{
