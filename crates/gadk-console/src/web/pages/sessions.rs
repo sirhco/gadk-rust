@@ -16,13 +16,13 @@
 //! thumbs.
 
 use gadk_analytics::cost::{CostSum, Usage};
+use gadk_analytics::sessions::{SessionPage, SessionQuery};
 use maud::{Markup, html};
 
 use super::cost::{NO_PRICES, PARTIAL_NOTE};
 use super::layout::{Nav, page};
 use super::millis;
 use crate::prices::{PriceTable, cost_of, thousands};
-use crate::sessions::{SessionPage, SessionQuery};
 use crate::traces::TimeRange;
 use crate::web::sessions::{next_link, session_link, sessions_csv_link};
 

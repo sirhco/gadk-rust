@@ -63,6 +63,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use futures::StreamExt as _;
 use gadk_model::{BodyStream, HttpClient, ModelError};
 use http::{HeaderMap, Method, StatusCode};
@@ -227,3 +228,188 @@ pub const TREND_FIELDS: [(&str, &str); 9] = [
     ("output", "INT64"),
     ("reasoning", "INT64"),
 ];
+
+/// The columns of the sessions query ([`AnalyticsSource::sessions`](crate::AnalyticsSource::sessions)).
+pub const SESSION_FIELDS: [(&str, &str); 14] = [
+    ("session_id", "STRING"),
+    ("user_id", "STRING"),
+    ("agent", "STRING"),
+    ("first", "TIMESTAMP"),
+    ("last", "TIMESTAMP"),
+    ("turns", "INT64"),
+    ("errors", "INT64"),
+    ("ups", "INT64"),
+    ("downs", "INT64"),
+    ("model", "STRING"),
+    ("input", "INT64"),
+    ("cached", "INT64"),
+    ("output", "INT64"),
+    ("reasoning", "INT64"),
+];
+
+/// The columns of the users query ([`AnalyticsSource::users`](crate::AnalyticsSource::users)).
+pub const USER_FIELDS: [(&str, &str); 12] = [
+    ("user_id", "STRING"),
+    ("sessions", "INT64"),
+    ("turns", "INT64"),
+    ("errors", "INT64"),
+    ("ups", "INT64"),
+    ("downs", "INT64"),
+    ("last", "TIMESTAMP"),
+    ("model", "STRING"),
+    ("input", "INT64"),
+    ("cached", "INT64"),
+    ("output", "INT64"),
+    ("reasoning", "INT64"),
+];
+/// The model cells of a test row: `(model, [input, cached, output, reasoning])`, or `None` for
+/// a row without model calls (NULL cells).
+pub type ModelCells<'a> = Option<(&'a str, [u64; 4])>;
+
+/// A TIMESTAMP cell as `jobs.query` sends it (microseconds since the epoch).
+fn ts_cell(t: DateTime<Utc>) -> Value {
+    Value::from(t.timestamp_micros().to_string())
+}
+
+/// The model, input, cached, output and reasoning cells of `model`.
+fn model_cells(model: ModelCells<'_>) -> Vec<Value> {
+    match model {
+        Some((name, counts)) => std::iter::once(Value::from(name))
+            .chain(counts.iter().map(|n| Value::from(n.to_string())))
+            .collect(),
+        None => vec![Value::Null; 5],
+    }
+}
+
+/// The cells of one the sessions query ([`AnalyticsSource::sessions`](crate::AnalyticsSource::sessions)) row; `counts` is `[turns, errors, ups, downs]`.
+pub fn session_cells(
+    id: &str,
+    user: &str,
+    agent: &str,
+    first: DateTime<Utc>,
+    last: DateTime<Utc>,
+    counts: [u64; 4],
+    model: ModelCells<'_>,
+) -> Vec<Value> {
+    let mut cells = vec![
+        Value::from(id),
+        Value::from(user),
+        Value::from(agent),
+        ts_cell(first),
+        ts_cell(last),
+    ];
+    cells.extend(counts.iter().map(|n| Value::from(n.to_string())));
+    cells.extend(model_cells(model));
+    cells
+}
+
+/// The cells of one the users query ([`AnalyticsSource::users`](crate::AnalyticsSource::users)) row (`None` is a NULL user); `counts` is
+/// `[sessions, turns, errors, ups, downs]`.
+pub fn user_cells(
+    user: Option<&str>,
+    counts: [u64; 5],
+    last: DateTime<Utc>,
+    model: ModelCells<'_>,
+) -> Vec<Value> {
+    let mut cells = vec![user.map_or(Value::Null, Value::from)];
+    cells.extend(counts.iter().map(|n| Value::from(n.to_string())));
+    cells.push(ts_cell(last));
+    cells.extend(model_cells(model));
+    cells
+}
+
+/// The schema of the turns query ([`AnalyticsSource::session_turns`](crate::AnalyticsSource::session_turns)): `tools` is `REPEATED` and `tokens` and `scores` are
+/// `REPEATED RECORD`s.
+pub fn turn_reply(rows: Vec<Vec<Value>>) -> Result<(u16, String), String> {
+    use serde_json::json;
+    let field = |name: &str, ty: &str| json!({ "name": name, "type": ty, "mode": "NULLABLE" });
+    let schema = vec![
+        field("invocation_id", "STRING"),
+        field("trace_id", "STRING"),
+        field("start", "TIMESTAMP"),
+        field("completed", "TIMESTAMP"),
+        field("errors", "INT64"),
+        json!({ "name": "tools", "type": "STRING", "mode": "REPEATED" }),
+        json!({ "name": "tokens", "type": "RECORD", "mode": "REPEATED", "fields": [
+            field("model", "STRING"),
+            field("input", "INT64"),
+            field("cached", "INT64"),
+            field("output", "INT64"),
+            field("reasoning", "INT64"),
+        ] }),
+        json!({ "name": "scores", "type": "RECORD", "mode": "REPEATED", "fields": [
+            field("name", "STRING"),
+            field("source", "STRING"),
+            field("value", "STRING"),
+        ] }),
+    ];
+    schema_reply(schema, rows, false)
+}
+
+/// The cells of one the turns query ([`AnalyticsSource::session_turns`](crate::AnalyticsSource::session_turns)) row.
+#[derive(Debug, Clone)]
+pub struct TurnCells<'a> {
+    /// The invocation id.
+    pub invocation_id: &'a str,
+    /// The trace id (`None` is NULL).
+    pub trace_id: Option<&'a str>,
+    /// The turn's first activity row.
+    pub start: DateTime<Utc>,
+    /// The `INVOCATION_COMPLETED` time (`None` is NULL).
+    pub end: Option<DateTime<Utc>>,
+    /// The error count.
+    pub errors: u64,
+    /// The `TOOL_STARTING` tool names, in call order.
+    pub tools: &'a [&'a str],
+    /// `(model, [input, cached, output, reasoning])` per model.
+    pub tokens: &'a [(&'a str, [u64; 4])],
+    /// `(name, source, value)` per latest score.
+    pub scores: &'a [(&'a str, &'a str, &'a str)],
+}
+
+impl<'a> TurnCells<'a> {
+    /// Invocation `invocation_id` starting at `start`, with no trace, no completion, no errors,
+    /// no tools, no tokens and no scores.
+    pub fn new(invocation_id: &'a str, start: DateTime<Utc>) -> Self {
+        Self {
+            invocation_id,
+            trace_id: None,
+            start,
+            end: None,
+            errors: 0,
+            tools: &[],
+            tokens: &[],
+            scores: &[],
+        }
+    }
+
+    /// The row's cells.
+    pub fn cells(&self) -> Vec<Value> {
+        vec![
+            Value::from(self.invocation_id),
+            self.trace_id.map_or(Value::Null, Value::from),
+            ts_cell(self.start),
+            self.end.map_or(Value::Null, ts_cell),
+            Value::from(self.errors.to_string()),
+            repeated(self.tools.iter().map(|t| Value::from(*t)).collect()),
+            repeated(
+                self.tokens
+                    .iter()
+                    .map(|(model, counts)| record(model_cells(Some((model, *counts)))))
+                    .collect(),
+            ),
+            repeated(
+                self.scores
+                    .iter()
+                    .map(|(name, source, value)| {
+                        record(vec![
+                            Value::from(*name),
+                            Value::from(*source),
+                            Value::from(*value),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ]
+    }
+}

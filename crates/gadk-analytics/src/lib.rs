@@ -17,7 +17,8 @@
 //!
 //! [`AnalyticsSource`] runs the queries: build it over a `gadk_bigquery::BigQueryClient`, the
 //! project that runs and pays for the queries, the table and a byte cap per query. The queries
-//! are grouped by module: [`usage`] (token usage per model, agent and prompt version).
+//! are grouped by module: [`usage`] (token usage per model, agent and prompt version) and
+//! [`sessions`] (activity per session, per user and per turn).
 //!
 //! The shared types are at the root: [`BigQueryTable`] names the table, [`TimeRange`] and
 //! [`TraceId`] are the trace-list window and id, and every query fails with a [`SourceError`].
@@ -29,6 +30,7 @@
 pub mod cost;
 mod error;
 pub mod row;
+pub mod sessions;
 mod source;
 mod table;
 #[cfg(any(test, feature = "test-util"))]

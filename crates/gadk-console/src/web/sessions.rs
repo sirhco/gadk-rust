@@ -23,6 +23,10 @@ use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::routing::get;
 use chrono::{DateTime, Utc};
+use gadk_analytics::sessions::{
+    CSV_CAP, CSV_ROW_CAP, MAX_ID_LEN, ROW_CAP, SESSION_CAP, SessionCursor, SessionQuery, TURN_CAP,
+    USER_CAP, UserQuery, is_session_id,
+};
 use gadk_eval_monitor::ExportSource;
 use http::StatusCode;
 
@@ -34,10 +38,6 @@ use super::pages::{sessions, users};
 use super::review::first;
 use crate::csv::{Csv, Field, filename, response};
 use crate::review::at_text;
-use crate::sessions::{
-    CSV_CAP, CSV_ROW_CAP, MAX_ID_LEN, ROW_CAP, SESSION_CAP, SessionCursor, SessionQuery, TURN_CAP,
-    USER_CAP, UserQuery, is_session_id,
-};
 use crate::traces::TimeRange;
 use crate::url::percent_encode;
 
@@ -152,14 +152,11 @@ fn session_query(params: &[(String, String)], end: DateTime<Utc>) -> Result<Sess
     } else {
         Some(SessionCursor::parse(after, after_id)?)
     };
-    Ok(SessionQuery {
-        range: range_param(params, TimeRange::Hours24),
-        end,
-        user: filter_param(params, "user")?,
-        agent: filter_param(params, "agent")?,
-        session: None,
-        after,
-    })
+    let mut q = SessionQuery::new(range_param(params, TimeRange::Hours24), end);
+    q.user = filter_param(params, "user")?;
+    q.agent = filter_param(params, "agent")?;
+    q.after = after;
+    Ok(q)
 }
 
 /// `GET /sessions`: at most 100 sessions of the window (24h by default), filtered by user and
@@ -212,11 +209,9 @@ async fn list_users(
 ///
 /// The text of the 400 page: `agent is too long`.
 fn user_query(params: &[(String, String)], end: DateTime<Utc>) -> Result<UserQuery, String> {
-    Ok(UserQuery {
-        range: range_param(params, TimeRange::Days7),
-        end,
-        agent: filter_param(params, "agent")?,
-    })
+    let mut q = UserQuery::new(range_param(params, TimeRange::Days7), end);
+    q.agent = filter_param(params, "agent")?;
+    Ok(q)
 }
 
 /// `GET /sessions.csv`: every session of the window `/sessions` would list (same `range`,
@@ -233,14 +228,12 @@ async fn sessions_csv(
         filter_param(&params, "user"),
         filter_param(&params, "agent"),
     ) {
-        (Ok(user), Ok(agent)) => SessionQuery {
-            range: range_param(&params, TimeRange::Hours24),
-            end: (state.now)(),
-            user,
-            agent,
-            session: None,
-            after: None,
-        },
+        (Ok(user), Ok(agent)) => {
+            let mut q = SessionQuery::new(range_param(&params, TimeRange::Hours24), (state.now)());
+            q.user = user;
+            q.agent = agent;
+            q
+        }
         (Err(text), _) | (_, Err(text)) => return bad_request(&text),
     };
     let p = match usage.sessions(&q, CSV_CAP, CSV_ROW_CAP).await {
@@ -350,14 +343,7 @@ async fn session_page(
     let range = range_param(&params, TimeRange::Days7);
     let end = (state.now)();
     let start = end - range.duration();
-    let q = SessionQuery {
-        range,
-        end,
-        user: None,
-        agent: None,
-        session: Some(id.clone()),
-        after: None,
-    };
+    let q = SessionQuery::new(range, end).with_session(id.clone());
     let head = match usage.sessions(&q, SESSION_CAP, ROW_CAP).await {
         Ok(p) => p.sessions.into_iter().next(),
         Err(e) => return source_error_in(Nav::Sessions, &e),
@@ -417,14 +403,14 @@ mod tests {
     use serde_json::{Value, json};
 
     use crate::prices::PriceTable;
-    use crate::sessions::{
-        SESSION_FIELDS, TurnCells, USER_FIELDS, session_cells, turn_reply, user_cells,
-    };
     use crate::traces::BigQueryTable;
     use crate::usage::UsageSource;
     use crate::web::AppState;
     use crate::web::testutil::{FakeExport, FakeSource, fixed_now, get, state};
-    use gadk_analytics::testutil::{FakeHttp, param_value, reply};
+    use gadk_analytics::testutil::{
+        FakeHttp, SESSION_FIELDS, TurnCells, USER_FIELDS, param_value, reply, session_cells,
+        turn_reply, user_cells,
+    };
 
     const ACTIVE: &str = r#"<a class="active" href="/sessions">Sessions</a>"#;
     const PRICES: &str = "- model: gemini-3.8-flash\n  input: 1\n  output: 2\n";
