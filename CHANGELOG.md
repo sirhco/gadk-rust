@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.17] - 2026-11-25
+
 ### Added
 
 - `gadk-console`: CSV downloads of `/usage`, `/sessions` and `/users`. `GET /usage.csv?range=&table=`
@@ -893,7 +895,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.16...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.17...HEAD
+[0.5.17]: https://github.com/sirhco/gadk-rust/compare/v0.5.16...v0.5.17
 [0.5.16]: https://github.com/sirhco/gadk-rust/compare/v0.5.15...v0.5.16
 [0.5.15]: https://github.com/sirhco/gadk-rust/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/sirhco/gadk-rust/compare/v0.5.13...v0.5.14
