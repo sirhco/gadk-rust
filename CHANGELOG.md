@@ -7,6 +7,20 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-console`: review rubrics. `--rubrics <file>` loads a YAML list of 1-20 rubrics, each a
+  `name`, an optional `description` and 1-10 criteria with an optional `description` and an
+  integer `scale` (`[min, max]`, default `[1, 5]`, at most 11 steps); a bad file stops startup
+  with `rubric file <path>: <detail>`. `/traces/{id}` gains one "Score with rubric <name>" form
+  per rubric, which `POST /traces/{id}/rubric` saves as one console `number` score per criterion,
+  named `<rubric>/<criterion>`, in a single parameterized `INSERT`, so per-version Feedback and
+  guard `feedback` checks read them unchanged. `/review?rubric=<name>` is a review queue whose
+  traces stay pending until every criterion has a console score; its trace pages show the
+  rubric's form in review mode. `Cli` gains `rubrics` and `with_rubrics`, and `ConsoleError`
+  gains `Rubrics`. Without `--rubrics` every page is unchanged; the pending query now takes the
+  score names as an `@names` array parameter instead of `@score`.
+
 ## [0.5.15] - 2026-11-24
 
 ### Added
