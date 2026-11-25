@@ -40,6 +40,9 @@ pub(crate) const NO_SUCH_ROUTE: &str = "no such API route";
 pub(crate) const READ_ONLY: &str = "the API is read-only";
 
 /// Every API path, relative to `/api`: the OpenAPI document lists exactly these.
+///
+/// Every route constant must be listed here: the path-sync test compares the OpenAPI document
+/// with this list, not with the router.
 #[cfg(test)]
 pub(crate) const PATHS: [&str; 10] = [
     usage::BREAKDOWN,

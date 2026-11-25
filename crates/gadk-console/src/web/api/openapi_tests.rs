@@ -71,6 +71,7 @@ impl Checker {
         }
         let validator = jsonschema::options()
             .with_draft(Draft::Draft202012)
+            .should_validate_formats(true)
             .with_registry(&self.registry)
             .build(&json!({ "$ref": format!("{DOC_URI}{pointer}") }))
             .map_err(|e| format!("schema {pointer}: {e}"))?;
@@ -98,6 +99,8 @@ impl Checker {
     /// else against [`API_ERROR`]. An undocumented status is an error.
     fn validate(&self, path: &str, status: StatusCode, body: &Value) -> Result<(), String> {
         let raw = path.split('?').next().unwrap_or(path);
+        // The first match in key order: serde_json's map is sorted (no `preserve_order`), so a
+        // literal segment sorts before a `{…}` one.
         let template = self.doc["paths"]
             .as_object()
             .and_then(|paths| paths.keys().find(|t| template_matches(t, raw)));
@@ -320,13 +323,20 @@ fn a_body_that_breaks_the_schema_names_the_path_status_and_schema() {
 
     for (bad, why) in [
         (json!({ "at": 1, "note": null, "pair": ["m", 3] }), "at"),
-        (json!({ "at": "x", "note": 2, "pair": ["m", 3] }), "note"),
         (
-            json!({ "at": "x", "note": null, "pair": [3, "m"] }),
+            json!({ "at": "2026-11-16 noon", "note": null, "pair": ["m", 3] }),
+            "at format",
+        ),
+        (
+            json!({ "at": "2026-11-16T12:00:00Z", "note": 2, "pair": ["m", 3] }),
+            "note",
+        ),
+        (
+            json!({ "at": "2026-11-16T12:00:00Z", "note": null, "pair": [3, "m"] }),
             "pair order",
         ),
         (
-            json!({ "at": "x", "note": null, "pair": ["m", 3, 4] }),
+            json!({ "at": "2026-11-16T12:00:00Z", "note": null, "pair": ["m", 3, 4] }),
             "pair length",
         ),
     ] {
@@ -335,6 +345,16 @@ fn a_body_that_breaks_the_schema_names_the_path_status_and_schema() {
             "{why}"
         );
     }
+}
+
+#[test]
+fn a_malformed_date_time_fails_the_format_check() {
+    let mut bad = part();
+    bad["at"] = json!("2026-11-16 noon");
+    let e = sample()
+        .validate("/api/v1/things/a/parts", StatusCode::OK, &bad)
+        .unwrap_err();
+    assert!(e.contains("date-time"), "{e}");
 }
 
 #[test]

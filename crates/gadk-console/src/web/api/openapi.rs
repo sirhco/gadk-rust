@@ -14,6 +14,8 @@
 
 //! The OpenAPI route: `/api/v1/openapi.json`, the OpenAPI 3.1 description of the JSON API.
 
+use std::sync::OnceLock;
+
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{Value, json};
@@ -31,14 +33,19 @@ pub(super) fn routes() -> Router<AppState> {
 }
 
 /// The OpenAPI document with `info.version` set to the console's version. The document is
-/// embedded, and a test checks that it parses.
+/// embedded and parsed once, and a test checks that it parses.
 pub(crate) fn document() -> Value {
-    let mut doc: Value = match serde_json::from_str(DOC) {
-        Ok(doc) => doc,
-        Err(e) => panic!("openapi.json: {e}"),
-    };
-    doc["info"]["version"] = json!(env!("CARGO_PKG_VERSION"));
-    doc
+    static DOC_VALUE: OnceLock<Value> = OnceLock::new();
+    DOC_VALUE
+        .get_or_init(|| {
+            let mut doc: Value = match serde_json::from_str(DOC) {
+                Ok(doc) => doc,
+                Err(e) => panic!("openapi.json: {e}"),
+            };
+            doc["info"]["version"] = json!(env!("CARGO_PKG_VERSION"));
+            doc
+        })
+        .clone()
 }
 
 /// `GET /api/v1/openapi.json`: the document, with or without the BigQuery source.

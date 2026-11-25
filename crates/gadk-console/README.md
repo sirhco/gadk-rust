@@ -83,7 +83,7 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/users` | BigQuery source only. The users with activity in the window, at most 100, with their sessions, turns, tokens, cost, errors and thumbs. `?range=` (default `7d`), `agent`. |
 | `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`, `30d`): totals, a chart of cost (or tokens) over time, then LLM calls, tokens, cost and a trend sparkline by model, by agent and by prompt version, and the 20 traces with the most tokens. See [Usage and cost](#usage-and-cost). |
 | `/usage.csv`, `/sessions.csv`, `/users.csv` | BigQuery source only. CSV downloads of the `/usage` tables (`?table=model`, `agent`, `prompt` or `trend`) and of every session or user of the window, up to 5,000. See [CSV export](#csv-export). |
-| `/api/v1/…` | BigQuery source only. Read-only JSON of the usage, sessions, users, prompt-version, trace-score and review views, for custom dashboards. See [JSON API](#json-api). |
+| `/api/v1/…` | BigQuery source only, except `/api/v1/openapi.json`. Read-only JSON of the usage, sessions, users, prompt-version, trace-score and review views, for custom dashboards. See [JSON API](#json-api). |
 
 ## Evals
 
@@ -476,7 +476,8 @@ With the BigQuery source, the console serves the data of its usage, sessions, us
 prompt-version, trace-score and review views as JSON, for custom dashboards and frontends. The
 routes are read-only `GET`s under `/api/v1`. They run the pages' own queries with the pages'
 parameters, defaults, caps and 400 texts, under `--bigquery-max-bytes`, and their shapes are the
-[`gadk-analytics`](../gadk-analytics/README.md) result types (timestamps as RFC 3339).
+[`gadk-analytics`](../gadk-analytics/README.md) result types (timestamps as RFC 3339). The OpenAPI
+document at `/api/v1/openapi.json` is served without the BigQuery source too.
 
 | Route | Parameters | `data` |
 |---|---|---|
