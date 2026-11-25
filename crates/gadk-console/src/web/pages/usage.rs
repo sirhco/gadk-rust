@@ -30,11 +30,14 @@ use crate::usage::{BREAKDOWN_CAP, Breakdown, ModelCalls, TopTrace, Trend, TrendC
 pub(crate) const NEEDS_BIGQUERY: &str = "Usage needs the BigQuery trace source: start the console with --traces bigquery://<project>.<dataset>.<table>.";
 
 /// Calls, tokens and cost summed over groups of model calls.
-#[derive(Debug, Clone, Copy, Default)]
-struct Totals {
-    calls: u64,
-    usage: Usage,
-    cost: CostSum,
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct Totals {
+    /// How many calls.
+    pub(crate) calls: u64,
+    /// Their summed tokens.
+    pub(crate) usage: Usage,
+    /// Their summed cost.
+    pub(crate) cost: CostSum,
 }
 
 impl Totals {
@@ -42,6 +45,67 @@ impl Totals {
         self.calls += m.calls;
         self.usage += m.usage;
         self.cost.add(cost_of(prices, &m.model, &m.usage));
+    }
+}
+
+/// The breakdown summed over all calls, by model, by agent and by prompt version: the numbers
+/// of the `/usage` tables and of `/usage.csv`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Grouped {
+    /// All calls.
+    pub(crate) all: Totals,
+    /// By model.
+    pub(crate) by_model: BTreeMap<String, Totals>,
+    /// By agent (empty when the rows have none).
+    pub(crate) by_agent: BTreeMap<String, Totals>,
+    /// By prompt version (`None` for calls without one).
+    pub(crate) by_prompt: BTreeMap<Option<String>, Totals>,
+}
+
+/// Sums the breakdown cells of `b` into [`Grouped`], pricing each cell's model with `prices`.
+pub(crate) fn group(b: &Breakdown, prices: Option<&PriceTable>) -> Grouped {
+    let mut g = Grouped::default();
+    for c in &b.cells {
+        g.all.add(&c.calls, prices);
+        g.by_model
+            .entry(c.calls.model.clone())
+            .or_default()
+            .add(&c.calls, prices);
+        g.by_agent
+            .entry(c.agent.clone())
+            .or_default()
+            .add(&c.calls, prices);
+        g.by_prompt
+            .entry(c.prompt.clone())
+            .or_default()
+            .add(&c.calls, prices);
+    }
+    g
+}
+
+/// An agent as the tables show it: `(unknown)` when empty.
+pub(crate) fn agent_label(agent: &str) -> String {
+    if agent.is_empty() {
+        "(unknown)".to_owned()
+    } else {
+        agent.to_owned()
+    }
+}
+
+/// A prompt version as the tables show it: `(none)` when missing.
+pub(crate) fn prompt_label(prompt: Option<&str>) -> String {
+    prompt.unwrap_or("(none)").to_owned()
+}
+
+/// `/usage.csv?range={range}&table={table}`.
+pub(crate) fn csv_href(range: UsageRange, table: &str) -> String {
+    format!("/usage.csv?range={}&table={table}", range.as_str())
+}
+
+/// The "Download CSV" link of one table.
+fn csv_link(range: UsageRange, table: &str) -> Markup {
+    html! {
+        p class="csv" { a href=(csv_href(range, table)) { "Download CSV" } }
     }
 }
 
@@ -224,25 +288,12 @@ pub(crate) fn render(
     prices: Option<&PriceTable>,
     start: DateTime<Utc>,
 ) -> Markup {
-    let mut all = Totals::default();
-    let mut by_model: BTreeMap<String, Totals> = BTreeMap::new();
-    let mut by_agent: BTreeMap<String, Totals> = BTreeMap::new();
-    let mut by_prompt: BTreeMap<Option<String>, Totals> = BTreeMap::new();
-    for c in &b.cells {
-        all.add(&c.calls, prices);
-        by_model
-            .entry(c.calls.model.clone())
-            .or_default()
-            .add(&c.calls, prices);
-        by_agent
-            .entry(c.agent.clone())
-            .or_default()
-            .add(&c.calls, prices);
-        by_prompt
-            .entry(c.prompt.clone())
-            .or_default()
-            .add(&c.calls, prices);
-    }
+    let Grouped {
+        all,
+        by_model,
+        by_agent,
+        by_prompt,
+    } = group(b, prices);
     let traces: Vec<(&TopTrace, Totals)> = top
         .iter()
         .map(|t| {
@@ -279,6 +330,7 @@ pub(crate) fn render(
                 row_spark(Some(&all_series)),
             ))))
             h2 { "Over time" }
+            (csv_link(range, "trend"))
             @if charted {
                 (chart(&all_series, bucket_label, start, bucket_seconds, prices.is_some()))
                 @if prices.is_some() && all.cost.unpriced {
@@ -288,21 +340,24 @@ pub(crate) fn render(
                 p class="empty" { (TOO_MANY_GROUPS) }
             }
             h2 { "By model" }
+            (csv_link(range, "model"))
             (totals_table("Model", by_model.iter().map(|(k, t)| {
                 (k.clone(), *t, row_spark(model_series.get(k)))
             })))
             h2 { "By agent" }
+            (csv_link(range, "agent"))
             (totals_table("Agent", by_agent.iter().map(|(k, t)| {
                 (
-                    if k.is_empty() { "(unknown)".to_owned() } else { k.clone() },
+                    agent_label(k),
                     *t,
                     row_spark(agent_series.get(k)),
                 )
             })))
             h2 { "By prompt" }
+            (csv_link(range, "prompt"))
             (totals_table("Prompt", by_prompt.iter().map(|(k, t)| {
                 (
-                    k.clone().unwrap_or_else(|| "(none)".to_owned()),
+                    prompt_label(k.as_deref()),
                     *t,
                     row_spark(prompt_series.get(k)),
                 )
