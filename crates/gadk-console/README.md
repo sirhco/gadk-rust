@@ -80,6 +80,7 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/sessions/{id}` | BigQuery source only. One session's turns as a conversation, oldest first, each with its metrics. `?range=` (default `7d`). |
 | `/users` | BigQuery source only. The users with activity in the window, at most 100, with their sessions, turns, tokens, cost, errors and thumbs. `?range=` (default `7d`), `agent`. |
 | `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`, `30d`): totals, a chart of cost (or tokens) over time, then LLM calls, tokens, cost and a trend sparkline by model, by agent and by prompt version, and the 20 traces with the most tokens. See [Usage and cost](#usage-and-cost). |
+| `/usage.csv`, `/sessions.csv`, `/users.csv` | BigQuery source only. CSV downloads of the `/usage` tables (`?table=model`, `agent`, `prompt` or `trend`) and of every session or user of the window, up to 5,000. See [CSV export](#csv-export). |
 
 ## Evals
 
@@ -398,6 +399,67 @@ answer 404 with a note.
   filter and id as a query parameter. With the BigQuery source the console builds the transcript
   reader at startup, which loads Application Default Credentials; without `--datasets` a failure
   there does not stop the console, and the session page shows it.
+
+## CSV export
+
+`/usage`, `/sessions` and `/users` offer their tables as CSV files for spreadsheets and scripts.
+With the BigQuery source each table has a "Download CSV" link that carries the page's range and
+filters: on `/usage` under the `Over time`, `By model`, `By agent` and `By prompt` headings, and on
+`/sessions` and `/users` above the table. A page without rows has no link. The downloads are
+read-only `GET` routes that run the pages' own queries, under `--bigquery-max-bytes`:
+
+- `/usage.csv?range=<range>&table=<table>`: `range` as on `/usage` (unknown or missing is `24h`).
+  `table` is required and is `model`, `agent`, `prompt` or `trend`; anything else is a 400 (`table:
+  must be model, agent, prompt or trend`).
+  - `model`, `agent` and `prompt` read only the breakdown query and sum it exactly as the page's
+    tables do, in the same order and with the same labels (an empty agent is `(unknown)`, a
+    missing prompt `(none)`). Columns: `<table>,llm_calls,input,cached,output,reasoning,cost_usd,cost_partial`.
+  - `trend` reads only the trend query: one row per bucket, model, agent and prompt version, in
+    query order. Columns: `bucket_start,model,agent,prompt,llm_calls,input,cached,output,reasoning,cost_usd,cost_partial`.
+    `bucket_start` is the bucket's start time (see the bucket table above); an empty agent or a
+    missing prompt is an empty cell.
+- `/sessions.csv?range=&user=&agent=`: the parameters, defaults and 400s of `/sessions`. `after`
+  and `after_id` are not read, so the file always starts at the newest session. Columns:
+  `session_id,user,agent,first_activity,last_activity,turns,tokens,cost_usd,cost_partial,errors,thumbs_up,thumbs_down`,
+  newest last activity first; `user` and `agent` are empty when the session has none.
+- `/users.csv?range=&agent=`: the parameters, defaults (`7d`) and 400s of `/users`. Columns:
+  `user,sessions,turns,errors,thumbs_up,thumbs_down,last_activity,tokens,cost_usd,cost_partial`, in
+  the page's order. `user` is the raw id, empty for sessions without one (the page shows `(none)`).
+
+The files are RFC 4180: a header row, then data rows, every line ending in CRLF, UTF-8 without a
+BOM. A field holding `,`, `"`, CR or LF is wrapped in `"`, with each `"` doubled. Counts are plain
+decimal, times are UTC RFC 3339 to the millisecond (`2026-11-24T01:00:00.000Z`), and `tokens` is
+input + output + reasoning, as on the pages.
+
+**Cost columns.** `cost_usd` is the cost of the priced calls in USD to 6 decimals, and is empty
+when no call had a price (always, without `--prices`). `cost_partial` is `true` when some calls had
+a price and some did not (the page's `$x*`), and `false` otherwise, so a column of `cost_usd` still
+sums in a spreadsheet. The usage, session and user rows use the same sums as the pages. A trend row
+is one model's calls, so its `cost_partial` is always `false` and its `cost_usd` is empty when the
+model has no price.
+
+**Formula guard.** Text that comes from the data (models, agents, prompts, session ids and users)
+and starts with `=`, `+`, `-`, `@`, TAB or CR gets a leading `'`, so spreadsheet tools show it as
+text instead of running it as a formula. Such a cell differs from the stored id by that `'`.
+
+**Caps and truncation.**
+
+- `/sessions.csv` and `/users.csv` list at most 5,000 sessions or users, reading at most 50,000
+  session (or user) × model rows. `/sessions` and `/users` keep their 100-row pages.
+- `/usage.csv` keeps the page's caps: 5,000 breakdown groups and 20,000 trend groups.
+- Every query reads one BigQuery reply page, and BigQuery caps one reply at about 10 MB, so a long
+  window can stop well below 50,000 rows. The file is then marked truncated, and the last session
+  or user listed may miss some of its tokens and cost. The pages behave the same way.
+
+When a cap cuts the rows, the response carries `X-Gadk-Truncated: true` and the file name ends in
+`-truncated.csv`; the body has no comment rows.
+
+**Responses.** A download is a 200 with `Content-Type: text/csv; charset=utf-8` and
+`Content-Disposition: attachment; filename="<name>"`, where the name is
+`gadk-usage-<table>-<range>-<stamp>.csv`, `gadk-sessions-<range>-<stamp>.csv` or
+`gadk-users-<range>-<stamp>.csv`, and the stamp is the window end in UTC (`20261124T0100Z`).
+Without the BigQuery source a download is a 404 page with the page's note, a bad parameter is a
+400 page, and a failed query is a 502 page with the source's hint.
 
 ## Datasets
 
