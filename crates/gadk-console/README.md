@@ -489,6 +489,7 @@ parameters, defaults, caps and 400 texts, under `--bigquery-max-bytes`, and thei
 | `/api/v1/prompts/{name}/versions` | `range` as on `/prompts/{name}` (`1h`, `6h`, `24h`, `7d`; unknown or missing is `7d`) | `{"metrics": {"stats", "models", "truncated"}, "feedback"}`: per-version calls, mean tokens and latency with their cost, the calls per version and model with theirs, and the scores per version |
 | `/api/v1/traces/{id}/scores` | none | `{"rows", "truncated"}`: the trace's scores and its invocations', newest first, as in the trace page's Scores section |
 | `/api/v1/review/pending` | `score` or `rubric` (one is required), `prompt`, `version`, `flagged=1`, `range`, as on `/review` | the queue's pending traces, newest first, at most 100 |
+| `/api/v1/openapi.json` | none | not an envelope: the [OpenAPI](#openapi) document of these routes, also without the BigQuery source |
 
 A name in a path is percent-encoded (`/api/v1/prompts/team%2Fgreet/versions`). The prompt route
 reads only BigQuery, not the prompt store: an unknown name gives empty rows, and it has no eval
@@ -550,6 +551,23 @@ application/json`:
 | 502 | the source's kind (`bigquery`, `transport`, …) | A failed query; `message` and `hint` are the error banner's text and hint. |
 
 A wrong `Host` still gets the HTML 421 of the [Security model](#security-model).
+
+### OpenAPI
+
+`GET /api/v1/openapi.json` answers 200 with an OpenAPI 3.1 description of the routes above:
+their parameters, the envelope and `data` schema of each, and their errors. Its `info.version`
+is the console's version. It answers with or without the BigQuery source, under the same `Host`
+check, security headers and `--api-origin` CORS as the other routes.
+
+```sh
+curl -s http://127.0.0.1:8765/api/v1/openapi.json > openapi.json
+```
+
+Any OpenAPI 3.1 generator can make a typed client from it. For example,
+[openapi-typescript](https://openapi-ts.dev/) writes TypeScript types with
+`npx openapi-typescript openapi.json -o api.d.ts`; the console neither ships nor needs one. Each
+schema lists every field the console always writes as required and allows other fields, so a
+field added later does not break a client.
 
 ### Browser apps on another origin
 

@@ -7,6 +7,14 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-console`: `GET /api/v1/openapi.json` serves an OpenAPI 3.1 description of the JSON API
+  (the parameters, the envelope and row schemas with their cost fields, and the errors) for
+  typed-client generators, with `info.version` set to the console's version, with or without
+  the BigQuery source. Tests keep its paths equal to the API's routes and validate every API
+  test response against it (`jsonschema` is a dev-dependency only).
+
 ## [0.5.20] - 2026-11-25
 
 ### Added
