@@ -20,6 +20,8 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use gadk_analytics::AnalyticsSource;
+use gadk_bigquery::BigQueryClient;
 use gadk_eval_monitor::{BigQueryTranscriptSource, ExportSource, MonitorError, ReportStore};
 
 use crate::datasets::Datasets;
@@ -28,7 +30,6 @@ use crate::experiments::ExperimentCache;
 use crate::guards::GuardCache;
 use crate::rubrics::Rubrics;
 use crate::traces::{BigQueryTable, BigQueryTraceSource, CloudTraceSource, TraceSource};
-use crate::usage::UsageSource;
 
 mod cache;
 mod cli;
@@ -42,11 +43,8 @@ mod prices;
 mod prompts;
 mod review;
 mod rubrics;
-mod scores;
-mod sessions;
 pub mod traces;
 mod url;
-mod usage;
 mod web;
 
 pub use cli::{parse_args, parse_cli};
@@ -250,7 +248,7 @@ pub(crate) struct Extras {
     /// The loaded price file.
     pub(crate) prices: Option<Arc<PriceTable>>,
     /// The usage queries (BigQuery trace source only).
-    pub(crate) usage: Option<Arc<UsageSource>>,
+    pub(crate) usage: Option<Arc<AnalyticsSource>>,
     /// The author of console scores; `None` is [`default_author`] over the environment.
     pub(crate) author: Option<String>,
     /// The `--datasets` directory and its export source (BigQuery trace source only).
@@ -414,7 +412,7 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
         }
         _ => None,
     };
-    let (source, usage): (Arc<dyn TraceSource>, Option<Arc<UsageSource>>) = match cli.traces {
+    let (source, usage): (Arc<dyn TraceSource>, Option<Arc<AnalyticsSource>>) = match cli.traces {
         None => (
             Arc::new(CloudTraceSource::new(
                 cli.config.project.clone(),
@@ -431,7 +429,8 @@ pub async fn run_cli(cli: Cli, out: &mut (dyn std::io::Write + Send)) -> Result<
                 table.clone(),
                 max_bytes_billed,
             )),
-            Some(Arc::new(UsageSource::new(
+            Some(Arc::new(AnalyticsSource::new(
+                BigQueryClient::new(),
                 cli.config.project.clone(),
                 table,
                 max_bytes_billed,

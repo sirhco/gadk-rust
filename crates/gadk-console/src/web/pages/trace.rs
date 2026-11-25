@@ -16,6 +16,11 @@
 
 use std::sync::Arc;
 
+use gadk_analytics::cost::{
+    CostSum, LABEL_MODEL, LABEL_OPERATION, OP_GENERATE_CONTENT, UNKNOWN_MODEL, Usage,
+};
+use gadk_analytics::review::{Cursor, at_text};
+use gadk_analytics::scores::{ScoreRow, TRACE_SCORES_CAP, TraceScores};
 use maud::{Markup, PreEscaped, html};
 use serde_json::{Value, json};
 
@@ -24,13 +29,9 @@ use super::error::banner;
 use super::layout::{Nav, page};
 use super::millis;
 use crate::model::{AttachedLogs, SpanRow, prompt_link};
-use crate::prices::{
-    CostSum, LABEL_MODEL, LABEL_OPERATION, OP_GENERATE_CONTENT, PriceTable, UNKNOWN_MODEL, Usage,
-    cost_of, cost_text, thousands,
-};
-use crate::review::{Cursor, ReviewQueue, Target, at_text};
+use crate::prices::{PriceTable, cost_of, cost_text, thousands};
+use crate::review::{ReviewQueue, Target};
 use crate::rubrics::{Rubric, Rubrics};
-use crate::scores::{ScoreRow, TRACE_SCORES_CAP, TraceScores};
 use crate::traces::{LogEntry, RawSpan, SourceError, TraceId};
 use crate::url::percent_encode;
 use crate::web::review::next_link;

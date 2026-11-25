@@ -17,14 +17,17 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, TimeDelta, Utc};
+use gadk_analytics::cost::{CostSum, Usage};
+use gadk_analytics::usage::{
+    BREAKDOWN_CAP, Breakdown, ModelCalls, TopTrace, Trend, TrendCell, UsageRange,
+};
 use maud::{Markup, html};
 
 use super::cost::{NO_PRICES, PARTIAL_NOTE, token_cells};
 use super::evals::{points, trend_labeled};
 use super::layout::{Nav, page};
-use crate::prices::{CostSum, PriceTable, Usage, cost_of, cost_text, thousands};
+use crate::prices::{PriceTable, cost_of, cost_text, thousands};
 use crate::traces::TraceId;
-use crate::usage::{BREAKDOWN_CAP, Breakdown, ModelCalls, TopTrace, Trend, TrendCell, UsageRange};
 
 /// The note shown when the trace source is not BigQuery.
 pub(crate) const NEEDS_BIGQUERY: &str = "Usage needs the BigQuery trace source: start the console with --traces bigquery://<project>.<dataset>.<table>.";
@@ -224,7 +227,7 @@ fn range_form(range: UsageRange) -> Markup {
             label {
                 "Range"
                 select name="range" {
-                    @for r in UsageRange::ALL {
+                    @for &r in UsageRange::ALL {
                         option value=(r.as_str()) selected[r == range] { (r.as_str()) }
                     }
                 }
@@ -405,7 +408,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::usage::Cell;
+    use gadk_analytics::usage::Cell;
 
     /// `m` costs $1 per 1,000,000 input tokens and $2 per 1,000,000 output tokens; `free` has no
     /// price.
@@ -418,27 +421,18 @@ mod tests {
         prompt: Option<&str>,
         usage: Usage,
     ) -> TrendCell {
-        TrendCell {
+        TrendCell::new(
             bucket,
-            cell: Cell {
-                agent: agent.into(),
-                prompt: prompt.map(str::to_owned),
-                calls: ModelCalls {
-                    model: model.into(),
-                    calls: 1,
-                    usage,
-                },
-            },
-        }
+            Cell::new(
+                agent.into(),
+                prompt.map(str::to_owned),
+                ModelCalls::new(model.into(), 1, usage),
+            ),
+        )
     }
 
     fn tokens(input: u64, output: u64, reasoning: u64) -> Usage {
-        Usage {
-            input,
-            cached: 0,
-            output,
-            reasoning,
-        }
+        Usage::new(input, 0, output, reasoning)
     }
 
     /// Bucket 1 and 3 are empty; bucket 5 is past the 4 buckets.

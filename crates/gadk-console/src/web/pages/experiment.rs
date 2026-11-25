@@ -15,6 +15,7 @@
 //! The page for one experiment: the variants side by side, then the cases they disagree on.
 
 use chrono::SecondsFormat;
+use gadk_analytics::cost::CostSum;
 use gadk_eval::{CaseRun, Outcome};
 use gadk_eval_monitor::{CaseVerdicts, ExperimentReport, VariantStats, Verdict};
 use maud::{Markup, html};
@@ -24,7 +25,7 @@ use super::eval_report::outcome_chip;
 use super::layout::{Nav, page};
 use crate::evals::percent;
 use crate::experiments::experiment_href;
-use crate::prices::{CostSum, PriceTable, runs_cost, thousands};
+use crate::prices::{PriceTable, runs_cost, thousands};
 
 /// The experiment stored as `name`: its header, a comparison table with one column per variant
 /// (the first is the baseline; a Model row when any variant records a model), then the cases

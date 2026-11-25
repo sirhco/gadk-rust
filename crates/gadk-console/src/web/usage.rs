@@ -19,6 +19,8 @@ use axum::extract::{Query, State};
 use axum::response::Response;
 use axum::routing::get;
 use chrono::TimeDelta;
+use gadk_analytics::cost::CostSum;
+use gadk_analytics::usage::{TOP_TRACES, UsageRange};
 use http::StatusCode;
 use serde::Deserialize;
 
@@ -27,8 +29,7 @@ use super::pages::error::{error_page, source_error_in};
 use super::pages::layout::{Nav, html};
 use super::pages::usage::{self, NEEDS_BIGQUERY, Totals, agent_label, group, prompt_label};
 use crate::csv::{Csv, Field, filename, response};
-use crate::prices::{CostSum, cost_of};
-use crate::usage::{TOP_TRACES, UsageRange};
+use crate::prices::cost_of;
 
 /// The text of the 400 page for a missing or unknown `/usage.csv` table.
 const BAD_TABLE: &str = "table: must be model, agent, prompt or trend";
@@ -214,18 +215,17 @@ mod tests {
 
     use crate::prices::{PriceTable, thousands};
     use crate::traces::BigQueryTable;
-    use crate::traces::test_http::{FakeHttp, param_value, reply};
-    use crate::usage::UsageSource;
-    use crate::usage::tests::TREND_FIELDS;
     use crate::web::AppState;
     use crate::web::testutil::{FakeSource, get, state};
+    use gadk_analytics::AnalyticsSource;
+    use gadk_analytics::testutil::{FakeHttp, TREND_FIELDS, param_value, reply};
 
     const PRICES: &str =
         "- model: gemini-3.8-flash\n  input: 0.30\n  output: 2.50\n  cached_input: 0.075\n";
 
     fn bq_state(fake: &Arc<FakeHttp>, prices: bool) -> AppState {
         let mut st = state(Arc::new(FakeSource::new()), None);
-        st.usage = Some(Arc::new(UsageSource::with_client(
+        st.usage = Some(Arc::new(AnalyticsSource::new(
             BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
             "billing-proj",
             BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),

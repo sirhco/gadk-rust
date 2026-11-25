@@ -15,6 +15,7 @@
 //! The prompt detail page: versions, diff, label and rollout forms.
 
 use chrono::SecondsFormat;
+use gadk_analytics::prompts::FeedbackRow;
 use maud::{Markup, html};
 
 use super::cost::{NO_PRICES, PARTIAL_NOTE};
@@ -23,7 +24,6 @@ use super::layout::{Nav, page};
 use crate::evals::percent;
 use crate::prices::thousands;
 use crate::prompts::{DiffLine, DiffTag, DiffView, PromptDetail, VersionView};
-use crate::scores::FeedbackRow;
 use crate::traces::TimeRange;
 use crate::url::percent_encode;
 

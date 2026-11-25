@@ -18,82 +18,93 @@
 //! Activity rows are a session's rows other than `FEEDBACK` rows. A session's user and root
 //! agent come from its earliest `INVOCATION_STARTING` row in the window. Every query is
 //! parameterized (unset filters are typed NULL parameters), filters `timestamp` to the window
-//! and runs through [`UsageSource::run`] under the byte cap. Each per-session aggregate is
+//! and runs under the byte cap. Each per-session aggregate is
 //! computed on its own before any join, so joins never multiply counts. Tokens come per model,
 //! so the pages can price them.
+//!
+//! ```
+//! use std::sync::Arc;
+//!
+//! use chrono::{TimeZone, Utc};
+//! use gadk_analytics::sessions::{ROW_CAP, SESSION_CAP, SessionQuery};
+//! use gadk_analytics::testutil::{FakeHttp, SESSION_FIELDS, reply, session_cells};
+//! use gadk_analytics::{AnalyticsSource, BigQueryTable, TimeRange};
+//! use gadk_bigquery::{BigQueryClient, NoAuth};
+//!
+//! # tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+//! let end = Utc.with_ymd_and_hms(2026, 11, 20, 12, 0, 0).unwrap();
+//! let first = end - chrono::TimeDelta::hours(2);
+//! // One scripted `jobs.query` reply: one session with one model's tokens.
+//! let http = FakeHttp::new(vec![reply(
+//!     &SESSION_FIELDS,
+//!     vec![session_cells(
+//!         "s1", "alice", "triage", first, end, [2, 0, 1, 0],
+//!         Some(("gemini-3.8-flash", [1000, 0, 200, 0])),
+//!     )],
+//!     false,
+//! )]);
+//! let source = AnalyticsSource::new(
+//!     BigQueryClient::with_client(http.clone(), Arc::new(NoAuth)),
+//!     "billing-proj",
+//!     BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
+//!     1_073_741_824,
+//! );
+//! let q = SessionQuery::new(TimeRange::Hours24, end).with_user("alice");
+//! let page = source.sessions(&q, SESSION_CAP, ROW_CAP).await?;
+//! assert_eq!(page.sessions[0].session_id, "s1");
+//! assert_eq!((page.sessions[0].turns, page.has_next), (2, false));
+//! # Ok::<(), gadk_analytics::SourceError>(())
+//! # }).unwrap();
+//! ```
 
-/// The columns of [`session_rows_sql`].
-#[cfg(test)]
-pub(crate) const SESSION_FIELDS: [(&str, &str); 14] = [
-    ("session_id", "STRING"),
-    ("user_id", "STRING"),
-    ("agent", "STRING"),
-    ("first", "TIMESTAMP"),
-    ("last", "TIMESTAMP"),
-    ("turns", "INT64"),
-    ("errors", "INT64"),
-    ("ups", "INT64"),
-    ("downs", "INT64"),
-    ("model", "STRING"),
-    ("input", "INT64"),
-    ("cached", "INT64"),
-    ("output", "INT64"),
-    ("reasoning", "INT64"),
-];
-
-/// The columns of [`user_rows_sql`].
-#[cfg(test)]
-pub(crate) const USER_FIELDS: [(&str, &str); 12] = [
-    ("user_id", "STRING"),
-    ("sessions", "INT64"),
-    ("turns", "INT64"),
-    ("errors", "INT64"),
-    ("ups", "INT64"),
-    ("downs", "INT64"),
-    ("last", "TIMESTAMP"),
-    ("model", "STRING"),
-    ("input", "INT64"),
-    ("cached", "INT64"),
-    ("output", "INT64"),
-    ("reasoning", "INT64"),
-];
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::prices::Usage;
-use crate::traces::{SourceError, TimeRange, param, text, timestamp, ts_param};
-use crate::usage::{CALL_COLUMNS, UsageSource, count, window_params};
+use crate::cost::Usage;
+use crate::row::{param, text, timestamp, ts_param};
+use crate::source::{count, window_params};
+use crate::usage::CALL_COLUMNS;
+use crate::{AnalyticsSource, SourceError, TimeRange};
 
 /// The most sessions `/sessions` lists.
-pub(crate) const SESSION_CAP: usize = 100;
+pub const SESSION_CAP: usize = 100;
 /// The most users `/users` lists.
-pub(crate) const USER_CAP: usize = 100;
+pub const USER_CAP: usize = 100;
 /// The most turns `/sessions/{id}` lists.
-pub(crate) const TURN_CAP: usize = 200;
+pub const TURN_CAP: usize = 200;
 /// The most (session or user) × model rows the `/sessions` and `/users` queries return.
-pub(crate) const ROW_CAP: u32 = 5_000;
+pub const ROW_CAP: u32 = 5_000;
 /// The most sessions `/sessions.csv` and users `/users.csv` lists.
-pub(crate) const CSV_CAP: usize = 5_000;
+pub const CSV_CAP: usize = 5_000;
 /// The most (session or user) × model rows the `/sessions.csv` and `/users.csv` queries return.
-pub(crate) const CSV_ROW_CAP: u32 = 50_000;
+pub const CSV_ROW_CAP: u32 = 50_000;
 /// The longest session id, user or agent filter, in bytes.
-pub(crate) const MAX_ID_LEN: usize = 128;
+pub const MAX_ID_LEN: usize = 128;
 /// The text of the 400 page for a bad `after` / `after_id` pair.
-pub(crate) const INVALID_CURSOR: &str = "invalid cursor";
+pub const INVALID_CURSOR: &str = "invalid cursor";
 
 /// Whether `s` can be a session id: 1 to [`MAX_ID_LEN`] bytes with no control characters.
-pub(crate) fn is_session_id(s: &str) -> bool {
+pub fn is_session_id(s: &str) -> bool {
     !s.is_empty() && s.len() <= MAX_ID_LEN && !s.chars().any(char::is_control)
 }
 
 /// A position in the sessions list: the sort key `(last, session id)` of the session last
 /// shown. The next page starts with the largest sort key strictly below it.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SessionCursor {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct SessionCursor {
     /// The session's last activity.
-    pub(crate) at: DateTime<Utc>,
+    pub at: DateTime<Utc>,
     /// The session id, as given.
-    pub(crate) id: String,
+    pub id: String,
+}
+
+impl SessionCursor {
+    /// The cursor of the session `id` whose last activity is `at`.
+    pub fn new(at: DateTime<Utc>, id: String) -> Self {
+        Self { at, id }
+    }
 }
 
 impl SessionCursor {
@@ -103,7 +114,7 @@ impl SessionCursor {
     /// # Errors
     ///
     /// [`INVALID_CURSOR`] when either value is invalid.
-    pub(crate) fn parse(after: &str, after_id: &str) -> Result<Self, &'static str> {
+    pub fn parse(after: &str, after_id: &str) -> Result<Self, &'static str> {
         let at = DateTime::parse_from_rfc3339(after)
             .map_err(|_| INVALID_CURSOR)?
             .with_timezone(&Utc);
@@ -118,106 +129,245 @@ impl SessionCursor {
 }
 
 /// The sessions of `[end - range, end)` to list.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SessionQuery {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct SessionQuery {
     /// The window length.
-    pub(crate) range: TimeRange,
+    pub range: TimeRange,
     /// The window end (now).
-    pub(crate) end: DateTime<Utc>,
+    pub end: DateTime<Utc>,
     /// Only sessions of this user.
-    pub(crate) user: Option<String>,
+    pub user: Option<String>,
     /// Only sessions of this root agent.
-    pub(crate) agent: Option<String>,
+    pub agent: Option<String>,
     /// Only this session.
-    pub(crate) session: Option<String>,
+    pub session: Option<String>,
     /// Only sessions after this cursor.
-    pub(crate) after: Option<SessionCursor>,
+    pub after: Option<SessionCursor>,
+}
+
+impl SessionQuery {
+    /// The sessions of `[end - range, end)`, unfiltered, from the newest.
+    pub fn new(range: TimeRange, end: DateTime<Utc>) -> Self {
+        Self {
+            range,
+            end,
+            user: None,
+            agent: None,
+            session: None,
+            after: None,
+        }
+    }
+
+    /// Only the sessions of `user`.
+    pub fn with_user(mut self, user: impl Into<String>) -> Self {
+        self.user = Some(user.into());
+        self
+    }
+
+    /// Only the sessions of the root agent `agent`.
+    pub fn with_agent(mut self, agent: impl Into<String>) -> Self {
+        self.agent = Some(agent.into());
+        self
+    }
+
+    /// Only the session `session`.
+    pub fn with_session(mut self, session: impl Into<String>) -> Self {
+        self.session = Some(session.into());
+        self
+    }
+
+    /// Only the sessions after `after` (the next page).
+    pub fn with_after(mut self, after: SessionCursor) -> Self {
+        self.after = Some(after);
+        self
+    }
 }
 
 /// The users of `[end - range, end)` to list.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct UserQuery {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct UserQuery {
     /// The window length.
-    pub(crate) range: TimeRange,
+    pub range: TimeRange,
     /// The window end (now).
-    pub(crate) end: DateTime<Utc>,
+    pub end: DateTime<Utc>,
     /// Only sessions of this root agent count.
-    pub(crate) agent: Option<String>,
+    pub agent: Option<String>,
+}
+
+impl UserQuery {
+    /// The users of `[end - range, end)`, counting every agent.
+    pub fn new(range: TimeRange, end: DateTime<Utc>) -> Self {
+        Self {
+            range,
+            end,
+            agent: None,
+        }
+    }
+
+    /// Only sessions of the root agent `agent` count.
+    pub fn with_agent(mut self, agent: impl Into<String>) -> Self {
+        self.agent = Some(agent.into());
+        self
+    }
 }
 
 /// One session's activity in the window.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SessionRow {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct SessionRow {
     /// The session id.
-    pub(crate) session_id: String,
+    pub session_id: String,
     /// The user of its earliest `INVOCATION_STARTING` row; empty when none.
-    pub(crate) user: String,
+    pub user: String,
     /// The root agent of that row; empty when none.
-    pub(crate) agent: String,
+    pub agent: String,
     /// The first activity row.
-    pub(crate) first: DateTime<Utc>,
+    pub first: DateTime<Utc>,
     /// The last activity row.
-    pub(crate) last: DateTime<Utc>,
+    pub last: DateTime<Utc>,
     /// Distinct non-empty invocation ids.
-    pub(crate) turns: u64,
+    pub turns: u64,
     /// `LLM_ERROR` and `TOOL_ERROR` rows and rows with status `ERROR`.
-    pub(crate) errors: u64,
+    pub errors: u64,
     /// Latest boolean scores that are `true`.
-    pub(crate) ups: u64,
+    pub ups: u64,
     /// Latest boolean scores that are `false`.
-    pub(crate) downs: u64,
+    pub downs: u64,
     /// The `LLM_RESPONSE` tokens per model.
-    pub(crate) tokens: Vec<(String, Usage)>,
+    pub tokens: Vec<(String, Usage)>,
+}
+
+impl SessionRow {
+    /// A session row with every field given.
+    #[allow(clippy::too_many_arguments)] // one argument per field
+    pub fn new(
+        session_id: String,
+        user: String,
+        agent: String,
+        first: DateTime<Utc>,
+        last: DateTime<Utc>,
+        turns: u64,
+        errors: u64,
+        ups: u64,
+        downs: u64,
+        tokens: Vec<(String, Usage)>,
+    ) -> Self {
+        Self {
+            session_id,
+            user,
+            agent,
+            first,
+            last,
+            turns,
+            errors,
+            ups,
+            downs,
+            tokens,
+        }
+    }
 }
 
 /// A page of sessions.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SessionPage {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct SessionPage {
     /// At most the query's cap of sessions, newest last activity first.
-    pub(crate) sessions: Vec<SessionRow>,
+    pub sessions: Vec<SessionRow>,
     /// More sessions follow the last one.
-    pub(crate) has_next: bool,
+    pub has_next: bool,
     /// The query hit its row cap: some sessions or models are left out.
-    pub(crate) truncated: bool,
+    pub truncated: bool,
+}
+
+impl SessionPage {
+    /// A page of `sessions`; `has_next` when more sessions follow, `truncated` when the row cap was hit.
+    pub fn new(sessions: Vec<SessionRow>, has_next: bool, truncated: bool) -> Self {
+        Self {
+            sessions,
+            has_next,
+            truncated,
+        }
+    }
 }
 
 /// One user's activity in the window.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct UserRow {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct UserRow {
     /// The user id; empty for sessions without one.
-    pub(crate) user: String,
+    pub user: String,
     /// Distinct sessions.
-    pub(crate) sessions: u64,
+    pub sessions: u64,
     /// Turns over those sessions.
-    pub(crate) turns: u64,
+    pub turns: u64,
     /// Errors over those sessions.
-    pub(crate) errors: u64,
+    pub errors: u64,
     /// Latest boolean scores that are `true`.
-    pub(crate) ups: u64,
+    pub ups: u64,
     /// Latest boolean scores that are `false`.
-    pub(crate) downs: u64,
+    pub downs: u64,
     /// The last activity of those sessions.
-    pub(crate) last: DateTime<Utc>,
+    pub last: DateTime<Utc>,
     /// The `LLM_RESPONSE` tokens per model.
-    pub(crate) tokens: Vec<(String, Usage)>,
+    pub tokens: Vec<(String, Usage)>,
+}
+
+impl UserRow {
+    /// A user row with every field given.
+    #[allow(clippy::too_many_arguments)] // one argument per field
+    pub fn new(
+        user: String,
+        sessions: u64,
+        turns: u64,
+        errors: u64,
+        ups: u64,
+        downs: u64,
+        last: DateTime<Utc>,
+        tokens: Vec<(String, Usage)>,
+    ) -> Self {
+        Self {
+            user,
+            sessions,
+            turns,
+            errors,
+            ups,
+            downs,
+            last,
+            tokens,
+        }
+    }
 }
 
 /// A page of users.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct UserPage {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct UserPage {
     /// At most the query's cap of users, most recent last activity first.
-    pub(crate) users: Vec<UserRow>,
+    pub users: Vec<UserRow>,
     /// More users matched.
-    pub(crate) more: bool,
+    pub more: bool,
     /// The query hit its row cap: some users or models are left out.
-    pub(crate) truncated: bool,
+    pub truncated: bool,
 }
 
-impl UsageSource {
+impl UserPage {
+    /// A page of `users`; `more` when more users matched, `truncated` when the row cap was hit.
+    pub fn new(users: Vec<UserRow>, more: bool, truncated: bool) -> Self {
+        Self {
+            users,
+            more,
+            truncated,
+        }
+    }
+}
+
+impl AnalyticsSource {
     /// The sessions of `q`, newest last activity first: at most `cap` (the pages pass
     /// [`SESSION_CAP`]), with whether more follow, reading at most `row_cap` session × model
     /// rows.
-    pub(crate) async fn sessions(
+    pub async fn sessions(
         &self,
         q: &SessionQuery,
         cap: usize,
@@ -272,7 +422,7 @@ impl UsageSource {
 
     /// The users of `q`, most recent last activity first: at most `cap` (the pages pass
     /// [`USER_CAP`]), with whether more matched, reading at most `row_cap` user × model rows.
-    pub(crate) async fn users(
+    pub async fn users(
         &self,
         q: &UserQuery,
         cap: usize,
@@ -319,12 +469,12 @@ impl UsageSource {
 
 /// The `input`, `cached`, `output` and `reasoning` cells of `row`.
 fn usage_of(row: &Map<String, Value>) -> Usage {
-    Usage {
-        input: count(row, "input"),
-        cached: count(row, "cached"),
-        output: count(row, "output"),
-        reasoning: count(row, "reasoning"),
-    }
+    Usage::new(
+        count(row, "input"),
+        count(row, "cached"),
+        count(row, "output"),
+        count(row, "reasoning"),
+    )
 }
 
 /// Adds the tokens of `row`'s `model` (none when NULL) to `tokens`, summing a model seen
@@ -484,41 +634,80 @@ ORDER BY last DESC, user_id, model"
 }
 
 /// The latest score of one (name, source) on a turn.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct TurnScore {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct TurnScore {
     /// The score name.
-    pub(crate) name: String,
+    pub name: String,
     /// `attributes.source` (empty when none).
-    pub(crate) source: String,
+    pub source: String,
     /// The value as text.
-    pub(crate) value: String,
+    pub value: String,
+}
+
+impl TurnScore {
+    /// The latest score `name` from `source`, valued `value`.
+    pub fn new(name: String, source: String, value: String) -> Self {
+        Self {
+            name,
+            source,
+            value,
+        }
+    }
 }
 
 /// The metrics of one turn (invocation) of a session in the window.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct TurnRow {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct TurnRow {
     /// The invocation id.
-    pub(crate) invocation_id: String,
+    pub invocation_id: String,
     /// A trace id of its rows.
-    pub(crate) trace_id: Option<String>,
+    pub trace_id: Option<String>,
     /// Its first activity row.
-    pub(crate) start: DateTime<Utc>,
+    pub start: DateTime<Utc>,
     /// Its `INVOCATION_COMPLETED` row.
-    pub(crate) end: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
     /// Its error rows.
-    pub(crate) errors: u64,
+    pub errors: u64,
     /// The tools it called, distinct, in first-call order.
-    pub(crate) tools: Vec<String>,
+    pub tools: Vec<String>,
     /// Its `LLM_RESPONSE` tokens per model.
-    pub(crate) tokens: Vec<(String, Usage)>,
+    pub tokens: Vec<(String, Usage)>,
     /// The latest score per (name, source).
-    pub(crate) scores: Vec<TurnScore>,
+    pub scores: Vec<TurnScore>,
 }
 
-impl UsageSource {
+impl TurnRow {
+    /// A turn row with every field given.
+    #[allow(clippy::too_many_arguments)] // one argument per field
+    pub fn new(
+        invocation_id: String,
+        trace_id: Option<String>,
+        start: DateTime<Utc>,
+        end: Option<DateTime<Utc>>,
+        errors: u64,
+        tools: Vec<String>,
+        tokens: Vec<(String, Usage)>,
+        scores: Vec<TurnScore>,
+    ) -> Self {
+        Self {
+            invocation_id,
+            trace_id,
+            start,
+            end,
+            errors,
+            tools,
+            tokens,
+            scores,
+        }
+    }
+}
+
+impl AnalyticsSource {
     /// The turns of session `id` in `[start, end)`, oldest first: at most [`TURN_CAP`] + 1,
     /// so the caller can tell whether the cap was hit.
-    pub(crate) async fn session_turns(
+    pub async fn session_turns(
         &self,
         id: &str,
         start: DateTime<Utc>,
@@ -543,11 +732,8 @@ fn array<'a>(row: &'a Map<String, Value>, key: &str) -> &'a [Value] {
 /// A row of [`session_turns_sql`]: the tools deduplicated in first-call order (empty names
 /// dropped), the token and score structs read from their arrays.
 fn turn_row(row: &Map<String, Value>) -> Result<TurnRow, SourceError> {
-    let invocation_id = text(row, "invocation_id").ok_or_else(|| SourceError::BigQuery {
-        status: None,
-        reason: None,
-        detail: "row without a valid invocation_id".to_owned(),
-    })?;
+    let invocation_id = text(row, "invocation_id")
+        .ok_or_else(|| SourceError::bigquery(None, None, "row without a valid invocation_id"))?;
     let mut tools: Vec<String> = Vec::new();
     for tool in array(row, "tools").iter().filter_map(Value::as_str) {
         if !tool.is_empty() && !tools.iter().any(|t| t == tool) {
@@ -659,167 +845,6 @@ ORDER BY start, invocation_id"
     )
 }
 
-/// The model cells of a test row: `(model, [input, cached, output, reasoning])`, or `None` for
-/// a row without model calls (NULL cells).
-#[cfg(test)]
-pub(crate) type ModelCells<'a> = Option<(&'a str, [u64; 4])>;
-
-/// A TIMESTAMP cell as `jobs.query` sends it (microseconds since the epoch).
-#[cfg(test)]
-pub(crate) fn ts_cell(t: DateTime<Utc>) -> Value {
-    Value::from(t.timestamp_micros().to_string())
-}
-
-/// The model, input, cached, output and reasoning cells of `model`.
-#[cfg(test)]
-fn model_cells(model: ModelCells<'_>) -> Vec<Value> {
-    match model {
-        Some((name, counts)) => std::iter::once(Value::from(name))
-            .chain(counts.iter().map(|n| Value::from(n.to_string())))
-            .collect(),
-        None => vec![Value::Null; 5],
-    }
-}
-
-/// The cells of one [`session_rows_sql`] row; `counts` is `[turns, errors, ups, downs]`.
-#[cfg(test)]
-pub(crate) fn session_cells(
-    id: &str,
-    user: &str,
-    agent: &str,
-    first: DateTime<Utc>,
-    last: DateTime<Utc>,
-    counts: [u64; 4],
-    model: ModelCells<'_>,
-) -> Vec<Value> {
-    let mut cells = vec![
-        Value::from(id),
-        Value::from(user),
-        Value::from(agent),
-        ts_cell(first),
-        ts_cell(last),
-    ];
-    cells.extend(counts.iter().map(|n| Value::from(n.to_string())));
-    cells.extend(model_cells(model));
-    cells
-}
-
-/// The cells of one [`user_rows_sql`] row (`None` is a NULL user); `counts` is
-/// `[sessions, turns, errors, ups, downs]`.
-#[cfg(test)]
-pub(crate) fn user_cells(
-    user: Option<&str>,
-    counts: [u64; 5],
-    last: DateTime<Utc>,
-    model: ModelCells<'_>,
-) -> Vec<Value> {
-    let mut cells = vec![user.map_or(Value::Null, Value::from)];
-    cells.extend(counts.iter().map(|n| Value::from(n.to_string())));
-    cells.push(ts_cell(last));
-    cells.extend(model_cells(model));
-    cells
-}
-
-/// The schema of [`session_turns_sql`]: `tools` is `REPEATED` and `tokens` and `scores` are
-/// `REPEATED RECORD`s.
-#[cfg(test)]
-pub(crate) fn turn_reply(rows: Vec<Vec<Value>>) -> Result<(u16, String), String> {
-    use serde_json::json;
-    let field = |name: &str, ty: &str| json!({ "name": name, "type": ty, "mode": "NULLABLE" });
-    let schema = vec![
-        field("invocation_id", "STRING"),
-        field("trace_id", "STRING"),
-        field("start", "TIMESTAMP"),
-        field("completed", "TIMESTAMP"),
-        field("errors", "INT64"),
-        json!({ "name": "tools", "type": "STRING", "mode": "REPEATED" }),
-        json!({ "name": "tokens", "type": "RECORD", "mode": "REPEATED", "fields": [
-            field("model", "STRING"),
-            field("input", "INT64"),
-            field("cached", "INT64"),
-            field("output", "INT64"),
-            field("reasoning", "INT64"),
-        ] }),
-        json!({ "name": "scores", "type": "RECORD", "mode": "REPEATED", "fields": [
-            field("name", "STRING"),
-            field("source", "STRING"),
-            field("value", "STRING"),
-        ] }),
-    ];
-    crate::traces::test_http::schema_reply(schema, rows, false)
-}
-
-/// The cells of one [`session_turns_sql`] row.
-#[cfg(test)]
-#[derive(Debug, Clone)]
-pub(crate) struct TurnCells<'a> {
-    /// The invocation id.
-    pub(crate) invocation_id: &'a str,
-    /// The trace id (`None` is NULL).
-    pub(crate) trace_id: Option<&'a str>,
-    /// The turn's first activity row.
-    pub(crate) start: DateTime<Utc>,
-    /// The `INVOCATION_COMPLETED` time (`None` is NULL).
-    pub(crate) end: Option<DateTime<Utc>>,
-    /// The error count.
-    pub(crate) errors: u64,
-    /// The `TOOL_STARTING` tool names, in call order.
-    pub(crate) tools: &'a [&'a str],
-    /// `(model, [input, cached, output, reasoning])` per model.
-    pub(crate) tokens: &'a [(&'a str, [u64; 4])],
-    /// `(name, source, value)` per latest score.
-    pub(crate) scores: &'a [(&'a str, &'a str, &'a str)],
-}
-
-#[cfg(test)]
-impl<'a> TurnCells<'a> {
-    /// Invocation `invocation_id` starting at `start`, with no trace, no completion, no errors,
-    /// no tools, no tokens and no scores.
-    pub(crate) fn new(invocation_id: &'a str, start: DateTime<Utc>) -> Self {
-        Self {
-            invocation_id,
-            trace_id: None,
-            start,
-            end: None,
-            errors: 0,
-            tools: &[],
-            tokens: &[],
-            scores: &[],
-        }
-    }
-
-    /// The row's cells.
-    pub(crate) fn cells(&self) -> Vec<Value> {
-        use crate::traces::test_http::{record, repeated};
-        vec![
-            Value::from(self.invocation_id),
-            self.trace_id.map_or(Value::Null, Value::from),
-            ts_cell(self.start),
-            self.end.map_or(Value::Null, ts_cell),
-            Value::from(self.errors.to_string()),
-            repeated(self.tools.iter().map(|t| Value::from(*t)).collect()),
-            repeated(
-                self.tokens
-                    .iter()
-                    .map(|(model, counts)| record(model_cells(Some((model, *counts)))))
-                    .collect(),
-            ),
-            repeated(
-                self.scores
-                    .iter()
-                    .map(|(name, source, value)| {
-                        record(vec![
-                            Value::from(*name),
-                            Value::from(*source),
-                            Value::from(*value),
-                        ])
-                    })
-                    .collect(),
-            ),
-        ]
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -830,8 +855,11 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::traces::BigQueryTable;
-    use crate::traces::test_http::{FakeHttp, param_value, reply};
+    use crate::BigQueryTable;
+    use crate::testutil::{
+        FakeHttp, SESSION_FIELDS, TurnCells, USER_FIELDS, param_value, reply, session_cells,
+        turn_reply, user_cells,
+    };
     const TURNS_SQL: &str = r"WITH inv AS (
   SELECT invocation_id, MIN(timestamp) AS start, ANY_VALUE(NULLIF(trace_id, '')) AS trace_id,
     MAX(IF(event_type = 'INVOCATION_COMPLETED', timestamp, NULL)) AS completed,
@@ -1077,8 +1105,8 @@ ORDER BY last DESC, user_id, model";
         end() - TimeDelta::seconds(secs) - TimeDelta::microseconds(250)
     }
 
-    fn source(fake: &Arc<FakeHttp>) -> UsageSource {
-        UsageSource::with_client(
+    fn source(fake: &Arc<FakeHttp>) -> AnalyticsSource {
+        AnalyticsSource::new(
             BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
             "billing-proj",
             BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
@@ -1098,12 +1126,7 @@ ORDER BY last DESC, user_id, model";
     }
 
     fn usage(input: u64, cached: u64, output: u64, reasoning: u64) -> Usage {
-        Usage {
-            input,
-            cached,
-            output,
-            reasoning,
-        }
+        Usage::new(input, cached, output, reasoning)
     }
 
     #[test]
@@ -1524,11 +1547,7 @@ ORDER BY last DESC, user_id, model";
             .unwrap_err();
         assert_eq!(
             err,
-            SourceError::BigQuery {
-                status: Some(500),
-                reason: Some("backendError".into()),
-                detail: "backend error".into()
-            }
+            SourceError::bigquery(Some(500), Some("backendError".into()), "backend error")
         );
     }
 
@@ -1630,11 +1649,7 @@ ORDER BY last DESC, user_id, model";
             .unwrap_err();
         assert_eq!(
             err,
-            SourceError::BigQuery {
-                status: None,
-                reason: None,
-                detail: "row without a valid invocation_id".into()
-            }
+            SourceError::bigquery(None, None, "row without a valid invocation_id")
         );
     }
 }

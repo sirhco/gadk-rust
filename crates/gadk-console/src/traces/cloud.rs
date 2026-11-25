@@ -432,8 +432,8 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
-    use crate::traces::test_http::FakeHttp;
     use crate::traces::{EXCERPT_LIMIT, TimeRange};
+    use gadk_analytics::testutil::FakeHttp;
 
     /// Fixed credentials headers, including a stale quota project that must be replaced.
     struct FixedAuth;

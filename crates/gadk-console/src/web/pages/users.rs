@@ -15,6 +15,7 @@
 //! The users page: the users of a window with their sessions, turns, tokens, cost, errors and
 //! thumbs.
 
+use gadk_analytics::sessions::{MAX_ID_LEN, USER_CAP, UserPage, UserQuery};
 use maud::{Markup, html};
 
 use super::cost::{NO_PRICES, PARTIAL_NOTE};
@@ -22,7 +23,6 @@ use super::layout::{Nav, page};
 use super::millis;
 use super::sessions::{TRUNCATED, totals, user_text};
 use crate::prices::{PriceTable, thousands};
-use crate::sessions::{MAX_ID_LEN, USER_CAP, UserPage, UserQuery};
 use crate::traces::TimeRange;
 use crate::url::percent_encode;
 use crate::web::sessions::users_csv_link;
@@ -126,30 +126,25 @@ mod tests {
 
     use super::*;
 
-    fn row(user: &str) -> crate::sessions::UserRow {
-        crate::sessions::UserRow {
-            user: user.to_owned(),
-            sessions: 1,
-            turns: 1,
-            errors: 0,
-            ups: 0,
-            downs: 0,
-            last: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
-            tokens: Vec::new(),
-        }
+    fn row(user: &str) -> gadk_analytics::sessions::UserRow {
+        gadk_analytics::sessions::UserRow::new(
+            user.to_owned(),
+            1,
+            1,
+            0,
+            0,
+            0,
+            Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+            Vec::new(),
+        )
     }
 
     fn html_for(users: &[&str]) -> String {
-        let q = UserQuery {
-            range: TimeRange::ALL[0],
-            end: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
-            agent: None,
-        };
-        let p = UserPage {
-            users: users.iter().map(|u| row(u)).collect(),
-            more: false,
-            truncated: false,
-        };
+        let q = UserQuery::new(
+            TimeRange::ALL[0],
+            Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+        );
+        let p = UserPage::new(users.iter().map(|u| row(u)).collect(), false, false);
         render(&q, &p, None).into_string()
     }
 

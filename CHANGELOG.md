@@ -7,6 +7,25 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- New crate `gadk-analytics`: the console's BigQuery queries over the agent-analytics table as a
+  public, documented library. `AnalyticsSource::new(client, billing_project, table,
+  max_bytes_billed)` runs them: `usage` (`breakdown`, `trend`, `top_traces`), `sessions`
+  (`sessions`, `users`, `session_turns`), `prompts` (`version_metrics`, `version_feedback`,
+  `versions_for_invocations`), `scores` (`trace_scores`, `trace_root`, and the writes
+  `insert_score` and `insert_scores`, each one DML statement billed at least 10 MiB) and
+  `review` (`pending`, `next_pending`). `cost` prices token counts with a
+  `gadk_eval_monitor::PriceTable` (re-exported as `cost::PriceTable` and `cost::ModelPrice`).
+  The result types derive `serde::Serialize` (timestamps as RFC 3339), new types are `#[non_exhaustive]` with constructors, and feature `test-util` adds
+  `testutil` (a scripted fake HTTP client and row fixtures). The SQL is unchanged.
+- `gadk-console`: `gadk_console::traces::{BigQueryTable, SourceError, Service, TimeRange,
+  TraceId}` are now re-exports of the `gadk_analytics` types, which gain `serde::Serialize`
+  (`TimeRange` as `"24h"`, `Service` as `"Cloud Trace"`, `TraceId` as its string, `SourceError`
+  as `{"kind", "message", "hint"}`);
+  `SourceError::bigquery` builds the `#[non_exhaustive]` `BigQuery` variant. The console uses
+  `gadk-analytics` for its queries; its pages, CSVs, routes and messages are unchanged.
+
 ## [0.5.17] - 2026-11-25
 
 ### Added

@@ -1,0 +1,36 @@
+[package]
+name = "gadk-analytics"
+description = "Typed BigQuery queries over the gadk agent-analytics table: usage, sessions, prompt versions, scores and review queues"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# `testutil`: the scripted fake HTTP client and the row fixtures the query tests (here and in
+# gadk-console) use.
+test-util = ["dep:gadk-model", "dep:bytes", "dep:futures", "dep:http"]
+
+[dependencies]
+gadk-bigquery = { workspace = true }
+gadk-eval-monitor = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# `tokio::try_join!` runs the two version-metric queries concurrently.
+tokio = { workspace = true }
+gadk-model = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Unit tests and doc tests get `testutil` without `--all-features`.
+gadk-analytics = { path = ".", features = ["test-util"] }
+pretty_assertions = { workspace = true }

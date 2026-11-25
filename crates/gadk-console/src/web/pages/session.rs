@@ -16,6 +16,7 @@
 
 use std::collections::HashMap;
 
+use gadk_analytics::sessions::{SessionRow, TURN_CAP, TurnRow};
 use gadk_eval_monitor::ProductionRun;
 use maud::{Markup, html};
 
@@ -25,7 +26,6 @@ use super::layout::{Nav, page};
 use super::millis;
 use super::sessions::{totals, user_text};
 use crate::prices::{PriceTable, thousands};
-use crate::sessions::{SessionRow, TURN_CAP, TurnRow};
 use crate::traces::{TimeRange, TraceId};
 use crate::url::percent_encode;
 use crate::web::sessions::session_link;

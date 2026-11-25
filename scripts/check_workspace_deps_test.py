@@ -481,17 +481,39 @@ class EdgeTest(unittest.TestCase):
                          {"gadk-agent", "gadk-cloudtrace", "gadk-engine", "gadk-eval",
                           "gadk-gemini", "gadk-model", "gadk-platform", "gadk-prompts",
                           "gadk-prompts-cli"})
-        # Only the console (its Evals pages) depends on it; the façade does not.
+        # Only gadk-analytics (`cost_of` prices with its PriceTable) and the console (its Evals
+        # pages) depend on it; the façade does not.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-eval-monitor" in deps],
-                         ["gadk-console"])
+                         ["gadk-analytics", "gadk-console"])
         # The `experiment` command builds LlmAgents, so it may depend on the engine.
         self.assertIn("gadk-eval-monitor", cwd.ENGINE_DEPENDENTS)
 
     def test_console_may_depend_on_cloudtrace_eval_eval_monitor_and_bigquery(self):
         self.assertEqual(cwd.ALLOWED["gadk-console"],
                          {"gadk-cloudtrace", "gadk-model", "gadk-prompts", "gadk-prompts-cli",
-                          "gadk-eval", "gadk-eval-monitor", "gadk-bigquery"})
+                          "gadk-eval", "gadk-eval-monitor", "gadk-bigquery", "gadk-analytics"})
         self.assertEqual(cwd.check(self.repo), [])
+
+    def test_analytics_edges_are_exactly_bigquery_eval_monitor_and_optional_model(self):
+        self.assertEqual(cwd.ALLOWED["gadk-analytics"],
+                         {"gadk-bigquery", "gadk-eval-monitor", "gadk-model"})
+        self.assertIn(("gadk-analytics", "gadk-model"), cwd.OPTIONAL)
+        self.assertNotIn("gadk-analytics", cwd.ENGINE_DEPENDENTS)
+        # Only the console depends on it.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-analytics" in deps],
+                         ["gadk-console"])
+        self.assertEqual(cwd.check(self.repo), [])
+
+    def test_analytics_model_edge_must_be_optional(self):
+        self.edit("gadk-analytics", "gadk-model = { workspace = true, optional = true }",
+                  "gadk-model = { workspace = true }")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-analytics -> gadk-model must be optional = true" in e for e in errs), errs)
+
+    def test_analytics_missing_eval_monitor_edge_is_rejected(self):
+        self.edit("gadk-analytics", "gadk-eval-monitor = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-analytics -> gadk-eval-monitor is missing" in e for e in errs), errs)
 
     def test_cloudtrace_depends_only_on_model(self):
         self.assertEqual(cwd.ALLOWED["gadk-cloudtrace"], {"gadk-model"})
@@ -527,7 +549,7 @@ class EdgeTest(unittest.TestCase):
 
     def test_facade_bigquery_edge_is_optional(self):
         self.assertEqual(sorted(c for c, deps in cwd.ALLOWED.items() if "gadk-bigquery" in deps),
-                         ["gadk", "gadk-console"])
+                         ["gadk", "gadk-analytics", "gadk-console"])
         self.assertNotIn(("gadk-console", "gadk-bigquery"), cwd.OPTIONAL)
         self.assertIn(("gadk", "gadk-bigquery"), cwd.OPTIONAL)
         self.edit("gadk", "gadk-bigquery = { workspace = true, optional = true }",

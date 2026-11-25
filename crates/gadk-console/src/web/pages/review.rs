@@ -14,11 +14,12 @@
 
 //! The review page: the queue's filter form and its pending traces.
 
+use gadk_analytics::review::{PendingTrace, REVIEW_CAP};
 use maud::{Markup, html};
 
 use super::layout::{Nav, page};
 use super::millis;
-use crate::review::{PendingTrace, REVIEW_CAP, ReviewQueue, Target};
+use crate::review::{ReviewQueue, Target};
 use crate::rubrics::Rubrics;
 use crate::traces::TimeRange;
 use crate::web::review::review_link;

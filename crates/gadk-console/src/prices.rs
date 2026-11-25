@@ -18,34 +18,17 @@
 //! are four counts ([`Usage`]): input (prompt plus tool-use prompt, cached tokens included),
 //! cached input, output (without reasoning) and reasoning. The price-file rules, [`ModelPrice`]
 //! and the cost formula are gadk-eval-monitor's ([`gadk_eval_monitor::PriceTable`],
-//! [`gadk_eval_monitor::TokenUsage`]); this module wraps them with the console's error type.
+//! [`gadk_eval_monitor::TokenUsage`]), and [`Usage`], [`CostSum`] and the cost of a call are
+//! gadk-analytics' ([`gadk_analytics::cost`]); this module wraps them with the console's error
+//! type.
 
-use std::collections::BTreeMap;
-use std::ops::AddAssign;
 use std::path::Path;
 
+use gadk_analytics::cost::{CostSum, Usage};
 use gadk_eval::{RunMetrics, TokenCounts};
 pub use gadk_eval_monitor::ModelPrice;
-use gadk_eval_monitor::TokenUsage;
 
 use crate::ConsoleError;
-
-/// The span label naming a span's operation.
-pub(crate) const LABEL_OPERATION: &str = "gen_ai.operation.name";
-/// The operation of a model-call span.
-pub(crate) const OP_GENERATE_CONTENT: &str = "generate_content";
-/// The span label naming the requested model.
-pub(crate) const LABEL_MODEL: &str = "gen_ai.request.model";
-/// Input tokens: prompt plus tool-use prompt.
-pub(crate) const LABEL_INPUT: &str = "gen_ai.usage.input_tokens";
-/// Output tokens: candidates plus reasoning.
-pub(crate) const LABEL_OUTPUT: &str = "gen_ai.usage.output_tokens";
-/// Cached input tokens.
-pub(crate) const LABEL_CACHED: &str = "gen_ai.usage.cache_read.input_tokens";
-/// Reasoning (thinking) tokens.
-pub(crate) const LABEL_REASONING: &str = "gen_ai.usage.reasoning.output_tokens";
-/// The model shown for a call whose model is not known.
-pub(crate) const UNKNOWN_MODEL: &str = "(unknown)";
 
 /// Model prices from a price file: a YAML list of
 /// `{model, input, output, cached_input?, reasoning?}`, prices in USD per 1,000,000 tokens.
@@ -83,78 +66,23 @@ impl PriceTable {
     pub fn price_for(&self, model: &str) -> Option<&ModelPrice> {
         self.inner.price_for(model)
     }
-}
 
-/// The tokens of one model call (or a sum of calls).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct Usage {
-    /// Input tokens (prompt plus tool-use prompt), cached ones included.
-    pub(crate) input: u64,
-    /// Cached input tokens.
-    pub(crate) cached: u64,
-    /// Output tokens, without reasoning.
-    pub(crate) output: u64,
-    /// Reasoning (thinking) tokens.
-    pub(crate) reasoning: u64,
-}
-
-impl Usage {
-    /// The usage of a model-call span from its labels: input = `gen_ai.usage.input_tokens`,
-    /// cached = `gen_ai.usage.cache_read.input_tokens`, reasoning =
-    /// `gen_ai.usage.reasoning.output_tokens`, output = `gen_ai.usage.output_tokens` minus
-    /// reasoning (floored at 0). A missing label, or one that is not a count, is 0.
-    pub(crate) fn from_labels(labels: &BTreeMap<String, String>) -> Self {
-        let count = |key: &str| {
-            labels
-                .get(key)
-                .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(0)
-        };
-        let reasoning = count(LABEL_REASONING);
-        Self {
-            input: count(LABEL_INPUT),
-            cached: count(LABEL_CACHED),
-            output: count(LABEL_OUTPUT).saturating_sub(reasoning),
-            reasoning,
-        }
-    }
-
-    /// The cost in USD: `(input − cached) × input + cached × cached_input + output × output +
-    /// reasoning × reasoning`, prices per 1,000,000 tokens (`input − cached` floors at 0).
-    pub(crate) fn cost(&self, p: &ModelPrice) -> f64 {
-        TokenUsage::from(*self).cost(p)
+    /// The gadk-eval-monitor price table this wraps.
+    pub(crate) fn inner(&self) -> &gadk_eval_monitor::PriceTable {
+        &self.inner
     }
 }
 
-impl From<Usage> for TokenUsage {
-    fn from(u: Usage) -> Self {
-        TokenUsage::new(u.input, u.cached, u.output, u.reasoning)
-    }
-}
-
-impl AddAssign for Usage {
-    fn add_assign(&mut self, other: Self) {
-        self.input = self.input.saturating_add(other.input);
-        self.cached = self.cached.saturating_add(other.cached);
-        self.output = self.output.saturating_add(other.output);
-        self.reasoning = self.reasoning.saturating_add(other.reasoning);
-    }
-}
-
-/// The cost of `usage` on `model`; `None` without a price file or a price for the model.
+/// The cost of `usage` on `model`; `None` without a price file or a price for the model
+/// ([`gadk_analytics::cost::cost_of`] over the wrapped table).
 pub(crate) fn cost_of(prices: Option<&PriceTable>, model: &str, usage: &Usage) -> Option<f64> {
-    prices?.price_for(model).map(|p| usage.cost(p))
+    gadk_analytics::cost::cost_of(prices.map(PriceTable::inner), model, usage)
 }
 
 /// The usage of an eval run's token counts for one model: the four counts copied as they are
 /// (eval runs count output without reasoning already).
 pub(crate) fn usage_of(t: &TokenCounts) -> Usage {
-    Usage {
-        input: t.input,
-        cached: t.cached,
-        output: t.output,
-        reasoning: t.reasoning,
-    }
+    Usage::new(t.input, t.cached, t.output, t.reasoning)
 }
 
 /// The cost of eval runs: every model of every run in `runs`, priced with [`cost_of`].
@@ -184,50 +112,8 @@ pub(crate) fn thousands(n: u64) -> String {
     out
 }
 
-/// A sum of call costs that remembers whether some calls had no price.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct CostSum {
-    /// The sum of the priced calls' costs, in USD.
-    pub(crate) usd: f64,
-    /// Whether any call had a price.
-    pub(crate) priced: bool,
-    /// Whether any call had no price.
-    pub(crate) unpriced: bool,
-}
-
-impl CostSum {
-    /// Adds one call's cost (`None`: the call had no price).
-    pub(crate) fn add(&mut self, cost: Option<f64>) {
-        match cost {
-            Some(c) => {
-                self.usd += c;
-                self.priced = true;
-            }
-            None => self.unpriced = true,
-        }
-    }
-
-    /// Whether the sum leaves out unpriced calls while covering priced ones.
-    pub(crate) fn partial(&self) -> bool {
-        self.priced && self.unpriced
-    }
-
-    /// `$x` (six decimals), `$x*` when it leaves out unpriced calls, `—` when no call had a price.
-    pub(crate) fn text(&self) -> String {
-        if !self.priced {
-            "—".to_owned()
-        } else if self.unpriced {
-            format!("${:.6}*", self.usd)
-        } else {
-            format!("${:.6}", self.usd)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
 
     const PRICES: &str = "\
@@ -339,70 +225,10 @@ mod tests {
             "{err}"
         );
     }
-
-    fn labels(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-            .collect()
-    }
-
-    #[test]
-    fn usage_from_labels_takes_reasoning_out_of_output() {
-        let u = Usage::from_labels(&labels(&[
-            (LABEL_INPUT, "120"),
-            (LABEL_OUTPUT, "50"),
-            (LABEL_CACHED, "20"),
-            (LABEL_REASONING, "30"),
-        ]));
-        assert_eq!(
-            u,
-            Usage {
-                input: 120,
-                cached: 20,
-                output: 20,
-                reasoning: 30
-            }
-        );
-        let floored = Usage::from_labels(&labels(&[(LABEL_OUTPUT, "10"), (LABEL_REASONING, "30")]));
-        assert_eq!(floored.output, 0, "output minus reasoning floors at 0");
-        assert_eq!(Usage::from_labels(&BTreeMap::new()), Usage::default());
-        assert_eq!(
-            Usage::from_labels(&labels(&[(LABEL_INPUT, "x")])),
-            Usage::default(),
-            "a label that is not a count is 0"
-        );
-    }
-
-    #[test]
-    fn cost_prices_each_count_per_million_tokens() {
-        let u = Usage {
-            input: 1_000_000,
-            cached: 200_000,
-            output: 500_000,
-            reasoning: 100_000,
-        };
-        let p = ModelPrice::new(0.30, 2.50).with_cached_input(0.075);
-        assert!((u.cost(&p) - 1.755).abs() < 1e-9, "{}", u.cost(&p));
-        // Defaults (cached = input, reasoning = output) and the uncached floor.
-        let u = Usage {
-            input: 100,
-            cached: 300,
-            output: 10,
-            reasoning: 5,
-        };
-        assert!((u.cost(&ModelPrice::new(1.0, 4.0)) - 0.000_36).abs() < 1e-12);
-    }
-
     #[test]
     fn cost_of_and_texts() {
         let t = PriceTable::from_yaml(PRICES).unwrap();
-        let u = Usage {
-            input: 1200,
-            cached: 200,
-            output: 300,
-            reasoning: 50,
-        };
+        let u = Usage::new(1200, 200, 300, 50);
         assert_eq!(
             cost_text(cost_of(Some(&t), "gemini-3.8-flash", &u)),
             "$0.001190"
@@ -424,12 +250,7 @@ mod tests {
     fn usage_of_copies_the_counts() {
         assert_eq!(
             usage_of(&TokenCounts::new(1200, 200, 300, 50)),
-            Usage {
-                input: 1200,
-                cached: 200,
-                output: 300,
-                reasoning: 50
-            }
+            Usage::new(1200, 200, 300, 50)
         );
     }
 
@@ -455,22 +276,5 @@ mod tests {
         assert_eq!(runs_cost(Some(&t), &[run(&["claude"])]).text(), "—");
         assert_eq!(runs_cost(None, &[run(&["gemini-3.8-flash"])]).text(), "—");
         assert_eq!(runs_cost(Some(&t), &[]).text(), "—");
-    }
-
-    #[test]
-    fn cost_sums_mark_unpriced_calls() {
-        let mut s = CostSum::default();
-        assert_eq!(s.text(), "—");
-        s.add(None);
-        assert_eq!(s.text(), "—");
-        assert!(!s.partial());
-        s.add(Some(0.5));
-        assert_eq!(s.text(), "$0.500000*");
-        assert!(s.partial());
-        let mut all = CostSum::default();
-        all.add(Some(0.25));
-        all.add(Some(0.25));
-        assert_eq!(all.text(), "$0.500000");
-        assert!(!all.partial());
     }
 }
