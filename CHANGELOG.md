@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.16] - 2026-11-24
+
 ### Added
 
 - `gadk-console`: review rubrics. `--rubrics <file>` loads a YAML list of 1-20 rubrics, each a
@@ -878,7 +880,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.15...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.16...HEAD
+[0.5.16]: https://github.com/sirhco/gadk-rust/compare/v0.5.15...v0.5.16
 [0.5.15]: https://github.com/sirhco/gadk-rust/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/sirhco/gadk-rust/compare/v0.5.13...v0.5.14
 [0.5.13]: https://github.com/sirhco/gadk-rust/compare/v0.5.12...v0.5.13
