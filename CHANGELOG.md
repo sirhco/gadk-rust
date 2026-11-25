@@ -7,6 +7,13 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `examples/console-dashboard`: a dependency-free example dashboard (`index.html`, `app.js`,
+  `style.css`) on another origin that reads the `gadk-console` JSON API through `--api-origin`:
+  usage totals, a trend chart, top traces, sessions with their turns, users and the review
+  queue. A `gadk-console` unit test checks that every API path it calls is a console route.
+
 ## [0.5.19] - 2026-11-25
 
 ### Added
