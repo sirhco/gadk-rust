@@ -7,12 +7,14 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.20] - 2026-11-25
+
 ### Added
 
 - `examples/console-dashboard`: a dependency-free example dashboard (`index.html`, `app.js`,
   `style.css`) on another origin that reads the `gadk-console` JSON API through `--api-origin`:
   usage totals, a trend chart, top traces, sessions with their turns, users and the review
-  queue. A `gadk-console` unit test checks that every API path it calls is a console route.
+  queue. A `gadk-console` integration test checks that every API path it calls is a console route.
 
 ## [0.5.19] - 2026-11-25
 
@@ -948,7 +950,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.19...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.20...HEAD
+[0.5.20]: https://github.com/sirhco/gadk-rust/compare/v0.5.19...v0.5.20
 [0.5.19]: https://github.com/sirhco/gadk-rust/compare/v0.5.18...v0.5.19
 [0.5.18]: https://github.com/sirhco/gadk-rust/compare/v0.5.17...v0.5.18
 [0.5.17]: https://github.com/sirhco/gadk-rust/compare/v0.5.16...v0.5.17
