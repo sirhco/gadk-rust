@@ -256,7 +256,7 @@ fn review_bar(bar: &ReviewBar) -> Markup {
     html! {
         div class="banner info" {
             p {
-                "Reviewing " strong { (bar.queue.score) }
+                "Reviewing " strong { (bar.queue.target.name()) }
                 " · " a href=(next_link(&bar.queue, &bar.cursor)) { "Skip →" }
                 " · " a href={ "/review?" (qs) } { "Back to queue" }
             }
@@ -269,7 +269,7 @@ fn review_bar(bar: &ReviewBar) -> Markup {
 fn review_fields(bar: &ReviewBar) -> Markup {
     let q = &bar.queue;
     html! {
-        input type="hidden" name="q_score" value=(q.score);
+        input type="hidden" name="q_score" value=(q.target.name());
         input type="hidden" name="q_prompt" value=(q.prompt.as_deref().unwrap_or_default());
         input type="hidden" name="q_version"
             value=(q.version.map(|v| v.to_string()).unwrap_or_default());
@@ -291,7 +291,7 @@ fn score_form(id: &TraceId, review: Option<&ReviewBar>, csrf: &str) -> Markup {
                 (review_fields(bar))
             }
             input type="text" name="name" placeholder="score name"
-                value=[review.map(|bar| bar.queue.score.as_str())] required maxlength="100";
+                value=[review.map(|bar| bar.queue.target.name())] required maxlength="100";
             " "
             select name="kind" {
                 option value="up" { "thumbs up" }

@@ -54,7 +54,6 @@ pub(crate) struct AppState {
     pub datasets: Option<Arc<crate::datasets::Datasets>>, // Some with --datasets and BigQuery
     // Some with BigQuery: the conversation text of `/sessions/{id}`, or why it is unavailable.
     pub export: Option<Result<Arc<dyn gadk_eval_monitor::ExportSource>, String>>,
-    #[allow(dead_code)] // read by the review queue
     pub rubrics: Option<Arc<crate::rubrics::Rubrics>>, // the --rubrics file, if any
 }
 

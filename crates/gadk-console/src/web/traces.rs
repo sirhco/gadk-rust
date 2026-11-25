@@ -114,7 +114,7 @@ fn review_bar_from_query(
     params: &[(String, String)],
 ) -> Option<ReviewBar> {
     state.usage.as_ref()?;
-    let queue = ReviewQueue::from_params(params).ok()??;
+    let queue = ReviewQueue::from_params(params, None).ok()??;
     let at = params
         .iter()
         .find(|(k, _)| k == "at")
@@ -219,7 +219,7 @@ impl ReviewFields {
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.clone()))
         .collect();
-        let queue = ReviewQueue::from_params(&params).ok()??;
+        let queue = ReviewQueue::from_params(&params, None).ok()??;
         let cursor = Cursor::parse(&self.q_at, id.as_str()).ok()?;
         Some((queue, cursor))
     }
