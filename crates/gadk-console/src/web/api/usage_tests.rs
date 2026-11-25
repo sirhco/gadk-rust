@@ -22,6 +22,7 @@ use http::header::{HOST, ORIGIN};
 use http::{Request, StatusCode};
 use serde_json::{Value, json};
 
+use super::openapi_tests::{METHOD_NOT_ALLOWED, assert_matches_pointer};
 use super::tests::{api_get, assert_api_headers, bq_state, error_body};
 use crate::web::pages::usage::NEEDS_BIGQUERY;
 use crate::web::testutil::{FakeSource, PORT, send, state};
@@ -374,10 +375,12 @@ async fn a_write_method_on_a_route_is_the_405_and_head_follows_get() {
     let (status, headers, body) = send(bq_state(&fake, true), req).await;
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(headers[http::header::ALLOW], "GET, HEAD, OPTIONS");
+    let body: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(
-        serde_json::from_str::<Value>(&body).unwrap(),
+        body,
         error_body("method_not_allowed", "the API is read-only")
     );
+    assert_matches_pointer(METHOD_NOT_ALLOWED, &body);
     assert!(fake.uris().is_empty(), "nothing is queried");
 
     let req = Request::head("/api/v1/usage/breakdown")

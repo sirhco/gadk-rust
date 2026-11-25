@@ -28,6 +28,7 @@ use http::header::{
 use http::{HeaderMap, Request, StatusCode};
 use serde_json::{Value, json};
 
+use super::openapi_tests::{METHOD_NOT_ALLOWED, assert_matches_pointer};
 use super::{Priced, cost_sum, ok, rejected, source_failure};
 use crate::prices::PriceTable;
 use crate::traces::{BigQueryTable, SourceError};
@@ -169,11 +170,13 @@ async fn a_write_method_past_the_guard_is_a_json_405() {
             "GET, HEAD, OPTIONS",
             "{method}"
         );
+        let body: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&body).unwrap(),
+            body,
             error_body("method_not_allowed", "the API is read-only"),
             "{method}"
         );
+        assert_matches_pointer(METHOD_NOT_ALLOWED, &body);
     }
 }
 

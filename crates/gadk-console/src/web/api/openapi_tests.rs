@@ -15,17 +15,29 @@
 //! The OpenAPI checks: response bodies validated against an OpenAPI 3.1 document with
 //! `jsonschema`, and the tests of the checker itself.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use http::StatusCode;
+use axum::body::Body;
+use gadk_analytics::testutil::FakeHttp;
+use http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, HOST, ORIGIN, VARY};
+use http::{Request, StatusCode};
 use jsonschema::{Draft, Registry, Validator};
 use serde_json::{Value, json};
+
+use super::PATHS;
+use super::openapi::document;
+use super::tests::{api_get, assert_api_headers, bq_state};
+use crate::web::AppState;
+use crate::web::testutil::{FakeSource, PORT, send, state};
 
 /// The URI the document is registered under; every validator `$ref`s into it.
 const DOC_URI: &str = "urn:gadk-console:openapi";
 /// The schema of a body on a path the document does not list: the API fallback's error.
 const API_ERROR: &str = "#/components/schemas/ApiError";
+/// The schema of the 405 body: the error of `components/responses/MethodNotAllowed`.
+pub(super) const METHOD_NOT_ALLOWED: &str =
+    "#/components/responses/MethodNotAllowed/content/application~1json/schema";
 
 /// An OpenAPI document, its JSON Schema registry and one cached validator per schema pointer.
 struct Checker {
@@ -137,6 +149,33 @@ fn response_pointer(template: &str, status: StatusCode) -> String {
 /// percent-encoded.
 fn fragment(pointer: &str) -> String {
     format!("#{}", pointer.replace('{', "%7B").replace('}', "%7D"))
+}
+
+/// The checker of the console's document, [`document`].
+fn checker() -> &'static Checker {
+    static CHECKER: OnceLock<Checker> = OnceLock::new();
+    CHECKER.get_or_init(|| Checker::new(document()))
+}
+
+/// Validates the `status` response `body` of `GET path` against the console's document (see
+/// [`Checker::validate`]).
+fn validate(path: &str, status: StatusCode, body: &Value) -> Result<(), String> {
+    checker().validate(path, status, body)
+}
+
+/// Panics unless the `status` response `body` of `GET path` matches the console's document.
+pub(super) fn assert_matches_openapi(path: &str, status: StatusCode, body: &Value) {
+    if let Err(e) = validate(path, status, body) {
+        panic!("the response does not match the OpenAPI document: {e}");
+    }
+}
+
+/// Panics unless `body` matches the schema at the URI fragment `pointer` of the console's
+/// document.
+pub(super) fn assert_matches_pointer(pointer: &str, body: &Value) {
+    if let Err(e) = checker().check_pointer(pointer, body) {
+        panic!("the body does not match the OpenAPI document: {e}");
+    }
 }
 
 /// A small document in the shape of the console's: one templated path, a `$ref`'d row with a
@@ -336,4 +375,71 @@ fn an_explicit_pointer_validates_and_is_cached() {
             .check_pointer("#/components/schemas/Nope", &error())
             .is_err()
     );
+}
+
+#[test]
+fn the_document_is_openapi_3_1_with_the_crate_version() {
+    let raw: Value = serde_json::from_str(include_str!("openapi.json")).unwrap();
+    assert_eq!(raw["info"]["version"], "0.0.0");
+    let doc = document();
+    assert_eq!(doc["openapi"], "3.1.0");
+    assert_eq!(doc["info"]["title"], "gadk-console JSON API");
+    assert_eq!(doc["info"]["version"], env!("CARGO_PKG_VERSION"));
+}
+
+#[test]
+fn the_document_lists_exactly_the_api_paths() {
+    let doc = document();
+    let documented: BTreeSet<String> = doc["paths"].as_object().unwrap().keys().cloned().collect();
+    let routed: BTreeSet<String> = PATHS.iter().map(|p| format!("/api{p}")).collect();
+    assert_eq!(documented, routed);
+}
+
+#[tokio::test]
+async fn the_document_is_served_with_or_without_bigquery() {
+    let fake = FakeHttp::new(Vec::new());
+    for st in [
+        state(Arc::new(FakeSource::new()), None),
+        bq_state(&fake, true),
+    ] {
+        let (status, headers, body) = api_get(st, "/api/v1/openapi.json").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_api_headers(&headers);
+        assert_eq!(body, document());
+        assert_matches_openapi("/api/v1/openapi.json", status, &body);
+    }
+    assert!(fake.uris().is_empty(), "nothing is queried");
+}
+
+#[tokio::test]
+async fn the_document_route_has_the_api_cors_head_and_host_guard() {
+    const APP: &str = "http://localhost:5173";
+    let with_app = AppState {
+        api_origins: Arc::from([APP.to_owned()]),
+        ..state(Arc::new(FakeSource::new()), None)
+    };
+    let req = Request::get("/api/v1/openapi.json")
+        .header(HOST, format!("127.0.0.1:{PORT}"))
+        .header(ORIGIN, APP)
+        .body(Body::empty())
+        .unwrap();
+    let (status, headers, _) = send(with_app, req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[ACCESS_CONTROL_ALLOW_ORIGIN], APP);
+    assert_eq!(headers[VARY], "Origin");
+
+    let req = Request::head("/api/v1/openapi.json")
+        .header(HOST, format!("127.0.0.1:{PORT}"))
+        .body(Body::empty())
+        .unwrap();
+    let (status, _, body) = send(state(Arc::new(FakeSource::new()), None), req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.is_empty(), "{body}");
+
+    let req = Request::get("/api/v1/openapi.json")
+        .header(HOST, "evil.example:8765")
+        .body(Body::empty())
+        .unwrap();
+    let (status, _, _) = send(state(Arc::new(FakeSource::new()), None), req).await;
+    assert_eq!(status, StatusCode::MISDIRECTED_REQUEST);
 }

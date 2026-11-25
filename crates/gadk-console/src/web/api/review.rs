@@ -26,8 +26,11 @@ use crate::review::{NEEDS_BIGQUERY_REVIEW, ReviewQueue};
 use crate::web::AppState;
 use crate::web::review::SCORE_REQUIRED;
 
+/// The review queue's path, relative to `/api`.
+pub(super) const PENDING: &str = "/v1/review/pending";
+
 pub(super) fn routes() -> Router<AppState> {
-    Router::new().route("/v1/review/pending", get(pending))
+    Router::new().route(PENDING, get(pending))
 }
 
 /// `GET /api/v1/review/pending`: the pending traces of the `/review` queue (same parameters and
