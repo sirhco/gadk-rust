@@ -839,6 +839,10 @@ answer-tokens: tokens 3412000 ≤ 5000000 — ok
 alerts: 1 specs, 4 rules — 1 fired, 3 ok, 0 insufficient, 0 errors
 ```
 
+Costs print with 2 decimal places and error rates with 1. When a value and its limit differ
+but would print the same, both get just enough more places (up to 6 more) to tell them apart,
+so a rule never shows as `$50.00 > $50.00`: `cost $50.0040 > $50.0000 — FIRED`.
+
 An `error_rate` rule with too few calls prints
 `error_rate: error_rate — insufficient (8 calls < min_calls 50)`. A spec whose query
 fails prints `error: <message>` under its header, for example
@@ -910,8 +914,8 @@ Each spec issues one BigQuery query (after reading the table schema, which is fr
 on `timestamp` from the window's start, so a table partitioned by `timestamp` scans only the
 window's partitions, and it is capped at `--max-bytes` billed: a long window on a large table
 can hit the cap, and the spec then fails instead of running. A spec whose calls fall into more
-than 5,000 model × agent × prompt groups fails with
-`alert usage: more than 5000 model × agent × prompt groups`.
+than 5,000 model × agent × prompt groups fails, printing
+`error: transcript source: alert usage: more than 5000 model × agent × prompt groups`.
 
 `alerts` needs the same roles as `guards` minus the prompt store: the BigQuery roles in
 [Access (IAM)](#access-iam), and Storage Object Viewer on the bucket holding `gs://` specs and

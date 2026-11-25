@@ -90,6 +90,16 @@ fn status(fired: bool) -> RuleStatus {
     }
 }
 
+/// The decimal places to print `value` and `max` with: `base`, or more (up to `base + 6`) when
+/// the two differ but would print the same at `base`, so a line never shows a fired value equal
+/// to its limit. Values that print the same at every width keep `base`.
+fn places(value: f64, max: f64, base: usize) -> usize {
+    (base..=base + 6)
+        .find(|&p| format!("{value:.p$}") != format!("{max:.p$}"))
+        .unwrap_or(base)
+}
+
+/// One rule's value and line over the groups its filter keeps.
 fn evaluate_rule(
     rule: &AlertRule,
     groups: &[UsageGroup],
@@ -113,10 +123,11 @@ fn evaluate_rule(
             } else {
                 String::new()
             };
+            let p = places(cost, max, 2);
             (
                 status(fired),
                 cost,
-                format!("cost ${cost:.2} {} ${max:.2}{note}", op(fired)),
+                format!("cost ${cost:.p$} {} ${max:.p$}{note}", op(fired)),
             )
         }
         AlertMetric::ErrorRate { max, min_calls } => {
@@ -134,14 +145,14 @@ fn evaluate_rule(
                 )
             } else {
                 let fired = rate > max;
+                let (percent, max_percent) = (rate * 100.0, max * 100.0);
+                let p = places(percent, max_percent, 1);
                 (
                     status(fired),
                     rate,
                     format!(
-                        "error_rate {:.1}% ({errors}/{calls}) {} {:.1}%",
-                        rate * 100.0,
+                        "error_rate {percent:.p$}% ({errors}/{calls}) {} {max_percent:.p$}%",
                         op(fired),
-                        max * 100.0
                     ),
                 )
             }
@@ -491,6 +502,30 @@ mod tests {
                 "tokens: tokens 221000 > 220999 — FIRED",
             ]
         );
+    }
+
+    #[test]
+    fn a_value_that_rounds_to_max_prints_enough_places_to_differ() {
+        assert_eq!(
+            lines(
+                "[{ where: { model: m-pro }, cost: { max: 0.2499 } }, \
+                 { where: { model: m-pro }, error_rate: { max: 0.0999, min_calls: 10 } }, \
+                 { name: close, where: { model: m-pro }, error_rate: { max: 0.10001, min_calls: 10 } }]"
+            ),
+            [
+                "cost: cost $0.2500 > $0.2499 — FIRED",
+                "error_rate: error_rate 10.00% (1/10) > 9.99% — FIRED",
+                "close: error_rate 10.000% (1/10) ≤ 10.001% — ok",
+            ]
+        );
+    }
+
+    #[test]
+    fn places_widen_only_while_the_printed_values_match() {
+        assert_eq!(places(0.25, 0.25, 2), 2);
+        assert_eq!(places(0.26, 0.25, 2), 2);
+        assert_eq!(places(0.2500, 0.2499, 2), 4);
+        assert_eq!(places(0.25 + 1e-15, 0.25, 2), 2);
     }
 
     #[test]

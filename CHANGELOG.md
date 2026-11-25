@@ -15,7 +15,8 @@ the public API.
   (USD, needs `--prices`), `error_rate` (with `min_calls`, default 20), `calls` or `tokens`
   limit, optionally filtered by model, agent or prompt. Each spec runs one parameterized query,
   capped at `--max-bytes`, and prints one line per rule under `== <name> ==`, then a summary
-  line. A rule fires when its value is strictly greater than its `max`. `--notify` posts the
+  line. A rule fires when its value is strictly greater than its `max`; a cost or error rate
+  that would print the same as its limit gets more decimal places. `--notify` posts the
   summary, each fired rule and each failed spec (Slack-style text or `--notify-format json`)
   when a rule fired or a spec failed. It exits 1 when a rule fired, 2 when a spec or the post
   failed, and 0 otherwise. Specs, the price file and `--notify` are checked before any query.
