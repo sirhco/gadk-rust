@@ -100,18 +100,24 @@ pub(crate) fn source_failure(e: &SourceError) -> Response {
     (status, Json(json!({ "error": e }))).into_response()
 }
 
-/// The 405 `method_not_allowed` error.
+/// The 405 `method_not_allowed` error, with `Allow: GET, HEAD, OPTIONS`.
 async fn method_not_allowed() -> Response {
-    api_error(
+    let mut response = api_error(
         StatusCode::METHOD_NOT_ALLOWED,
         "method_not_allowed",
         READ_ONLY,
-    )
+    );
+    response.headers_mut().insert(
+        http::header::ALLOW,
+        http::HeaderValue::from_static("GET, HEAD, OPTIONS"),
+    );
+    response
 }
 
-/// An unknown `/api` path: 404 `not_found` for GET, HEAD and OPTIONS, else the 405.
+/// An unknown `/api` path: 404 `not_found` for GET and HEAD, else the 405 (OPTIONS never gets
+/// here: the CORS layer answers it with 204).
 async fn fallback(method: Method) -> Response {
-    if method == Method::GET || method == Method::HEAD || method == Method::OPTIONS {
+    if method == Method::GET || method == Method::HEAD {
         not_found(NO_SUCH_ROUTE)
     } else {
         method_not_allowed().await

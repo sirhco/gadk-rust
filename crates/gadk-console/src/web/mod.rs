@@ -67,9 +67,9 @@ const WATERFALL_JS: &str = include_str!("assets/waterfall.js");
 /// text/css and text/javascript; charset=utf-8 content types); merges traces::routes(),
 /// prompts::routes(), evals::routes(), experiments::routes(), guards::routes(),
 /// review::routes(), sessions::routes() and usage::routes(); nests the JSON API at `/api`
-/// (api::router(), with its own JSON 404 and 405, under the cors::cors layer); wraps everything in guard::layer (Host 421,
-/// POST Origin 403) and adds the CSP header to every response; other unknown paths → error page
-/// 404.
+/// (api::router(), with its own JSON 404 and 405, under the cors::cors layer); wraps everything
+/// in guard::layer (Host 421, POST Origin 403) and adds the CSP header to every response; other
+/// unknown paths → error page 404.
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(root))

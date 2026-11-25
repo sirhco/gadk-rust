@@ -165,11 +165,29 @@ async fn a_write_method_past_the_guard_is_a_json_405() {
         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED, "{method}");
         assert_api_headers(&headers);
         assert_eq!(
+            headers[http::header::ALLOW],
+            "GET, HEAD, OPTIONS",
+            "{method}"
+        );
+        assert_eq!(
             serde_json::from_str::<Value>(&body).unwrap(),
             error_body("method_not_allowed", "the API is read-only"),
             "{method}"
         );
     }
+}
+
+#[tokio::test]
+async fn a_head_on_an_unknown_api_path_is_the_404_status() {
+    let req = Request::builder()
+        .method("HEAD")
+        .uri("/api/v1/nope")
+        .header(HOST, format!("127.0.0.1:{PORT}"))
+        .body(Body::empty())
+        .unwrap();
+    let (status, _, body) = send(fresh(), req).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body.is_empty(), "{body}");
 }
 
 #[tokio::test]

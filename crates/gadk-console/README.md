@@ -481,7 +481,7 @@ parameters, defaults, caps and 400 texts, under `--bigquery-max-bytes`, and thei
 | Route | Parameters | `data` |
 |---|---|---|
 | `/api/v1/usage/breakdown` | `range` as on `/usage` (`1h`, `6h`, `24h`, `7d`, `30d`; unknown or missing is `24h`) | `{"cells": [...], "truncated"}`: calls and tokens per model, agent and prompt version, each cell priced |
-| `/api/v1/usage/trend` | `range` as above | `{"start", "bucket_seconds", "cells": [...]}`: the window start, the bucket width and one priced cell per bucket, model, agent and prompt version (`bucket` counts buckets from `start`) |
+| `/api/v1/usage/trend` | `range` as above | `{"start", "bucket_seconds", "cells": [...]}`: the window start, the bucket width and one priced cell per bucket, model, agent and prompt version (`bucket` counts buckets from `start`); each cell is `{"bucket", "cell": {"agent", "prompt", "calls"}, "cost_usd", "cost_partial"}` |
 | `/api/v1/usage/top-traces` | `range` as above | the 20 traces with the most tokens, each with its calls per model, priced |
 | `/api/v1/sessions` | `range` (default `24h`), `user`, `agent`, `after` and `after_id` (the cursor), as on `/sessions` | at most 100 sessions, newest last activity first, each priced |
 | `/api/v1/sessions/{id}/turns` | `range` (default `7d`), as on `/sessions/{id}` | `{"session", "turns": [...]}`: the session's row and its first 200 turns, oldest first, each priced |
@@ -505,7 +505,7 @@ Every successful response is 200 with `Content-Type: application/json` and the e
   next page, with the same `range`, `user` and `agent` and the cursor of the last row. It is
   `null` everywhere else.
 
-With `--prices`, these rows carry `cost_usd` and `cost_partial` next to their own fields:
+These rows always carry `cost_usd` and `cost_partial` next to their own fields:
 usage cells, trend cells, top traces, sessions, the session row and its turns, users, and the
 prompt `stats` and `models` rows. `cost_usd` is the sum of the priced calls in USD, unrounded,
 and `null` when no call had a price (always, without `--prices`); `cost_partial` is true when some
@@ -545,8 +545,8 @@ application/json`:
 |---|---|---|
 | 400 | `bad_request` | A bad parameter, with the page's text (`user is too long`, `invalid cursor`, `invalid session id`, `score and rubric: choose one`, `score: required`, …), or a request the router cannot read (`invalid request: …`). |
 | 404 | `needs_bigquery` | The console is not using the BigQuery source; the message is the page's note. This comes before any other check. |
-| 404 | `not_found` | An unknown or invalid trace id (`trace not found`), a session without activity in the range (`no activity for session <id> in the last <range>`), or an unknown `/api` path (`no such API route`). |
-| 405 | `method_not_allowed` | A method other than `GET`, `HEAD` or `OPTIONS` (`the API is read-only`). A `POST` from another origin gets the console's HTML 403 first. |
+| 404 | `not_found` | An unknown or invalid trace id (`trace not found`), a session without activity in the range (`no activity for session <id> in the last <range>`), or an unknown `/api` path requested with `GET` or `HEAD` (`no such API route`). |
+| 405 | `method_not_allowed` | A method other than `GET`, `HEAD` or `OPTIONS` (`the API is read-only`), with an `Allow: GET, HEAD, OPTIONS` header. A `POST` from another origin gets the console's HTML 403 first. |
 | 502 | the source's kind (`bigquery`, `transport`, …) | A failed query; `message` and `hint` are the error banner's text and hint. |
 
 A wrong `Host` still gets the HTML 421 of the [Security model](#security-model).

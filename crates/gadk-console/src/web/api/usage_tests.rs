@@ -371,8 +371,9 @@ async fn a_write_method_on_a_route_is_the_405_and_head_follows_get() {
         .header(ORIGIN, format!("http://127.0.0.1:{PORT}"))
         .body(Body::empty())
         .unwrap();
-    let (status, _, body) = send(bq_state(&fake, true), req).await;
+    let (status, headers, body) = send(bq_state(&fake, true), req).await;
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(headers[http::header::ALLOW], "GET, HEAD, OPTIONS");
     assert_eq!(
         serde_json::from_str::<Value>(&body).unwrap(),
         error_body("method_not_allowed", "the API is read-only")

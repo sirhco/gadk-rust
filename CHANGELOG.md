@@ -17,10 +17,10 @@ the public API.
   `/api/v1/review/pending` (the `/review` queue parameters) return the views' data as the
   `gadk-analytics` types in a `{"data", "truncated", "next"}` envelope, `next` being the next
   page of sessions. Each route shares its page's parameter parsing, defaults, caps and 400 texts.
-  With `--prices`, usage, session, turn, user and prompt-version rows carry `cost_usd`
-  (unrounded, `null` without a price) and `cost_partial`. Errors are JSON `{"error": {"kind",
+  Usage, session, turn, user and prompt-version rows always carry `cost_usd` (unrounded, `null`
+  without a price) and `cost_partial`. Errors are JSON `{"error": {"kind",
   "message", "hint"}}`: 400 `bad_request`, 404 `needs_bigquery` (checked first) or `not_found`
-  (including any unknown `/api` path), 405 `method_not_allowed` for writes, and 502 with the
+  (including an unknown `/api` path read with `GET` or `HEAD`), 405 `method_not_allowed` for writes, and 502 with the
   query's error.
 - `gadk-console`: `--api-origin <origin>` (repeatable; `Cli::api_origins`,
   `Cli::with_api_origin`) lets a browser app on another origin read the API. Each value must be
