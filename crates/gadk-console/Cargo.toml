@@ -49,6 +49,8 @@ gadk-analytics = { workspace = true, features = ["test-util"] }
 tower = { workspace = true, features = ["util"] }
 tempfile = { workspace = true }
 gadk-telemetry = { workspace = true }
+# The OpenAPI checks of the JSON API: responses validated against the OpenAPI document.
+jsonschema = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 pretty_assertions = { workspace = true }

@@ -158,6 +158,8 @@ pub(crate) fn cost_sum<'a>(
 }
 
 #[cfg(test)]
+mod openapi_tests;
+#[cfg(test)]
 mod prompts_tests;
 #[cfg(test)]
 mod review_tests;
