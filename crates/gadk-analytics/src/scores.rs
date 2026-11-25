@@ -103,14 +103,14 @@ pub struct NewScore {
     pub name: String,
     /// The value.
     pub value: NewValue,
-    /// `None` when the form's comment is blank.
+    /// `None` when the comment is blank.
     pub comment: Option<String>,
 }
 
 impl NewScore {
     /// The score `name` (saved trimmed) with `value` and `comment`, checked by the rules of
     /// [`from_form`](Self::from_form): a non-blank name, a non-blank category and a finite
-    /// number.
+    /// number. A blank `comment` (empty or whitespace only) is `None`, as in `from_form`.
     ///
     /// # Errors
     ///
@@ -136,7 +136,7 @@ impl NewScore {
         Ok(NewScore {
             name: name.trim().to_owned(),
             value,
-            comment,
+            comment: comment.filter(|c| !c.trim().is_empty()),
         })
     }
 
@@ -366,6 +366,10 @@ impl AnalyticsSource {
 
     /// Inserts `score` by `author` on trace `trace_id` as a `FEEDBACK` row of `root`'s
     /// invocation (one DML statement, billed at least 10 MiB).
+    ///
+    /// This is a write: it changes the table and needs `roles/bigquery.dataEditor` on it
+    /// ([`BQ_EDITOR_HINT`]). Rows are written with `attributes.source = "console"`, so they
+    /// count as console scores, including for the review queue.
     pub async fn insert_score(
         &self,
         trace_id: &str,
@@ -391,6 +395,10 @@ impl AnalyticsSource {
 
     /// Inserts `scores` by `author` on trace `trace_id` as `FEEDBACK` rows of `root`'s
     /// invocation, in order: one DML statement (all rows or none), billed at least 10 MiB.
+    ///
+    /// This is a write: it changes the table and needs `roles/bigquery.dataEditor` on it
+    /// ([`BQ_EDITOR_HINT`]). Rows are written with `attributes.source = "console"`, so they
+    /// count as console scores, including for the review queue.
     pub async fn insert_scores(
         &self,
         trace_id: &str,
@@ -677,6 +685,18 @@ mod tests {
             s,
             NewScore::from_form("rating", "number", "4", "fast").unwrap()
         );
+    }
+
+    #[test]
+    fn new_scores_drop_a_blank_comment() {
+        for blank in ["  ", ""] {
+            let s = NewScore::new("q", NewValue::Bool(true), Some(blank.into())).unwrap();
+            assert_eq!(s.comment, None, "{blank:?}");
+            assert_eq!(
+                s.content(),
+                json!({ "name": "q", "value": true, "data_type": "bool" })
+            );
+        }
     }
 
     #[test]

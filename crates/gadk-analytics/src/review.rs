@@ -98,6 +98,7 @@ impl ReviewQueue {
     }
 
     /// Only traces that used `version` of the prompt (set with [`with_prompt`](Self::with_prompt)).
+    /// Without a prompt the version is ignored.
     pub fn with_version(mut self, version: u32) -> Self {
         self.version = Some(version);
         self
@@ -122,9 +123,13 @@ pub struct Cursor {
 }
 
 impl Cursor {
-    /// The cursor of the trace `trace_id` (lowercase) whose first LLM response is `at`.
+    /// The cursor of the trace `trace_id` whose first LLM response is `at`. The id is saved
+    /// lowercase, as [`parse`](Self::parse) saves it.
     pub fn new(at: DateTime<Utc>, trace_id: String) -> Self {
-        Self { at, trace_id }
+        Self {
+            at,
+            trace_id: trace_id.to_ascii_lowercase(),
+        }
     }
 
     /// The cursor of the URL values `at` (RFC 3339) and `trace_id` (32 hex digits, either
@@ -188,13 +193,17 @@ impl PendingTrace {
 impl AnalyticsSource {
     /// The pending traces of `q` in `[end - q.range, end)`, newest first: those that miss a
     /// console score for some name in `names` (sent as `@names`). At most [`REVIEW_CAP`] + 1
-    /// rows, so the caller can tell whether the cap was hit.
+    /// rows, so the caller can tell whether the cap was hit. An empty `names` slice returns no
+    /// traces (and runs no query).
     pub async fn pending(
         &self,
         q: &ReviewQueue,
         names: &[String],
         end: DateTime<Utc>,
     ) -> Result<Vec<PendingTrace>, SourceError> {
+        if names.is_empty() {
+            return Ok(Vec::new());
+        }
         let sql = pending_sql(&self.table_path()?, false);
         let params = pending_params(q, names, end, None, REVIEW_CAP + 1);
         let result = self.run(&sql, params, (REVIEW_CAP + 1) as u32).await?;
@@ -203,7 +212,8 @@ impl AnalyticsSource {
 
     /// The pending trace of `q` and `names` (see [`pending`](Self::pending)) in
     /// `[end - q.range, end)` that comes right after `after` (the largest sort key strictly
-    /// below it); `None` when the queue has no more.
+    /// below it); `None` when the queue has no more. An empty `names` slice returns no trace
+    /// (and runs no query).
     pub async fn next_pending(
         &self,
         q: &ReviewQueue,
@@ -211,6 +221,9 @@ impl AnalyticsSource {
         end: DateTime<Utc>,
         after: &Cursor,
     ) -> Result<Option<PendingTrace>, SourceError> {
+        if names.is_empty() {
+            return Ok(None);
+        }
         let sql = pending_sql(&self.table_path()?, true);
         let params = pending_params(q, names, end, Some(after), 1);
         let result = self.run(&sql, params, 1).await?;
@@ -632,6 +645,30 @@ WHERE NOT IFNULL(agg.scored, FALSE)
             src.next_pending(&q, &names, end(), &after).await.unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn a_new_cursor_lowercases_its_trace_id() {
+        let at = Utc.with_ymd_and_hms(2026, 11, 23, 11, 0, 0).unwrap();
+        assert_eq!(Cursor::new(at, TRACE.to_uppercase()).trace_id, TRACE);
+        assert_eq!(
+            Cursor::new(at, TRACE.to_uppercase()),
+            Cursor::parse("2026-11-23T11:00:00Z", TRACE).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn no_score_names_is_no_pending_traces_and_no_query() {
+        let fake = FakeHttp::new(vec![]);
+        let src = source(&fake);
+        let q = ReviewQueue::new(TimeRange::Days7);
+        assert_eq!(src.pending(&q, &[], end()).await.unwrap(), vec![]);
+        let after = Cursor::parse("2026-11-23T10:00:00Z", TRACE).unwrap();
+        assert_eq!(
+            src.next_pending(&q, &[], end(), &after).await.unwrap(),
+            None
+        );
+        assert!(fake.uris().is_empty());
     }
 
     #[tokio::test]

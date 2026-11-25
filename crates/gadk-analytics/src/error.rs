@@ -16,12 +16,13 @@
 
 use std::fmt;
 
-use serde::Serialize;
+use serde::ser::SerializeMap;
+use serde::{Serialize, Serializer};
 
 use crate::row::{BQ_BYTES_HINT, BQ_ROLES_HINT};
 
 /// The upstream API a [`SourceError`] came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Service {
     /// Cloud Trace.
     Trace,
@@ -38,8 +39,15 @@ impl fmt::Display for Service {
     }
 }
 
+/// Serializes as the [`Display`](fmt::Display) text: `"Cloud Trace"` or `"Cloud Logging"`.
+impl Serialize for Service {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
 /// A failed trace or log read.
-#[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SourceError {
     /// Non-2xx reply. `excerpt` is at most 1,024 bytes of the body, cut on a char boundary.
@@ -105,7 +113,8 @@ impl SourceError {
         }
     }
 
-    /// The hint shown under the error banner, if any.
+    /// The hint shown under the error banner, if any. The hints are the console's texts: the
+    /// byte-cap hint, for example, names the console's `--bigquery-max-bytes` flag.
     pub fn hint(&self) -> Option<&'static str> {
         match self {
             SourceError::Upstream {
@@ -142,6 +151,33 @@ impl SourceError {
             }
             _ => None,
         }
+    }
+}
+
+impl SourceError {
+    /// The snake_case name of the variant: the `kind` of the JSON form.
+    fn kind(&self) -> &'static str {
+        match self {
+            SourceError::Upstream { .. } => "upstream",
+            SourceError::Transport { .. } => "transport",
+            SourceError::Decode { .. } => "decode",
+            SourceError::Credentials(_) => "credentials",
+            SourceError::NotFound => "not_found",
+            SourceError::BigQuery { .. } => "big_query",
+        }
+    }
+}
+
+/// Serializes as `{"kind", "message", "hint"}`: the snake_case variant name (`upstream`,
+/// `transport`, `decode`, `credentials`, `not_found` or `big_query`), the
+/// [`Display`](fmt::Display) text and [`SourceError::hint`] (`null` when there is none).
+impl Serialize for SourceError {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("kind", self.kind())?;
+        map.serialize_entry("message", &self.to_string())?;
+        map.serialize_entry("hint", &self.hint())?;
+        map.end()
     }
 }
 

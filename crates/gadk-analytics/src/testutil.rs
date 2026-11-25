@@ -281,7 +281,9 @@ fn model_cells(model: ModelCells<'_>) -> Vec<Value> {
     }
 }
 
-/// The cells of one the sessions query ([`AnalyticsSource::sessions`](crate::AnalyticsSource::sessions)) row; `counts` is `[turns, errors, ups, downs]`.
+/// The cells of one row of the sessions query
+/// ([`AnalyticsSource::sessions`](crate::AnalyticsSource::sessions)); `counts` is
+/// `[turns, errors, ups, downs]`.
 pub fn session_cells(
     id: &str,
     user: &str,
@@ -303,8 +305,9 @@ pub fn session_cells(
     cells
 }
 
-/// The cells of one the users query ([`AnalyticsSource::users`](crate::AnalyticsSource::users)) row (`None` is a NULL user); `counts` is
-/// `[sessions, turns, errors, ups, downs]`.
+/// The cells of one row of the users query
+/// ([`AnalyticsSource::users`](crate::AnalyticsSource::users)), `None` being a NULL user;
+/// `counts` is `[sessions, turns, errors, ups, downs]`.
 pub fn user_cells(
     user: Option<&str>,
     counts: [u64; 5],
@@ -318,8 +321,9 @@ pub fn user_cells(
     cells
 }
 
-/// The schema of the turns query ([`AnalyticsSource::session_turns`](crate::AnalyticsSource::session_turns)): `tools` is `REPEATED` and `tokens` and `scores` are
-/// `REPEATED RECORD`s.
+/// A reply with the schema of the turns query
+/// ([`AnalyticsSource::session_turns`](crate::AnalyticsSource::session_turns)) and `rows`: `tools`
+/// is `REPEATED`, and `tokens` and `scores` are `REPEATED RECORD`s.
 pub fn turn_reply(rows: Vec<Vec<Value>>) -> Result<(u16, String), String> {
     use serde_json::json;
     let field = |name: &str, ty: &str| json!({ "name": name, "type": ty, "mode": "NULLABLE" });
@@ -346,7 +350,8 @@ pub fn turn_reply(rows: Vec<Vec<Value>>) -> Result<(u16, String), String> {
     schema_reply(schema, rows, false)
 }
 
-/// The cells of one the turns query ([`AnalyticsSource::session_turns`](crate::AnalyticsSource::session_turns)) row.
+/// The cells of one row of the turns query
+/// ([`AnalyticsSource::session_turns`](crate::AnalyticsSource::session_turns)).
 #[derive(Debug, Clone)]
 pub struct TurnCells<'a> {
     /// The invocation id.

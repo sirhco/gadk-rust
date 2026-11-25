@@ -192,9 +192,17 @@ pub enum UsageRange {
     Days30,
 }
 
+/// Serializes as the query-string form ([`UsageRange::as_str`]): `"1h"`, `"6h"`, `"24h"`,
+/// `"7d"` or `"30d"`.
+impl Serialize for UsageRange {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 impl UsageRange {
     /// Every range, shortest first.
-    pub const ALL: [UsageRange; 5] = [
+    pub const ALL: &'static [UsageRange] = &[
         UsageRange::Hour1,
         UsageRange::Hours6,
         UsageRange::Hours24,
@@ -204,7 +212,7 @@ impl UsageRange {
 
     /// "1h" | "6h" | "24h" | "7d" | "30d"; anything else is None.
     pub fn parse(s: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|r| r.as_str() == s)
+        Self::ALL.iter().copied().find(|r| r.as_str() == s)
     }
 
     /// The query-string form: "1h", "6h", "24h", "7d" or "30d".
@@ -834,10 +842,13 @@ ORDER BY 2 DESC, 1, 3"
     #[test]
     fn usage_range_parses_its_five_ranges_in_order() {
         assert_eq!(
-            UsageRange::ALL.map(UsageRange::as_str),
+            UsageRange::ALL
+                .iter()
+                .map(|r| r.as_str())
+                .collect::<Vec<_>>(),
             ["1h", "6h", "24h", "7d", "30d"]
         );
-        for r in UsageRange::ALL {
+        for &r in UsageRange::ALL {
             assert_eq!(UsageRange::parse(r.as_str()), Some(r));
         }
         for bogus in ["", "bogus", "30D", "1d", "2h"] {

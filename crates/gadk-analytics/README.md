@@ -48,9 +48,12 @@ Results are grouped by model wherever tokens are counted, so they can be priced 
 ## Costs and caps
 
 Every query runs as a BigQuery job in the billing project given to `AnalyticsSource::new`, which
-BigQuery bills, and stops with a `bytesBilledLimitExceeded` error past the byte cap. Every query
-filters `timestamp` to its window, so a table partitioned by day on `timestamp` is read only for
-the days asked for. Every value is a query parameter; no input is spliced into SQL.
+BigQuery bills, and stops with a `bytesBilledLimitExceeded` error past the byte cap. Every windowed
+query filters `timestamp` to its window, so a table partitioned by day on `timestamp` is read only
+for the days asked for. `trace_root` reads a fixed 30-day lookback. The score reads of
+`trace_scores`, `version_feedback` and the review queries have no upper time bound (scores arrive
+after the calls they score): they read every score written since their start up to now. Every
+value is a query parameter; no input is spliced into SQL.
 
 Results are capped, and say when a cap cut them (`truncated`, `has_next`, `more`):
 
@@ -73,7 +76,9 @@ the billing project.
 
 `AnalyticsSource::insert_score` and `insert_scores` are the only writes. Each is one DML
 statement that inserts `FEEDBACK` rows into the table (`insert_scores` inserts all its rows or
-none). They need `roles/bigquery.dataEditor` on the table (`scores::BQ_EDITOR_HINT`), and
+none). Rows are written with `attributes.source = "console"`, so they count as console scores,
+including for the review queue. They need `roles/bigquery.dataEditor` on the table
+(`scores::BQ_EDITOR_HINT`), and
 BigQuery bills every DML statement at least 10 MiB, so their byte cap is raised to
 `scores::DML_MIN_BYTES` when it is lower. `NewScore::new` checks a score as the console's form
 does: a non-blank name, a non-blank category, a finite number.

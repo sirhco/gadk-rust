@@ -76,6 +76,9 @@ fn the_cost_module() {
     let _: fn(u64, u64, u64, u64) -> Usage = Usage::new;
     let _: fn(&BTreeMap<String, String>) -> Usage = Usage::from_labels;
     let _: fn(Option<&gadk_eval_monitor::PriceTable>, &str, &Usage) -> Option<f64> = cost_of;
+    // The price types are re-exported, so `cost_of`'s argument can be named from this crate.
+    let _: fn(Option<&gadk_analytics::cost::PriceTable>, &str, &Usage) -> Option<f64> = cost_of;
+    let _: Option<gadk_analytics::cost::ModelPrice> = None;
     let _: fn(&mut CostSum, Option<f64>) = CostSum::add;
     let _: fn(&CostSum) -> bool = CostSum::partial;
     let _: fn(&CostSum) -> String = CostSum::text;
@@ -103,7 +106,7 @@ fn the_output_constructors() {
     let _: fn(UsageRange) -> &'static str = UsageRange::as_str;
     let _: fn(UsageRange) -> TimeDelta = UsageRange::duration;
     let _: fn(UsageRange) -> (i64, usize, &'static str) = UsageRange::bucket;
-    let _: [UsageRange; 5] = UsageRange::ALL;
+    let _: &[UsageRange] = UsageRange::ALL;
     let _: [usize; 3] = [BREAKDOWN_CAP, TOP_TRACES, TREND_CAP];
 
     let _: fn(DateTime<Utc>, String) -> SessionCursor = SessionCursor::new;

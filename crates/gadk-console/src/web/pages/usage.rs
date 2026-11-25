@@ -227,7 +227,7 @@ fn range_form(range: UsageRange) -> Markup {
             label {
                 "Range"
                 select name="range" {
-                    @for r in UsageRange::ALL {
+                    @for &r in UsageRange::ALL {
                         option value=(r.as_str()) selected[r == range] { (r.as_str()) }
                     }
                 }

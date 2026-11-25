@@ -66,8 +66,15 @@
 use std::collections::BTreeMap;
 use std::ops::AddAssign;
 
-use gadk_eval_monitor::{ModelPrice, PriceTable, TokenUsage};
+use gadk_eval_monitor::TokenUsage;
 use serde::Serialize;
+
+/// The price table [`cost_of`] prices with, re-exported from `gadk-eval-monitor` so it can be
+/// named from this crate: USD per 1,000,000 tokens per model, read from a `--prices` YAML file.
+pub use gadk_eval_monitor::PriceTable;
+
+/// One model's prices in a [`PriceTable`], re-exported from `gadk-eval-monitor`.
+pub use gadk_eval_monitor::ModelPrice;
 
 /// The span label naming a span's operation.
 pub const LABEL_OPERATION: &str = "gen_ai.operation.name";

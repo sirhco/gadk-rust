@@ -24,7 +24,7 @@ use gadk_analytics::scores::{ScoreRow, TraceRoot, TraceScores};
 use gadk_analytics::sessions::{
     SessionCursor, SessionPage, SessionRow, TurnRow, TurnScore, UserPage, UserRow,
 };
-use gadk_analytics::usage::{Breakdown, Cell, ModelCalls, TopTrace, Trend, TrendCell};
+use gadk_analytics::usage::{Breakdown, Cell, ModelCalls, TopTrace, Trend, TrendCell, UsageRange};
 use gadk_analytics::{BigQueryTable, Service, SourceError, TimeRange, TraceId};
 use serde_json::json;
 
@@ -36,7 +36,11 @@ fn the_shared_types_serialize() {
     );
     assert_eq!(
         serde_json::to_value(TimeRange::Hours24).unwrap(),
-        json!("Hours24")
+        json!("24h")
+    );
+    assert_eq!(
+        serde_json::to_value(UsageRange::Days30).unwrap(),
+        json!("30d")
     );
     assert_eq!(
         serde_json::to_value(TraceId::parse("0123456789ABCDEF0123456789ABCDEF").unwrap()).unwrap(),
@@ -44,15 +48,20 @@ fn the_shared_types_serialize() {
     );
     assert_eq!(
         serde_json::to_value(Service::Trace).unwrap(),
-        json!("Trace")
+        json!("Cloud Trace")
     );
     assert_eq!(
-        serde_json::to_value(SourceError::bigquery(Some(403), None, "Access Denied")).unwrap(),
-        json!({ "BigQuery": { "status": 403, "reason": null, "detail": "Access Denied" } })
-    );
-    assert_eq!(
-        serde_json::to_value(SourceError::NotFound).unwrap(),
-        json!("NotFound")
+        serde_json::to_value(SourceError::bigquery(
+            Some(403),
+            Some("accessDenied".into()),
+            "Access Denied"
+        ))
+        .unwrap(),
+        json!({
+            "kind": "big_query",
+            "message": "BigQuery: HTTP 403: Access Denied",
+            "hint": "needs roles/bigquery.dataViewer and roles/bigquery.jobUser",
+        })
     );
 }
 

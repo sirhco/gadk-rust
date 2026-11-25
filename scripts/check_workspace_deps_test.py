@@ -481,7 +481,8 @@ class EdgeTest(unittest.TestCase):
                          {"gadk-agent", "gadk-cloudtrace", "gadk-engine", "gadk-eval",
                           "gadk-gemini", "gadk-model", "gadk-platform", "gadk-prompts",
                           "gadk-prompts-cli"})
-        # Only the console (its Evals pages) depends on it; the façade does not.
+        # Only gadk-analytics (`cost_of` prices with its PriceTable) and the console (its Evals
+        # pages) depend on it; the façade does not.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-eval-monitor" in deps],
                          ["gadk-analytics", "gadk-console"])
         # The `experiment` command builds LlmAgents, so it may depend on the engine.

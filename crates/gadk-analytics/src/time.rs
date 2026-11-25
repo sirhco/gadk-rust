@@ -14,10 +14,10 @@
 
 //! [`TimeRange`], the trace-list time window, and [`TraceId`].
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 /// The trace-list time window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimeRange {
     /// The last hour (the default).
     #[default]
@@ -62,6 +62,14 @@ impl TimeRange {
             TimeRange::Hours24 => chrono::TimeDelta::hours(24),
             TimeRange::Days7 => chrono::TimeDelta::days(7),
         }
+    }
+}
+
+/// Serializes as the query-string form ([`TimeRange::as_str`]): `"1h"`, `"6h"`, `"24h"` or
+/// `"7d"`.
+impl Serialize for TimeRange {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 
