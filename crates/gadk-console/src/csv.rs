@@ -14,8 +14,6 @@
 
 //! CSV downloads: an RFC 4180 writer (CRLF line ends, UTF-8 without a BOM) with a guard
 //! against spreadsheet formulas, and the response that serves a body as a file.
-// The `.csv` routes that use these land in later commits.
-#![cfg_attr(not(test), allow(dead_code))]
 
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};

@@ -7,6 +7,19 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-console`: CSV downloads of `/usage`, `/sessions` and `/users`. `GET /usage.csv?range=&table=`
+  (`model`, `agent`, `prompt` or `trend`; anything else is a 400) serves one usage table from the
+  page's own query and aggregation, `GET /sessions.csv` (`range`, `user`, `agent`) every session of
+  the window up to 5,000, and `GET /users.csv` (`range`, `agent`) every user up to 5,000, reading
+  at most 50,000 rows. The files are RFC 4180 with CRLF line ends, carry `cost_usd` and
+  `cost_partial` columns, and prefix text starting with `=`, `+`, `-`, `@`, TAB or CR with `'` so
+  spreadsheets do not run it as a formula. A file cut by a cap, including the single BigQuery
+  reply page of about 10 MB, is named `…-truncated.csv` and sent with `X-Gadk-Truncated: true`.
+  With the BigQuery source each table gets a "Download CSV" link; the pages are otherwise
+  unchanged, and `/sessions` and `/users` keep their 100-row pages and their SQL.
+
 ## [0.5.16] - 2026-11-24
 
 ### Added
