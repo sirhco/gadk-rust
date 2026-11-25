@@ -12,23 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The usage route: `/usage`.
+//! The usage routes: `/usage` and `/usage.csv`.
 
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::response::Response;
 use axum::routing::get;
+use chrono::TimeDelta;
 use http::StatusCode;
 use serde::Deserialize;
 
 use super::AppState;
-use super::pages::error::source_error_in;
+use super::pages::error::{error_page, source_error_in};
 use super::pages::layout::{Nav, html};
-use super::pages::usage;
+use super::pages::usage::{self, NEEDS_BIGQUERY, Totals, agent_label, group, prompt_label};
+use crate::csv::{Csv, Field, filename, response};
+use crate::prices::{CostSum, cost_of};
 use crate::usage::{TOP_TRACES, UsageRange};
 
+/// The text of the 400 page for a missing or unknown `/usage.csv` table.
+const BAD_TABLE: &str = "table: must be model, agent, prompt or trend";
+
+/// The token and cost columns that end every `/usage.csv` row.
+const TOTAL_COLUMNS: [&str; 7] = [
+    "llm_calls",
+    "input",
+    "cached",
+    "output",
+    "reasoning",
+    "cost_usd",
+    "cost_partial",
+];
+
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/usage", get(usage_page))
+    Router::new()
+        .route("/usage", get(usage_page))
+        .route("/usage.csv", get(usage_csv))
 }
 
 /// `/usage` query parameters.
@@ -73,6 +92,116 @@ async fn usage_page(State(state): State<AppState>, Query(p): Query<UsageParams>)
     )
 }
 
+/// `/usage.csv` query parameters.
+#[derive(Debug, Default, Deserialize)]
+struct UsageCsvParams {
+    range: Option<String>,
+    table: Option<String>,
+}
+
+/// The calls, tokens and cost cells of `t`.
+fn total_fields(t: &Totals) -> [Field; 6] {
+    [
+        Field::Int(t.calls),
+        Field::Int(t.usage.input),
+        Field::Int(t.usage.cached),
+        Field::Int(t.usage.output),
+        Field::Int(t.usage.reasoning),
+        Field::Cost(t.cost),
+    ]
+}
+
+/// The CSV of one `/usage` table: the header `key` plus [`TOTAL_COLUMNS`], then one row per
+/// group in key order.
+fn totals_csv(key: &str, rows: impl Iterator<Item = (String, Totals)>) -> String {
+    let mut csv = Csv::new();
+    let mut header = vec![key];
+    header.extend(TOTAL_COLUMNS);
+    csv.header(&header);
+    for (label, t) in rows {
+        let mut row = vec![Field::Text(label)];
+        row.extend(total_fields(&t));
+        csv.row(&row);
+    }
+    csv.finish()
+}
+
+/// `GET /usage.csv?range=<r>&table=<t>`: one `/usage` table as CSV. `model`, `agent` and
+/// `prompt` read the breakdown query and sum it as the page does; `trend` reads the trend
+/// query, one row per group and bucket. An unknown or missing `range` is 24h. Without the
+/// BigQuery source it is a 404 page, an unknown `table` a 400 page and a failed query a 502
+/// page, all under the Usage nav.
+async fn usage_csv(State(state): State<AppState>, Query(p): Query<UsageCsvParams>) -> Response {
+    let Some(source) = &state.usage else {
+        return error_page(StatusCode::NOT_FOUND, Nav::Usage, NEEDS_BIGQUERY, None);
+    };
+    let table = match p.table.as_deref() {
+        Some(t @ ("model" | "agent" | "prompt" | "trend")) => t,
+        _ => return error_page(StatusCode::BAD_REQUEST, Nav::Usage, BAD_TABLE, None),
+    };
+    let range = p
+        .range
+        .as_deref()
+        .and_then(UsageRange::parse)
+        .unwrap_or_default();
+    let end = (state.now)();
+    let start = end - range.duration();
+    let prices = state.prices.as_deref();
+    let (body, truncated) = if table == "trend" {
+        let (bucket_seconds, _, _) = range.bucket();
+        let trend = match source.trend(start, end, bucket_seconds).await {
+            Ok(trend) => trend,
+            Err(e) => return source_error_in(Nav::Usage, &e),
+        };
+        let mut csv = Csv::new();
+        let mut header = vec!["bucket_start", "model", "agent", "prompt"];
+        header.extend(TOTAL_COLUMNS);
+        csv.header(&header);
+        for c in &trend.cells {
+            let calls = &c.cell.calls;
+            let mut cost = CostSum::default();
+            cost.add(cost_of(prices, &calls.model, &calls.usage));
+            let t = Totals {
+                calls: calls.calls,
+                usage: calls.usage,
+                cost,
+            };
+            let bucket_start = start + TimeDelta::seconds(c.bucket as i64 * bucket_seconds);
+            let mut row = vec![
+                Field::Time(bucket_start),
+                Field::Text(calls.model.clone()),
+                Field::Text(c.cell.agent.clone()),
+                Field::Text(c.cell.prompt.clone().unwrap_or_default()),
+            ];
+            row.extend(total_fields(&t));
+            csv.row(&row);
+        }
+        (csv.finish(), trend.truncated)
+    } else {
+        let breakdown = match source.breakdown(start, end).await {
+            Ok(b) => b,
+            Err(e) => return source_error_in(Nav::Usage, &e),
+        };
+        let g = group(&breakdown, prices);
+        let body = match table {
+            "model" => totals_csv("model", g.by_model.into_iter()),
+            "agent" => totals_csv(
+                "agent",
+                g.by_agent.into_iter().map(|(k, t)| (agent_label(&k), t)),
+            ),
+            _ => totals_csv(
+                "prompt",
+                g.by_prompt
+                    .into_iter()
+                    .map(|(k, t)| (prompt_label(k.as_deref()), t)),
+            ),
+        };
+        (body, breakdown.truncated)
+    };
+    let name = filename(&format!("usage-{table}"), range.as_str(), end, truncated);
+    response(body, &name, truncated)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -80,9 +209,10 @@ mod tests {
 
     use gadk_bigquery::{BigQueryClient, NoAuth};
     use http::StatusCode;
+    use http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
     use serde_json::{Value, json};
 
-    use crate::prices::PriceTable;
+    use crate::prices::{PriceTable, thousands};
     use crate::traces::BigQueryTable;
     use crate::traces::test_http::{FakeHttp, param_value, reply};
     use crate::usage::UsageSource;
@@ -302,7 +432,7 @@ mod tests {
         // Totals and three tables of two rows each.
         assert_eq!(body.matches("<th>Trend</th>").count(), 4, "{body}");
         assert_eq!(body.matches(r#"<svg class="trend""#).count(), 7, "{body}");
-        let chart = r#"<h2>Over time</h2><svg class="usage-chart" viewBox="0 0 600 120" role="img" aria-label="cost per hour"><polyline points="8.0,10.0 33.4,100.0 58.8,100.0 84.2,100.0 109.6,100.0 135.0,100.0 160.3,100.0 185.7,100.0 211.1,100.0 236.5,100.0 261.9,100.0 287.3,100.0 312.7,100.0 338.1,100.0 363.5,100.0 388.9,100.0 414.3,100.0 439.7,100.0 465.0,100.0 490.4,100.0 515.8,100.0 541.2,100.0 566.6,100.0 592.0,35.9" fill="none"></polyline><text x="8" y="12" text-anchor="start">max $0.002175</text><text x="592" y="12" text-anchor="end">latest $0.001550</text><text x="8" y="116" text-anchor="start">12:00</text><text x="592" y="116" text-anchor="end">11:00</text></svg><p class="empty">Excludes calls to models without a price.</p><h2>By model</h2>"#;
+        let chart = r#"<h2>Over time</h2><p class="csv"><a href="/usage.csv?range=24h&amp;table=trend">Download CSV</a></p><svg class="usage-chart" viewBox="0 0 600 120" role="img" aria-label="cost per hour"><polyline points="8.0,10.0 33.4,100.0 58.8,100.0 84.2,100.0 109.6,100.0 135.0,100.0 160.3,100.0 185.7,100.0 211.1,100.0 236.5,100.0 261.9,100.0 287.3,100.0 312.7,100.0 338.1,100.0 363.5,100.0 388.9,100.0 414.3,100.0 439.7,100.0 465.0,100.0 490.4,100.0 515.8,100.0 541.2,100.0 566.6,100.0 592.0,35.9" fill="none"></polyline><text x="8" y="12" text-anchor="start">max $0.002175</text><text x="592" y="12" text-anchor="end">latest $0.001550</text><text x="8" y="116" text-anchor="start">12:00</text><text x="592" y="116" text-anchor="end">11:00</text></svg><p class="empty">Excludes calls to models without a price.</p><h2>By model</h2>"#;
         assert!(body.contains(chart), "{chart}\n{body}");
         assert!(
             body.contains("* Costs exclude calls to models without a price."),
@@ -428,7 +558,7 @@ mod tests {
         let (status, _, body) = get(bq_state(&fake, true), "/usage").await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert!(
-            body.contains(r#"<h2>Over time</h2><p class="empty">Too many groups to chart for this range.</p><h2>By model</h2>"#),
+            body.contains(r#"<h2>Over time</h2><p class="csv"><a href="/usage.csv?range=24h&amp;table=trend">Download CSV</a></p><p class="empty">Too many groups to chart for this range.</p><h2>By model</h2>"#),
             "{body}"
         );
         assert!(!body.contains("usage-chart"), "{body}");
@@ -525,5 +655,314 @@ mod tests {
             "{body}"
         );
         assert_eq!(src.calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// The `Content-Disposition` of the download `name`.
+    fn attachment(name: &str) -> String {
+        format!(r#"attachment; filename="{name}""#)
+    }
+
+    #[tokio::test]
+    async fn usage_links_each_table_to_its_csv() {
+        let fake = FakeHttp::new(vec![breakdown_reply(), top_reply(), trend_reply(false)]);
+        let (status, _, body) = get(bq_state(&fake, true), "/usage?range=7d").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        for (heading, table) in [
+            ("Over time", "trend"),
+            ("By model", "model"),
+            ("By agent", "agent"),
+            ("By prompt", "prompt"),
+        ] {
+            let link = format!(
+                r#"<h2>{heading}</h2><p class="csv"><a href="/usage.csv?range=7d&amp;table={table}">Download CSV</a></p>"#
+            );
+            assert!(body.contains(&link), "{link}\n{body}");
+        }
+        assert!(
+            body.contains(r#"table=model">Download CSV</a></p><table>"#),
+            "{body}"
+        );
+        assert_eq!(body.matches("Download CSV").count(), 4, "{body}");
+        assert!(
+            !body.contains(r#"<h2>Totals</h2><p class="csv">"#),
+            "{body}"
+        );
+        assert!(
+            !body.contains(r#"<h2>Top traces</h2><p class="csv">"#),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_links_without_calls_or_without_bigquery() {
+        let fake = FakeHttp::new(vec![
+            empty_reply(&[("model", "STRING"), ("calls", "INT64")]),
+            empty_reply(&[("trace_id", "STRING"), ("total", "INT64")]),
+            empty_reply(&[("bucket", "INT64"), ("model", "STRING")]),
+        ]);
+        let (_, _, body) = get(bq_state(&fake, true), "/usage").await;
+        assert!(!body.contains("Download CSV"), "{body}");
+        let (_, _, body) = get(state(Arc::new(FakeSource::new()), None), "/usage").await;
+        assert!(!body.contains("Download CSV"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn usage_csv_by_model_agent_and_prompt_are_the_page_tables() {
+        for (table, csv) in [
+            (
+                "model",
+                "model,llm_calls,input,cached,output,reasoning,cost_usd,cost_partial\r\n\
+                 gemini-3.8-flash,4,4000,1000,1000,100,0.003725,false\r\n\
+                 other-model,2,500,0,100,0,,false\r\n",
+            ),
+            (
+                "agent",
+                "agent,llm_calls,input,cached,output,reasoning,cost_usd,cost_partial\r\n\
+                 triage,4,4000,1000,1000,100,0.003725,false\r\n\
+                 writer,2,500,0,100,0,,false\r\n",
+            ),
+            (
+                "prompt",
+                "prompt,llm_calls,input,cached,output,reasoning,cost_usd,cost_partial\r\n\
+                 (none),1,1000,0,400,100,0.001550,false\r\n\
+                 triage@2,5,3500,1000,700,0,0.002175,true\r\n",
+            ),
+        ] {
+            let fake = FakeHttp::new(vec![breakdown_reply()]);
+            let path = format!("/usage.csv?table={table}");
+            let (status, headers, body) = get(bq_state(&fake, true), &path).await;
+            assert_eq!(status, StatusCode::OK, "{path}: {body}");
+            assert_eq!(body, csv, "{path}");
+            assert_eq!(headers[CONTENT_TYPE], "text/csv; charset=utf-8");
+            assert_eq!(
+                headers[CONTENT_DISPOSITION],
+                attachment(&format!("gadk-usage-{table}-24h-20261116T1200Z.csv")).as_str()
+            );
+            assert!(headers.get("x-gadk-truncated").is_none(), "{path}");
+            // Only the breakdown query runs, over the default 24h.
+            assert_eq!(fake.uris().len(), 1, "{path}");
+            let sent = fake.body(0);
+            assert!(
+                !sent["query"].as_str().unwrap().contains("AS bucket"),
+                "{sent}"
+            );
+            assert_eq!(
+                param_value(&sent, "start")["parameterValue"]["value"],
+                json!("2026-11-15 12:00:00.000000+00:00")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_empty_agent_is_unknown_and_text_is_guarded() {
+        let fields = [
+            ("model", "STRING"),
+            ("agent", "STRING"),
+            ("prompt", "STRING"),
+            ("calls", "INT64"),
+            ("input", "INT64"),
+            ("cached", "INT64"),
+            ("output", "INT64"),
+            ("reasoning", "INT64"),
+        ];
+        let rows = vec![vec![
+            json!("=HYPERLINK(\"x\")"),
+            json!(""),
+            json!("p,1"),
+            json!("1"),
+            json!("10"),
+            json!("0"),
+            json!("5"),
+            json!("0"),
+        ]];
+        for (table, row) in [
+            ("model", "\"'=HYPERLINK(\"\"x\"\")\",1,10,0,5,0,,false\r\n"),
+            ("agent", "(unknown),1,10,0,5,0,,false\r\n"),
+            ("prompt", "\"p,1\",1,10,0,5,0,,false\r\n"),
+        ] {
+            let fake = FakeHttp::new(vec![reply(&fields, rows.clone(), false)]);
+            let (status, _, body) =
+                get(bq_state(&fake, false), &format!("/usage.csv?table={table}")).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert!(body.ends_with(&format!("\r\n{row}")), "{table}: {body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn usage_csv_trend_has_one_row_per_group_and_bucket() {
+        let fake = FakeHttp::new(vec![trend_reply(false)]);
+        let (status, headers, body) =
+            get(bq_state(&fake, true), "/usage.csv?table=trend&range=24h").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            body,
+            "bucket_start,model,agent,prompt,llm_calls,input,cached,output,reasoning,cost_usd,cost_partial\r\n\
+             2026-11-15T12:00:00.000Z,gemini-3.8-flash,triage,triage@2,3,3000,1000,600,0,0.002175,false\r\n\
+             2026-11-16T11:00:00.000Z,gemini-3.8-flash,triage,,1,1000,0,400,100,0.001550,false\r\n\
+             2026-11-16T11:00:00.000Z,other-model,writer,triage@2,2,500,0,100,0,,false\r\n"
+        );
+        assert_eq!(
+            headers[CONTENT_DISPOSITION],
+            attachment("gadk-usage-trend-24h-20261116T1200Z.csv").as_str()
+        );
+        assert_eq!(fake.uris().len(), 1);
+        let sent = fake.body(0);
+        assert!(
+            sent["query"].as_str().unwrap().contains("AS bucket"),
+            "{sent}"
+        );
+        assert_eq!(
+            param_value(&sent, "bucket")["parameterValue"]["value"],
+            json!("3600")
+        );
+    }
+
+    #[tokio::test]
+    async fn usage_csv_takes_the_range_and_an_unknown_one_is_24h() {
+        let fake = FakeHttp::new(vec![trend_reply(false)]);
+        let (_, headers, body) =
+            get(bq_state(&fake, false), "/usage.csv?range=7d&table=trend").await;
+        // Bucket 23 of 6-hour buckets from 11-09 12:00 starts 11-15 06:00; no prices, no cost.
+        assert!(
+            body.ends_with(
+                "\r\n2026-11-15T06:00:00.000Z,other-model,writer,triage@2,2,500,0,100,0,,false\r\n"
+            ),
+            "{body}"
+        );
+        assert_eq!(
+            headers[CONTENT_DISPOSITION],
+            attachment("gadk-usage-trend-7d-20261116T1200Z.csv").as_str()
+        );
+        let sent = fake.body(0);
+        assert_eq!(
+            param_value(&sent, "start")["parameterValue"]["value"],
+            json!("2026-11-09 12:00:00.000000+00:00")
+        );
+        assert_eq!(
+            param_value(&sent, "bucket")["parameterValue"]["value"],
+            json!("21600")
+        );
+
+        let fake = FakeHttp::new(vec![breakdown_reply()]);
+        let (status, headers, _) =
+            get(bq_state(&fake, false), "/usage.csv?range=bogus&table=model").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers[CONTENT_DISPOSITION],
+            attachment("gadk-usage-model-24h-20261116T1200Z.csv").as_str()
+        );
+        assert_eq!(
+            param_value(&fake.body(0), "start")["parameterValue"]["value"],
+            json!("2026-11-15 12:00:00.000000+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_truncated_query_is_a_truncated_download() {
+        let fake = FakeHttp::new(vec![trend_reply(true)]);
+        let (status, headers, body) = get(bq_state(&fake, true), "/usage.csv?table=trend").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(headers["x-gadk-truncated"], "true");
+        assert_eq!(
+            headers[CONTENT_DISPOSITION],
+            attachment("gadk-usage-trend-24h-20261116T1200Z-truncated.csv").as_str()
+        );
+        assert!(body.starts_with("bucket_start,"), "{body}");
+        assert_eq!(body.matches("\r\n").count(), 4, "no comment rows: {body}");
+    }
+
+    #[tokio::test]
+    async fn usage_csv_needs_a_known_table() {
+        for path in [
+            "/usage.csv",
+            "/usage.csv?table=",
+            "/usage.csv?table=bogus",
+            "/usage.csv?range=7d&table=Model",
+        ] {
+            let fake = FakeHttp::new(vec![]);
+            let (status, headers, body) = get(bq_state(&fake, true), path).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+            assert_eq!(headers[CONTENT_TYPE], "text/html; charset=utf-8");
+            assert!(
+                body.contains("table: must be model, agent, prompt or trend"),
+                "{path}: {body}"
+            );
+            assert!(
+                body.contains(r#"<a class="active" href="/usage">Usage</a>"#),
+                "{body}"
+            );
+            assert!(fake.uris().is_empty(), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn usage_csv_without_bigquery_is_404_with_the_usage_note() {
+        let src = Arc::new(FakeSource::new());
+        let (status, _, body) = get(state(src.clone(), None), "/usage.csv?table=model").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(
+            body.contains("Usage needs the BigQuery trace source: start the console with --traces bigquery://&lt;project&gt;.&lt;dataset&gt;.&lt;table&gt;."),
+            "{body}"
+        );
+        assert!(
+            body.contains(r#"<a class="active" href="/usage">Usage</a>"#),
+            "{body}"
+        );
+        assert_eq!(src.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_usage_csv_query_is_a_502_page() {
+        for table in ["model", "trend"] {
+            let fake = FakeHttp::new(vec![Ok((
+                403,
+                json!({ "error": { "code": 403, "message": "Access Denied", "errors": [{ "reason": "accessDenied" }] } }).to_string(),
+            ))]);
+            let (status, headers, body) =
+                get(bq_state(&fake, true), &format!("/usage.csv?table={table}")).await;
+            assert_eq!(status, StatusCode::BAD_GATEWAY, "{table}");
+            assert_eq!(headers[CONTENT_TYPE], "text/html; charset=utf-8");
+            assert!(body.contains("BigQuery: HTTP 403: Access Denied"), "{body}");
+            assert!(
+                body.contains(r#"<a class="active" href="/usage">Usage</a>"#),
+                "{body}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_csv_totals_equal_the_page_totals() {
+        let fake = FakeHttp::new(vec![breakdown_reply(), top_reply(), trend_reply(false)]);
+        let (_, _, page) = get(bq_state(&fake, true), "/usage").await;
+        for table in ["model", "agent", "prompt"] {
+            let fake = FakeHttp::new(vec![breakdown_reply()]);
+            let (_, _, csv) =
+                get(bq_state(&fake, true), &format!("/usage.csv?table={table}")).await;
+            let rows: Vec<&str> = csv
+                .split("\r\n")
+                .skip(1)
+                .filter(|r| !r.is_empty())
+                .collect();
+            assert_eq!(rows.len(), 2, "{csv}");
+            for row in rows {
+                let cells: Vec<&str> = row.split(',').collect();
+                let num = |i: usize| thousands(cells[i].parse().unwrap());
+                let cost = match (cells[6], cells[7]) {
+                    ("", _) => "—".to_owned(),
+                    (usd, "true") => format!("${usd}*"),
+                    (usd, _) => format!("${usd}"),
+                };
+                let tr = format!(
+                    r#"<tr><td>{}</td><td class="num">{}</td><td class="num">{}</td><td class="num">{}</td><td class="num">{}</td><td class="num">{}</td><td class="num">{cost}</td>"#,
+                    cells[0],
+                    num(1),
+                    num(2),
+                    num(3),
+                    num(4),
+                    num(5),
+                );
+                assert!(page.contains(&tr), "{table}: {tr}\n{page}");
+            }
+        }
     }
 }
