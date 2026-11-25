@@ -24,6 +24,8 @@
 //! gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]
 //! gadk-eval guards <source>... [--apply] [--prices <file|gs://bucket/object>] [--out <url>]
 //!     [--max-bytes <n>] [--notify <url|env:NAME>] [--notify-format slack|json]
+//! gadk-eval alerts <source>... [--prices <file|gs://bucket/object>] [--max-bytes <n>]
+//!     [--notify <url|env:NAME>] [--notify-format slack|json]
 //! ```
 //!
 //! `monitor` exits 0 on success, 1 when the spec's `min_pass_rate` is set and either the pass
@@ -64,6 +66,18 @@
 //! succeeded, and 2 when a guard failed, the post failed, a source, spec, price file, `--out` or
 //! `--notify` check failed (nothing runs and no summary is printed), stdout could not be
 //! written, or on a usage error.
+//!
+//! `alerts` checks every [`AlertSpec`] its sources name (read as for `guards`), one at a time: one
+//! BigQuery query per spec over `[now - window, now)`, capped at `--max-bytes`, then one line per
+//! rule under `== <name> ==` (`<rule>: <metric> <value> > <max> — FIRED`, `≤ … — ok`, or
+//! `insufficient` for an `error_rate` rule with too few calls); a spec that fails prints `error:
+//! <message>` and the run goes on. The last line counts the rules (`alerts: <s> specs, <r> rules —
+//! <f> fired, <o> ok, <i> insufficient, <e> errors`). Every spec, the price file (required by
+//! `cost` rules) and `--notify` are checked before any query. With `--notify`, a run in which a
+//! rule fired or a spec failed posts the summary and each such rule or spec, as `guards` posts. It
+//! exits 0 when no rule fired, 1 when a rule fired, and 2 when a spec failed, the post failed, a
+//! check before the run failed (nothing is queried and no summary is printed), stdout could not be
+//! written, or on a usage error.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -79,6 +93,9 @@ use gadk_eval::{EvalSet, Evaluator, Variant};
 use gadk_model::Llm;
 use gadk_prompts::{PromptRegistry, Selector, StoreError};
 
+use crate::alert::{AlertCounts, AlertOutcome, RuleStatus, alerts_body, evaluate};
+use crate::alert_source::{AlertQuery, AlertSource, UsageGroup};
+use crate::alert_spec::{AlertMetric, AlertSpec};
 use crate::error::MonitorError;
 use crate::experiment::run_experiment;
 use crate::experiment_spec::{AgentInstruction, ExperimentSpec};
@@ -89,7 +106,7 @@ use crate::gcp::{AdcTokenSource, GcpHttp};
 use crate::guard::Guard;
 use crate::guard_report::GuardReport;
 use crate::guard_source::GuardSource;
-use crate::guard_sources::{load_prices, load_specs};
+use crate::guard_sources::{load_alert_specs, load_prices, load_specs};
 use crate::guard_spec::GuardSpec;
 use crate::judge::vertex_judge;
 use crate::monitor::Monitor;
@@ -163,6 +180,22 @@ pub trait Backends: Send + Sync {
         let _ = (project, dataset, table, max_bytes);
         Err(MonitorError::Source(
             "guards are not supported by these backends".into(),
+        ))
+    }
+
+    /// The alert data source for the agent-analytics table `project.dataset.table`, every
+    /// query capped at `max_bytes` billed (`alerts`). The default refuses; [`CloudBackends`]
+    /// returns a [`BigQueryGuardSource`].
+    fn alert_source(
+        &self,
+        project: &str,
+        dataset: &str,
+        table: &str,
+        max_bytes: i64,
+    ) -> Result<Arc<dyn AlertSource>, MonitorError> {
+        let _ = (project, dataset, table, max_bytes);
+        Err(MonitorError::Source(
+            "alerts are not supported by these backends".into(),
         ))
     }
 
@@ -295,6 +328,18 @@ impl Backends for CloudBackends {
         ))
     }
 
+    fn alert_source(
+        &self,
+        project: &str,
+        dataset: &str,
+        table: &str,
+        max_bytes: i64,
+    ) -> Result<Arc<dyn AlertSource>, MonitorError> {
+        Ok(Arc::new(
+            BigQueryGuardSource::new(project, dataset, table)?.with_max_bytes_billed(max_bytes),
+        ))
+    }
+
     async fn list_objects(&self, bucket: &str, prefix: &str) -> Result<Vec<String>, MonitorError> {
         list_full_names(&cloud_storage()?, bucket, prefix).await
     }
@@ -386,6 +431,7 @@ fn cli() -> Command {
         )
         .subcommand(guard_cli())
         .subcommand(guards_cli())
+        .subcommand(alerts_cli())
 }
 
 /// The flags `guard` and `guards` share, with `prices` as the `--prices` argument (a path for
@@ -441,6 +487,49 @@ fn guards_cli() -> Command {
                 .long("notify")
                 .value_name("url|env:NAME")
                 .help("post a summary to this webhook when a guard advances, aborts or errors"),
+        )
+        .arg(
+            Arg::new("notify-format")
+                .long("notify-format")
+                .value_parser(["slack", "json"])
+                .requires("notify")
+                .help("webhook body: slack (default) or json"),
+        )
+}
+
+fn alerts_cli() -> Command {
+    Command::new("alerts")
+        .about(
+            "Check usage limits (cost, error rate, calls, tokens) in alert specs from files, \
+             directories or gs:// locations",
+        )
+        .after_help("Exit codes: 0 no rule fired, 1 a rule fired, 2 a spec failed or an error.")
+        .arg(
+            Arg::new("sources")
+                .value_name("source")
+                .required(true)
+                .num_args(1..)
+                .help(
+                    "alert spec file, directory, gs://<bucket>/<object> or \
+                     gs://<bucket>/<prefix>/",
+                ),
+        )
+        .arg(
+            Arg::new("prices")
+                .long("prices")
+                .help("price file (YAML) for cost rules: <file> or gs://<bucket>/<object>"),
+        )
+        .arg(
+            Arg::new("max-bytes")
+                .long("max-bytes")
+                .value_parser(value_parser!(i64).range(1..))
+                .help("most bytes billed per BigQuery query (default 1073741824)"),
+        )
+        .arg(
+            Arg::new("notify")
+                .long("notify")
+                .value_name("url|env:NAME")
+                .help("post a summary to this webhook when a rule fires or a spec errors"),
         )
         .arg(
             Arg::new("notify-format")
@@ -614,6 +703,7 @@ pub async fn run(
         }
         Some(("guard", m)) => guard(m, backends, stdout).await,
         Some(("guards", m)) => guards(m, backends, stdout).await,
+        Some(("alerts", m)) => alerts(m, backends, stdout).await,
         _ => Ok(2),
     };
     match result {
@@ -882,16 +972,7 @@ async fn guards(
     };
     let out = out_url.map(|url| ReportStore::open(url)).transpose()?;
     // The last pre-run check, so a bad --notify also fails before any guard runs.
-    let notifier = match m.get_one::<String>("notify") {
-        Some(target) => Some(Notifier {
-            url: notify::resolve(target, &|name| std::env::var(name).ok())?,
-            format: match m.get_one::<String>("notify-format").map(String::as_str) {
-                Some("json") => NotifyFormat::Json,
-                _ => NotifyFormat::Slack,
-            },
-        }),
-        None => None,
-    };
+    let notifier = notifier(m)?;
     let opts = GuardRunOpts {
         apply: m.get_flag("apply"),
         prices: Prices::Loaded(prices),
@@ -972,6 +1053,142 @@ async fn guards(
             Ok(2)
         }
     }
+}
+
+/// The webhook `--notify` and `--notify-format` name (`guards` and `alerts`), if any.
+fn notifier(m: &ArgMatches) -> Result<Option<Notifier>, MonitorError> {
+    let Some(target) = m.get_one::<String>("notify") else {
+        return Ok(None);
+    };
+    Ok(Some(Notifier {
+        url: notify::resolve(target, &|name| std::env::var(name).ok())?,
+        format: match m.get_one::<String>("notify-format").map(String::as_str) {
+            Some("json") => NotifyFormat::Json,
+            _ => NotifyFormat::Slack,
+        },
+    }))
+}
+
+/// `alerts`: 0 when no rule fired, 1 when one did, 2 when a spec errored or the `--notify`
+/// post failed; errors map to 2.
+async fn alerts(
+    m: &ArgMatches,
+    backends: &dyn Backends,
+    stdout: &mut dyn Write,
+) -> Result<i32, MonitorError> {
+    let sources: Vec<String> = m
+        .get_many::<String>("sources")
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect();
+    let specs = load_alert_specs(&sources, backends).await?;
+    let prices_source = m.get_one::<String>("prices");
+    if prices_source.is_none()
+        && let Some(s) = specs.iter().find(|s| {
+            s.spec
+                .rules
+                .iter()
+                .any(|r| matches!(r.metric, AlertMetric::Cost { .. }))
+        })
+    {
+        return Err(MonitorError::Spec(format!(
+            "alert spec {}: cost rules need --prices",
+            s.origin
+        )));
+    }
+    let prices = match prices_source {
+        Some(source) => Some(load_prices(source, backends).await?),
+        None => None,
+    };
+    // The last pre-run check, so a bad --notify also fails before any query.
+    let notifier = notifier(m)?;
+    let max_bytes = m
+        .get_one::<i64>("max-bytes")
+        .copied()
+        .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED);
+    let mut counts = AlertCounts {
+        specs: specs.len(),
+        ..AlertCounts::default()
+    };
+    // The rules that fired and the specs that errored, in output order, for the --notify body.
+    let mut outcomes = Vec::new();
+    for s in &specs {
+        writeln!(stdout, "== {} ==", s.spec.name)?;
+        match usage(&s.spec, max_bytes, backends).await {
+            Ok(groups) => {
+                let results = evaluate(&s.spec, &groups, prices.as_ref());
+                counts.add(&results);
+                for result in results {
+                    writeln!(stdout, "{}", result.line)?;
+                    if result.status == RuleStatus::Fired {
+                        outcomes.push(AlertOutcome::Fired {
+                            spec: s.spec.name.clone(),
+                            result,
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                let message = e.to_string();
+                writeln!(stdout, "error: {message}")?;
+                counts.errors += 1;
+                outcomes.push(AlertOutcome::Error {
+                    spec: s.spec.name.clone(),
+                    message,
+                });
+            }
+        }
+    }
+    let summary = counts.summary_line();
+    writeln!(stdout, "{summary}")?;
+    let code = if counts.errors > 0 {
+        2
+    } else if counts.fired > 0 {
+        1
+    } else {
+        0
+    };
+    let Some(notifier) = notifier else {
+        return Ok(code);
+    };
+    if counts.fired + counts.errors == 0 {
+        return Ok(code);
+    }
+    let body = alerts_body(notifier.format, &summary, &counts, &outcomes);
+    match notify::post(backends, &notifier.url, &body, tokio::time::sleep).await {
+        Ok(()) => {
+            writeln!(stdout, "notify: posted")?;
+            Ok(code)
+        }
+        Err(reason) => {
+            writeln!(stdout, "notify: {reason}")?;
+            Ok(2)
+        }
+    }
+}
+
+/// The usage groups of `spec`'s calls in `[now - window, now)`, read through
+/// [`Backends::alert_source`] with every query capped at `max_bytes`.
+async fn usage(
+    spec: &AlertSpec,
+    max_bytes: i64,
+    backends: &dyn Backends,
+) -> Result<Vec<UsageGroup>, MonitorError> {
+    let SourceSpec::BigQuery {
+        project,
+        dataset,
+        table,
+    } = &spec.source
+    else {
+        return Err(MonitorError::Spec(format!(
+            "alert spec: unsupported source {}",
+            spec.source.describe()
+        )));
+    };
+    let source = backends.alert_source(project, dataset, table, max_bytes)?;
+    let to = Utc::now();
+    source.usage(&AlertQuery::new(to - spec.window, to)).await
 }
 
 /// A writer that remembers whether a write to `inner` failed.
@@ -3890,6 +4107,760 @@ mod tests {
             let code = run(argv, &fake, &mut BrokenPipe, &mut err).await;
             assert_eq!(code, 2);
             assert!(fake.posts().is_empty(), "{:?}", fake.posts());
+        }
+    }
+
+    // ---- alerts ----
+
+    mod alerts_command {
+        use std::collections::{BTreeMap, VecDeque};
+
+        use crate::alert_source::{AlertQuery, AlertSource, UsageGroup};
+        use crate::prices::TokenUsage;
+
+        use super::*;
+
+        /// A webhook URL whose path is the secret.
+        const HOOK: &str = "https://hooks.example/T0/B0/secret-token";
+
+        /// The groups of table `events`: 116 calls, 12 failed; `m-flash` and `m-pro` cost
+        /// $0.11 and $0.25 with [`PRICES`], `m-new` has no price.
+        fn events() -> Vec<UsageGroup> {
+            vec![
+                UsageGroup::new(
+                    "m-flash",
+                    "support",
+                    Some("support/answer".into()),
+                    100,
+                    5,
+                    TokenUsage::new(100_000, 20_000, 30_000, 0),
+                ),
+                UsageGroup::new(
+                    "m-pro",
+                    "support",
+                    None,
+                    10,
+                    1,
+                    TokenUsage::new(50_000, 0, 10_000, 5_000),
+                ),
+                UsageGroup::new(
+                    "m-new",
+                    "triage",
+                    None,
+                    6,
+                    6,
+                    TokenUsage::new(1_000, 0, 0, 0),
+                ),
+            ]
+        }
+
+        const PRICES: &str = "- { model: m-flash, input: 0.5, output: 2 }\n\
+                              - { model: m-pro, input: 2, output: 10 }\n";
+
+        /// An alert source answering with `groups` (or the error `error`), recording each
+        /// query's window length in seconds.
+        struct FakeUsage {
+            groups: Result<Vec<UsageGroup>, String>,
+            calls: Arc<Mutex<Vec<String>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl AlertSource for FakeUsage {
+            async fn usage(&self, q: &AlertQuery) -> Result<Vec<UsageGroup>, MonitorError> {
+                // The window ends now.
+                assert!((Utc::now() - q.to).num_seconds().abs() < 60, "{q:?}");
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push(format!("usage {}", (q.to - q.from).num_seconds()));
+                self.groups.clone().map_err(MonitorError::Source)
+            }
+        }
+
+        /// Backends serving the tables `events` and `empty`; building a source for `broken`
+        /// fails, and `slow`'s query fails. Every `alert_source` and `usage` call is recorded.
+        struct Alerting {
+            calls: Arc<Mutex<Vec<String>>>,
+            /// Cloud Storage objects by `<bucket>/<name>`.
+            objects: BTreeMap<String, String>,
+            /// The `post_webhook` replies, in order; once they run out, every post gets 200.
+            webhook: Mutex<VecDeque<Result<u16, String>>>,
+            /// Every `post_webhook` call: the URL and the body.
+            posts: Mutex<Vec<(String, serde_json::Value)>>,
+        }
+
+        impl Alerting {
+            fn new() -> Self {
+                Self {
+                    calls: Arc::new(Mutex::new(Vec::new())),
+                    objects: BTreeMap::new(),
+                    webhook: Mutex::new(VecDeque::new()),
+                    posts: Mutex::new(Vec::new()),
+                }
+            }
+
+            fn calls(&self) -> Vec<String> {
+                self.calls.lock().unwrap().clone()
+            }
+
+            fn posts(&self) -> Vec<(String, serde_json::Value)> {
+                self.posts.lock().unwrap().clone()
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl Backends for Alerting {
+            fn source(
+                &self,
+                _spec: &SourceSpec,
+            ) -> Result<Arc<dyn TranscriptSource>, MonitorError> {
+                Err(MonitorError::Source("no monitor source".into()))
+            }
+
+            async fn judge(&self, _spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError> {
+                Err(MonitorError::Judge("no judge".into()))
+            }
+
+            fn alert_source(
+                &self,
+                project: &str,
+                dataset: &str,
+                table: &str,
+                max_bytes: i64,
+            ) -> Result<Arc<dyn AlertSource>, MonitorError> {
+                self.calls.lock().unwrap().push(format!(
+                    "alert_source {project}.{dataset}.{table} {max_bytes}"
+                ));
+                let groups = match table {
+                    "events" => Ok(events()),
+                    "empty" => Ok(Vec::new()),
+                    "slow" => Err("query failed: timeout".to_owned()),
+                    _ => return Err(MonitorError::Source("HTTP 403: denied".into())),
+                };
+                Ok(Arc::new(FakeUsage {
+                    groups,
+                    calls: self.calls.clone(),
+                }))
+            }
+
+            async fn list_objects(
+                &self,
+                bucket: &str,
+                prefix: &str,
+            ) -> Result<Vec<String>, MonitorError> {
+                let start = format!("{bucket}/");
+                Ok(self
+                    .objects
+                    .keys()
+                    .filter_map(|k| k.strip_prefix(&start))
+                    .filter(|n| {
+                        n.strip_prefix(prefix)
+                            .is_some_and(|rest| !rest.contains('/'))
+                    })
+                    .map(str::to_owned)
+                    .collect())
+            }
+
+            async fn read_object(
+                &self,
+                bucket: &str,
+                name: &str,
+            ) -> Result<Option<String>, MonitorError> {
+                Ok(self.objects.get(&format!("{bucket}/{name}")).cloned())
+            }
+
+            async fn post_webhook(
+                &self,
+                url: &str,
+                body: &serde_json::Value,
+            ) -> Result<u16, String> {
+                self.posts
+                    .lock()
+                    .unwrap()
+                    .push((url.to_owned(), body.clone()));
+                self.webhook.lock().unwrap().pop_front().unwrap_or(Ok(200))
+            }
+        }
+
+        /// The rules of the `usage` spec: a cost rule that fires, an error rate and a calls
+        /// rule that are ok, and an error rate with too few calls.
+        const USAGE_RULES: &str = "\n  - name: daily-cost\n    cost: { max: 0.3 }\n\
+              \x20 - error_rate: { max: 0.2 }\n\
+              \x20 - name: support-calls\n    where: { agent: support }\n    calls: { max: 200 }\n\
+              \x20 - name: new-errors\n    where: { model: m-new }\n    error_rate: { max: 0.5 }\n";
+
+        /// What the `usage` spec prints after its header.
+        const USAGE_LINES: &str = "daily-cost: cost $0.36 > $0.30 (6 unpriced calls) — FIRED\n\
+             error_rate: error_rate 10.3% (12/116) ≤ 20.0% — ok\n\
+             support-calls: calls 110 ≤ 200 — ok\n\
+             new-errors: error_rate — insufficient (6 calls < min_calls 20)\n";
+
+        /// The YAML of alert spec `name` on table `table` over `window` with `rules`.
+        fn alert_yaml(name: &str, table: &str, window: &str, rules: &str) -> String {
+            format!(
+                "name: {name}\nsource: {{ bigquery: {{ project: p, dataset: d, table: {table} }} }}\n\
+                 window: {window}\nrules: {rules}\n"
+            )
+        }
+
+        /// Writes `yaml` to `dir/file` and returns its path.
+        fn write(dir: &Path, file: &str, yaml: &str) -> String {
+            let p = dir.join(file);
+            std::fs::write(&p, yaml).unwrap();
+            p.display().to_string()
+        }
+
+        /// `<dir>/specs` with `usage` (on `events` over 1d, one rule fires) and `quiet` (on
+        /// `events` over 1h, ok), and `<dir>/prices.yaml`: `(specs, prices)`.
+        fn two_specs(dir: &Path) -> (String, String) {
+            let specs = dir.join("specs");
+            std::fs::create_dir(&specs).unwrap();
+            write(
+                &specs,
+                "1.yaml",
+                &alert_yaml("usage", "events", "1d", USAGE_RULES),
+            );
+            write(
+                &specs,
+                "2.yaml",
+                &alert_yaml("quiet", "events", "1h", "[tokens: { max: 1000000 }]"),
+            );
+            let prices = write(dir, "prices.yaml", PRICES);
+            (specs.display().to_string(), prices)
+        }
+
+        #[tokio::test]
+        async fn alerts_runs_each_spec_under_its_header_and_exits_1_when_a_rule_fires() {
+            let dir = tempfile::tempdir().unwrap();
+            let (specs, prices) = two_specs(dir.path());
+            let fake = Alerting::new();
+            let (code, stdout, stderr) =
+                cli_run(&["alerts", &specs, "--prices", &prices], &fake).await;
+            assert_eq!(code, 1, "{stdout}{stderr}");
+            assert_eq!(stderr, "");
+            assert_eq!(
+                stdout,
+                format!(
+                    "== usage ==\n{USAGE_LINES}\
+                     == quiet ==\n\
+                     tokens: tokens 196000 ≤ 1000000 — ok\n\
+                     alerts: 2 specs, 5 rules — 1 fired, 3 ok, 1 insufficient, 0 errors\n"
+                )
+            );
+            assert_eq!(
+                fake.calls(),
+                [
+                    "alert_source p.d.events 1073741824",
+                    "usage 86400",
+                    "alert_source p.d.events 1073741824",
+                    "usage 3600",
+                ]
+            );
+        }
+
+        #[tokio::test]
+        async fn alerts_exits_0_when_no_rule_fires() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = write(
+                dir.path(),
+                "a.yaml",
+                &alert_yaml(
+                    "ok",
+                    "events",
+                    "30d",
+                    "[calls: { max: 116 }, \
+                     { where: { model: m-new }, error_rate: { max: 0.01 } }]",
+                ),
+            );
+            let empty = write(
+                dir.path(),
+                "b.yaml",
+                &alert_yaml("none", "empty", "1m", "[tokens: { max: 0 }]"),
+            );
+            let fake = Alerting::new();
+            let (code, stdout, stderr) = cli_run(&["alerts", &file, &empty], &fake).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(
+                stdout,
+                "== ok ==\n\
+                 calls: calls 116 ≤ 116 — ok\n\
+                 error_rate: error_rate — insufficient (6 calls < min_calls 20)\n\
+                 == none ==\n\
+                 tokens: tokens 0 ≤ 0 — ok\n\
+                 alerts: 2 specs, 3 rules — 0 fired, 2 ok, 1 insufficient, 0 errors\n"
+            );
+            assert_eq!(
+                fake.calls(),
+                [
+                    "alert_source p.d.events 1073741824",
+                    "usage 2592000",
+                    "alert_source p.d.empty 1073741824",
+                    "usage 60",
+                ]
+            );
+        }
+
+        #[tokio::test]
+        async fn a_failing_spec_prints_its_error_and_the_rest_still_run() {
+            let dir = tempfile::tempdir().unwrap();
+            let specs = dir.path().join("specs");
+            std::fs::create_dir(&specs).unwrap();
+            write(
+                &specs,
+                "a.yaml",
+                &alert_yaml("broken", "broken", "1h", "[calls: { max: 1 }]"),
+            );
+            write(
+                &specs,
+                "b.yaml",
+                &alert_yaml(
+                    "slow",
+                    "slow",
+                    "1h",
+                    "[calls: { max: 1 }, tokens: { max: 1 }]",
+                ),
+            );
+            write(
+                &specs,
+                "c.yaml",
+                &alert_yaml("busy", "events", "1h", "[calls: { max: 1 }]"),
+            );
+            let fake = Alerting::new();
+            let (code, stdout, stderr) =
+                cli_run(&["alerts", &specs.display().to_string()], &fake).await;
+            assert_eq!(code, 2, "{stdout}{stderr}");
+            assert_eq!(stderr, "");
+            assert_eq!(
+                stdout,
+                "== broken ==\n\
+                 error: transcript source: HTTP 403: denied\n\
+                 == slow ==\n\
+                 error: transcript source: query failed: timeout\n\
+                 == busy ==\n\
+                 calls: calls 116 > 1 — FIRED\n\
+                 alerts: 3 specs, 1 rules — 1 fired, 0 ok, 0 insufficient, 2 errors\n"
+            );
+        }
+
+        #[tokio::test]
+        async fn backends_without_alert_sources_error_each_spec() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = write(
+                dir.path(),
+                "a.yaml",
+                &alert_yaml("usage", "events", "1h", "[calls: { max: 1 }]"),
+            );
+            let (code, stdout, _) = cli_run(&["alerts", &file], &Fake::new(Vec::new())).await;
+            assert_eq!(code, 2, "{stdout}");
+            assert_eq!(
+                stdout,
+                "== usage ==\n\
+                 error: transcript source: alerts are not supported by these backends\n\
+                 alerts: 1 specs, 0 rules — 0 fired, 0 ok, 0 insufficient, 1 errors\n"
+            );
+        }
+
+        #[test]
+        fn backends_without_alert_source_refuse_it() {
+            let Err(err) = Fake::new(Vec::new()).alert_source("p", "d", "t", 1_073_741_824) else {
+                panic!("the default alert_source returned a source");
+            };
+            assert_eq!(
+                err.to_string(),
+                "transcript source: alerts are not supported by these backends"
+            );
+        }
+
+        #[tokio::test]
+        async fn alerts_reads_specs_and_prices_from_gs_and_passes_max_bytes() {
+            let mut fake = Alerting::new();
+            fake.objects.insert(
+                "evals/alerts/usage.yaml".into(),
+                alert_yaml("usage", "events", "1d", USAGE_RULES),
+            );
+            fake.objects
+                .insert("evals/alerts/readme.txt".into(), "not a spec".into());
+            fake.objects
+                .insert("evals/prices.yaml".into(), PRICES.into());
+            let (code, stdout, stderr) = cli_run(
+                &[
+                    "alerts",
+                    "gs://evals/alerts/",
+                    "--prices",
+                    "gs://evals/prices.yaml",
+                    "--max-bytes",
+                    "5000",
+                ],
+                &fake,
+            )
+            .await;
+            assert_eq!(code, 1, "{stdout}{stderr}");
+            assert_eq!(
+                stdout,
+                format!(
+                    "== usage ==\n{USAGE_LINES}\
+                     alerts: 1 specs, 4 rules — 1 fired, 2 ok, 1 insufficient, 0 errors\n"
+                )
+            );
+            assert_eq!(
+                fake.calls(),
+                ["alert_source p.d.events 5000", "usage 86400"]
+            );
+        }
+
+        /// Runs `alerts` with `args` and checks it exits 2 with `stderr` (exactly, or as a
+        /// prefix when `prefix`), printing nothing, querying nothing and posting nothing.
+        async fn refused(args: &[&str], fake: &Alerting, stderr: &str, prefix: bool) {
+            let mut argv = vec!["alerts"];
+            argv.extend_from_slice(args);
+            let (code, out, err) = cli_run(&argv, fake).await;
+            assert_eq!(code, 2, "{args:?}: {err}");
+            assert_eq!(out, "", "{args:?}");
+            if prefix {
+                assert!(err.starts_with(stderr), "{args:?}: {err}");
+            } else {
+                assert_eq!(err, stderr, "{args:?}");
+            }
+            assert!(fake.calls().is_empty(), "{args:?}: {:?}", fake.calls());
+            assert!(fake.posts().is_empty(), "{args:?}: {:?}", fake.posts());
+        }
+
+        #[tokio::test]
+        async fn pre_run_checks_exit_2_before_any_query() {
+            let dir = tempfile::tempdir().unwrap();
+            let a = write(
+                dir.path(),
+                "a.yaml",
+                &alert_yaml("a", "events", "1h", "[calls: { max: 1 }]"),
+            );
+            let fake = Alerting::new();
+
+            // An invalid second spec.
+            let bad = write(dir.path(), "bad.yaml", "name: bad\n");
+            let want = format!("gadk-eval: monitor spec: alert spec {bad}: ");
+            refused(&[&a, &bad], &fake, &want, true).await;
+
+            // Two specs named `a`.
+            let dup = write(
+                dir.path(),
+                "dup.yaml",
+                &alert_yaml("a", "events", "1h", "[tokens: { max: 1 }]"),
+            );
+            let want = format!(
+                "gadk-eval: monitor spec: alerts: duplicate alert name a in {a} and {dup}\n"
+            );
+            refused(&[&a, &dup], &fake, &want, false).await;
+
+            // 201 specs.
+            let many = dir.path().join("many");
+            std::fs::create_dir(&many).unwrap();
+            for i in 0..=200 {
+                let name = format!("a{i:03}");
+                write(
+                    &many,
+                    &format!("{name}.yaml"),
+                    &alert_yaml(&name, "events", "1h", "[calls: { max: 1 }]"),
+                );
+            }
+            let many = many.display().to_string();
+            refused(
+                &[&many],
+                &fake,
+                "gadk-eval: monitor spec: alerts: more than 200 specs\n",
+                false,
+            )
+            .await;
+
+            // A cost rule without --prices names the spec, and comes before a bad --notify.
+            let cost = write(
+                dir.path(),
+                "cost.yaml",
+                &alert_yaml("cost", "events", "1h", "[cost: { max: 1 }]"),
+            );
+            let want =
+                format!("gadk-eval: monitor spec: alert spec {cost}: cost rules need --prices\n");
+            refused(&[&a, &cost, "--notify", "env:"], &fake, &want, false).await;
+
+            // A bad --prices, local or gs://.
+            let missing = dir.path().join("missing.yaml").display().to_string();
+            let want = format!("gadk-eval: monitor spec: price file {missing}: ");
+            refused(&[&cost, "--prices", &missing], &fake, &want, true).await;
+            refused(
+                &[&a, "--prices", "gs://evals/missing.yaml"],
+                &fake,
+                "gadk-eval: monitor spec: price file gs://evals/missing.yaml: not found\n",
+                false,
+            )
+            .await;
+
+            // A missing source, and a bad gs:// bucket.
+            let want = format!("gadk-eval: monitor spec: alert spec {missing}: not found\n");
+            refused(&[&a, &missing], &fake, &want, false).await;
+            refused(
+                &[&a, "gs://Bad/x.yaml"],
+                &fake,
+                "gadk-eval: monitor spec: alert spec gs://Bad/x.yaml: invalid bucket\n",
+                false,
+            )
+            .await;
+
+            // A bad --notify, checked last.
+            refused(
+                &[&a, "--notify", "env:GADK_EVAL_TEST_UNSET_WEBHOOK"],
+                &fake,
+                "gadk-eval: monitor spec: --notify: environment variable \
+                 GADK_EVAL_TEST_UNSET_WEBHOOK is not set\n",
+                false,
+            )
+            .await;
+            refused(
+                &[&a, "--notify", "ftp://hooks.example/secret-token"],
+                &fake,
+                "gadk-eval: monitor spec: --notify: expected an http:// or https:// URL or \
+                 env:NAME\n",
+                false,
+            )
+            .await;
+            refused(
+                &[&a, "--prices", &missing, "--notify", "env:"],
+                &fake,
+                &format!("gadk-eval: monitor spec: price file {missing}: "),
+                true,
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn notify_posts_a_slack_summary_when_a_rule_fires() {
+            let dir = tempfile::tempdir().unwrap();
+            let (specs, prices) = two_specs(dir.path());
+            let (_, plain, _) =
+                cli_run(&["alerts", &specs, "--prices", &prices], &Alerting::new()).await;
+            let fake = Alerting::new();
+            let (code, stdout, stderr) = cli_run(
+                &["alerts", &specs, "--prices", &prices, "--notify", HOOK],
+                &fake,
+            )
+            .await;
+            assert_eq!(code, 1, "{stdout}{stderr}");
+            assert_eq!(stderr, "");
+            assert_eq!(stdout, format!("{plain}notify: posted\n"));
+            let text = "alerts: 2 specs, 5 rules — 1 fired, 3 ok, 1 insufficient, 0 errors\n\
+                        • usage/daily-cost: cost $0.36 > $0.30 (6 unpriced calls)";
+            assert_eq!(
+                fake.posts(),
+                [(HOOK.to_owned(), serde_json::json!({ "text": text }))]
+            );
+            // `--notify-format slack` is the default.
+            let explicit = Alerting::new();
+            let args = [
+                "alerts",
+                &specs,
+                "--prices",
+                &prices,
+                "--notify",
+                HOOK,
+                "--notify-format",
+                "slack",
+            ];
+            assert_eq!(cli_run(&args, &explicit).await.0, 1);
+            assert_eq!(explicit.posts(), fake.posts());
+        }
+
+        #[tokio::test]
+        async fn notify_format_json_posts_the_counts_fired_rules_and_errors() {
+            let dir = tempfile::tempdir().unwrap();
+            let (specs, prices) = two_specs(dir.path());
+            write(
+                &dir.path().join("specs"),
+                "3.yaml",
+                &alert_yaml("broken", "broken", "1h", "[calls: { max: 1 }]"),
+            );
+            let fake = Alerting::new();
+            let args = [
+                "alerts",
+                &specs,
+                "--prices",
+                &prices,
+                "--notify",
+                HOOK,
+                "--notify-format",
+                "json",
+            ];
+            let (code, stdout, stderr) = cli_run(&args, &fake).await;
+            assert_eq!(code, 2, "{stdout}{stderr}");
+            assert!(
+                stdout.ends_with(
+                    "alerts: 3 specs, 5 rules — 1 fired, 3 ok, 1 insufficient, 1 errors\n\
+                     notify: posted\n"
+                ),
+                "{stdout}"
+            );
+            let posts = fake.posts();
+            assert_eq!(posts.len(), 1);
+            let cost = posts[0].1["fired"][0]["value"].as_f64().unwrap();
+            assert!((cost - 0.36).abs() < 1e-9, "{cost}");
+            let want = serde_json::json!({
+                "summary": {
+                    "specs": 3, "rules": 5, "fired": 1, "ok": 3, "insufficient": 1, "errors": 1
+                },
+                "fired": [{
+                    "spec": "usage", "rule": "daily-cost", "metric": "cost", "value": cost,
+                    "max": 0.3, "where": {}, "unpriced_calls": 6
+                }],
+                "errors": [{"spec": "broken", "error": "transcript source: HTTP 403: denied"}]
+            });
+            assert_eq!(posts, [(HOOK.to_owned(), want)]);
+        }
+
+        #[tokio::test]
+        async fn a_quiet_run_posts_nothing_and_prints_the_same() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = write(
+                dir.path(),
+                "a.yaml",
+                &alert_yaml(
+                    "quiet",
+                    "events",
+                    "1h",
+                    "[calls: { max: 1000 }, { where: { model: m-new }, error_rate: { max: 0 } }]",
+                ),
+            );
+            let (code, plain, _) = cli_run(&["alerts", &file], &Alerting::new()).await;
+            assert_eq!(code, 0, "{plain}");
+            let fake = Alerting::new();
+            let (code, stdout, stderr) = cli_run(&["alerts", &file, "--notify", HOOK], &fake).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(stdout, plain);
+            assert!(
+                stdout.ends_with(
+                    "alerts: 1 specs, 2 rules — 0 fired, 1 ok, 1 insufficient, 0 errors\n"
+                ),
+                "{stdout}"
+            );
+            assert!(fake.posts().is_empty(), "{:?}", fake.posts());
+        }
+
+        #[tokio::test]
+        async fn an_error_run_posts_and_still_exits_2() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = write(
+                dir.path(),
+                "a.yaml",
+                &alert_yaml("broken", "broken", "1h", "[calls: { max: 1 }]"),
+            );
+            let fake = Alerting::new();
+            let (code, stdout, stderr) = cli_run(&["alerts", &file, "--notify", HOOK], &fake).await;
+            assert_eq!(code, 2, "{stdout}{stderr}");
+            assert_eq!(
+                stdout,
+                "== broken ==\n\
+                 error: transcript source: HTTP 403: denied\n\
+                 alerts: 1 specs, 0 rules — 0 fired, 0 ok, 0 insufficient, 1 errors\n\
+                 notify: posted\n"
+            );
+            let text = "alerts: 1 specs, 0 rules — 0 fired, 0 ok, 0 insufficient, 1 errors\n\
+                        • broken: error: transcript source: HTTP 403: denied";
+            assert_eq!(
+                fake.posts(),
+                [(HOOK.to_owned(), serde_json::json!({ "text": text }))]
+            );
+        }
+
+        #[tokio::test]
+        async fn a_failed_post_exits_2_naming_only_the_origin() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = write(
+                dir.path(),
+                "a.yaml",
+                &alert_yaml("busy", "events", "1h", "[calls: { max: 1 }]"),
+            );
+            let fake = Alerting::new();
+            fake.webhook.lock().unwrap().push_back(Ok(404));
+            let (code, stdout, stderr) = cli_run(&["alerts", &file, "--notify", HOOK], &fake).await;
+            assert_eq!(code, 2, "{stdout}{stderr}");
+            assert_eq!(stderr, "");
+            assert_eq!(
+                stdout,
+                "== busy ==\n\
+                 calls: calls 116 > 1 — FIRED\n\
+                 alerts: 1 specs, 1 rules — 1 fired, 0 ok, 0 insufficient, 0 errors\n\
+                 notify: POST https://hooks.example failed: http 404\n"
+            );
+            for secret in ["secret-token", "/T0/"] {
+                assert!(!stdout.contains(secret), "{stdout}");
+            }
+            assert_eq!(fake.posts().len(), 1);
+        }
+
+        #[tokio::test]
+        async fn a_stdout_failure_ends_alerts_with_exit_2_before_any_query_or_post() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = write(
+                dir.path(),
+                "a.yaml",
+                &alert_yaml("busy", "events", "1h", "[calls: { max: 1 }]"),
+            );
+            let fake = Alerting::new();
+            let mut err = Vec::new();
+            let argv = ["gadk-eval", "alerts", &file, "--notify", HOOK]
+                .map(str::to_owned)
+                .to_vec();
+            let code = run(argv, &fake, &mut BrokenPipe, &mut err).await;
+            assert_eq!(code, 2);
+            let err = String::from_utf8(err).unwrap();
+            assert!(err.starts_with("gadk-eval: "), "{err}");
+            assert!(!err.contains("alerts: "), "{err}");
+            assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+            assert!(fake.posts().is_empty(), "{:?}", fake.posts());
+        }
+
+        #[tokio::test]
+        async fn help_lists_alerts_and_its_flags() {
+            let fake = Alerting::new();
+            let (code, stdout, _) = cli_run(&["--help"], &fake).await;
+            assert_eq!(code, 0);
+            assert!(stdout.contains("alerts"), "{stdout}");
+            let (code, stdout, _) = cli_run(&["alerts", "--help"], &fake).await;
+            assert_eq!(code, 0);
+            for text in [
+                "<source>...",
+                "--prices <prices>",
+                "--max-bytes <max-bytes>",
+                "--notify <url|env:NAME>",
+                "post a summary to this webhook when a rule fires or a spec errors",
+                "--notify-format <notify-format>",
+                "Exit codes: 0 no rule fired, 1 a rule fired, 2 a spec failed or an error.",
+            ] {
+                assert!(stdout.contains(text), "{text}: {stdout}");
+            }
+            assert!(!stdout.contains("--apply"), "{stdout}");
+            assert!(!stdout.contains("--out"), "{stdout}");
+        }
+
+        #[tokio::test]
+        async fn usage_errors_exit_2() {
+            let fake = Alerting::new();
+            for args in [
+                &["alerts"][..],
+                &["alerts", "x.yaml", "--max-bytes=0"],
+                &["alerts", "x.yaml", "--notify-format", "json"],
+                &[
+                    "alerts",
+                    "x.yaml",
+                    "--notify",
+                    HOOK,
+                    "--notify-format",
+                    "xml",
+                ],
+                &["alerts", "x.yaml", "--out", "reports"],
+            ] {
+                let (code, out, stderr) = cli_run(args, &fake).await;
+                assert_eq!(code, 2, "{args:?}");
+                assert_eq!(out, "", "{args:?}");
+                assert!(!stderr.is_empty(), "{args:?}");
+            }
+            assert!(fake.calls().is_empty() && fake.posts().is_empty());
         }
     }
 
