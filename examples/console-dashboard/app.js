@@ -558,17 +558,9 @@ function readControls() {
   state.range = document.getElementById("range").value;
 }
 
-// The `console|range` of the last reload, so that one edit seen by two listeners reloads once.
-let lastReload = null;
-
 // R2: reloads every loaded panel with the header's console URL and range.
 async function reload() {
   readControls();
-  const key = `${state.console}|${state.range}`;
-  if (key === lastReload) {
-    return;
-  }
-  lastReload = key;
   document.getElementById("clamp-note").hidden = state.range !== "30d";
   clearTurns();
   const loaders = [loadUsage(), loadTrend(), loadTopTraces(), loadSessions(), loadUsers()];
@@ -582,7 +574,6 @@ async function reload() {
 function init() {
   const params = new URLSearchParams(location.search);
   document.getElementById("console-url").value = params.get("console") || DEFAULT_CONSOLE;
-  document.getElementById("console-url").addEventListener("change", reload);
   document.getElementById("range").addEventListener("change", reload);
   document.getElementById("controls").addEventListener("submit", (event) => {
     event.preventDefault();
