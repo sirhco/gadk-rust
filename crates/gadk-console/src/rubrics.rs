@@ -22,6 +22,7 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::ConsoleError;
+use crate::scores::NewScore;
 
 /// The most rubrics a file may hold.
 const MAX_RUBRICS: usize = 20;
@@ -68,6 +69,52 @@ impl Rubric {
         self.criteria
             .iter()
             .map(|c| format!("{}/{}", self.name, c.name))
+            .collect()
+    }
+
+    /// The `number` scores of a submitted rubric form, one per criterion in file order: score
+    /// `<rubric>/<criterion>` with the value of field `c_<criterion>` (its first value,
+    /// trimmed) and the shared `comment` (dropped when blank).
+    ///
+    /// # Errors
+    ///
+    /// The text of the 400 page for the first failing criterion: `` `<criterion>`: choose a
+    /// score `` when the value is missing or blank, `` `<criterion>`: must be an integer from
+    /// <min> to <max> `` when it is not an integer on the scale.
+    pub(crate) fn scores_from_form(
+        &self,
+        form: &[(String, String)],
+        comment: &str,
+    ) -> Result<Vec<NewScore>, String> {
+        self.criteria
+            .iter()
+            .map(|c| {
+                let key = format!("c_{}", c.name);
+                let value = form
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, v)| v.trim())
+                    .filter(|v| !v.is_empty())
+                    .ok_or_else(|| format!("`{}`: choose a score", c.name))?;
+                let n = value
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|n| {
+                        value.bytes().all(|b| b.is_ascii_digit()) && (c.min..=c.max).contains(n)
+                    })
+                    .ok_or_else(|| {
+                        format!(
+                            "`{}`: must be an integer from {} to {}",
+                            c.name, c.min, c.max
+                        )
+                    })?;
+                NewScore::from_form(
+                    &format!("{}/{}", self.name, c.name),
+                    "number",
+                    &n.to_string(),
+                    comment,
+                )
+            })
             .collect()
     }
 }
@@ -477,6 +524,70 @@ mod tests {
                 "r".repeat(64),
                 "c".repeat(36)
             )
+        );
+    }
+
+    fn form(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn a_complete_form_is_one_number_score_per_criterion_in_file_order() {
+        let rubrics = Rubrics::from_yaml(VALID).unwrap();
+        let support = rubrics.get("support").unwrap();
+        let scores = support
+            .scores_from_form(
+                &form(&[
+                    ("c_tone", " 0 "),
+                    ("c_accuracy", "4"),
+                    ("c_accuracy", "1"),
+                    ("c_other", "x"),
+                ]),
+                "clear and kind",
+            )
+            .unwrap();
+        assert_eq!(
+            scores.iter().map(NewScore::content).collect::<Vec<_>>(),
+            vec![
+                serde_json::json!({"name": "support/accuracy", "value": 4.0, "data_type": "number", "comment": "clear and kind"}),
+                serde_json::json!({"name": "support/tone", "value": 0.0, "data_type": "number", "comment": "clear and kind"}),
+            ]
+        );
+        let scores = support
+            .scores_from_form(&form(&[("c_accuracy", "5"), ("c_tone", "3")]), "  ")
+            .unwrap();
+        assert_eq!(
+            scores[0].content(),
+            serde_json::json!({"name": "support/accuracy", "value": 5.0, "data_type": "number"})
+        );
+        assert_eq!(
+            scores[0].content().to_string(),
+            r#"{"data_type":"number","name":"support/accuracy","value":5.0}"#
+        );
+    }
+
+    #[test]
+    fn the_first_failing_criterion_in_file_order_is_reported() {
+        let rubrics = Rubrics::from_yaml(VALID).unwrap();
+        let support = rubrics.get("support").unwrap();
+        let err = |pairs: &[(&str, &str)]| support.scores_from_form(&form(pairs), "").unwrap_err();
+        assert_eq!(err(&[]), "`accuracy`: choose a score");
+        assert_eq!(err(&[("c_accuracy", " ")]), "`accuracy`: choose a score");
+        assert_eq!(err(&[("c_tone", "9")]), "`accuracy`: choose a score");
+        assert_eq!(err(&[("c_accuracy", "3")]), "`tone`: choose a score");
+        for value in ["0", "6", "3.0", "+3", "-1", "x", "99999999999"] {
+            assert_eq!(
+                err(&[("c_accuracy", value), ("c_tone", "1")]),
+                "`accuracy`: must be an integer from 1 to 5",
+                "{value}"
+            );
+        }
+        assert_eq!(
+            err(&[("c_accuracy", "2"), ("c_tone", "4")]),
+            "`tone`: must be an integer from 0 to 3"
         );
     }
 

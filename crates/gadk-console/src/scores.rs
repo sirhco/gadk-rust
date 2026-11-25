@@ -287,6 +287,33 @@ impl UsageSource {
         ];
         self.run_dml(&sql, params).await
     }
+
+    /// Inserts `scores` by `author` on trace `trace_id` as `FEEDBACK` rows of `root`'s
+    /// invocation, in order: one DML statement (all rows or none), billed at least 10 MiB.
+    #[allow(dead_code)] // the rubric form posts here
+    pub(crate) async fn insert_scores(
+        &self,
+        trace_id: &str,
+        root: &TraceRoot,
+        scores: &[NewScore],
+        author: &str,
+    ) -> Result<(), SourceError> {
+        let sql = insert_scores_sql(&self.table_path()?);
+        let contents: Vec<String> = scores.iter().map(|s| s.content().to_string()).collect();
+        let params = vec![
+            param("trace_id", "STRING", Some(trace_id.to_owned())),
+            param("session_id", "STRING", root.session_id.clone()),
+            param("invocation_id", "STRING", Some(root.invocation_id.clone())),
+            param("user_id", "STRING", root.user_id.clone()),
+            string_array_param("contents", &contents),
+            param(
+                "attributes",
+                "STRING",
+                Some(root.attributes(author).to_string()),
+            ),
+        ];
+        self.run_dml(&sql, params).await
+    }
 }
 
 impl UsageSource {
@@ -444,6 +471,20 @@ VALUES (CURRENT_TIMESTAMP(), REPLACE(GENERATE_UUID(), '-', ''), 'FEEDBACK', @tra
   @session_id, @invocation_id, @user_id, 'OK', FALSE,
   PARSE_JSON(@content, wide_number_mode => 'round'),
   PARSE_JSON(@attributes, wide_number_mode => 'round'))"
+    )
+}
+
+/// One `FEEDBACK` row per element of `@contents` (`ARRAY<STRING>`); the other columns are
+/// those of [`insert_score_sql`].
+fn insert_scores_sql(table: &str) -> String {
+    format!(
+        r"INSERT INTO {table} (timestamp, event_id, event_type, trace_id, session_id,
+  invocation_id, user_id, status, is_truncated, content, attributes)
+SELECT CURRENT_TIMESTAMP(), REPLACE(GENERATE_UUID(), '-', ''), 'FEEDBACK', @trace_id,
+  @session_id, @invocation_id, @user_id, 'OK', FALSE,
+  PARSE_JSON(c, wide_number_mode => 'round'),
+  PARSE_JSON(@attributes, wide_number_mode => 'round')
+FROM UNNEST(@contents) AS c"
     )
 }
 
@@ -805,6 +846,114 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(fake.body(0)["maximumBytesBilled"], json!("50000000"));
+    }
+
+    #[test]
+    fn the_insert_scores_sql_is_byte_identical() {
+        assert_eq!(
+            insert_scores_sql("`p.d.t`"),
+            r"INSERT INTO `p.d.t` (timestamp, event_id, event_type, trace_id, session_id,
+  invocation_id, user_id, status, is_truncated, content, attributes)
+SELECT CURRENT_TIMESTAMP(), REPLACE(GENERATE_UUID(), '-', ''), 'FEEDBACK', @trace_id,
+  @session_id, @invocation_id, @user_id, 'OK', FALSE,
+  PARSE_JSON(c, wide_number_mode => 'round'),
+  PARSE_JSON(@attributes, wide_number_mode => 'round')
+FROM UNNEST(@contents) AS c"
+        );
+    }
+
+    #[tokio::test]
+    async fn insert_scores_is_one_dml_with_the_contents_in_order() {
+        let fake = FakeHttp::new(vec![dml_reply()]);
+        let root = TraceRoot {
+            user_id: Some("u-1".into()),
+            session_id: Some("s-1".into()),
+            invocation_id: "e-1".into(),
+            app_name: Some("shop".into()),
+        };
+        let scores = [
+            NewScore::from_form("support/accuracy", "number", "4", "kind").unwrap(),
+            NewScore::from_form("support/tone", "number", "2", "kind").unwrap(),
+        ];
+        source(&fake)
+            .insert_scores(TRACE, &root, &scores, "chris")
+            .await
+            .unwrap();
+        assert_eq!(fake.uris().len(), 1, "one statement");
+        let body = fake.body(0);
+        assert_eq!(body["maximumBytesBilled"], json!("10485760"));
+        assert_eq!(
+            body["query"],
+            json!(insert_scores_sql(
+                "`data-proj.agent_analytics.agent_events`"
+            ))
+        );
+        let contents = param_value(&body, "contents");
+        assert_eq!(
+            contents["parameterType"],
+            json!({ "type": "ARRAY", "arrayType": { "type": "STRING" } })
+        );
+        assert_eq!(
+            contents["parameterValue"],
+            json!({ "arrayValues": [
+                { "value": r#"{"comment":"kind","data_type":"number","name":"support/accuracy","value":4.0}"# },
+                { "value": r#"{"comment":"kind","data_type":"number","name":"support/tone","value":2.0}"# },
+            ] })
+        );
+        for (name, want) in [
+            ("trace_id", TRACE),
+            ("session_id", "s-1"),
+            ("invocation_id", "e-1"),
+            ("user_id", "u-1"),
+        ] {
+            assert_eq!(
+                param_value(&body, name)["parameterValue"]["value"],
+                json!(want),
+                "{name}"
+            );
+        }
+        let attributes: Value = serde_json::from_str(
+            param_value(&body, "attributes")["parameterValue"]["value"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            attributes,
+            json!({"source": "console", "author": "chris", "adk": {"app_name": "shop", "invocation_id": "e-1"}})
+        );
+        let sql = body["query"].as_str().unwrap();
+        for value in [TRACE, "s-1", "e-1", "u-1", "support", "kind", "chris"] {
+            assert!(!sql.contains(value), "{value} is a parameter: {sql}");
+        }
+    }
+
+    #[tokio::test]
+    async fn insert_scores_keeps_a_larger_byte_cap() {
+        let fake = FakeHttp::new(vec![dml_reply()]);
+        let src = UsageSource::with_client(
+            BigQueryClient::with_client(fake.clone(), Arc::new(NoAuth)),
+            "billing-proj",
+            BigQueryTable::new("data-proj", "agent_analytics", "agent_events"),
+            50_000_000,
+        );
+        let root = TraceRoot {
+            user_id: None,
+            session_id: None,
+            invocation_id: "e-1".into(),
+            app_name: None,
+        };
+        let scores = [NewScore::from_form("r/c", "number", "1", "").unwrap()];
+        src.insert_scores(TRACE, &root, &scores, "chris")
+            .await
+            .unwrap();
+        let body = fake.body(0);
+        assert_eq!(body["maximumBytesBilled"], json!("50000000"));
+        assert_eq!(
+            param_value(&body, "user_id")["parameterValue"],
+            json!({}),
+            "an unknown user id is NULL"
+        );
     }
 
     const FEEDBACK_FIELDS: [(&str, &str); 8] = [
