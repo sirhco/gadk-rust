@@ -46,7 +46,7 @@ pub(crate) const NEEDS_BIGQUERY_SESSIONS: &str = "Sessions need the BigQuery tra
 
 /// The text of the 400 page for a session id that is empty, longer than 128 bytes or holds a
 /// control character.
-const INVALID_SESSION_ID: &str = "invalid session id";
+pub(crate) const INVALID_SESSION_ID: &str = "invalid session id";
 
 /// Why the session page has no conversation text when the console has no export source.
 const NO_EXPORT: &str = "the console has no transcript source";
@@ -139,13 +139,16 @@ fn filter_param(params: &[(String, String)], key: &str) -> Result<Option<String>
     }
 }
 
-/// The `/sessions` query of `params`, ending at `end`.
+/// The `/sessions` query of `params`, ending at `end` (shared with `/api/v1/sessions`).
 ///
 /// # Errors
 ///
 /// The text of the 400 page: `user is too long`, `agent is too long` or `invalid cursor`
 /// (`after` and `after_id` must both be absent, or both valid).
-fn session_query(params: &[(String, String)], end: DateTime<Utc>) -> Result<SessionQuery, String> {
+pub(crate) fn session_query(
+    params: &[(String, String)],
+    end: DateTime<Utc>,
+) -> Result<SessionQuery, String> {
     let (after, after_id) = (first(params, "after"), first(params, "after_id"));
     let after = if after.is_empty() && after_id.is_empty() {
         None
@@ -203,15 +206,36 @@ async fn list_users(
     }
 }
 
-/// The `/users` query of `params`, ending at `end`.
+/// The `/users` query of `params`, ending at `end` (shared with `/api/v1/users`).
 ///
 /// # Errors
 ///
 /// The text of the 400 page: `agent is too long`.
-fn user_query(params: &[(String, String)], end: DateTime<Utc>) -> Result<UserQuery, String> {
+pub(crate) fn user_query(
+    params: &[(String, String)],
+    end: DateTime<Utc>,
+) -> Result<UserQuery, String> {
     let mut q = UserQuery::new(range_param(params, TimeRange::Days7), end);
     q.agent = filter_param(params, "agent")?;
     Ok(q)
+}
+
+/// The header query of session `id` on `/sessions/{id}` and `/api/v1/sessions/{id}/turns`:
+/// the session's row over the `range` of `params` (7d by default), ending at `end`.
+///
+/// # Errors
+///
+/// [`INVALID_SESSION_ID`] for an id that is empty, longer than 128 bytes or holds a control
+/// character.
+pub(crate) fn turns_query(
+    id: &str,
+    params: &[(String, String)],
+    end: DateTime<Utc>,
+) -> Result<SessionQuery, &'static str> {
+    if !is_session_id(id) {
+        return Err(INVALID_SESSION_ID);
+    }
+    Ok(SessionQuery::new(range_param(params, TimeRange::Days7), end).with_session(id))
 }
 
 /// `GET /sessions.csv`: every session of the window `/sessions` would list (same `range`,
@@ -337,13 +361,12 @@ async fn session_page(
     let Some(usage) = &state.usage else {
         return needs_bigquery();
     };
-    if !is_session_id(&id) {
-        return bad_request(INVALID_SESSION_ID);
-    }
-    let range = range_param(&params, TimeRange::Days7);
-    let end = (state.now)();
+    let q = match turns_query(&id, &params, (state.now)()) {
+        Ok(q) => q,
+        Err(text) => return bad_request(text),
+    };
+    let (range, end) = (q.range, q.end);
     let start = end - range.duration();
-    let q = SessionQuery::new(range, end).with_session(id.clone());
     let head = match usage.sessions(&q, SESSION_CAP, ROW_CAP).await {
         Ok(p) => p.sessions.into_iter().next(),
         Err(e) => return source_error_in(Nav::Sessions, &e),

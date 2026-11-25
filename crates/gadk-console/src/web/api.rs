@@ -27,6 +27,7 @@ use super::AppState;
 use crate::prices::{PriceTable, cost_of};
 use crate::traces::SourceError;
 
+mod sessions;
 mod usage;
 
 /// The message of the 404 for an unknown `/api` path.
@@ -36,7 +37,9 @@ pub(crate) const READ_ONLY: &str = "the API is read-only";
 
 /// The routes of the API, relative to `/api`.
 fn routes() -> Router<AppState> {
-    Router::new().merge(usage::routes())
+    Router::new()
+        .merge(usage::routes())
+        .merge(sessions::routes())
 }
 
 /// The router nested at `/api`: [`routes`], a JSON 405 for other methods on a known route, and
@@ -142,6 +145,8 @@ pub(crate) fn cost_sum<'a>(
     sum
 }
 
+#[cfg(test)]
+mod sessions_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
