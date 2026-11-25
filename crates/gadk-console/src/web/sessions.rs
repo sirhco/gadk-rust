@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Session routes: `/sessions`, `/sessions/{id}` and `/users`.
+//! Session routes: `/sessions`, `/sessions/{id}` and `/users`, and their downloads
+//! `/sessions.csv` and `/users.csv`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,9 +32,11 @@ use super::pages::layout::{Nav, html};
 use super::pages::session::{self, Conversation};
 use super::pages::{sessions, users};
 use super::review::first;
+use crate::csv::{Csv, Field, filename, response};
 use crate::review::at_text;
 use crate::sessions::{
-    MAX_ID_LEN, SessionCursor, SessionQuery, TURN_CAP, UserQuery, is_session_id,
+    CSV_CAP, CSV_ROW_CAP, MAX_ID_LEN, ROW_CAP, SESSION_CAP, SessionCursor, SessionQuery, TURN_CAP,
+    USER_CAP, UserQuery, is_session_id,
 };
 use crate::traces::TimeRange;
 use crate::url::percent_encode;
@@ -51,8 +54,10 @@ const NO_EXPORT: &str = "the console has no transcript source";
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/sessions", get(list))
+        .route("/sessions.csv", get(sessions_csv))
         .route("/sessions/{id}", get(session_page))
         .route("/users", get(list_users))
+        .route("/users.csv", get(users_csv))
 }
 
 /// `/sessions/{id}?range={range}`: the session page.
@@ -75,6 +80,28 @@ pub(crate) fn next_link(q: &SessionQuery, id: &str, last: DateTime<Utc>) -> Stri
         percent_encode(&at_text(last)),
         percent_encode(id)
     ));
+    out
+}
+
+/// `/sessions.csv?range={range}[&user={user}][&agent={agent}]`: the download of the sessions
+/// `q` lists.
+pub(crate) fn sessions_csv_link(q: &SessionQuery) -> String {
+    let mut out = format!("/sessions.csv?range={}", q.range.as_str());
+    if let Some(user) = &q.user {
+        out.push_str(&format!("&user={}", percent_encode(user)));
+    }
+    if let Some(agent) = &q.agent {
+        out.push_str(&format!("&agent={}", percent_encode(agent)));
+    }
+    out
+}
+
+/// `/users.csv?range={range}[&agent={agent}]`: the download of the users `q` lists.
+pub(crate) fn users_csv_link(q: &UserQuery) -> String {
+    let mut out = format!("/users.csv?range={}", q.range.as_str());
+    if let Some(agent) = &q.agent {
+        out.push_str(&format!("&agent={}", percent_encode(agent)));
+    }
     out
 }
 
@@ -148,7 +175,7 @@ async fn list(
         Ok(q) => q,
         Err(text) => return bad_request(&text),
     };
-    match usage.sessions(&q).await {
+    match usage.sessions(&q, SESSION_CAP, ROW_CAP).await {
         Ok(p) => html(
             StatusCode::OK,
             sessions::render(&q, &p, state.prices.as_deref()),
@@ -166,21 +193,143 @@ async fn list_users(
     let Some(usage) = &state.usage else {
         return needs_bigquery();
     };
-    let q = match filter_param(&params, "agent") {
-        Ok(agent) => UserQuery {
-            range: range_param(&params, TimeRange::Days7),
-            end: (state.now)(),
-            agent,
-        },
+    let q = match user_query(&params, (state.now)()) {
+        Ok(q) => q,
         Err(text) => return bad_request(&text),
     };
-    match usage.users(&q).await {
+    match usage.users(&q, USER_CAP, ROW_CAP).await {
         Ok(p) => html(
             StatusCode::OK,
             users::render(&q, &p, state.prices.as_deref()),
         ),
         Err(e) => source_error_in(Nav::Sessions, &e),
     }
+}
+
+/// The `/users` query of `params`, ending at `end`.
+///
+/// # Errors
+///
+/// The text of the 400 page: `agent is too long`.
+fn user_query(params: &[(String, String)], end: DateTime<Utc>) -> Result<UserQuery, String> {
+    Ok(UserQuery {
+        range: range_param(params, TimeRange::Days7),
+        end,
+        agent: filter_param(params, "agent")?,
+    })
+}
+
+/// `GET /sessions.csv`: every session of the window `/sessions` would list (same `range`,
+/// `user` and `agent`), newest last activity first, from the newest on (`after` and `after_id`
+/// are not read), up to [`CSV_CAP`].
+async fn sessions_csv(
+    State(state): State<AppState>,
+    Query(params): Query<Vec<(String, String)>>,
+) -> Response {
+    let Some(usage) = &state.usage else {
+        return needs_bigquery();
+    };
+    let q = match (
+        filter_param(&params, "user"),
+        filter_param(&params, "agent"),
+    ) {
+        (Ok(user), Ok(agent)) => SessionQuery {
+            range: range_param(&params, TimeRange::Hours24),
+            end: (state.now)(),
+            user,
+            agent,
+            session: None,
+            after: None,
+        },
+        (Err(text), _) | (_, Err(text)) => return bad_request(&text),
+    };
+    let p = match usage.sessions(&q, CSV_CAP, CSV_ROW_CAP).await {
+        Ok(p) => p,
+        Err(e) => return source_error_in(Nav::Sessions, &e),
+    };
+    let mut csv = Csv::new();
+    csv.header(&[
+        "session_id",
+        "user",
+        "agent",
+        "first_activity",
+        "last_activity",
+        "turns",
+        "tokens",
+        "cost_usd",
+        "cost_partial",
+        "errors",
+        "thumbs_up",
+        "thumbs_down",
+    ]);
+    for s in &p.sessions {
+        let (tokens, cost) = sessions::totals(&s.tokens, state.prices.as_deref());
+        csv.row(&[
+            Field::Text(s.session_id.clone()),
+            Field::Text(s.user.clone()),
+            Field::Text(s.agent.clone()),
+            Field::Time(s.first),
+            Field::Time(s.last),
+            Field::Int(s.turns),
+            Field::Int(tokens),
+            Field::Cost(cost),
+            Field::Int(s.errors),
+            Field::Int(s.ups),
+            Field::Int(s.downs),
+        ]);
+    }
+    let truncated = p.has_next || p.truncated;
+    let name = filename("sessions", q.range.as_str(), q.end, truncated);
+    response(csv.finish(), &name, truncated)
+}
+
+/// `GET /users.csv`: every user of the window `/users` would list (same `range` and `agent`),
+/// in the page's order, up to [`CSV_CAP`]. The `user` column is the raw id, empty for none.
+async fn users_csv(
+    State(state): State<AppState>,
+    Query(params): Query<Vec<(String, String)>>,
+) -> Response {
+    let Some(usage) = &state.usage else {
+        return needs_bigquery();
+    };
+    let q = match user_query(&params, (state.now)()) {
+        Ok(q) => q,
+        Err(text) => return bad_request(&text),
+    };
+    let p = match usage.users(&q, CSV_CAP, CSV_ROW_CAP).await {
+        Ok(p) => p,
+        Err(e) => return source_error_in(Nav::Sessions, &e),
+    };
+    let mut csv = Csv::new();
+    csv.header(&[
+        "user",
+        "sessions",
+        "turns",
+        "errors",
+        "thumbs_up",
+        "thumbs_down",
+        "last_activity",
+        "tokens",
+        "cost_usd",
+        "cost_partial",
+    ]);
+    for u in &p.users {
+        let (tokens, cost) = sessions::totals(&u.tokens, state.prices.as_deref());
+        csv.row(&[
+            Field::Text(u.user.clone()),
+            Field::Int(u.sessions),
+            Field::Int(u.turns),
+            Field::Int(u.errors),
+            Field::Int(u.ups),
+            Field::Int(u.downs),
+            Field::Time(u.last),
+            Field::Int(tokens),
+            Field::Cost(cost),
+        ]);
+    }
+    let truncated = p.more || p.truncated;
+    let name = filename("users", q.range.as_str(), q.end, truncated);
+    response(csv.finish(), &name, truncated)
 }
 
 /// `GET /sessions/{id}`: the session's header (its row of the sessions query), then its turns
@@ -209,7 +358,7 @@ async fn session_page(
         session: Some(id.clone()),
         after: None,
     };
-    let head = match usage.sessions(&q).await {
+    let head = match usage.sessions(&q, SESSION_CAP, ROW_CAP).await {
         Ok(p) => p.sessions.into_iter().next(),
         Err(e) => return source_error_in(Nav::Sessions, &e),
     };
@@ -264,7 +413,8 @@ mod tests {
     use gadk_eval::{RunTranscript, TurnRecord};
     use gadk_eval_monitor::ProductionRun;
     use http::StatusCode;
-    use serde_json::json;
+    use http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+    use serde_json::{Value, json};
 
     use crate::prices::PriceTable;
     use crate::sessions::{
@@ -898,5 +1048,372 @@ mod tests {
         let (status, _, body) = get(bq_state(&fake, false), "/sessions/s-1").await;
         assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
         assert!(body.contains(ACTIVE), "{body}");
+    }
+
+    /// The `Content-Disposition` of the download `name`.
+    fn attachment(name: &str) -> String {
+        format!(r#"attachment; filename="{name}""#)
+    }
+
+    /// Whether the query `body` sent a parameter `name`.
+    fn has_param(body: &Value, name: &str) -> bool {
+        body["queryParameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["name"] == json!(name))
+    }
+
+    #[tokio::test]
+    async fn sessions_csv_lists_the_sessions_with_totals_and_cost() {
+        let fake = FakeHttp::new(vec![reply(
+            &SESSION_FIELDS,
+            vec![
+                session_cells(
+                    "s/<1>",
+                    "u-1",
+                    "triage",
+                    ago(600),
+                    ago(60),
+                    [3, 1, 2, 1],
+                    Some(("gemini-3.8-flash", [1_000_000, 0, 500_000, 0])),
+                ),
+                session_cells(
+                    "s/<1>",
+                    "u-1",
+                    "triage",
+                    ago(600),
+                    ago(60),
+                    [3, 1, 2, 1],
+                    Some(("other-model", [10, 0, 5, 0])),
+                ),
+                session_cells(
+                    "s-2",
+                    "",
+                    "",
+                    ago(900),
+                    ago(120),
+                    [1, 0, 0, 0],
+                    Some(("other-model", [7, 0, 3, 0])),
+                ),
+                session_cells(
+                    "s-3",
+                    "@u-2",
+                    "triage",
+                    ago(950),
+                    ago(130),
+                    [0, 0, 0, 0],
+                    None,
+                ),
+            ],
+            false,
+        )]);
+        let path = "/sessions.csv?user=%20u-1%20&agent=triage&range=6h&after=bad&after_id=x";
+        let (status, headers, body) = get(bq_state(&fake, true), path).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            body,
+            "session_id,user,agent,first_activity,last_activity,turns,tokens,cost_usd,cost_partial,errors,thumbs_up,thumbs_down\r\n\
+             s/<1>,u-1,triage,2026-11-16T11:49:59.999Z,2026-11-16T11:58:59.999Z,3,1500015,2.000000,true,1,2,1\r\n\
+             s-2,,,2026-11-16T11:44:59.999Z,2026-11-16T11:57:59.999Z,1,10,,false,0,0,0\r\n\
+             s-3,'@u-2,triage,2026-11-16T11:44:09.999Z,2026-11-16T11:57:49.999Z,0,0,,false,0,0,0\r\n"
+        );
+        assert_eq!(headers[CONTENT_TYPE], "text/csv; charset=utf-8");
+        assert_eq!(
+            headers[CONTENT_DISPOSITION],
+            attachment("gadk-sessions-6h-20261116T1200Z.csv").as_str()
+        );
+        assert!(headers.get("x-gadk-truncated").is_none());
+        let sent = fake.body(0);
+        assert_eq!(sent["maxResults"], json!(50000));
+        for (name, value) in [
+            ("start", "2026-11-16 06:00:00.000000+00:00"),
+            ("user", "u-1"),
+            ("agent", "triage"),
+            ("limit", "5001"),
+        ] {
+            assert_eq!(
+                param_value(&sent, name)["parameterValue"]["value"],
+                json!(value),
+                "{name}"
+            );
+        }
+        assert_eq!(param_value(&sent, "session")["parameterValue"], json!({}));
+        assert!(!has_param(&sent, "after") && !has_param(&sent, "after_id"));
+        assert!(
+            !sent["query"].as_str().unwrap().contains("@after"),
+            "{sent}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sessions_csv_defaults_to_24h_without_filters() {
+        let fake = FakeHttp::new(vec![reply(&SESSION_FIELDS, vec![], false)]);
+        let (status, headers, body) = get(bq_state(&fake, false), "/sessions.csv?range=30d").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            body,
+            "session_id,user,agent,first_activity,last_activity,turns,tokens,cost_usd,cost_partial,errors,thumbs_up,thumbs_down\r\n"
+        );
+        assert_eq!(
+            headers[CONTENT_DISPOSITION],
+            attachment("gadk-sessions-24h-20261116T1200Z.csv").as_str()
+        );
+        let sent = fake.body(0);
+        assert_eq!(
+            param_value(&sent, "start")["parameterValue"]["value"],
+            json!("2026-11-15 12:00:00.000000+00:00")
+        );
+        for name in ["user", "agent", "session"] {
+            assert_eq!(
+                param_value(&sent, name)["parameterValue"],
+                json!({}),
+                "{name}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn sessions_csv_is_truncated_past_its_caps() {
+        let rows: Vec<_> = (0..5_001)
+            .map(|i| {
+                session_cells(
+                    &format!("s-{i:04}"),
+                    "u",
+                    "a",
+                    ago(10 + i),
+                    ago(i),
+                    [1, 0, 0, 0],
+                    None,
+                )
+            })
+            .collect();
+        let fake = FakeHttp::new(vec![reply(&SESSION_FIELDS, rows, false)]);
+        let (status, headers, body) = get(bq_state(&fake, false), "/sessions.csv").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body.matches("\r\n").count(),
+            5_001,
+            "a header and 5,000 sessions"
+        );
+        assert!(body.contains("\r\ns-4999,"), "the 5,000th session");
+        assert!(!body.contains("s-5000"), "the 5,001st is cut");
+        assert_eq!(headers["x-gadk-truncated"], "true");
+        assert_eq!(
+            headers[CONTENT_DISPOSITION],
+            attachment("gadk-sessions-24h-20261116T1200Z-truncated.csv").as_str()
+        );
+
+        let fake = FakeHttp::new(vec![reply(
+            &SESSION_FIELDS,
+            vec![session_cells(
+                "s-1",
+                "u",
+                "a",
+                ago(9),
+                ago(1),
+                [1, 0, 0, 0],
+                None,
+            )],
+            true,
+        )]);
+        let (_, headers, body) = get(bq_state(&fake, false), "/sessions.csv").await;
+        assert_eq!(headers["x-gadk-truncated"], "true");
+        assert_eq!(
+            headers[CONTENT_DISPOSITION],
+            attachment("gadk-sessions-24h-20261116T1200Z-truncated.csv").as_str()
+        );
+        assert_eq!(body.matches("\r\n").count(), 2, "no comment rows: {body}");
+    }
+
+    #[tokio::test]
+    async fn users_csv_lists_raw_user_ids_over_7d_by_default() {
+        let fake = FakeHttp::new(vec![reply(
+            &USER_FIELDS,
+            vec![
+                user_cells(
+                    Some("a&b"),
+                    [2, 5, 1, 3, 0],
+                    ago(60),
+                    Some(("gemini-3.8-flash", [1_000_000, 0, 0, 0])),
+                ),
+                user_cells(None, [1, 1, 0, 0, 1], ago(120), None),
+            ],
+            false,
+        )]);
+        let (status, headers, body) = get(bq_state(&fake, true), "/users.csv").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            body,
+            "user,sessions,turns,errors,thumbs_up,thumbs_down,last_activity,tokens,cost_usd,cost_partial\r\n\
+             a&b,2,5,1,3,0,2026-11-16T11:58:59.999Z,1000000,1.000000,false\r\n\
+             ,1,1,0,0,1,2026-11-16T11:57:59.999Z,0,,false\r\n"
+        );
+        assert_eq!(headers[CONTENT_TYPE], "text/csv; charset=utf-8");
+        assert_eq!(
+            headers[CONTENT_DISPOSITION],
+            attachment("gadk-users-7d-20261116T1200Z.csv").as_str()
+        );
+        assert!(headers.get("x-gadk-truncated").is_none());
+        let sent = fake.body(0);
+        assert_eq!(sent["maxResults"], json!(50000));
+        assert_eq!(
+            param_value(&sent, "start")["parameterValue"]["value"],
+            json!("2026-11-09 12:00:00.000000+00:00")
+        );
+        assert_eq!(
+            param_value(&sent, "limit")["parameterValue"]["value"],
+            json!("5001")
+        );
+        assert_eq!(param_value(&sent, "agent")["parameterValue"], json!({}));
+    }
+
+    #[tokio::test]
+    async fn users_csv_takes_the_agent_and_range_and_flags_truncation() {
+        let fake = FakeHttp::new(vec![reply(
+            &USER_FIELDS,
+            vec![user_cells(Some("u"), [1, 1, 0, 0, 0], ago(1), None)],
+            true,
+        )]);
+        let (status, headers, _) = get(
+            bq_state(&fake, false),
+            "/users.csv?agent=%20triage%20&range=1h",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers["x-gadk-truncated"], "true");
+        assert_eq!(
+            headers[CONTENT_DISPOSITION],
+            attachment("gadk-users-1h-20261116T1200Z-truncated.csv").as_str()
+        );
+        let sent = fake.body(0);
+        assert_eq!(
+            param_value(&sent, "agent")["parameterValue"]["value"],
+            json!("triage")
+        );
+        assert_eq!(
+            param_value(&sent, "start")["parameterValue"]["value"],
+            json!("2026-11-16 11:00:00.000000+00:00")
+        );
+
+        let rows = (0..5_001)
+            .map(|i| user_cells(Some(&format!("u-{i:04}")), [1, 1, 0, 0, 0], ago(i), None))
+            .collect();
+        let fake = FakeHttp::new(vec![reply(&USER_FIELDS, rows, false)]);
+        let (_, headers, body) = get(bq_state(&fake, false), "/users.csv").await;
+        assert_eq!(
+            body.matches("\r\n").count(),
+            5_001,
+            "a header and 5,000 users"
+        );
+        assert!(!body.contains("u-5000"), "the 5,001st is cut");
+        assert_eq!(headers["x-gadk-truncated"], "true");
+    }
+
+    #[tokio::test]
+    async fn csv_downloads_share_the_pages_errors() {
+        let src = Arc::new(FakeSource::new());
+        for path in ["/sessions.csv", "/users.csv"] {
+            let (status, _, body) = get(state(src.clone(), None), path).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+            assert!(
+                body.contains("Sessions need the BigQuery trace source"),
+                "{path}: {body}"
+            );
+            assert!(body.contains(ACTIVE), "{body}");
+        }
+        let long = "u".repeat(129);
+        for (path, text) in [
+            (format!("/sessions.csv?user={long}"), "user is too long"),
+            (format!("/sessions.csv?agent={long}"), "agent is too long"),
+            (format!("/users.csv?agent={long}"), "agent is too long"),
+        ] {
+            let fake = FakeHttp::new(vec![]);
+            let (status, headers, body) = get(bq_state(&fake, false), &path).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+            assert_eq!(headers[CONTENT_TYPE], "text/html; charset=utf-8");
+            assert!(body.contains(text), "{path}: {body}");
+            assert!(body.contains(ACTIVE), "{body}");
+            assert!(fake.uris().is_empty(), "{path}");
+        }
+        for path in ["/sessions.csv", "/users.csv"] {
+            let fake = FakeHttp::new(vec![failed()]);
+            let (status, _, body) = get(bq_state(&fake, false), path).await;
+            assert_eq!(status, StatusCode::BAD_GATEWAY, "{path}");
+            assert!(body.contains("backend error"), "{path}: {body}");
+            assert!(body.contains(ACTIVE), "{body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_pages_link_their_csv_and_keep_their_caps() {
+        let fake = FakeHttp::new(vec![
+            reply(
+                &SESSION_FIELDS,
+                vec![session_cells(
+                    "s-1",
+                    "a&b",
+                    "triage",
+                    ago(9),
+                    ago(1),
+                    [1, 0, 0, 0],
+                    None,
+                )],
+                false,
+            ),
+            reply(
+                &USER_FIELDS,
+                vec![user_cells(Some("u"), [1, 1, 0, 0, 0], ago(1), None)],
+                false,
+            ),
+            head_reply(),
+            turns_reply(),
+        ]);
+        let st = bq_state(&fake, false);
+        let (_, _, body) = get(st.clone(), "/sessions?user=a%26b&agent=tri%20age&range=6h").await;
+        assert!(
+            body.contains(r#"</form><p><a href="/users?range=6h">View by user →</a></p><p class="empty">No price file: start the console with --prices &lt;file&gt; to see costs.</p><p class="csv"><a href="/sessions.csv?range=6h&amp;user=a%26b&amp;agent=tri%20age">Download CSV</a></p><table>"#),
+            "{body}"
+        );
+        let (_, _, body) = get(st.clone(), "/users?agent=tri%20age").await;
+        assert!(
+            body.contains(r#"<p class="csv"><a href="/users.csv?range=7d&amp;agent=tri%20age">Download CSV</a></p><table>"#),
+            "{body}"
+        );
+        let (status, _, body) = get(st, "/sessions/s-1").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(!body.contains("Download CSV"), "{body}");
+        for i in 0..3 {
+            let sent = fake.body(i);
+            assert_eq!(sent["maxResults"], json!(5000), "request {i}");
+            assert_eq!(
+                param_value(&sent, "limit")["parameterValue"]["value"],
+                json!("101"),
+                "request {i}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_users_link_follows_the_cut_note_and_empty_pages_have_none() {
+        let rows = (0..101)
+            .map(|i| user_cells(Some(&format!("u-{i:03}")), [1, 1, 0, 0, 0], ago(i), None))
+            .collect();
+        let fake = FakeHttp::new(vec![
+            reply(&USER_FIELDS, rows, false),
+            reply(&SESSION_FIELDS, vec![], false),
+            reply(&USER_FIELDS, vec![], false),
+        ]);
+        let st = bq_state(&fake, false);
+        let (_, _, body) = get(st.clone(), "/users?range=24h").await;
+        assert!(
+            body.contains(r#"<p>showing the 100 most recent users</p><p class="csv"><a href="/users.csv?range=24h">Download CSV</a></p><table>"#),
+            "{body}"
+        );
+        for path in ["/sessions", "/users"] {
+            let (status, _, body) = get(st.clone(), path).await;
+            assert_eq!(status, StatusCode::OK, "{path}");
+            assert!(!body.contains("Download CSV"), "{path}: {body}");
+        }
     }
 }

@@ -70,8 +70,12 @@ pub(crate) const SESSION_CAP: usize = 100;
 pub(crate) const USER_CAP: usize = 100;
 /// The most turns `/sessions/{id}` lists.
 pub(crate) const TURN_CAP: usize = 200;
-/// The most (session or user) × model rows the sessions and users queries return.
-const ROW_CAP: u32 = 5_000;
+/// The most (session or user) × model rows the `/sessions` and `/users` queries return.
+pub(crate) const ROW_CAP: u32 = 5_000;
+/// The most sessions `/sessions.csv` and users `/users.csv` lists.
+pub(crate) const CSV_CAP: usize = 5_000;
+/// The most (session or user) × model rows the `/sessions.csv` and `/users.csv` queries return.
+pub(crate) const CSV_ROW_CAP: u32 = 50_000;
 /// The longest session id, user or agent filter, in bytes.
 pub(crate) const MAX_ID_LEN: usize = 128;
 /// The text of the 400 page for a bad `after` / `after_id` pair.
@@ -169,7 +173,7 @@ pub(crate) struct SessionRow {
 /// A page of sessions.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SessionPage {
-    /// At most [`SESSION_CAP`] sessions, newest last activity first.
+    /// At most the query's cap of sessions, newest last activity first.
     pub(crate) sessions: Vec<SessionRow>,
     /// More sessions follow the last one.
     pub(crate) has_next: bool,
@@ -201,7 +205,7 @@ pub(crate) struct UserRow {
 /// A page of users.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct UserPage {
-    /// At most [`USER_CAP`] users, most recent last activity first.
+    /// At most the query's cap of users, most recent last activity first.
     pub(crate) users: Vec<UserRow>,
     /// More users matched.
     pub(crate) more: bool,
@@ -210,20 +214,26 @@ pub(crate) struct UserPage {
 }
 
 impl UsageSource {
-    /// The sessions of `q`, newest last activity first: at most [`SESSION_CAP`], with whether
-    /// more follow.
-    pub(crate) async fn sessions(&self, q: &SessionQuery) -> Result<SessionPage, SourceError> {
+    /// The sessions of `q`, newest last activity first: at most `cap` (the pages pass
+    /// [`SESSION_CAP`]), with whether more follow, reading at most `row_cap` session × model
+    /// rows.
+    pub(crate) async fn sessions(
+        &self,
+        q: &SessionQuery,
+        cap: usize,
+        row_cap: u32,
+    ) -> Result<SessionPage, SourceError> {
         let sql = session_rows_sql(&self.table_path()?, q.after.is_some());
         let mut params = window_params(q.end - q.range.duration(), q.end);
         params.push(param("user", "STRING", q.user.clone()));
         params.push(param("agent", "STRING", q.agent.clone()));
         params.push(param("session", "STRING", q.session.clone()));
-        params.push(param("limit", "INT64", Some((SESSION_CAP + 1).to_string())));
+        params.push(param("limit", "INT64", Some((cap + 1).to_string())));
         if let Some(c) = &q.after {
             params.push(param("after", "TIMESTAMP", Some(ts_param(c.at))));
             params.push(param("after_id", "STRING", Some(c.id.clone())));
         }
-        let result = self.run(&sql, params, ROW_CAP).await?;
+        let result = self.run(&sql, params, row_cap).await?;
         let mut sessions: Vec<SessionRow> = Vec::new();
         let mut has_next = false;
         for row in &result.rows {
@@ -234,7 +244,7 @@ impl UsageSource {
                 add_tokens(&mut last.tokens, row);
                 continue;
             }
-            if sessions.len() == SESSION_CAP {
+            if sessions.len() == cap {
                 has_next = true;
                 break;
             }
@@ -260,15 +270,20 @@ impl UsageSource {
         })
     }
 
-    /// The users of `q`, most recent last activity first: at most [`USER_CAP`], with whether
-    /// more matched.
-    pub(crate) async fn users(&self, q: &UserQuery) -> Result<UserPage, SourceError> {
+    /// The users of `q`, most recent last activity first: at most `cap` (the pages pass
+    /// [`USER_CAP`]), with whether more matched, reading at most `row_cap` user × model rows.
+    pub(crate) async fn users(
+        &self,
+        q: &UserQuery,
+        cap: usize,
+        row_cap: u32,
+    ) -> Result<UserPage, SourceError> {
         let sql = user_rows_sql(&self.table_path()?);
         let mut params = window_params(q.end - q.range.duration(), q.end);
         params.push(param("agent", "STRING", q.agent.clone()));
         params.push(param("session", "STRING", None));
-        params.push(param("limit", "INT64", Some((USER_CAP + 1).to_string())));
-        let result = self.run(&sql, params, ROW_CAP).await?;
+        params.push(param("limit", "INT64", Some((cap + 1).to_string())));
+        let result = self.run(&sql, params, row_cap).await?;
         let mut users: Vec<UserRow> = Vec::new();
         let mut more = false;
         for row in &result.rows {
@@ -277,7 +292,7 @@ impl UsageSource {
                 add_tokens(&mut last.tokens, row);
                 continue;
             }
-            if users.len() == USER_CAP {
+            if users.len() == cap {
                 more = true;
                 break;
             }
@@ -1175,7 +1190,10 @@ ORDER BY last DESC, user_id, model";
             session: Some("s-a".into()),
             ..query()
         };
-        let page = source(&fake).sessions(&q).await.unwrap();
+        let page = source(&fake)
+            .sessions(&q, SESSION_CAP, ROW_CAP)
+            .await
+            .unwrap();
         assert_eq!(
             page,
             SessionPage {
@@ -1246,7 +1264,10 @@ ORDER BY last DESC, user_id, model";
             after: Some(SessionCursor::parse("2026-11-16T11:58:59.999750Z", "Sess-AB").unwrap()),
             ..query()
         };
-        let page = source(&fake).sessions(&q).await.unwrap();
+        let page = source(&fake)
+            .sessions(&q, SESSION_CAP, ROW_CAP)
+            .await
+            .unwrap();
         assert!(page.sessions.is_empty() && !page.has_next && !page.truncated);
         let body = fake.body(0);
         for name in ["user", "agent", "session"] {
@@ -1297,13 +1318,13 @@ ORDER BY last DESC, user_id, model";
             reply(&SESSION_FIELDS, rows[..101].to_vec(), true),
         ]);
         let src = source(&fake);
-        let page = src.sessions(&query()).await.unwrap();
+        let page = src.sessions(&query(), SESSION_CAP, ROW_CAP).await.unwrap();
         assert_eq!(page.sessions.len(), 100);
         assert!(page.has_next && !page.truncated);
         assert_eq!(page.sessions[0].tokens.len(), 2);
         assert_eq!(page.sessions[99].session_id, "s-099");
 
-        let page = src.sessions(&query()).await.unwrap();
+        let page = src.sessions(&query(), SESSION_CAP, ROW_CAP).await.unwrap();
         assert_eq!(page.sessions.len(), 100);
         assert!(!page.has_next && page.truncated);
     }
@@ -1334,7 +1355,7 @@ ORDER BY last DESC, user_id, model";
             end: end(),
             agent: Some("triage".into()),
         };
-        let page = source(&fake).users(&q).await.unwrap();
+        let page = source(&fake).users(&q, USER_CAP, ROW_CAP).await.unwrap();
         assert_eq!(
             page,
             UserPage {
@@ -1397,7 +1418,7 @@ ORDER BY last DESC, user_id, model";
             end: end(),
             agent: None,
         };
-        let page = source(&fake).users(&q).await.unwrap();
+        let page = source(&fake).users(&q, USER_CAP, ROW_CAP).await.unwrap();
         assert!(page.users.is_empty() && !page.more && !page.truncated);
         assert_eq!(
             param_value(&fake.body(0), "session"),
@@ -1416,7 +1437,7 @@ ORDER BY last DESC, user_id, model";
             end: end(),
             agent: None,
         };
-        let page = source(&fake).users(&q).await.unwrap();
+        let page = source(&fake).users(&q, USER_CAP, ROW_CAP).await.unwrap();
         assert_eq!(page.users.len(), 100);
         assert!(page.more && page.truncated);
         assert_eq!(
@@ -1426,12 +1447,81 @@ ORDER BY last DESC, user_id, model";
     }
 
     #[tokio::test]
+    async fn the_caps_set_the_limit_the_row_cap_and_the_cut() {
+        let fake = FakeHttp::new(vec![
+            reply(&SESSION_FIELDS, vec![], false),
+            reply(&USER_FIELDS, vec![], false),
+        ]);
+        let src = source(&fake);
+        src.sessions(&query(), CSV_CAP, CSV_ROW_CAP).await.unwrap();
+        let q = UserQuery {
+            range: TimeRange::Days7,
+            end: end(),
+            agent: None,
+        };
+        src.users(&q, CSV_CAP, CSV_ROW_CAP).await.unwrap();
+        for i in 0..2 {
+            let body = fake.body(i);
+            assert_eq!(body["maxResults"], json!(50000), "request {i}");
+            assert_eq!(
+                param_value(&body, "limit")["parameterValue"]["value"],
+                json!("5001"),
+                "request {i}"
+            );
+        }
+        assert_eq!(
+            fake.body(0)["query"].as_str().unwrap(),
+            session_rows_sql("`data-proj.agent_analytics.agent_events`", false)
+        );
+        assert_eq!(
+            fake.body(1)["query"].as_str().unwrap(),
+            user_rows_sql("`data-proj.agent_analytics.agent_events`")
+        );
+
+        let sessions = (0..3)
+            .map(|i| {
+                session_cells(
+                    &format!("s-{i}"),
+                    "u",
+                    "a",
+                    ago(10 + i),
+                    ago(i),
+                    [1, 0, 0, 0],
+                    None,
+                )
+            })
+            .collect();
+        let users = (0..3)
+            .map(|i| user_cells(Some(&format!("u-{i}")), [1, 1, 0, 0, 0], ago(i), None))
+            .collect();
+        let fake = FakeHttp::new(vec![
+            reply(&SESSION_FIELDS, sessions, false),
+            reply(&USER_FIELDS, users, false),
+        ]);
+        let src = source(&fake);
+        let page = src.sessions(&query(), 2, 10).await.unwrap();
+        assert_eq!(page.sessions.len(), 2);
+        assert!(page.has_next && !page.truncated);
+        let page = src.users(&q, 2, 10).await.unwrap();
+        assert_eq!(page.users.len(), 2);
+        assert!(page.more && !page.truncated);
+        assert_eq!(fake.body(0)["maxResults"], json!(10));
+        assert_eq!(
+            param_value(&fake.body(1), "limit")["parameterValue"]["value"],
+            json!("3")
+        );
+    }
+
+    #[tokio::test]
     async fn a_failed_query_is_the_source_error() {
         let fake = FakeHttp::new(vec![Ok((
             500,
             json!({ "error": { "code": 500, "message": "backend error", "errors": [{ "reason": "backendError" }] } }).to_string(),
         ))]);
-        let err = source(&fake).sessions(&query()).await.unwrap_err();
+        let err = source(&fake)
+            .sessions(&query(), SESSION_CAP, ROW_CAP)
+            .await
+            .unwrap_err();
         assert_eq!(
             err,
             SourceError::BigQuery {

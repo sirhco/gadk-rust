@@ -25,6 +25,7 @@ use crate::prices::{PriceTable, thousands};
 use crate::sessions::{MAX_ID_LEN, USER_CAP, UserPage, UserQuery};
 use crate::traces::TimeRange;
 use crate::url::percent_encode;
+use crate::web::sessions::users_csv_link;
 
 /// The filter form of `/users`: agent and range.
 fn filter_form(q: &UserQuery) -> Markup {
@@ -78,6 +79,7 @@ pub(crate) fn render(q: &UserQuery, p: &UserPage, prices: Option<&PriceTable>) -
             @if p.more {
                 p { "showing the " (USER_CAP) " most recent users" }
             }
+            p class="csv" { a href=(users_csv_link(q)) { "Download CSV" } }
             table {
                 thead {
                     tr {

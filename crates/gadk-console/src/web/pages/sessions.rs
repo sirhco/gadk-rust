@@ -23,7 +23,7 @@ use super::millis;
 use crate::prices::{CostSum, PriceTable, Usage, cost_of, thousands};
 use crate::sessions::{SessionPage, SessionQuery};
 use crate::traces::TimeRange;
-use crate::web::sessions::{next_link, session_link};
+use crate::web::sessions::{next_link, session_link, sessions_csv_link};
 
 /// The note shown when a query hit its row cap.
 pub(crate) const TRUNCATED: &str =
@@ -96,6 +96,7 @@ pub(crate) fn render(q: &SessionQuery, p: &SessionPage, prices: Option<&PriceTab
         @if rows.is_empty() {
             p class="empty" { "No sessions in the last " (q.range.as_str()) "." }
         } @else {
+            p class="csv" { a href=(sessions_csv_link(q)) { "Download CSV" } }
             table {
                 thead {
                     tr {
