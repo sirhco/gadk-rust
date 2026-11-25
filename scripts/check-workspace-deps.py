@@ -95,7 +95,8 @@
   command's `LlmAgent`s; the thirteenth crate that may depend on `gadk-engine`), `gadk-eval`,
   `gadk-gemini` (the Vertex AI judge and agent models), `gadk-model` (HTTP seam, `gcp-auth`),
   `gadk-platform`, `gadk-prompts` (prompt versions as agent instructions) and
-  `gadk-prompts-cli` (prompt store URLs); only `gadk-console` (its Evals pages) depends on it.
+  `gadk-prompts-cli` (prompt store URLs); only `gadk-analytics` (the price tables of its costs) and
+  `gadk-console` (its Evals pages) depend on it.
 - experiments: no crate dev-depends on `gadk-engine` without being in ENGINE_DEPENDENTS
   (ENGINE_DEV_DEPENDENTS is empty since `gadk-eval-monitor` depends on the engine).
 - cloudtrace: `gadk-cloudtrace` (the Cloud Trace v1 read client) depends on exactly `gadk-model`
@@ -103,8 +104,13 @@
   Trace transcript source) depend on it.
 - bigquery: `gadk-bigquery` (the BigQuery toolset) depends on exactly `gadk-agent`, `gadk-engine`,
   `gadk-model` and `gadk-session`; it may depend on `gadk-engine` (its tools are function tools),
-  and the façade (feature `bigquery`, optional) and `gadk-console` (its BigQuery trace source)
-  depend on it.
+  and the façade (feature `bigquery`, optional), `gadk-analytics` (its BigQuery client) and
+  `gadk-console` (its BigQuery trace source) depend on it.
+- analytics: `gadk-analytics` (the typed queries over the agent-analytics table) depends on
+  exactly `gadk-bigquery` (its client), `gadk-eval-monitor` (the price tables of its costs) and,
+  optionally (its `test-util` feature, for the fake HTTP client of `testutil`), `gadk-model`; it
+  never depends on `gadk-engine` directly. Only `gadk-console` depends on it, normally and, with
+  `test-util`, as a dev-dependency.
 """
 import pathlib, sys, tomllib
 

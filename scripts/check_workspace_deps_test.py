@@ -493,6 +493,27 @@ class EdgeTest(unittest.TestCase):
                           "gadk-eval", "gadk-eval-monitor", "gadk-bigquery", "gadk-analytics"})
         self.assertEqual(cwd.check(self.repo), [])
 
+    def test_analytics_edges_are_exactly_bigquery_eval_monitor_and_optional_model(self):
+        self.assertEqual(cwd.ALLOWED["gadk-analytics"],
+                         {"gadk-bigquery", "gadk-eval-monitor", "gadk-model"})
+        self.assertIn(("gadk-analytics", "gadk-model"), cwd.OPTIONAL)
+        self.assertNotIn("gadk-analytics", cwd.ENGINE_DEPENDENTS)
+        # Only the console depends on it.
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-analytics" in deps],
+                         ["gadk-console"])
+        self.assertEqual(cwd.check(self.repo), [])
+
+    def test_analytics_model_edge_must_be_optional(self):
+        self.edit("gadk-analytics", "gadk-model = { workspace = true, optional = true }",
+                  "gadk-model = { workspace = true }")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-analytics -> gadk-model must be optional = true" in e for e in errs), errs)
+
+    def test_analytics_missing_eval_monitor_edge_is_rejected(self):
+        self.edit("gadk-analytics", "gadk-eval-monitor = { workspace = true }\n", "")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-analytics -> gadk-eval-monitor is missing" in e for e in errs), errs)
+
     def test_cloudtrace_depends_only_on_model(self):
         self.assertEqual(cwd.ALLOWED["gadk-cloudtrace"], {"gadk-model"})
         # The console (trace reads) and the eval monitor (Cloud Trace source) depend on it.

@@ -486,6 +486,13 @@ cases were added.
   wins), so do not run both on one file at once.
 - The files hold production text; nothing is uploaded.
 
+## Library access
+
+The BigQuery queries behind `/usage`, `/sessions`, `/users`, the per-version prompt metrics,
+the trace scores and `/review` are the [`gadk-analytics`](../gadk-analytics/README.md) crate.
+Depend on it to run the same queries from your own code, with the same SQL, caps and byte cap,
+and typed results that serialize to JSON. The console's pages are one consumer of it.
+
 ## Limits
 
 - Trace lists: 50 traces per page (a "Next page" link follows the API's page token).
