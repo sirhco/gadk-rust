@@ -7,8 +7,9 @@ registry: versions, diffs and labels. With `--reports`, it also shows the report
 its rollout guards. With a price file (`--prices`) it prices token counts. With the BigQuery trace
 source it also shows usage and cost by model, agent, prompt version and trace, lists and adds
 scores, walks a review queue of the traces not yet scored, browses sessions and users (each
-session's turns as a conversation, with tokens, cost, errors and thumbs), and, with `--datasets`,
-adds a trace's runs to an eval set. It runs on your machine, listens on 127.0.0.1 only, and reads
+session's turns as a conversation, with tokens, cost, errors and thumbs), serves the same data as
+a read-only JSON API under `/api/v1`, and, with `--datasets`, adds a trace's runs to an eval set.
+It runs on your machine, listens on 127.0.0.1 only, and reads
 Google Cloud with your Application Default Credentials.
 
 ```sh
@@ -32,10 +33,11 @@ The console prints its URL and serves until you stop it (Ctrl-C).
 | `--author <name>` | `$USER`, else `$USERNAME`, else `console` | Author of the scores you add on `/traces/{id}` (BigQuery source). See [Scores](#scores). |
 | `--datasets <dir>` | none | Directory of eval-set YAML files that `/traces/{id}` adds runs to (BigQuery trace source only; ignored with Cloud Trace). It must exist. See [Datasets](#datasets). |
 | `--rubrics <file>` | none | YAML file of review rubrics: named sets of criteria, each scored on a small integer scale (1-5 by default), on `/traces/{id}` and in `/review` queues (BigQuery trace source only; with Cloud Trace the file is still checked at startup but unused). See [Rubrics](#rubrics). |
+| `--api-origin <origin>` | none | Origin of a browser app allowed to read the JSON API, exactly `scheme://host[:port]` as a browser sends it (`http://localhost:5173`); repeat it for more origins. Without it the API sends no CORS headers. See [JSON API](#json-api). |
 
 Exit codes: 2 for a usage error (clap's message), 1 when startup fails (a bad store URL, a bad
 report store URL, a bad price file, a bad rubric file, a `--datasets` directory that does not
-exist, missing credentials for a `gs://` report store or for `--datasets`, or a port already in
+exist, an `--api-origin` that is not an exact origin, missing credentials for a `gs://` report store or for `--datasets`, or a port already in
 use), with a one-line `gadk-console: …` message.
 
 ## Prerequisites
@@ -81,6 +83,7 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/users` | BigQuery source only. The users with activity in the window, at most 100, with their sessions, turns, tokens, cost, errors and thumbs. `?range=` (default `7d`), `agent`. |
 | `/usage` | BigQuery source only. `?range=` (`1h`, `6h`, `24h` default, `7d`, `30d`): totals, a chart of cost (or tokens) over time, then LLM calls, tokens, cost and a trend sparkline by model, by agent and by prompt version, and the 20 traces with the most tokens. See [Usage and cost](#usage-and-cost). |
 | `/usage.csv`, `/sessions.csv`, `/users.csv` | BigQuery source only. CSV downloads of the `/usage` tables (`?table=model`, `agent`, `prompt` or `trend`) and of every session or user of the window, up to 5,000. See [CSV export](#csv-export). |
+| `/api/v1/…` | BigQuery source only. Read-only JSON of the usage, sessions, users, prompt-version, trace-score and review views, for custom dashboards. See [JSON API](#json-api). |
 
 ## Evals
 
@@ -153,6 +156,12 @@ The console is for one developer on their own machine:
   `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; frame-ancestors 'none'; form-action 'self'`,
   `X-Content-Type-Options: nosniff` and `Cache-Control: no-store` (so pages holding trace
   payloads are not kept in the browser cache), and all trace and log text is HTML-escaped.
+- The JSON API under `/api` sends no CORS headers unless you list origins with `--api-origin`. A
+  listed origin, matched exactly, gets `Access-Control-Allow-Origin` with its own value (never
+  `*`, never `Access-Control-Allow-Credentials`) on `GET` responses and preflights; every other
+  origin's browser scripts still cannot read the responses. The `Host` check applies to the API
+  too, and the API has no write routes. List only apps you trust: a listed origin's pages can
+  read everything the API serves.
 - There is no login. Anyone who can reach the port on your machine (other local users, or
   processes you run) can read your traces, logs and monitor reports, which may include prompts, completions and
   production user messages, and change prompt labels with your credentials. Don't run it on a shared host.
@@ -461,6 +470,110 @@ When a cap cuts the rows, the response carries `X-Gadk-Truncated: true` and the 
 Without the BigQuery source a download is a 404 page with the page's note, a bad parameter is a
 400 page, and a failed query is a 502 page with the source's hint.
 
+## JSON API
+
+With the BigQuery source, the console serves the data of its usage, sessions, users,
+prompt-version, trace-score and review views as JSON, for custom dashboards and frontends. The
+routes are read-only `GET`s under `/api/v1`. They run the pages' own queries with the pages'
+parameters, defaults, caps and 400 texts, under `--bigquery-max-bytes`, and their shapes are the
+[`gadk-analytics`](../gadk-analytics/README.md) result types (timestamps as RFC 3339).
+
+| Route | Parameters | `data` |
+|---|---|---|
+| `/api/v1/usage/breakdown` | `range` as on `/usage` (`1h`, `6h`, `24h`, `7d`, `30d`; unknown or missing is `24h`) | `{"cells": [...], "truncated"}`: calls and tokens per model, agent and prompt version, each cell priced |
+| `/api/v1/usage/trend` | `range` as above | `{"start", "bucket_seconds", "cells": [...]}`: the window start, the bucket width and one priced cell per bucket, model, agent and prompt version (`bucket` counts buckets from `start`) |
+| `/api/v1/usage/top-traces` | `range` as above | the 20 traces with the most tokens, each with its calls per model, priced |
+| `/api/v1/sessions` | `range` (default `24h`), `user`, `agent`, `after` and `after_id` (the cursor), as on `/sessions` | at most 100 sessions, newest last activity first, each priced |
+| `/api/v1/sessions/{id}/turns` | `range` (default `7d`), as on `/sessions/{id}` | `{"session", "turns": [...]}`: the session's row and its first 200 turns, oldest first, each priced |
+| `/api/v1/users` | `range` (default `7d`), `agent`, as on `/users` | at most 100 users, each priced |
+| `/api/v1/prompts/{name}/versions` | `range` as on `/prompts/{name}` (`1h`, `6h`, `24h`, `7d`; unknown or missing is `7d`) | `{"metrics": {"stats", "models", "truncated"}, "feedback"}`: per-version calls, mean tokens and latency with their cost, the calls per version and model with theirs, and the scores per version |
+| `/api/v1/traces/{id}/scores` | none | `{"rows", "truncated"}`: the trace's scores and its invocations', newest first, as in the trace page's Scores section |
+| `/api/v1/review/pending` | `score` or `rubric` (one is required), `prompt`, `version`, `flagged=1`, `range`, as on `/review` | the queue's pending traces, newest first, at most 100 |
+
+A name in a path is percent-encoded (`/api/v1/prompts/team%2Fgreet/versions`). The prompt route
+reads only BigQuery, not the prompt store: an unknown name gives empty rows, and it has no eval
+pass rate.
+
+Every successful response is 200 with `Content-Type: application/json` and the envelope
+`{"data": …, "truncated": <bool>, "next": <string or null>}`:
+
+- `truncated` is true when the answer is cut: a query hit its row cap (for users, also more
+  than 100 users), a session has more than 200 turns, a review queue has more than 100 traces,
+  or the prompt metrics or feedback were truncated. More sessions than fit on one page is not
+  truncation: it is `next`.
+- `next` is set only on `/api/v1/sessions` when there are more sessions: the relative URL of the
+  next page, with the same `range`, `user` and `agent` and the cursor of the last row. It is
+  `null` everywhere else.
+
+With `--prices`, these rows carry `cost_usd` and `cost_partial` next to their own fields:
+usage cells, trend cells, top traces, sessions, the session row and its turns, users, and the
+prompt `stats` and `models` rows. `cost_usd` is the sum of the priced calls in USD, unrounded,
+and `null` when no call had a price (always, without `--prices`); `cost_partial` is true when some
+calls had a price and some did not.
+
+```sh
+curl -s 'http://127.0.0.1:8765/api/v1/usage/breakdown?range=24h'
+```
+
+```json
+{
+  "data": {
+    "cells": [
+      {
+        "agent": "triage",
+        "prompt": "triage@2",
+        "calls": {
+          "model": "gemini-3.8-flash",
+          "calls": 3,
+          "usage": { "input": 3000, "cached": 1000, "output": 600, "reasoning": 0 }
+        },
+        "cost_usd": 0.002175,
+        "cost_partial": false
+      }
+    ],
+    "truncated": false
+  },
+  "truncated": false,
+  "next": null
+}
+```
+
+Errors are JSON too, `{"error": {"kind", "message", "hint"}}` with `Content-Type:
+application/json`:
+
+| Status | `kind` | When |
+|---|---|---|
+| 400 | `bad_request` | A bad parameter, with the page's text (`user is too long`, `invalid cursor`, `invalid session id`, `score and rubric: choose one`, `score: required`, …), or a request the router cannot read (`invalid request: …`). |
+| 404 | `needs_bigquery` | The console is not using the BigQuery source; the message is the page's note. This comes before any other check. |
+| 404 | `not_found` | An unknown or invalid trace id (`trace not found`), a session without activity in the range (`no activity for session <id> in the last <range>`), or an unknown `/api` path (`no such API route`). |
+| 405 | `method_not_allowed` | A method other than `GET`, `HEAD` or `OPTIONS` (`the API is read-only`). A `POST` from another origin gets the console's HTML 403 first. |
+| 502 | the source's kind (`bigquery`, `transport`, …) | A failed query; `message` and `hint` are the error banner's text and hint. |
+
+A wrong `Host` still gets the HTML 421 of the [Security model](#security-model).
+
+### Browser apps on another origin
+
+A browser app served from another origin (a Vite dev server on `http://localhost:5173`, say)
+can read the API only when the console lists that origin:
+
+    gadk-console --project my-billing-project \
+      --traces bigquery://my-data-project.agent_analytics.agent_events \
+      --api-origin http://localhost:5173
+
+- `--api-origin` takes an exact origin as a browser sends it: lowercase `http://` or `https://`,
+  a lowercase host name, IPv4 address or bracketed IPv6 address, and a port unless it is the
+  scheme's default; no path, no trailing slash. Repeat the flag for more origins. Anything else
+  stops startup with `--api-origin: invalid origin <origin> (expected scheme://host[:port])`.
+- With at least one origin listed, every `/api` response carries `Vary: Origin`, and a request
+  whose `Origin` equals a listed origin byte for byte also gets
+  `Access-Control-Allow-Origin: <that origin>`.
+- `OPTIONS` on an `/api` path answers 204. For a listed origin it adds
+  `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods: GET` and
+  `Access-Control-Max-Age: 600`.
+- The pages and the CSV downloads never send CORS headers, and the console still answers only
+  on 127.0.0.1 with its own `Host`, so the app calls `http://127.0.0.1:<port>/api/v1/…` (or
+  `localhost`) directly, without a proxy that rewrites `Host`.
+
 ## Datasets
 
 With `--datasets <dir>` and `--traces bigquery://…`, `/traces/{id}` shows an "Add to dataset"
@@ -491,7 +604,8 @@ cases were added.
 The BigQuery queries behind `/usage`, `/sessions`, `/users`, the per-version prompt metrics,
 the trace scores and `/review` are the [`gadk-analytics`](../gadk-analytics/README.md) crate.
 Depend on it to run the same queries from your own code, with the same SQL, caps and byte cap,
-and typed results that serialize to JSON. The console's pages are one consumer of it.
+and typed results that serialize to JSON. The console's pages and its [JSON API](#json-api) are
+consumers of it.
 
 ## Limits
 

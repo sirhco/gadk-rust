@@ -7,6 +7,29 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-console`: a read-only JSON API for custom dashboards, with the BigQuery trace source.
+  `GET /api/v1/usage/breakdown`, `/usage/trend` and `/usage/top-traces` (`range`),
+  `/api/v1/sessions` (`range`, `user`, `agent`, `after`, `after_id`),
+  `/api/v1/sessions/{id}/turns` and `/api/v1/users` (`range`, `agent`),
+  `/api/v1/prompts/{name}/versions` (`range`), `/api/v1/traces/{id}/scores` and
+  `/api/v1/review/pending` (the `/review` queue parameters) return the views' data as the
+  `gadk-analytics` types in a `{"data", "truncated", "next"}` envelope, `next` being the next
+  page of sessions. Each route shares its page's parameter parsing, defaults, caps and 400 texts.
+  With `--prices`, usage, session, turn, user and prompt-version rows carry `cost_usd`
+  (unrounded, `null` without a price) and `cost_partial`. Errors are JSON `{"error": {"kind",
+  "message", "hint"}}`: 400 `bad_request`, 404 `needs_bigquery` (checked first) or `not_found`
+  (including any unknown `/api` path), 405 `method_not_allowed` for writes, and 502 with the
+  query's error.
+- `gadk-console`: `--api-origin <origin>` (repeatable; `Cli::api_origins`,
+  `Cli::with_api_origin`) lets a browser app on another origin read the API. Each value must be
+  an exact `scheme://host[:port]` origin, or startup stops with the new
+  `ConsoleError::ApiOrigin`. A listed origin gets `Access-Control-Allow-Origin` with its own value
+  and `Vary: Origin` on `/api` responses, and 204 preflights with `Access-Control-Allow-Methods:
+  GET` and `Access-Control-Max-Age: 600`; there is no wildcard and no credentials header, and the
+  pages never send CORS headers.
+
 ## [0.5.18] - 2026-11-25
 
 ### Added
