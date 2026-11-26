@@ -591,6 +591,17 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-eval-monitor -> gadk-eval is missing" in e for e in errs), errs)
 
+    def test_console_client_has_no_gadk_edges(self):
+        self.assertEqual(cwd.ALLOWED["gadk-console-client"], set())
+        # Nothing depends on it normally; the console dev-depends on it (conformance tests).
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-console-client" in deps], [])
+        self.assertEqual(cwd.check(self.repo), [])
+
+    def test_console_client_dependency_on_model_is_rejected(self):
+        self.edit("gadk-console-client", "[dependencies]\n", "[dependencies]\ngadk-model = { workspace = true }\n")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk-console-client -> gadk-model is not allowed" in e for e in errs), errs)
+
 
 if __name__ == "__main__":
     unittest.main()

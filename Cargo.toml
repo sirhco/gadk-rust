@@ -34,6 +34,7 @@ members = [
   "crates/gadk-cloudtrace",
   "crates/gadk-analytics",
   "crates/gadk-console",
+  "crates/gadk-console-client",
   "crates/gadk-eval",
   "crates/gadk-eval-monitor",
   "crates/gadk-bigquery",
@@ -86,6 +87,7 @@ gadk-eval-monitor = { path = "crates/gadk-eval-monitor", version = "0.5.22" }
 gadk-cloudtrace = { path = "crates/gadk-cloudtrace", version = "0.5.22" }
 gadk-bigquery = { path = "crates/gadk-bigquery", version = "0.5.22" }
 gadk-analytics = { path = "crates/gadk-analytics", version = "0.5.22" }
+gadk-console-client = { path = "crates/gadk-console-client", version = "0.5.22" }
 similar = "2.7.0"
 maud = { version = "0.27.0", default-features = false }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }

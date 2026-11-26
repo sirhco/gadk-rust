@@ -1681,6 +1681,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gadk-console-client"
+version = "0.5.22"
+dependencies = [
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "gadk-engine"
 version = "0.5.22"
 dependencies = [

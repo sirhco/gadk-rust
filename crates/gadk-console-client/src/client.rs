@@ -1,0 +1,138 @@
+// Copyright 2026 Chris Olson
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! The HTTP client: base URL checks, requests and reply mapping.
+
+use reqwest::header::ACCEPT;
+use serde::de::DeserializeOwned;
+use url::Url;
+
+use crate::error::{Error, http_body};
+use crate::generated::ApiError;
+
+/// One path segment of an API route: literal text, or a parameter sent percent-encoded.
+pub(crate) enum Seg<'a> {
+    /// A literal segment (`api`, `v1`, `sessions`).
+    Lit(&'static str),
+    /// A path parameter, percent-encoded as one segment (`team/greet` → `team%2Fgreet`).
+    Param(&'a str),
+}
+
+/// A client of one console's JSON API.
+///
+/// Every operation of the API is a method (see the crate docs). The client is cheap to clone:
+/// clones share the HTTP connection pool.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct Client {
+    base: Url,
+    http: reqwest::Client,
+}
+
+impl Client {
+    /// The client of the console at `base_url`, such as `http://127.0.0.1:8765`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidUrl`] unless `base_url` is an `http` or `https` URL whose path is empty
+    /// or `/` (no query or fragment); [`Error::Transport`] when the HTTP client cannot be
+    /// built.
+    pub fn new(base_url: &str) -> Result<Client, Error> {
+        let http = reqwest::Client::builder()
+            .build()
+            .map_err(Error::Transport)?;
+        Client::with_http(base_url, http)
+    }
+
+    /// The client of the console at `base_url` over `http`, for your own timeouts, proxy or
+    /// headers.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidUrl`] unless `base_url` is an `http` or `https` URL whose path is empty
+    /// or `/` (no query or fragment).
+    pub fn with_http(base_url: &str, http: reqwest::Client) -> Result<Client, Error> {
+        let base =
+            Url::parse(base_url).map_err(|e| Error::InvalidUrl(format!("{base_url}: {e}")))?;
+        if !matches!(base.scheme(), "http" | "https") {
+            return Err(Error::InvalidUrl(format!(
+                "{base_url}: the scheme must be http or https"
+            )));
+        }
+        if base.path() != "/" || base.query().is_some() || base.fragment().is_some() {
+            return Err(Error::InvalidUrl(format!(
+                "{base_url}: the URL must have no path, query or fragment"
+            )));
+        }
+        Ok(Client { base, http })
+    }
+
+    /// GET the route `segments` with the query `query` and decode the 2xx body as `T`.
+    pub(crate) async fn get_json<T: DeserializeOwned>(
+        &self,
+        segments: &[Seg<'_>],
+        query: Vec<(&'static str, String)>,
+    ) -> Result<T, Error> {
+        let mut url = self.base.clone();
+        {
+            let mut path = url
+                .path_segments_mut()
+                .map_err(|()| Error::InvalidUrl(self.base.to_string()))?;
+            path.clear();
+            for seg in segments {
+                match seg {
+                    Seg::Lit(s) => path.push(s),
+                    Seg::Param(s) => path.push(s),
+                };
+            }
+        }
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query);
+        }
+        self.send(url).await
+    }
+
+    /// GET `url` and map the reply: a 2xx body decoded as `T`, else [`Error::Api`] or
+    /// [`Error::Http`].
+    async fn send<T: DeserializeOwned>(&self, url: Url) -> Result<T, Error> {
+        let resp = self
+            .http
+            .get(url)
+            .header(ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(Error::Transport)?;
+        let status = resp.status();
+        let bytes = resp.bytes().await.map_err(Error::Transport)?;
+        let code = status.as_u16();
+        if status.is_success() {
+            return serde_json::from_slice(&bytes).map_err(|e| Error::Decode {
+                status: code,
+                message: e.to_string(),
+            });
+        }
+        Err(match serde_json::from_slice::<ApiError>(&bytes) {
+            Ok(api) => Error::Api {
+                status: code,
+                kind: api.error.kind,
+                message: api.error.message,
+                hint: api.error.hint,
+            },
+            Err(_) => Error::Http {
+                status: code,
+                body: http_body(&bytes),
+            },
+        })
+    }
+}

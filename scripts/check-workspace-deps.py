@@ -111,6 +111,9 @@
   optionally (its `test-util` feature, for the fake HTTP client of `testutil`), `gadk-model`; it
   never depends on `gadk-engine` directly. Only `gadk-console` depends on it, normally and, with
   `test-util`, as a dev-dependency.
+- console-client: `gadk-console-client` (the typed client of the console's JSON API) has no
+  gadk-* dependency, and no crate depends on it normally; `gadk-console` may dev-depend on it
+  (its client conformance tests).
 """
 import pathlib, sys, tomllib
 
@@ -158,6 +161,7 @@ ALLOWED = {
     "gadk-cloudtrace": {"gadk-model"},
     "gadk-bigquery": {"gadk-agent", "gadk-engine", "gadk-model", "gadk-session"},
     "gadk-analytics": {"gadk-bigquery", "gadk-eval-monitor", "gadk-model"},
+    "gadk-console-client": set(),
     "gadk-console": {"gadk-cloudtrace", "gadk-model", "gadk-prompts", "gadk-prompts-cli",
                      "gadk-eval", "gadk-eval-monitor", "gadk-bigquery", "gadk-analytics"},
     "gadk-eval": {"gadk-agent", "gadk-engine", "gadk-genai", "gadk-model", "gadk-platform",
