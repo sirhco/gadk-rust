@@ -376,6 +376,7 @@
         "required": ["error"],
         "properties": {
           "error": {
+            "description": "The error: its kind, message and hint.",
             "type": "object",
             "required": ["kind", "message", "hint"],
             "properties": {
@@ -383,8 +384,14 @@
                 "type": "string",
                 "description": "bad_request, needs_bigquery, not_found, method_not_allowed, or for a 502 the source's kind (bigquery, transport, …)."
               },
-              "message": {"type": "string"},
-              "hint": {"type": ["string", "null"]}
+              "message": {
+                "type": "string",
+                "description": "What went wrong: the page's text or the error banner's."
+              },
+              "hint": {
+                "type": ["string", "null"],
+                "description": "How to fix it, from the error banner; null when there is none."
+              }
             }
           }
         }
@@ -409,10 +416,22 @@
         "description": "Token counts.",
         "required": ["input", "cached", "output", "reasoning"],
         "properties": {
-          "input": {"type": "integer", "minimum": 0},
-          "cached": {"type": "integer", "minimum": 0},
-          "output": {"type": "integer", "minimum": 0},
-          "reasoning": {"type": "integer", "minimum": 0}
+          "input": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Input tokens (prompt plus tool-use prompt), cached ones included."
+          },
+          "cached": {"type": "integer", "minimum": 0, "description": "Cached input tokens."},
+          "output": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Output tokens, without reasoning."
+          },
+          "reasoning": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Reasoning (thinking) tokens."
+          }
         }
       },
       "ModelCalls": {
@@ -420,9 +439,9 @@
         "description": "The calls of one model and their tokens.",
         "required": ["model", "calls", "usage"],
         "properties": {
-          "model": {"type": "string"},
-          "calls": {"type": "integer", "minimum": 0},
-          "usage": {"$ref": "#/components/schemas/Usage"}
+          "model": {"type": "string", "description": "The model."},
+          "calls": {"type": "integer", "minimum": 0, "description": "How many calls."},
+          "usage": {"$ref": "#/components/schemas/Usage", "description": "Their summed tokens."}
         }
       },
       "ModelTokens": {
@@ -437,9 +456,15 @@
         "description": "The calls of one model by one agent with one prompt version (name@version, or null).",
         "required": ["agent", "prompt", "calls"],
         "properties": {
-          "agent": {"type": "string"},
-          "prompt": {"type": ["string", "null"]},
-          "calls": {"$ref": "#/components/schemas/ModelCalls"}
+          "agent": {"type": "string", "description": "The agent (empty when the rows have none)."},
+          "prompt": {
+            "type": ["string", "null"],
+            "description": "The prompt version as name@version; null for calls without a prompt."
+          },
+          "calls": {
+            "$ref": "#/components/schemas/ModelCalls",
+            "description": "The model and its calls."
+          }
         }
       },
       "PricedCell": {
@@ -452,7 +477,10 @@
         "required": ["bucket", "cell"],
         "properties": {
           "bucket": {"type": "integer", "minimum": 0, "description": "Buckets from start."},
-          "cell": {"$ref": "#/components/schemas/Cell"}
+          "cell": {
+            "$ref": "#/components/schemas/Cell",
+            "description": "The agent, prompt version, model and calls."
+          }
         }
       },
       "PricedTrendCell": {
@@ -467,9 +495,17 @@
         "description": "A trace with its total tokens and its calls per model.",
         "required": ["trace_id", "total", "models"],
         "properties": {
-          "trace_id": {"type": "string"},
-          "total": {"type": "integer", "minimum": 0},
-          "models": {"type": "array", "items": {"$ref": "#/components/schemas/ModelCalls"}}
+          "trace_id": {"type": "string", "description": "The trace id."},
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Input, output and reasoning tokens of the trace's calls."
+          },
+          "models": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/ModelCalls"},
+            "description": "The trace's calls per model."
+          }
         }
       },
       "PricedTopTrace": {
@@ -492,16 +528,50 @@
           "tokens"
         ],
         "properties": {
-          "session_id": {"type": "string"},
-          "user": {"type": "string"},
-          "agent": {"type": "string"},
-          "first": {"type": "string", "format": "date-time"},
-          "last": {"type": "string", "format": "date-time"},
-          "turns": {"type": "integer", "minimum": 0},
-          "errors": {"type": "integer", "minimum": 0},
-          "ups": {"type": "integer", "minimum": 0},
-          "downs": {"type": "integer", "minimum": 0},
-          "tokens": {"type": "array", "items": {"$ref": "#/components/schemas/ModelTokens"}}
+          "session_id": {"type": "string", "description": "The session id."},
+          "user": {
+            "type": "string",
+            "description": "The user of the session's first invocation; empty when none."
+          },
+          "agent": {
+            "type": "string",
+            "description": "The root agent of that invocation; empty when none."
+          },
+          "first": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The session's first activity in the range."
+          },
+          "last": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The session's last activity in the range."
+          },
+          "turns": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Distinct invocations (turns)."
+          },
+          "errors": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Model and tool errors, and rows with an error status."
+          },
+          "ups": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Latest boolean scores that are true."
+          },
+          "downs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Latest boolean scores that are false."
+          },
+          "tokens": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/ModelTokens"},
+            "description": "The model response tokens per model."
+          }
         }
       },
       "PricedSessionRow": {
@@ -516,9 +586,9 @@
         "description": "A score of one turn.",
         "required": ["name", "source", "value"],
         "properties": {
-          "name": {"type": "string"},
-          "source": {"type": "string"},
-          "value": {"type": "string"}
+          "name": {"type": "string", "description": "The score name."},
+          "source": {"type": "string", "description": "The score's source (empty when none)."},
+          "value": {"type": "string", "description": "The value as text."}
         }
       },
       "TurnRow": {
@@ -535,14 +605,41 @@
           "scores"
         ],
         "properties": {
-          "invocation_id": {"type": "string"},
-          "trace_id": {"type": ["string", "null"]},
-          "start": {"type": "string", "format": "date-time"},
-          "end": {"type": ["string", "null"], "format": "date-time"},
-          "errors": {"type": "integer", "minimum": 0},
-          "tools": {"type": "array", "items": {"type": "string"}},
-          "tokens": {"type": "array", "items": {"$ref": "#/components/schemas/ModelTokens"}},
-          "scores": {"type": "array", "items": {"$ref": "#/components/schemas/TurnScore"}}
+          "invocation_id": {"type": "string", "description": "The invocation id."},
+          "trace_id": {
+            "type": ["string", "null"],
+            "description": "A trace id of the invocation's rows; null when none."
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The invocation's first activity."
+          },
+          "end": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the invocation completed; null when it has not."
+          },
+          "errors": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The invocation's error rows."
+          },
+          "tools": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "The tools it called, distinct, in first-call order."
+          },
+          "tokens": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/ModelTokens"},
+            "description": "Its model response tokens per model."
+          },
+          "scores": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/TurnScore"},
+            "description": "The latest score per name and source."
+          }
         }
       },
       "PricedTurnRow": {
@@ -554,14 +651,30 @@
         "description": "One user.",
         "required": ["user", "sessions", "turns", "errors", "ups", "downs", "last", "tokens"],
         "properties": {
-          "user": {"type": "string"},
-          "sessions": {"type": "integer", "minimum": 0},
-          "turns": {"type": "integer", "minimum": 0},
-          "errors": {"type": "integer", "minimum": 0},
-          "ups": {"type": "integer", "minimum": 0},
-          "downs": {"type": "integer", "minimum": 0},
-          "last": {"type": "string", "format": "date-time"},
-          "tokens": {"type": "array", "items": {"$ref": "#/components/schemas/ModelTokens"}}
+          "user": {"type": "string", "description": "The user id; empty for sessions without one."},
+          "sessions": {"type": "integer", "minimum": 0, "description": "Distinct sessions."},
+          "turns": {"type": "integer", "minimum": 0, "description": "Turns over those sessions."},
+          "errors": {"type": "integer", "minimum": 0, "description": "Errors over those sessions."},
+          "ups": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Latest boolean scores that are true."
+          },
+          "downs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Latest boolean scores that are false."
+          },
+          "last": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The last activity of those sessions."
+          },
+          "tokens": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/ModelTokens"},
+            "description": "The model response tokens per model."
+          }
         }
       },
       "PricedUserRow": {
@@ -573,12 +686,18 @@
         "description": "Calls, mean tokens and latency percentiles of one prompt version.",
         "required": ["version", "calls", "mean_input", "mean_output", "p50_ms", "p95_ms"],
         "properties": {
-          "version": {"type": "integer", "minimum": 0},
-          "calls": {"type": "integer", "minimum": 0},
-          "mean_input": {"type": "number"},
-          "mean_output": {"type": "number"},
-          "p50_ms": {"type": ["number", "null"]},
-          "p95_ms": {"type": ["number", "null"]}
+          "version": {"type": "integer", "minimum": 0, "description": "The prompt version."},
+          "calls": {"type": "integer", "minimum": 0, "description": "Model calls."},
+          "mean_input": {"type": "number", "description": "Mean input tokens per call."},
+          "mean_output": {"type": "number", "description": "Mean output tokens per call."},
+          "p50_ms": {
+            "type": ["number", "null"],
+            "description": "Median latency in milliseconds (approximate); null when no call has one."
+          },
+          "p95_ms": {
+            "type": ["number", "null"],
+            "description": "95th percentile latency in milliseconds (approximate); null when no call has one."
+          }
         }
       },
       "PricedVersionStats": {
@@ -593,8 +712,11 @@
         "description": "The calls of one prompt version on one model.",
         "required": ["version", "calls"],
         "properties": {
-          "version": {"type": "integer", "minimum": 0},
-          "calls": {"$ref": "#/components/schemas/ModelCalls"}
+          "version": {"type": "integer", "minimum": 0, "description": "The prompt version."},
+          "calls": {
+            "$ref": "#/components/schemas/ModelCalls",
+            "description": "The model and its calls."
+          }
         }
       },
       "PricedVersionModel": {
@@ -609,14 +731,34 @@
         "description": "The scores of one prompt version with one name, source and data type.",
         "required": ["version", "name", "source", "data_type", "count", "positive", "mean", "mode"],
         "properties": {
-          "version": {"type": "integer", "minimum": 0},
-          "name": {"type": "string"},
-          "source": {"type": "string"},
-          "data_type": {"type": "string"},
-          "count": {"type": "integer", "minimum": 0},
-          "positive": {"type": "integer", "minimum": 0},
-          "mean": {"type": ["number", "null"]},
-          "mode": {"type": ["string", "null"]}
+          "version": {"type": "integer", "minimum": 0, "description": "The prompt version."},
+          "name": {"type": "string", "description": "The score name."},
+          "source": {
+            "type": "string",
+            "description": "app or console (empty when the rows have none)."
+          },
+          "data_type": {
+            "type": "string",
+            "description": "bool, number or category (empty when the rows have none)."
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many scores (the latest per invocation, name and source)."
+          },
+          "positive": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "bool scores that are true."
+          },
+          "mean": {
+            "type": ["number", "null"],
+            "description": "The mean of number scores; null for other data types."
+          },
+          "mode": {
+            "type": ["string", "null"],
+            "description": "The most common category (ties: the lowest value); null for other data types."
+          }
         }
       },
       "ScoreRow": {
@@ -624,13 +766,23 @@
         "description": "One score as /traces/{id} lists it.",
         "required": ["timestamp", "source", "author", "name", "data_type", "value", "comment"],
         "properties": {
-          "timestamp": {"type": "string", "format": "date-time"},
-          "source": {"type": "string"},
-          "author": {"type": "string"},
-          "name": {"type": "string"},
-          "data_type": {"type": "string"},
-          "value": {"type": "string"},
-          "comment": {"type": "string"}
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the score was written."
+          },
+          "source": {
+            "type": "string",
+            "description": "app or console (empty when the row has none)."
+          },
+          "author": {"type": "string", "description": "Who scored (empty when the row has none)."},
+          "name": {"type": "string", "description": "The score name."},
+          "data_type": {
+            "type": "string",
+            "description": "bool, number or category (empty when the row has none)."
+          },
+          "value": {"type": "string", "description": "The value as text (true, 4.5, helpful)."},
+          "comment": {"type": "string", "description": "The comment (empty when none)."}
         }
       },
       "PendingTrace": {
@@ -638,10 +790,22 @@
         "description": "A trace waiting for review.",
         "required": ["trace_id", "first", "prompts", "thumbs_down"],
         "properties": {
-          "trace_id": {"type": "string"},
-          "first": {"type": "string", "format": "date-time"},
-          "prompts": {"type": "array", "items": {"type": "string"}},
-          "thumbs_down": {"type": "integer", "minimum": 0}
+          "trace_id": {"type": "string", "description": "The trace id, lowercase."},
+          "first": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The trace's earliest model response in the range."
+          },
+          "prompts": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "The trace's prompt versions as name@version, sorted."
+          },
+          "thumbs_down": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The distinct app thumbs-down scores on the trace."
+          }
         }
       },
       "UsageBreakdown": {
@@ -649,8 +813,15 @@
         "description": "The usage breakdown.",
         "required": ["cells", "truncated"],
         "properties": {
-          "cells": {"type": "array", "items": {"$ref": "#/components/schemas/PricedCell"}},
-          "truncated": {"type": "boolean"}
+          "cells": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/PricedCell"},
+            "description": "The cells, ordered by model, agent and prompt version, each priced."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "The query hit its row cap: some cells are left out."
+          }
         }
       },
       "UsageTrend": {
@@ -658,9 +829,21 @@
         "description": "The window start, the bucket width in seconds and the trend cells.",
         "required": ["start", "bucket_seconds", "cells"],
         "properties": {
-          "start": {"type": "string", "format": "date-time"},
-          "bucket_seconds": {"type": "integer", "minimum": 1},
-          "cells": {"type": "array", "items": {"$ref": "#/components/schemas/PricedTrendCell"}}
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The window start; bucket counts buckets from here."
+          },
+          "bucket_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The bucket width in seconds."
+          },
+          "cells": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/PricedTrendCell"},
+            "description": "The trend cells, each priced."
+          }
         }
       },
       "SessionTurns": {
@@ -668,8 +851,15 @@
         "description": "A session's row and its turns.",
         "required": ["session", "turns"],
         "properties": {
-          "session": {"$ref": "#/components/schemas/PricedSessionRow"},
-          "turns": {"type": "array", "items": {"$ref": "#/components/schemas/PricedTurnRow"}}
+          "session": {
+            "$ref": "#/components/schemas/PricedSessionRow",
+            "description": "The session's row, priced."
+          },
+          "turns": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/PricedTurnRow"},
+            "description": "The session's first 200 turns, oldest first, each priced."
+          }
         }
       },
       "VersionMetrics": {
@@ -677,9 +867,20 @@
         "description": "Per-version metrics, newest version first.",
         "required": ["stats", "models", "truncated"],
         "properties": {
-          "stats": {"type": "array", "items": {"$ref": "#/components/schemas/PricedVersionStats"}},
-          "models": {"type": "array", "items": {"$ref": "#/components/schemas/PricedVersionModel"}},
-          "truncated": {"type": "boolean"}
+          "stats": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/PricedVersionStats"},
+            "description": "One entry per version, newest first, each priced."
+          },
+          "models": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/PricedVersionModel"},
+            "description": "Calls and tokens per version and model, each priced."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "A query hit its row cap: some versions or version-model rows are left out."
+          }
         }
       },
       "VersionFeedback": {
@@ -687,8 +888,15 @@
         "description": "The scores per version.",
         "required": ["rows", "truncated"],
         "properties": {
-          "rows": {"type": "array", "items": {"$ref": "#/components/schemas/FeedbackRow"}},
-          "truncated": {"type": "boolean"}
+          "rows": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/FeedbackRow"},
+            "description": "One row per version, name, source and data type: newest version first, then by name, source and data type."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "The query hit its row cap: some scores are left out."
+          }
         }
       },
       "PromptVersions": {
@@ -696,8 +904,14 @@
         "description": "A prompt's metrics and feedback per version.",
         "required": ["metrics", "feedback"],
         "properties": {
-          "metrics": {"$ref": "#/components/schemas/VersionMetrics"},
-          "feedback": {"$ref": "#/components/schemas/VersionFeedback"}
+          "metrics": {
+            "$ref": "#/components/schemas/VersionMetrics",
+            "description": "The per-version metrics."
+          },
+          "feedback": {
+            "$ref": "#/components/schemas/VersionFeedback",
+            "description": "The scores per version."
+          }
         }
       },
       "TraceScores": {
@@ -705,8 +919,12 @@
         "description": "A trace's scores, newest first.",
         "required": ["rows", "truncated"],
         "properties": {
-          "rows": {"type": "array", "items": {"$ref": "#/components/schemas/ScoreRow"}},
-          "truncated": {"type": "boolean"}
+          "rows": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/ScoreRow"},
+            "description": "The scores, newest first."
+          },
+          "truncated": {"type": "boolean", "description": "More scores exist than are listed."}
         }
       },
       "UsageBreakdownResponse": {
@@ -714,7 +932,10 @@
         "description": "The usage breakdown's envelope.",
         "required": ["data", "truncated", "next"],
         "properties": {
-          "data": {"$ref": "#/components/schemas/UsageBreakdown"},
+          "data": {
+            "$ref": "#/components/schemas/UsageBreakdown",
+            "description": "The usage breakdown."
+          },
           "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
           "next": {
             "type": ["string", "null"],
@@ -727,7 +948,7 @@
         "description": "The usage trend's envelope.",
         "required": ["data", "truncated", "next"],
         "properties": {
-          "data": {"$ref": "#/components/schemas/UsageTrend"},
+          "data": {"$ref": "#/components/schemas/UsageTrend", "description": "The usage trend."},
           "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
           "next": {
             "type": ["string", "null"],
@@ -740,7 +961,11 @@
         "description": "The top traces' envelope.",
         "required": ["data", "truncated", "next"],
         "properties": {
-          "data": {"type": "array", "items": {"$ref": "#/components/schemas/PricedTopTrace"}},
+          "data": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/PricedTopTrace"},
+            "description": "The traces with the most tokens, each priced."
+          },
           "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
           "next": {
             "type": ["string", "null"],
@@ -753,7 +978,11 @@
         "description": "The sessions' envelope.",
         "required": ["data", "truncated", "next"],
         "properties": {
-          "data": {"type": "array", "items": {"$ref": "#/components/schemas/PricedSessionRow"}},
+          "data": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/PricedSessionRow"},
+            "description": "The page's sessions, newest last activity first, each priced."
+          },
           "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
           "next": {
             "type": ["string", "null"],
@@ -766,7 +995,10 @@
         "description": "A session's turns' envelope.",
         "required": ["data", "truncated", "next"],
         "properties": {
-          "data": {"$ref": "#/components/schemas/SessionTurns"},
+          "data": {
+            "$ref": "#/components/schemas/SessionTurns",
+            "description": "The session's row and its turns."
+          },
           "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
           "next": {
             "type": ["string", "null"],
@@ -779,7 +1011,11 @@
         "description": "The users' envelope.",
         "required": ["data", "truncated", "next"],
         "properties": {
-          "data": {"type": "array", "items": {"$ref": "#/components/schemas/PricedUserRow"}},
+          "data": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/PricedUserRow"},
+            "description": "The users, each priced."
+          },
           "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
           "next": {
             "type": ["string", "null"],
@@ -792,7 +1028,10 @@
         "description": "The prompt versions' envelope.",
         "required": ["data", "truncated", "next"],
         "properties": {
-          "data": {"$ref": "#/components/schemas/PromptVersions"},
+          "data": {
+            "$ref": "#/components/schemas/PromptVersions",
+            "description": "The prompt's metrics and feedback per version."
+          },
           "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
           "next": {
             "type": ["string", "null"],
@@ -805,7 +1044,10 @@
         "description": "The trace scores' envelope.",
         "required": ["data", "truncated", "next"],
         "properties": {
-          "data": {"$ref": "#/components/schemas/TraceScores"},
+          "data": {
+            "$ref": "#/components/schemas/TraceScores",
+            "description": "The trace's scores."
+          },
           "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
           "next": {
             "type": ["string", "null"],
@@ -818,7 +1060,11 @@
         "description": "The review queue's envelope.",
         "required": ["data", "truncated", "next"],
         "properties": {
-          "data": {"type": "array", "items": {"$ref": "#/components/schemas/PendingTrace"}},
+          "data": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/PendingTrace"},
+            "description": "The queue's pending traces, newest first."
+          },
           "truncated": {"type": "boolean", "description": "The answer is cut (see the operation)."},
           "next": {
             "type": ["string", "null"],

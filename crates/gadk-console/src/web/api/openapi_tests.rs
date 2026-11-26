@@ -481,3 +481,37 @@ async fn the_checker_rejects_a_real_body_without_a_required_field() {
     let e = validate(path, status, &broken).unwrap_err();
     assert!(e.contains("\"cost_partial\" is a required property"), "{e}");
 }
+
+/// The `components.schemas` properties of `doc` without a `description`, the properties of
+/// inline objects included, as `Schema.property` paths.
+fn undocumented_properties(doc: &Value) -> Vec<String> {
+    fn walk(path: &str, schema: &Value, out: &mut Vec<String>) {
+        let Some(props) = schema["properties"].as_object() else {
+            return;
+        };
+        for (name, prop) in props {
+            let here = format!("{path}.{name}");
+            if !prop["description"].is_string() {
+                out.push(here.clone());
+            }
+            walk(&here, prop, out);
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(schemas) = doc["components"]["schemas"].as_object() {
+        for (name, schema) in schemas {
+            walk(name, schema, &mut out);
+        }
+    }
+    out
+}
+
+#[test]
+fn every_schema_property_has_a_description() {
+    assert_eq!(undocumented_properties(&document()), Vec::<String>::new());
+    let doc = json!({ "components": { "schemas": { "E": { "properties": {
+        "error": { "description": "The error.", "properties": { "hint": {} } },
+        "kind": {}
+    } } } } });
+    assert_eq!(undocumented_properties(&doc), ["E.error.hint", "E.kind"]);
+}
