@@ -1,0 +1,25 @@
+[package]
+name = "gadk-console-client"
+description = "A typed async client for the gadk-console JSON API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+# The in-process API server of the client tests.
+axum = { workspace = true }
+tokio = { workspace = true }

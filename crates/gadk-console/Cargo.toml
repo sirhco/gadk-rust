@@ -51,6 +51,8 @@ tempfile = { workspace = true }
 gadk-telemetry = { workspace = true }
 # The OpenAPI checks of the JSON API: responses validated against the OpenAPI document.
 jsonschema = { workspace = true }
+# Client conformance: every 200 body of the API tests must deserialize into the client's type.
+gadk-console-client = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 pretty_assertions = { workspace = true }

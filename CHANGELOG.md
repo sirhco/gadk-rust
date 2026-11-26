@@ -7,6 +7,18 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-console-client`: a new crate, a typed async client for the console's read-only JSON API
+  (`/api/v1/…`). Its response types, range enums, query builders and one `Client` method per
+  route are generated from the console's OpenAPI document by `scripts/gen-console-client.py`,
+  and the gate runs `--check` so the committed code stays in step with the document. Errors are
+  typed (`Error::Api` with the console's `kind`, `message` and `hint`, `Http`, `Transport`,
+  `Decode`, `InvalidUrl`), and `list_sessions_pages` / `list_sessions_all` follow the sessions
+  route's `next` links. `Client::new` follows no redirects, and a base URL carrying credentials
+  is refused. The console's OpenAPI document now describes every schema property, and
+  its API tests check that every 200 body they produce deserializes into the client's types.
+
 ### Changed
 
 - gadk-prompts: a rollout conflict where only the percent changed now reads `conflict: the v2
