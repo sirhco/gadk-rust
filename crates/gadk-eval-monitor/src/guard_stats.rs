@@ -15,6 +15,13 @@
 //! The statistics behind guard checks: Wilson score intervals, Newcombe's hybrid score
 //! interval for a difference of proportions (method 10 of Newcombe 1998), Welch's interval for
 //! a difference of means with a normal quantile, and the status rule on an interval of harm.
+//!
+//! An interval's z is `Z95` by default. A spec with `confidence` splits its error budget across
+//! its interval checks (`bonferroni_z`, from the standard normal quantile `normal_quantile`);
+//! with `sequential` each check uses the anytime z of Robbins' normal-mixture boundary
+//! (`anytime_z`, its mixture parameter from `mixture_rho`), the asymptotic confidence sequence
+//! of Waudby-Smith, Ramdas et al. (2024), *Time-uniform central limit theory and asymptotic
+//! confidence sequences*.
 
 use crate::guard_report::Status;
 
@@ -75,6 +82,142 @@ pub(crate) fn classify(lower: f64, upper: f64, tolerance: f64) -> Status {
     } else {
         Status::Unsure
     }
+}
+
+/// The standard normal quantile Φ⁻¹(`p`) for `p` in (0, 1): Wichura's algorithm AS 241
+/// (PPND16), a rational approximation accurate to about 1e-16.
+#[allow(clippy::excessive_precision)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn normal_quantile(p: f64) -> f64 {
+    /// `c[0] + c[1]·x + … + c[7]·x⁷` by Horner's rule.
+    fn poly(c: &[f64; 8], x: f64) -> f64 {
+        c.iter().rev().fold(0.0, |acc, k| acc * x + k)
+    }
+    const A: [f64; 8] = [
+        3.387132872796366608,
+        1.3314166789178437745e2,
+        1.9715909503065514427e3,
+        1.3731693765509461125e4,
+        4.5921953931549871457e4,
+        6.7265770927008700853e4,
+        3.3430575583588128105e4,
+        2.5090809287301226727e3,
+    ];
+    const B: [f64; 8] = [
+        1.0,
+        4.2313330701600911252e1,
+        6.8718700749205790830e2,
+        5.3941960214247511077e3,
+        2.1213794301586595867e4,
+        3.9307895800092710610e4,
+        2.8729085735721942674e4,
+        5.2264952788528545610e3,
+    ];
+    const C: [f64; 8] = [
+        1.42343711074968357734,
+        4.63033784615654529590,
+        5.76949722146069140550,
+        3.64784832476320460504,
+        1.27045825245236838258,
+        2.41780725177450611770e-1,
+        2.27238449892691845833e-2,
+        7.74545014278341407640e-4,
+    ];
+    const D: [f64; 8] = [
+        1.0,
+        2.05319162663775882187,
+        1.67638483018380384940,
+        6.89767334985100004550e-1,
+        1.48103976427480074590e-1,
+        1.51986665636164571966e-2,
+        5.47593808499534494600e-4,
+        1.05075007164441684324e-9,
+    ];
+    const E: [f64; 8] = [
+        6.65790464350110377720,
+        5.46378491116411436990,
+        1.78482653991729133580,
+        2.96560571828504891230e-1,
+        2.65321895265761230930e-2,
+        1.24266094738807843860e-3,
+        2.71155556874348757815e-5,
+        2.01033439929228813265e-7,
+    ];
+    const F: [f64; 8] = [
+        1.0,
+        5.99832206555887937690e-1,
+        1.36929880922735805310e-1,
+        1.48753612908506148525e-2,
+        7.86869131145613259100e-4,
+        1.84631831751005468180e-5,
+        1.42151175831644588870e-7,
+        2.04426310338993978564e-15,
+    ];
+    let q = p - 0.5;
+    if q.abs() <= 0.425 {
+        let r = 0.180625 - q * q;
+        return q * poly(&A, r) / poly(&B, r);
+    }
+    let r = if q < 0.0 { p } else { 1.0 - p };
+    let r = (-r.ln()).sqrt();
+    let x = if r <= 5.0 {
+        let r = r - 1.6;
+        poly(&C, r) / poly(&D, r)
+    } else {
+        let r = r - 5.0;
+        poly(&E, r) / poly(&F, r)
+    };
+    if q < 0.0 { -x } else { x }
+}
+
+/// The one-sided normal quantile of each of `k` checks (`k ≥ 1`) sharing the error budget
+/// `alpha` (Bonferroni): Φ⁻¹(1 − `alpha` ÷ `k`).
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn bonferroni_z(alpha: f64, k: u32) -> f64 {
+    normal_quantile(1.0 - alpha / f64::from(k))
+}
+
+/// The mixture parameter ρ > 0 that makes `anytime_z` smallest at the total sample `n_star`
+/// for level `a`: a golden-section search over ln ρ in [ln(`n_star`·1e-4), ln(`n_star`·1e4)],
+/// stopped once the bracket is narrower than 1e-9 (a relative tolerance of 1e-9 on ρ).
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn mixture_rho(n_star: f64, a: f64) -> f64 {
+    // z² as a function of ln ρ; it has one minimum.
+    let z2 = |ln_rho: f64| {
+        let rho = ln_rho.exp();
+        (1.0 + rho / n_star) * ((n_star + rho) / (rho * a * a)).ln()
+    };
+    let shrink = (5.0_f64.sqrt() - 1.0) / 2.0;
+    let (mut lo, mut hi) = ((n_star * 1e-4).ln(), (n_star * 1e4).ln());
+    let mut c = hi - shrink * (hi - lo);
+    let mut d = lo + shrink * (hi - lo);
+    let (mut fc, mut fd) = (z2(c), z2(d));
+    while hi - lo > 1e-9 {
+        if fc < fd {
+            hi = d;
+            d = c;
+            fd = fc;
+            c = hi - shrink * (hi - lo);
+            fc = z2(c);
+        } else {
+            lo = c;
+            c = d;
+            fc = fd;
+            d = lo + shrink * (hi - lo);
+            fd = z2(d);
+        }
+    }
+    ((lo + hi) / 2.0).exp()
+}
+
+/// The anytime z at total sample `n` (`n ≥ 1`) with mixture parameter `rho` and level `a`:
+/// √((1 + ρ/n) · ln((n + ρ) / (ρ · a²))). This is Robbins' two-sided normal-mixture boundary at
+/// level `a`, used as a one-sided level-`a` bound on each side (conservative); it is above
+/// Φ⁻¹(1 − `a`) for every `n`.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn anytime_z(n: u64, rho: f64, a: f64) -> f64 {
+    let n = n as f64;
+    ((1.0 + rho / n) * ((n + rho) / (rho * a * a)).ln()).sqrt()
 }
 
 #[cfg(test)]
@@ -174,5 +317,141 @@ mod tests {
         assert_eq!(classify(-0.01, 0.03, 0.02), Status::Unsure);
         assert_eq!(classify(0.1, 0.1, 0.05), Status::Worse);
         assert_eq!(classify(0.05, 0.05, 0.05), Status::Ok);
+    }
+
+    #[test]
+    fn normal_quantile_known_values() {
+        assert!((normal_quantile(0.975) - 1.959963984540054).abs() < 1e-9);
+        assert!((normal_quantile(0.95) - Z95).abs() < 1e-9);
+        assert_eq!(normal_quantile(0.5), 0.0);
+        for (p, want) in [
+            (0.6, 0.2533471031357998),
+            (0.9, 1.2815515655446006),
+            (0.99, 2.3263478740408408),
+            (0.999, 3.090232306167813),
+            (1.0 - 1e-6, 4.753424308817086),
+        ] {
+            let got = normal_quantile(p);
+            assert!((got - want).abs() < 1e-9, "{p}: {got}");
+            // The lower tail mirrors the upper one.
+            assert!((normal_quantile(1.0 - p) + got).abs() < 1e-9, "{p}");
+        }
+    }
+
+    #[test]
+    fn bonferroni_splits_alpha_across_the_checks() {
+        assert!((bonferroni_z(0.05, 2) - normal_quantile(0.975)).abs() < 1e-12);
+        assert!((bonferroni_z(0.05, 1) - Z95).abs() < 1e-9);
+        assert!((bonferroni_z(0.05, 3) - 2.128045234184984).abs() < 1e-9);
+    }
+
+    #[test]
+    fn anytime_z_by_hand() {
+        // √((1 + 50/1000) · ln((1000 + 50) / (50 · 0.05²))) = √(1.05 · ln 8400)
+        let z = anytime_z(1000, 50.0, 0.05);
+        assert!((z - 3.0802250460109204).abs() < 1e-12, "{z}");
+    }
+
+    #[test]
+    fn mixture_rho_minimises_z_at_n_star() {
+        for n_star in [20_u64, 200, 2000] {
+            let ns = n_star as f64;
+            for a in [0.05, 0.01, 0.001] {
+                let rho = mixture_rho(ns, a);
+                // Well inside the searched bracket [n*·1e-4, n*·1e4].
+                assert!(rho > ns * 1e-3 && rho < ns * 1e3, "{n_star} {a}: {rho}");
+                // At the minimum, x = n*/ρ solves x = ln(1 + x) + ln(1/a²).
+                let x = ns / rho;
+                let residual = x - (1.0 + x).ln() - (1.0 / (a * a)).ln();
+                assert!(residual.abs() < 1e-5, "{n_star} {a}: {residual}");
+                let at = anytime_z(n_star, rho, a);
+                assert!(at <= anytime_z(n_star / 2, rho, a), "{n_star} {a}");
+                assert!(at <= anytime_z(n_star * 2, rho, a), "{n_star} {a}");
+            }
+        }
+        let z = anytime_z(200, mixture_rho(200.0, 0.05), 0.05);
+        assert!((z - 3.0351224130285512).abs() < 1e-9, "{z}");
+    }
+
+    #[test]
+    fn the_anytime_z_is_wider_than_the_fixed_one_at_every_n() {
+        for a in [0.05, 0.01, 0.001] {
+            let fixed = normal_quantile(1.0 - a);
+            for n_star in [20.0, 200.0] {
+                let rho = mixture_rho(n_star, a);
+                for n in [2, 10, 100, 10_000, 1_000_000] {
+                    let z = anytime_z(n, rho, a);
+                    assert!(z > fixed, "a {a}, n* {n_star}, n {n}: {z} <= {fixed}");
+                }
+            }
+        }
+    }
+
+    /// SplitMix64: advances `state` and returns the next 64-bit output.
+    fn splitmix64(state: &mut u64) -> u64 {
+        *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = *state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// The shares of 2,000 simulated rollouts that some look wrongly classifies `worse`, as
+    /// `(sequential, fixed Z95)`. Both sides fail 5% of calls; each look adds 200 calls, each
+    /// going to the rollout with probability `share`; 50 cumulative looks; a look counts once
+    /// both sides have 100 calls (`min_calls`); k = 1, a = 0.05, tolerance 0, n* = 200. Each
+    /// call draws one SplitMix64 output: its high 32 bits pick the side, its low 32 bits the
+    /// error.
+    fn false_aborts(share: f64) -> (f64, f64) {
+        const ROLLOUTS: u32 = 2_000;
+        let mut state: u64 = 20_261_126;
+        let share_cut = (share * 4_294_967_296.0) as u64;
+        let error_cut = (0.05 * 4_294_967_296.0) as u64;
+        let a = 0.05;
+        let rho = mixture_rho(200.0, a);
+        let (mut sequential, mut fixed) = (0_u32, 0_u32);
+        for _ in 0..ROLLOUTS {
+            let (mut nb, mut eb, mut nr, mut er) = (0_u64, 0_u64, 0_u64, 0_u64);
+            let (mut sequential_hit, mut fixed_hit) = (false, false);
+            for _ in 0..50 {
+                for _ in 0..200 {
+                    let x = splitmix64(&mut state);
+                    let error = u64::from((x & 0xFFFF_FFFF) < error_cut);
+                    if (x >> 32) < share_cut {
+                        nr += 1;
+                        er += error;
+                    } else {
+                        nb += 1;
+                        eb += error;
+                    }
+                }
+                if nb < 100 || nr < 100 {
+                    continue;
+                }
+                let worse = |z: f64| {
+                    let (lower, upper) = newcombe_diff(eb, nb, er, nr, z);
+                    classify(lower, upper, 0.0) == Status::Worse
+                };
+                sequential_hit = sequential_hit || worse(anytime_z(nb + nr, rho, a));
+                fixed_hit = fixed_hit || worse(Z95);
+            }
+            sequential += u32::from(sequential_hit);
+            fixed += u32::from(fixed_hit);
+        }
+        (
+            f64::from(sequential) / f64::from(ROLLOUTS),
+            f64::from(fixed) / f64::from(ROLLOUTS),
+        )
+    }
+
+    /// R12. Measured while writing the plan: share 0.5 gives 0.30% sequential and 25.25%
+    /// fixed; share 0.1 gives 1.15% and 24.65%.
+    #[test]
+    fn the_anytime_z_bounds_false_aborts_over_repeated_looks() {
+        for share in [0.5, 0.1] {
+            let (sequential, fixed) = false_aborts(share);
+            assert!(sequential <= 0.02, "share {share}: sequential {sequential}");
+            assert!(fixed > 0.15, "share {share}: fixed {fixed}");
+        }
     }
 }
