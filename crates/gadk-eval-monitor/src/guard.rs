@@ -115,7 +115,8 @@ impl Guard {
     ///
     /// With `apply`, a ramp or abort is a `set_rollout_if` expecting B and the rollout read,
     /// and a promote re-reads the store (the label must still be at B with the same rollout)
-    /// and then sets the label to R expecting B. Without `apply` nothing is written.
+    /// and then calls `promote_rollout_if` expecting B and the rollout read, which moves the
+    /// label to R and ends the rollout in one atomic write. Without `apply` nothing is written.
     ///
     /// # Errors
     ///
@@ -379,7 +380,7 @@ async fn write(
                 }));
             }
             store
-                .set_label(prompt, label, read.version, Some(Some(baseline)))
+                .promote_rollout_if(prompt, label, baseline, read)
                 .await
                 .map_err(fail)
         }

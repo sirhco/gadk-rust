@@ -128,16 +128,15 @@ pub(crate) async fn dispatch(
             let label = Label::new(req(m, "label"))?;
             if m.get_flag("promote") {
                 let (snap, rollouts) = store.load_prompt(name).await?;
-                let to = rollouts
+                let read = *rollouts
                     .get(name, &label)
                     .ok_or_else(|| StoreError::NotFound {
                         name: name.into(),
                         selector: format!("{label} rollout"),
-                    })?
-                    .version;
+                    })?;
                 let from = snap.resolve(name, &Selector::Label(label.clone()))?.version;
-                store.set_label(name, &label, to, Some(Some(from))).await?;
-                return writeln!(out, "{name} {label} -> v{to}").map_err(io);
+                store.promote_rollout_if(name, &label, from, read).await?;
+                return writeln!(out, "{name} {label} -> v{}", read.version).map_err(io);
             }
             if m.get_flag("abort") {
                 store.set_rollout(name, &label, None).await?;

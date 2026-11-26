@@ -73,11 +73,18 @@ store.set_rollout("support-triage", &Label::production(), None).await?;
   served in `PromptUse` (so per-version metrics split the two sides) and `prompt.rollout` on the
   `render_prompt` span. `PromptRegistry::rollouts()` returns the rollouts loaded with the
   current snapshot.
-- Promote: move the label to the rollout version (`set_label`); moving or removing a label
-  clears its rollout in the same write, while `create_version` keeps rollouts. From the command
-  line: `gadk-prompts rollout <name> --label <l> <version> --percent <p>` starts or changes a
-  rollout, `--promote` moves the label to the rollout version (compare-and-set on the label
-  version it read) and `--abort` removes it. The console's prompt page has the same actions.
+- Promote: `promote_rollout_if(name, label, expected_version, expected_rollout)` moves the label
+  to the rollout version and ends the rollout in one atomic write, only while the label still
+  points at `expected_version` and its rollout still equals `expected_rollout` (version and
+  percent). Its errors, in order: `NotFound` for an unknown prompt, then the same label and
+  rollout `Conflict`s as `set_rollout_if`, then `NotFound` with selector `v<N>` for an unknown
+  version. The trait's default calls `set_label` and checks the label only; `FileStore` and the
+  Firestore store override it. Moving or removing a label with `set_label` or `remove_label`
+  also clears its rollout in the same write, while `create_version` keeps rollouts. From the
+  command line: `gadk-prompts rollout <name> --label <l> <version> --percent <p>` starts or
+  changes a rollout, `--promote` promotes it with `promote_rollout_if` (compare-and-set on the
+  label version and the rollout it read) and `--abort` removes it. The console's prompt page and
+  the `gadk-eval-monitor` guard promote the same way.
 - Compare-and-set: `set_rollout_if(name, label, rollout, expected_version, expected_rollout)`
   writes like `set_rollout` only while the label still points at `expected_version` and its
   rollout still equals `expected_rollout` (version and percent; `None` = no rollout), so an

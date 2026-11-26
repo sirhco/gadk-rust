@@ -490,6 +490,7 @@ pub(crate) fn render(
                                         (csrf_field(csrf))
                                         input type="hidden" name="version" value=(v);
                                         input type="hidden" name="expected" value=(current);
+                                        input type="hidden" name="percent" value=(p);
                                         button type="submit" { "Promote" }
                                     }
                                     " "

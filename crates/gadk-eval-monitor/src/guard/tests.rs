@@ -890,11 +890,14 @@ async fn apply_ramps_promotes_and_aborts() {
 
 /// A file store that replaces the rollout with `change` right after the first
 /// `load_all_with_rollouts`, which the default `load_prompt` makes (the guard's first
-/// `load_prompt`), as a concurrent writer would.
+/// `load_prompt`), as a concurrent writer would. With `at_promote` it writes `change` inside
+/// `promote_rollout_if` instead, just before the file store's atomic write, so the change lands
+/// after every read the guard makes.
 struct Racing {
     inner: FileStore,
     change: Option<Rollout>,
     loads: AtomicUsize,
+    at_promote: bool,
 }
 
 #[async_trait::async_trait]
@@ -925,7 +928,7 @@ impl PromptStore for Racing {
         &self,
     ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
         let out = self.inner.load_all_with_rollouts().await;
-        if self.loads.fetch_add(1, Ordering::SeqCst) == 0 {
+        if !self.at_promote && self.loads.fetch_add(1, Ordering::SeqCst) == 0 {
             self.inner
                 .set_rollout("support", &prod(), self.change)
                 .await
@@ -953,6 +956,21 @@ impl PromptStore for Racing {
     ) -> Result<(), StoreError> {
         self.inner
             .set_rollout_if(name, label, rollout, expected_version, expected_rollout)
+            .await
+    }
+
+    async fn promote_rollout_if(
+        &self,
+        name: &str,
+        label: &Label,
+        expected_version: u32,
+        expected_rollout: Rollout,
+    ) -> Result<(), StoreError> {
+        if self.at_promote {
+            self.inner.set_rollout(name, label, self.change).await?;
+        }
+        self.inner
+            .promote_rollout_if(name, label, expected_version, expected_rollout)
             .await
     }
 }
@@ -996,10 +1014,36 @@ async fn a_rollout_changed_after_the_read_writes_nothing() {
             inner: store_in(dir.path(), Some(10)).await,
             change,
             loads: AtomicUsize::new(0),
+            at_promote: false,
         };
         let err = apply(&spec(ramp, ERROR_RATE), &store, c).await.unwrap_err();
         assert_eq!(err.to_string(), want, "case {i}");
         assert_eq!(state(&store.inner).await, (Some(1), change), "case {i}");
+    }
+}
+
+#[tokio::test]
+async fn a_rollout_changed_inside_the_promote_writes_nothing() {
+    for (change, found) in [(Some(Rollout::new(2, 20).unwrap()), "v2"), (None, "unset")] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Racing {
+            inner: store_in(dir.path(), Some(10)).await,
+            change,
+            loads: AtomicUsize::new(0),
+            at_promote: true,
+        };
+        let err = apply(&spec("", ERROR_RATE), &store, plenty())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "report store: prompt store changed since it was read (v1, v2 at 10%): \
+                 conflict: expected v2, found {found}"
+            ),
+            "{change:?}"
+        );
+        assert_eq!(state(&store.inner).await, (Some(1), change), "{change:?}");
     }
 }
 
@@ -1010,6 +1054,7 @@ async fn promote_after_rewriting_the_same_rollout_goes_through() {
         inner: store_in(dir.path(), Some(10)).await,
         change: Some(Rollout::new(2, 10).unwrap()),
         loads: AtomicUsize::new(0),
+        at_promote: false,
     };
     let report = apply(&spec("", ERROR_RATE), &store, plenty())
         .await

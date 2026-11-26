@@ -70,9 +70,10 @@ where
     rollouts(factory().await).await;
 }
 
-/// Runs the compare-and-set rollout scenario ([`PromptStore::set_rollout_if`]) against a fresh
-/// store from `factory` (for stores that support rollouts); panics with
-/// `prompts testsuite/rollout_cas: <message>` on the first failure.
+/// Runs the compare-and-set rollout scenario ([`PromptStore::set_rollout_if`], then the atomic
+/// promote [`PromptStore::promote_rollout_if`]: each stale read, the unknown prompt and the
+/// promote itself) against a fresh store from `factory` (for stores that support rollouts);
+/// panics with `prompts testsuite/rollout_cas: <message>` on the first failure.
 pub async fn run_rollout_cas<F, Fut>(factory: F)
 where
     F: Fn() -> Fut,
@@ -650,4 +651,71 @@ async fn rollout_cas(s: Arc<dyn PromptStore>) {
     want.insert("p", staging.clone(), raw(3, 30));
     let got = s.load_rollouts().await.unwrap();
     check!(got == want, c, "final rollouts: {got:?}");
+
+    // Promote: an unknown prompt, then every stale read, each writing nothing.
+    let r = s.promote_rollout_if("nope", &prod, 1, raw(2, 10)).await;
+    check!(
+        r == not_found("nope", ""),
+        c,
+        "promote, unknown prompt {r:?}"
+    );
+    let (canary, beta) = (Label::new("canary").unwrap(), Label::new("beta").unwrap());
+    s.set_label("p", &canary, 1, None).await.unwrap();
+    s.set_rollout_if("p", &prod, Some(raw(2, 10)), 1, None)
+        .await
+        .unwrap();
+    let before = s.load_prompt("p").await.unwrap();
+    for (case, label, version, rollout, want) in [
+        (
+            "stale label version",
+            &prod,
+            2,
+            raw(2, 10),
+            conflict(Some(2), Some(1)),
+        ),
+        (
+            "stale rollout version",
+            &prod,
+            1,
+            raw(3, 10),
+            conflict(Some(3), Some(2)),
+        ),
+        (
+            "stale percent",
+            &prod,
+            1,
+            raw(2, 50),
+            conflict(Some(2), Some(2)),
+        ),
+        (
+            "no rollout",
+            &canary,
+            1,
+            raw(2, 10),
+            conflict(Some(2), None),
+        ),
+        (
+            "missing label",
+            &beta,
+            1,
+            raw(2, 10),
+            conflict(Some(1), None),
+        ),
+    ] {
+        let r = s.promote_rollout_if("p", label, version, rollout).await;
+        check!(r == want, c, "promote, {case}: {r:?}");
+        let now = s.load_prompt("p").await.unwrap();
+        check!(now == before, c, "promote, {case}: wrote {now:?}");
+    }
+
+    // Promote moves the label to the rollout's version and ends only that label's rollout.
+    s.promote_rollout_if("p", &prod, 1, raw(2, 10))
+        .await
+        .unwrap();
+    let (snap, rollouts) = s.load_prompt("p").await.unwrap();
+    let at = snap.prompts["p"].labels.get(&prod).copied();
+    check!(at == Some(2), c, "promoted label at {at:?}");
+    let mut want = RolloutSnapshot::default();
+    want.insert("p", staging, raw(3, 30));
+    check!(rollouts == want, c, "rollouts after promote: {rollouts:?}");
 }

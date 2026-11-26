@@ -64,6 +64,41 @@ fn api_paths(src: &str) -> BTreeSet<String> {
     paths
 }
 
+/// Each `/api/v1/` path in `src` that opens a single-quoted or a template literal, with up to
+/// 20 characters of text on each side. [`api_paths`] reads only double-quoted literals, so such
+/// a path would escape the route check.
+fn stray_api_literals(src: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for open in ["'/api/v1/", "`/api/v1/"] {
+        for (at, _) in src.match_indices(open) {
+            let before: Vec<char> = src[..at].chars().rev().take(20).collect();
+            let before: String = before.into_iter().rev().collect();
+            let after: String = src[at..].chars().take(open.len() + 20).collect();
+            found.push(format!("{before}{after}"));
+        }
+    }
+    found
+}
+
+#[test]
+fn stray_api_literals_finds_single_quoted_and_template_paths() {
+    let src = "a('/api/v1/users'); b(`/api/v1/x/${id}`); c(`${ROUTES.sessions}?`); \
+               d(\"/api/v1/review/pending\");";
+    let found = stray_api_literals(src);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found[0].contains("'/api/v1/users'"), "{found:?}");
+    assert!(found[1].contains("`/api/v1/x/${id}`"), "{found:?}");
+}
+
+#[test]
+fn every_api_path_of_the_dashboard_is_double_quoted() {
+    let stray = stray_api_literals(APP_JS);
+    assert!(
+        stray.is_empty(),
+        "app.js has /api/v1/ paths outside double quotes, which the route check cannot see: {stray:?}"
+    );
+}
+
 /// `template` as a request path: each `{…}` placeholder becomes `x` and the query is dropped.
 fn probe_path(template: &str) -> String {
     let path = template.split('?').next().unwrap_or(template);
