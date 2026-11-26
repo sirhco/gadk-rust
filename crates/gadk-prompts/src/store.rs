@@ -82,9 +82,11 @@ fn conflict_message(expected: Option<u32>, actual: Option<u32>) -> String {
 /// `remove_label` atomic with respect to each other.
 ///
 /// A store that supports rollouts overrides [`set_rollout`](Self::set_rollout),
-/// [`set_rollout_if`](Self::set_rollout_if), [`load_rollouts`](Self::load_rollouts) and
-/// [`load_all_with_rollouts`](Self::load_all_with_rollouts), makes `set_rollout` and
-/// `set_rollout_if` atomic with the other writes, removes a label's rollout in the same write
+/// [`set_rollout_if`](Self::set_rollout_if), [`promote_rollout_if`](Self::promote_rollout_if),
+/// [`load_rollouts`](Self::load_rollouts) and
+/// [`load_all_with_rollouts`](Self::load_all_with_rollouts), makes `set_rollout`,
+/// `set_rollout_if` and `promote_rollout_if` atomic with the other writes, removes a label's
+/// rollout in the same write
 /// whenever `set_label` or `remove_label` succeeds on that label (also when `set_label` keeps
 /// its version), and keeps every rollout in `create_version`.
 #[async_trait]
@@ -210,6 +212,39 @@ pub trait PromptStore: Send + Sync {
     ) -> Result<(), StoreError> {
         let _ = (name, label, rollout, expected_version, expected_rollout);
         Err(StoreError::Invalid(UNSUPPORTED.to_owned()))
+    }
+
+    /// Promotes the rollout on `label` of prompt `name`: moves the label to
+    /// `expected_rollout.version` and ends its rollout in one atomic write, only while `label`
+    /// points at `expected_version` and its rollout equals `expected_rollout` (version and
+    /// percent).
+    ///
+    /// Errors in a store that overrides it, checked in this order: `NotFound` with an empty
+    /// selector for an unknown prompt; `Conflict { expected: Some(expected_version), actual }`
+    /// when the label is missing (`actual: None`) or points at another version (`actual` = that
+    /// version); `Conflict { expected: Some(expected_rollout.version), actual }` (`actual` = the
+    /// current rollout's version, or `None` without one) when the rollout differs, so a
+    /// percent-only difference reports equal versions; then `NotFound` with selector `v<N>` when
+    /// `expected_rollout.version` is not a version of the prompt.
+    ///
+    /// The default implementation calls
+    /// `set_label(name, label, expected_rollout.version, Some(Some(expected_version)))`, which
+    /// checks the label but not the rollout, with `set_label`'s own error order. Stores that
+    /// support rollouts should override it.
+    async fn promote_rollout_if(
+        &self,
+        name: &str,
+        label: &Label,
+        expected_version: u32,
+        expected_rollout: Rollout,
+    ) -> Result<(), StoreError> {
+        self.set_label(
+            name,
+            label,
+            expected_rollout.version,
+            Some(Some(expected_version)),
+        )
+        .await
     }
 }
 

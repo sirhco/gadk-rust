@@ -163,6 +163,29 @@ impl FileStore {
         let _ = std::fs::remove_file(&lock);
         result
     }
+
+    /// [`locked`](Self::locked) on an existing prompt: checks `rollout`'s bounds first (when it
+    /// is `Some`), then runs `f` on the prompt's document; an unknown prompt is `NotFound` with
+    /// an empty selector.
+    async fn locked_doc<T>(
+        &self,
+        name: &str,
+        rollout: Option<Rollout>,
+        f: impl FnOnce(PromptFile) -> Result<(Option<PromptFile>, T), StoreError>,
+    ) -> Result<T, StoreError> {
+        if let Some(r) = rollout {
+            Rollout::new(r.version, r.percent)?;
+        }
+        let name_s = name.to_owned();
+        self.locked(name, move |_, current| {
+            let doc = current.ok_or_else(|| StoreError::NotFound {
+                name: name_s,
+                selector: String::new(),
+            })?;
+            f(doc)
+        })
+        .await
+    }
 }
 
 fn io(path: &Path, e: std::io::Error) -> StoreError {
@@ -313,40 +336,15 @@ impl PromptStore for FileStore {
         expected: Option<Option<u32>>,
     ) -> Result<(), StoreError> {
         let (name_s, label) = (name.to_owned(), label.clone());
-        self.locked(name, move |_, current| {
-            let mut doc = current.ok_or_else(|| StoreError::NotFound {
-                name: name_s.clone(),
-                selector: String::new(),
-            })?;
-            if !doc.versions.iter().any(|v| v.version == version) {
-                return Err(StoreError::NotFound {
-                    name: name_s,
-                    selector: format!("v{version}"),
-                });
-            }
-            let actual = doc.labels.get(&label).copied();
-            if let Some(exp) = expected
-                && exp != actual
-            {
-                return Err(StoreError::Conflict {
-                    expected: exp,
-                    actual,
-                });
-            }
-            doc.rollouts.remove(&label);
-            doc.labels.insert(label, version);
-            Ok((Some(doc), ()))
+        self.locked_doc(name, None, move |doc| {
+            move_label(doc, name_s, label, version, expected)
         })
         .await
     }
 
     async fn remove_label(&self, name: &str, label: &Label) -> Result<(), StoreError> {
         let (name_s, label) = (name.to_owned(), label.clone());
-        self.locked(name, move |_, current| {
-            let mut doc = current.ok_or_else(|| StoreError::NotFound {
-                name: name_s.clone(),
-                selector: String::new(),
-            })?;
+        self.locked_doc(name, None, move |mut doc| {
             if doc.labels.remove(&label).is_none() {
                 return Err(StoreError::NotFound {
                     name: name_s,
@@ -365,15 +363,8 @@ impl PromptStore for FileStore {
         label: &Label,
         rollout: Option<Rollout>,
     ) -> Result<(), StoreError> {
-        if let Some(r) = rollout {
-            Rollout::new(r.version, r.percent)?;
-        }
         let (name_s, label) = (name.to_owned(), label.clone());
-        self.locked(name, move |_, current| {
-            let doc = current.ok_or_else(|| StoreError::NotFound {
-                name: name_s.clone(),
-                selector: String::new(),
-            })?;
+        self.locked_doc(name, rollout, move |doc| {
             apply_rollout(doc, name_s, label, rollout)
         })
         .await
@@ -387,33 +378,84 @@ impl PromptStore for FileStore {
         expected_version: u32,
         expected_rollout: Option<Rollout>,
     ) -> Result<(), StoreError> {
-        if let Some(r) = rollout {
-            Rollout::new(r.version, r.percent)?;
-        }
         let (name_s, label) = (name.to_owned(), label.clone());
-        self.locked(name, move |_, current| {
-            let doc = current.ok_or_else(|| StoreError::NotFound {
-                name: name_s.clone(),
-                selector: String::new(),
-            })?;
-            let at = doc.labels.get(&label).copied();
-            if at != Some(expected_version) {
-                return Err(StoreError::Conflict {
-                    expected: Some(expected_version),
-                    actual: at,
-                });
-            }
-            let current_rollout = doc.rollouts.get(&label).copied();
-            if current_rollout != expected_rollout {
-                return Err(StoreError::Conflict {
-                    expected: expected_rollout.map(|r| r.version),
-                    actual: current_rollout.map(|r| r.version),
-                });
-            }
+        self.locked_doc(name, rollout, move |doc| {
+            check_read(&doc, &label, expected_version, expected_rollout)?;
             apply_rollout(doc, name_s, label, rollout)
         })
         .await
     }
+
+    async fn promote_rollout_if(
+        &self,
+        name: &str,
+        label: &Label,
+        expected_version: u32,
+        expected_rollout: Rollout,
+    ) -> Result<(), StoreError> {
+        let (name_s, label) = (name.to_owned(), label.clone());
+        self.locked_doc(name, None, move |doc| {
+            check_read(&doc, &label, expected_version, Some(expected_rollout))?;
+            move_label(doc, name_s, label, expected_rollout.version, None)
+        })
+        .await
+    }
+}
+
+/// `set_label`'s checks and move on the prompt document `doc` (read under its lock): `version`
+/// must be a version of the prompt, then the label must be as `expected` says (`None` skips
+/// the check); the move ends the label's rollout.
+fn move_label(
+    mut doc: PromptFile,
+    name: String,
+    label: Label,
+    version: u32,
+    expected: Option<Option<u32>>,
+) -> Result<(Option<PromptFile>, ()), StoreError> {
+    if !doc.versions.iter().any(|v| v.version == version) {
+        return Err(StoreError::NotFound {
+            name,
+            selector: format!("v{version}"),
+        });
+    }
+    let actual = doc.labels.get(&label).copied();
+    if let Some(exp) = expected
+        && exp != actual
+    {
+        return Err(StoreError::Conflict {
+            expected: exp,
+            actual,
+        });
+    }
+    doc.rollouts.remove(&label);
+    doc.labels.insert(label, version);
+    Ok((Some(doc), ()))
+}
+
+/// The compare-and-set of `set_rollout_if` and `promote_rollout_if` on `doc`: `label` must
+/// point at `expected_version`, then its rollout must equal `expected_rollout` (`None` = no
+/// rollout); each mismatch is its `Conflict`.
+fn check_read(
+    doc: &PromptFile,
+    label: &Label,
+    expected_version: u32,
+    expected_rollout: Option<Rollout>,
+) -> Result<(), StoreError> {
+    let at = doc.labels.get(label).copied();
+    if at != Some(expected_version) {
+        return Err(StoreError::Conflict {
+            expected: Some(expected_version),
+            actual: at,
+        });
+    }
+    let current = doc.rollouts.get(label).copied();
+    if current != expected_rollout {
+        return Err(StoreError::Conflict {
+            expected: expected_rollout.map(|r| r.version),
+            actual: current.map(|r| r.version),
+        });
+    }
+    Ok(())
 }
 
 /// `set_rollout`'s checks and change on the prompt document `doc` (read under its lock):
@@ -424,6 +466,9 @@ fn apply_rollout(
     label: Label,
     rollout: Option<Rollout>,
 ) -> Result<(Option<PromptFile>, ()), StoreError> {
+    // `set_rollout_if` and `promote_rollout_if` check the label first (`check_read`), and
+    // `promote_rollout_if` moves it with `move_label`, so only `set_rollout` reaches this
+    // branch.
     let Some(&at) = doc.labels.get(&label) else {
         return Err(StoreError::NotFound {
             name,

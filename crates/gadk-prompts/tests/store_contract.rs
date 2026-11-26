@@ -142,6 +142,46 @@ async fn set_rollout_if_default_is_unsupported() {
 }
 
 #[tokio::test]
+async fn promote_rollout_if_default_checks_only_the_label() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = DefaultsOnly(FileStore::new(dir.path()));
+    for t in ["a", "b"] {
+        s.create_version(NewVersion {
+            name: "p".into(),
+            template: t.into(),
+            config: None,
+            author: String::new(),
+            message: String::new(),
+        })
+        .await
+        .unwrap();
+    }
+    let prod = Label::production();
+    s.set_label("p", &prod, 1, None).await.unwrap();
+    let r = Rollout::new(2, 10).unwrap();
+    // `set_label`'s errors: a moved label, and an unknown target version before the label.
+    assert_eq!(
+        s.promote_rollout_if("p", &prod, 2, r).await,
+        Err(StoreError::Conflict {
+            expected: Some(2),
+            actual: Some(1)
+        })
+    );
+    assert_eq!(
+        s.promote_rollout_if("p", &prod, 2, Rollout::new(9, 10).unwrap())
+            .await,
+        Err(StoreError::NotFound {
+            name: "p".into(),
+            selector: "v9".into()
+        })
+    );
+    // No rollout is stored, and the default does not look for one.
+    s.promote_rollout_if("p", &prod, 1, r).await.unwrap();
+    let snap = s.load_all().await.unwrap();
+    assert_eq!(snap.prompts["p"].labels.get(&prod), Some(&2));
+}
+
+#[tokio::test]
 async fn store_contract_file_store_rollout_cas() {
     let dirs = std::sync::Mutex::new(Vec::new());
     gadk_prompts::testsuite::run_rollout_cas(|| {
