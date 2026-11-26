@@ -1684,11 +1684,13 @@ dependencies = [
 name = "gadk-console-client"
 version = "0.5.22"
 dependencies = [
+ "axum",
  "chrono",
  "reqwest",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "url",
 ]
 

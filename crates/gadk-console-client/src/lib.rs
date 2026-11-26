@@ -55,6 +55,6 @@ mod client;
 mod error;
 mod generated;
 
-pub use client::Client;
+pub use client::{Client, SessionPages};
 pub use error::Error;
 pub use generated::*;

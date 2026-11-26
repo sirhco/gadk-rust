@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The HTTP client: base URL checks, requests and reply mapping.
+//! The HTTP client: base URL checks, requests, reply mapping and session paging.
 
 use reqwest::header::ACCEPT;
 use serde::de::DeserializeOwned;
 use url::Url;
 
 use crate::error::{Error, http_body};
-use crate::generated::ApiError;
+use crate::generated::{ApiError, ListSessionsQuery, PricedSessionRow, SessionsResponse};
 
 /// One path segment of an API route: literal text, or a parameter sent percent-encoded.
 pub(crate) enum Seg<'a> {
@@ -103,6 +103,22 @@ impl Client {
         self.send(url).await
     }
 
+    /// GET `relative` (a link the console sent, such as a sessions page's `next`), resolved
+    /// against the base URL, and decode the 2xx body as `T`.
+    pub(crate) async fn get_url<T: DeserializeOwned>(&self, relative: &str) -> Result<T, Error> {
+        let url = self
+            .base
+            .join(relative)
+            .map_err(|e| Error::InvalidUrl(format!("{relative}: {e}")))?;
+        if url.origin() != self.base.origin() {
+            return Err(Error::InvalidUrl(format!(
+                "{relative}: the link leaves {}",
+                self.base
+            )));
+        }
+        self.send(url).await
+    }
+
     /// GET `url` and map the reply: a 2xx body decoded as `T`, else [`Error::Api`] or
     /// [`Error::Http`].
     async fn send<T: DeserializeOwned>(&self, url: Url) -> Result<T, Error> {
@@ -134,5 +150,75 @@ impl Client {
                 body: http_body(&bytes),
             },
         })
+    }
+
+    /// The pages of `GET /api/v1/sessions` for `query`, newest last activity first: the first
+    /// page, then each page's `next` link.
+    pub fn list_sessions_pages(&self, query: &ListSessionsQuery) -> SessionPages {
+        SessionPages {
+            client: self.clone(),
+            state: PageState::First(query.clone()),
+        }
+    }
+
+    /// The sessions of at most `max_pages` pages of `GET /api/v1/sessions` for `query`, in
+    /// page order.
+    ///
+    /// # Errors
+    ///
+    /// The [`Error`] of the first page that fails.
+    pub async fn list_sessions_all(
+        &self,
+        query: &ListSessionsQuery,
+        max_pages: usize,
+    ) -> Result<Vec<PricedSessionRow>, Error> {
+        let mut pages = self.list_sessions_pages(query);
+        let mut rows = Vec::new();
+        for _ in 0..max_pages {
+            match pages.next_page().await? {
+                Some(page) => rows.extend(page.data),
+                None => break,
+            }
+        }
+        Ok(rows)
+    }
+}
+
+/// Where a [`SessionPages`] is.
+#[derive(Debug)]
+enum PageState {
+    /// The first page is next.
+    First(ListSessionsQuery),
+    /// The page at this link is next.
+    Next(String),
+    /// No page is left (the last page had no `next`, or a page failed).
+    Done,
+}
+
+/// The pages of a sessions listing, from [`Client::list_sessions_pages`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct SessionPages {
+    client: Client,
+    state: PageState,
+}
+
+impl SessionPages {
+    /// The next page: the first page, then the page at each response's `next` link. `Ok(None)`
+    /// after the page without a `next`, and after an error.
+    ///
+    /// # Errors
+    ///
+    /// The page's [`Error`]; it is returned once, and the pages end.
+    pub async fn next_page(&mut self) -> Result<Option<SessionsResponse>, Error> {
+        let page: SessionsResponse = match std::mem::replace(&mut self.state, PageState::Done) {
+            PageState::First(query) => self.client.list_sessions(&query).await?,
+            PageState::Next(link) => self.client.get_url(&link).await?,
+            PageState::Done => return Ok(None),
+        };
+        if let Some(next) = &page.next {
+            self.state = PageState::Next(next.clone());
+        }
+        Ok(Some(page))
     }
 }
