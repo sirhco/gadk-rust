@@ -296,6 +296,29 @@ mod tests {
         ) -> Result<(), StoreError> {
             self.inner.set_rollout(name, label, rollout).await
         }
+        async fn set_rollout_if(
+            &self,
+            name: &str,
+            label: &Label,
+            rollout: Option<Rollout>,
+            expected_version: u32,
+            expected_rollout: Option<Rollout>,
+        ) -> Result<(), StoreError> {
+            self.inner
+                .set_rollout_if(name, label, rollout, expected_version, expected_rollout)
+                .await
+        }
+        async fn promote_rollout_if(
+            &self,
+            name: &str,
+            label: &Label,
+            expected_version: u32,
+            expected_rollout: Rollout,
+        ) -> Result<(), StoreError> {
+            self.inner
+                .promote_rollout_if(name, label, expected_version, expected_rollout)
+                .await
+        }
     }
 
     #[tokio::test]
@@ -361,6 +384,110 @@ mod tests {
         }
     }
 
+    /// A store where another writer replaces `production`'s rollout with v3 at 10% inside
+    /// `promote_rollout_if`, before the file store's atomic write, i.e. after
+    /// `rollout --promote`'s read.
+    struct RolloutReplaced(FileStore);
+
+    #[async_trait]
+    impl PromptStore for RolloutReplaced {
+        async fn load_all(&self) -> Result<PromptSnapshot, StoreError> {
+            self.0.load_all().await
+        }
+        async fn create_version(&self, new: NewVersion) -> Result<PromptVersion, StoreError> {
+            self.0.create_version(new).await
+        }
+        async fn set_label(
+            &self,
+            name: &str,
+            label: &Label,
+            version: u32,
+            expected: Option<Option<u32>>,
+        ) -> Result<(), StoreError> {
+            self.0.set_label(name, label, version, expected).await
+        }
+        async fn remove_label(&self, name: &str, label: &Label) -> Result<(), StoreError> {
+            self.0.remove_label(name, label).await
+        }
+        async fn load_prompt(
+            &self,
+            name: &str,
+        ) -> Result<(PromptSnapshot, RolloutSnapshot), StoreError> {
+            self.0.load_prompt(name).await
+        }
+        async fn promote_rollout_if(
+            &self,
+            name: &str,
+            label: &Label,
+            expected_version: u32,
+            expected_rollout: Rollout,
+        ) -> Result<(), StoreError> {
+            self.0
+                .set_rollout(name, label, Some(Rollout::new(3, 10)?))
+                .await?;
+            self.0
+                .promote_rollout_if(name, label, expected_version, expected_rollout)
+                .await
+        }
+    }
+
+    #[tokio::test]
+    async fn promote_is_compare_and_set_on_the_rollout_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let fs = FileStore::new(dir.path());
+        for t in ["one", "two", "three"] {
+            fs.create_version(NewVersion {
+                name: "p".into(),
+                template: t.into(),
+                config: None,
+                author: "me".into(),
+                message: String::new(),
+            })
+            .await
+            .unwrap();
+        }
+        let prod = Label::production();
+        fs.set_label("p", &prod, 1, None).await.unwrap();
+        fs.set_rollout("p", &prod, Some(Rollout::new(2, 10).unwrap()))
+            .await
+            .unwrap();
+        let store = RolloutReplaced(fs);
+        let m = super::cli()
+            .try_get_matches_from([
+                "gadk-prompts",
+                "rollout",
+                "p",
+                "--label",
+                "production",
+                "--promote",
+            ])
+            .unwrap();
+        let mut out = Vec::new();
+        let err = super::commands::dispatch(&store, &m, &mut "".as_bytes(), &mut out)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            StoreError::Conflict {
+                expected: Some(2),
+                actual: Some(3)
+            }
+        );
+        assert_eq!(super::code(&err), 3);
+        assert!(out.is_empty());
+        let (snap, rollouts) = store.0.load_prompt("p").await.unwrap();
+        assert_eq!(
+            snap.resolve("p", &Selector::Label(prod.clone()))
+                .unwrap()
+                .version,
+            1
+        );
+        assert_eq!(
+            rollouts.get("p", &prod),
+            Some(&Rollout::new(3, 10).unwrap())
+        );
+    }
+
     /// A store where another writer moves `production` to v3 right after every
     /// `load_all_with_rollouts` read, which the default `load_prompt` makes, i.e. between
     /// `rollout --promote`'s `load_prompt` and its write.
@@ -392,6 +519,29 @@ mod tests {
             let read = self.0.load_all_with_rollouts().await?;
             self.0.set_label("p", &Label::production(), 3, None).await?;
             Ok(read)
+        }
+        async fn set_rollout_if(
+            &self,
+            name: &str,
+            label: &Label,
+            rollout: Option<Rollout>,
+            expected_version: u32,
+            expected_rollout: Option<Rollout>,
+        ) -> Result<(), StoreError> {
+            self.0
+                .set_rollout_if(name, label, rollout, expected_version, expected_rollout)
+                .await
+        }
+        async fn promote_rollout_if(
+            &self,
+            name: &str,
+            label: &Label,
+            expected_version: u32,
+            expected_rollout: Rollout,
+        ) -> Result<(), StoreError> {
+            self.0
+                .promote_rollout_if(name, label, expected_version, expected_rollout)
+                .await
         }
     }
 
