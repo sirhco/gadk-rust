@@ -1656,6 +1656,7 @@ dependencies = [
  "gadk-analytics",
  "gadk-bigquery",
  "gadk-cloudtrace",
+ "gadk-console-client",
  "gadk-eval",
  "gadk-eval-monitor",
  "gadk-model",

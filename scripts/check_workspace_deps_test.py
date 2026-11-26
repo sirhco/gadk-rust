@@ -602,6 +602,12 @@ class EdgeTest(unittest.TestCase):
         errs = cwd.check(self.repo)
         self.assertTrue(any("gadk-console-client -> gadk-model is not allowed" in e for e in errs), errs)
 
+    def test_console_may_dev_depend_on_the_client(self):
+        dev = (self.repo / "crates/gadk-console/Cargo.toml").read_text().split("[dev-dependencies]\n", 1)[1]
+        self.assertIn("gadk-console-client = { workspace = true }\n", dev)
+        self.assertNotIn("gadk-console-client", cwd.ALLOWED["gadk-console"])
+        self.assertEqual(cwd.check(self.repo), [])
+
 
 if __name__ == "__main__":
     unittest.main()

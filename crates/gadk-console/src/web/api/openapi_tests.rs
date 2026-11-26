@@ -26,6 +26,7 @@ use jsonschema::{Draft, Registry, Validator};
 use serde_json::{Value, json};
 
 use super::PATHS;
+use super::client_conformance::decode_as_client;
 use super::openapi::document;
 use super::tests::{api_get, assert_api_headers, bq_state};
 use super::usage_tests::breakdown_reply;
@@ -96,8 +97,14 @@ impl Checker {
 
     /// Validates the `status` response `body` of `GET path` (query and all, percent-encoded as
     /// sent): against the operation's response schema when a documented path template matches,
-    /// else against [`API_ERROR`]. An undocumented status is an error.
-    fn validate(&self, path: &str, status: StatusCode, body: &Value) -> Result<(), String> {
+    /// else against [`API_ERROR`]. An undocumented status is an error. `Some(template)` names the
+    /// matched path template; `None` means the body was checked as the [`API_ERROR`] fallback.
+    fn validate(
+        &self,
+        path: &str,
+        status: StatusCode,
+        body: &Value,
+    ) -> Result<Option<&str>, String> {
         let raw = path.split('?').next().unwrap_or(path);
         // The first match in key order: serde_json's map is sorted (no `preserve_order`), so a
         // literal segment sorts before a `{…}` one.
@@ -123,7 +130,8 @@ impl Checker {
             None => API_ERROR.to_owned(),
         };
         self.check_pointer(&pointer, body)
-            .map_err(|e| format!("{path}: status {}: {e}", status.as_u16()))
+            .map_err(|e| format!("{path}: status {}: {e}", status.as_u16()))?;
+        Ok(template.map(String::as_str))
     }
 }
 
@@ -163,14 +171,21 @@ fn checker() -> &'static Checker {
 
 /// Validates the `status` response `body` of `GET path` against the console's document (see
 /// [`Checker::validate`]).
-fn validate(path: &str, status: StatusCode, body: &Value) -> Result<(), String> {
+fn validate(path: &str, status: StatusCode, body: &Value) -> Result<Option<&'static str>, String> {
     checker().validate(path, status, body)
 }
 
-/// Panics unless the `status` response `body` of `GET path` matches the console's document.
+/// Panics unless the `status` response `body` of `GET path` matches the console's document
+/// and, for a 200 on a documented path, deserializes into the client crate's type for it.
 pub(super) fn assert_matches_openapi(path: &str, status: StatusCode, body: &Value) {
-    if let Err(e) = validate(path, status, body) {
-        panic!("the response does not match the OpenAPI document: {e}");
+    let template = match validate(path, status, body) {
+        Ok(template) => template,
+        Err(e) => panic!("the response does not match the OpenAPI document: {e}"),
+    };
+    if let (Some(template), StatusCode::OK) = (template, status)
+        && let Err(e) = decode_as_client(template, body)
+    {
+        panic!("the client cannot read the {template} response: {e}");
     }
 }
 
@@ -290,10 +305,11 @@ fn pointers_escape_the_path_key() {
 fn a_documented_response_validates_through_its_refs() {
     let checker = sample();
     let path = "/api/v1/things/team%2Fgreet/parts?range=7d";
-    assert_eq!(checker.validate(path, StatusCode::OK, &part()), Ok(()));
+    let template = Ok(Some("/api/v1/things/{id}/parts"));
+    assert_eq!(checker.validate(path, StatusCode::OK, &part()), template);
     assert_eq!(
         checker.validate(path, StatusCode::NOT_FOUND, &error()),
-        Ok(())
+        template
     );
     let e = checker
         .validate(path, StatusCode::NOT_FOUND, &part())
@@ -373,7 +389,7 @@ fn an_unknown_path_must_be_the_api_error() {
     let checker = sample();
     assert_eq!(
         checker.validate("/api/v1/nope", StatusCode::NOT_FOUND, &error()),
-        Ok(())
+        Ok(None)
     );
     let e = checker
         .validate("/api/v1/things//parts", StatusCode::NOT_FOUND, &part())
@@ -471,7 +487,7 @@ async fn the_checker_rejects_a_real_body_without_a_required_field() {
     let path = "/api/v1/usage/breakdown";
     let (status, _, body) = api_get(bq_state(&fake, true), path).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(validate(path, status, &body), Ok(()));
+    assert_eq!(validate(path, status, &body), Ok(Some(path)));
 
     let mut broken = body.clone();
     broken["data"]["cells"][0]
