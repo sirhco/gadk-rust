@@ -18,7 +18,9 @@
 //! cargo run -p gadk-console-client --example console_client -- http://127.0.0.1:8765
 //! ```
 
-use gadk_console_client::{Client, Error, GetUsageBreakdownQuery, ListSessionsQuery};
+use gadk_console_client::{
+    Client, Error, GetUsageBreakdownQuery, ListSessionsQuery, Range, UsageRange,
+};
 
 #[tokio::main]
 async fn main() {
@@ -38,7 +40,7 @@ async fn run(base: &str) -> Result<(), Error> {
     let client = Client::new(base)?;
 
     let usage = client
-        .get_usage_breakdown(&GetUsageBreakdownQuery::new())
+        .get_usage_breakdown(&GetUsageBreakdownQuery::new().range(UsageRange::H24))
         .await?;
     let (mut calls, mut input, mut output) = (0, 0, 0);
     println!("usage breakdown (24h):");
@@ -59,7 +61,7 @@ async fn run(base: &str) -> Result<(), Error> {
     }
     println!("  total: {calls} calls, {input} in, {output} out");
 
-    let mut pages = client.list_sessions_pages(&ListSessionsQuery::new());
+    let mut pages = client.list_sessions_pages(&ListSessionsQuery::new().range(Range::H24));
     if let Some(page) = pages.next_page().await? {
         println!("sessions (first page, 24h):");
         for s in &page.data {

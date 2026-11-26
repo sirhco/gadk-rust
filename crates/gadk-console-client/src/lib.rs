@@ -34,6 +34,10 @@
 //! # }
 //! ```
 //!
+//! The public API exposes reqwest 0.13 types: [`Error::Transport`] carries a `reqwest::Error`
+//! and [`Client::with_http`] takes a `reqwest::Client`. A reqwest major-version upgrade is
+//! therefore a breaking release of this crate.
+//!
 //! The response types have no constructors: build test values from JSON.
 //!
 //! ```

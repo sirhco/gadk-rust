@@ -15,7 +15,8 @@ the public API.
   and the gate runs `--check` so the committed code stays in step with the document. Errors are
   typed (`Error::Api` with the console's `kind`, `message` and `hint`, `Http`, `Transport`,
   `Decode`, `InvalidUrl`), and `list_sessions_pages` / `list_sessions_all` follow the sessions
-  route's `next` links. The console's OpenAPI document now describes every schema property, and
+  route's `next` links. `Client::new` follows no redirects, and a base URL carrying credentials
+  is refused. The console's OpenAPI document now describes every schema property, and
   its API tests check that every 200 body they produce deserializes into the client's types.
 
 ### Changed

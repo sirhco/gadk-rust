@@ -388,12 +388,16 @@ async fn a_json_error_is_api_and_anything_else_is_http() {
         .await
         .unwrap_err()
     {
-        Error::Http { status, body } => assert_eq!((status, body.as_str()), (502, "bad gateway")),
+        Error::Http { status, body, .. } => {
+            assert_eq!((status, body.as_str()), (502, "bad gateway"))
+        }
         other => panic!("{other:?}"),
     }
 
     match client.list_users(&ListUsersQuery::new()).await.unwrap_err() {
-        Error::Decode { status, message } => {
+        Error::Decode {
+            status, message, ..
+        } => {
             assert_eq!(status, 200);
             assert!(message.contains("missing field `data`"), "{message}");
         }
@@ -546,4 +550,114 @@ async fn a_next_link_to_another_origin_is_refused() {
     assert!(matches!(e, Error::InvalidUrl(_)), "{e:?}");
     assert!(pages.next_page().await.unwrap().is_none());
     assert_eq!(seen(&server), ["/api/v1/sessions"]);
+}
+
+#[tokio::test]
+async fn a_cancelled_page_fetch_does_not_end_the_pages() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    // The first request stalls; later ones answer the first page at once.
+    let stalled = Arc::new(AtomicBool::new(false));
+    let app = Router::new().fallback({
+        let stalled = stalled.clone();
+        move || {
+            let stalled = stalled.clone();
+            async move {
+                if !stalled.swap(true, Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                }
+                (
+                    [(CONTENT_TYPE, "application/json")],
+                    envelope(json!([session("s-1")]), None),
+                )
+            }
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let client = Client::new(&format!("http://{addr}")).unwrap();
+    let mut pages = client.list_sessions_pages(&ListSessionsQuery::new());
+    let timed_out =
+        tokio::time::timeout(std::time::Duration::from_millis(200), pages.next_page()).await;
+    assert!(timed_out.is_err(), "the first fetch should time out");
+    let page = pages
+        .next_page()
+        .await
+        .unwrap()
+        .expect("the first page again");
+    assert_eq!(page.data[0].session_id, "s-1");
+    assert!(pages.next_page().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn a_base_url_with_credentials_is_refused_without_echoing_them() {
+    for bad in [
+        "http://user:hunter2pass@127.0.0.1:1",
+        "http://user@127.0.0.1:1",
+        "https://:hunter2pass@console.example/",
+    ] {
+        match Client::new(bad) {
+            Err(Error::InvalidUrl(m)) => {
+                assert!(!m.contains("pass") && !m.contains("user"), "{m}");
+                assert!(m.contains("credentials"), "{m}");
+            }
+            other => panic!("{bad}: {other:?}"),
+        }
+    }
+    // The other base URL errors do not echo the input either.
+    for bad in [
+        "http://u:hunter2pass@127.0.0.1:1/x",
+        "ftp://u:hunter2pass@h",
+        "not a url hunter2pass",
+    ] {
+        match Client::new(bad) {
+            Err(Error::InvalidUrl(m)) => assert!(!m.contains("hunter2"), "{m}"),
+            other => panic!("{bad}: {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_redirect_is_not_followed() {
+    let app = Router::new().fallback(|uri: Uri| async move {
+        if uri.path() == "/api/v1/openapi.json" {
+            (
+                StatusCode::FOUND,
+                [(axum::http::header::LOCATION, "/moved")],
+                "",
+            )
+                .into_response()
+        } else {
+            ([(CONTENT_TYPE, "application/json")], "{}").into_response()
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let e = Client::new(&format!("http://{addr}"))
+        .unwrap()
+        .get_open_api(&GetOpenApiQuery::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(e, Error::Http { status: 302, .. }), "{e:?}");
+}
+
+#[tokio::test]
+async fn dot_and_empty_path_parameters_are_refused() {
+    let (base, server) = serve(vec![]).await;
+    let client = Client::new(&base).unwrap();
+    for bad in [".", "..", ""] {
+        let e = client
+            .get_session_turns(&GetSessionTurnsQuery::new(bad))
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Error::InvalidUrl(_)), "{bad:?}: {e:?}");
+        let e = client
+            .get_prompt_versions(&GetPromptVersionsQuery::new(bad))
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Error::InvalidUrl(_)), "{bad:?}: {e:?}");
+    }
+    assert!(seen(&server).is_empty(), "{:?}", seen(&server));
 }

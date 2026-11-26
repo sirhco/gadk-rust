@@ -23,6 +23,7 @@ pub(crate) const HTTP_BODY_LIMIT: usize = 1024;
 pub enum Error {
     /// A non-2xx reply with the console's JSON error body.
     #[error("api {status} {kind}: {message}")]
+    #[non_exhaustive]
     Api {
         /// The HTTP status.
         status: u16,
@@ -36,6 +37,7 @@ pub enum Error {
     },
     /// A non-2xx reply whose body is not the console's JSON error, such as a proxy's page.
     #[error("http {status}: {body}")]
+    #[non_exhaustive]
     Http {
         /// The HTTP status.
         status: u16,
@@ -47,14 +49,16 @@ pub enum Error {
     Transport(#[source] reqwest::Error),
     /// A 2xx reply whose body does not decode into the operation's type.
     #[error("decode {status}: {message}")]
+    #[non_exhaustive]
     Decode {
         /// The HTTP status.
         status: u16,
         /// The serde error.
         message: String,
     },
-    /// A base URL that is not `http` or `https` with an empty path, or a paging link that
-    /// leaves the console.
+    /// A base URL that is not `http` or `https` with an empty path or that carries
+    /// credentials, a path parameter that is `.`, `..` or empty, or a paging link that leaves
+    /// the console. The message never repeats the base URL.
     #[error("invalid URL: {0}")]
     InvalidUrl(String),
 }

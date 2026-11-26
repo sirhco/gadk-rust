@@ -45,50 +45,77 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// [`Error::InvalidUrl`] unless `base_url` is an `http` or `https` URL whose path is empty
-    /// or `/` (no query or fragment); [`Error::Transport`] when the HTTP client cannot be
-    /// built.
+    /// [`Error::InvalidUrl`] unless `base_url` is an `http` or `https` URL without credentials
+    /// whose path is empty or `/` (no query or fragment); [`Error::Transport`] when the HTTP
+    /// client cannot be built.
+    ///
+    /// The client does not follow redirects: a 3xx reply is an [`Error::Http`] or
+    /// [`Error::Api`] with its status.
     pub fn new(base_url: &str) -> Result<Client, Error> {
         let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(Error::Transport)?;
         Client::with_http(base_url, http)
     }
 
     /// The client of the console at `base_url` over `http`, for your own timeouts, proxy or
-    /// headers.
+    /// headers. `http` keeps its own redirect policy (reqwest follows up to 10 redirects by
+    /// default); [`Client::new`] follows none.
+    ///
+    /// Credentials do not belong in the base URL: set an `Authorization` header as a default
+    /// header of `http` instead.
     ///
     /// # Errors
     ///
-    /// [`Error::InvalidUrl`] unless `base_url` is an `http` or `https` URL whose path is empty
-    /// or `/` (no query or fragment).
+    /// [`Error::InvalidUrl`] unless `base_url` is an `http` or `https` URL without a user name
+    /// or password whose path is empty or `/` (no query or fragment). The error's message does
+    /// not repeat `base_url`.
     pub fn with_http(base_url: &str, http: reqwest::Client) -> Result<Client, Error> {
-        let base =
-            Url::parse(base_url).map_err(|e| Error::InvalidUrl(format!("{base_url}: {e}")))?;
+        let base = Url::parse(base_url)
+            .map_err(|e| Error::InvalidUrl(format!("the base URL does not parse: {e}")))?;
+        if !base.username().is_empty() || base.password().is_some() {
+            return Err(Error::InvalidUrl(
+                "the base URL must not carry credentials; set an Authorization header on a \
+                 reqwest::Client and use Client::with_http"
+                    .to_owned(),
+            ));
+        }
         if !matches!(base.scheme(), "http" | "https") {
-            return Err(Error::InvalidUrl(format!(
-                "{base_url}: the scheme must be http or https"
-            )));
+            return Err(Error::InvalidUrl(
+                "the base URL's scheme must be http or https".to_owned(),
+            ));
         }
         if base.path() != "/" || base.query().is_some() || base.fragment().is_some() {
             return Err(Error::InvalidUrl(format!(
-                "{base_url}: the URL must have no path, query or fragment"
+                "the base URL must have no path, query or fragment (use {})",
+                base.origin().ascii_serialization()
             )));
         }
         Ok(Client { base, http })
     }
 
     /// GET the route `segments` with the query `query` and decode the 2xx body as `T`.
+    ///
+    /// A path parameter `.`, `..` or empty is an [`Error::InvalidUrl`]: as a path segment it
+    /// would name another route.
     pub(crate) async fn get_json<T: DeserializeOwned>(
         &self,
         segments: &[Seg<'_>],
         query: Vec<(&'static str, String)>,
     ) -> Result<T, Error> {
+        for seg in segments {
+            if let Seg::Param(p @ ("" | "." | "..")) = seg {
+                return Err(Error::InvalidUrl(format!(
+                    "the path parameter {p:?} is not a valid path segment"
+                )));
+            }
+        }
         let mut url = self.base.clone();
         {
-            let mut path = url
-                .path_segments_mut()
-                .map_err(|()| Error::InvalidUrl(self.base.to_string()))?;
+            let mut path = url.path_segments_mut().map_err(|()| {
+                Error::InvalidUrl("the base URL cannot have path segments".to_owned())
+            })?;
             path.clear();
             for seg in segments {
                 match seg {
@@ -113,7 +140,7 @@ impl Client {
         if url.origin() != self.base.origin() {
             return Err(Error::InvalidUrl(format!(
                 "{relative}: the link leaves {}",
-                self.base
+                self.base.origin().ascii_serialization()
             )));
         }
         self.send(url).await
@@ -210,15 +237,24 @@ impl SessionPages {
     /// # Errors
     ///
     /// The page's [`Error`]; it is returned once, and the pages end.
+    ///
+    /// Dropping the returned future before it completes (a timeout, say) leaves the pages
+    /// where they were: the next call fetches the same page again.
     pub async fn next_page(&mut self) -> Result<Option<SessionsResponse>, Error> {
-        let page: SessionsResponse = match std::mem::replace(&mut self.state, PageState::Done) {
-            PageState::First(query) => self.client.list_sessions(&query).await?,
-            PageState::Next(link) => self.client.get_url(&link).await?,
+        let res: Result<SessionsResponse, Error> = match &self.state {
+            PageState::First(query) => self.client.list_sessions(query).await,
+            PageState::Next(link) => self.client.get_url(link).await,
             PageState::Done => return Ok(None),
         };
-        if let Some(next) = &page.next {
-            self.state = PageState::Next(next.clone());
+        match res {
+            Err(e) => {
+                self.state = PageState::Done;
+                Err(e)
+            }
+            Ok(page) => {
+                self.state = page.next.clone().map_or(PageState::Done, PageState::Next);
+                Ok(Some(page))
+            }
         }
-        Ok(Some(page))
     }
 }

@@ -71,7 +71,14 @@ a `UsageRange` (also `D30`). The console's [JSON API](../gadk-console/README.md#
 describes each route's defaults and fields.
 
 Pass your own `reqwest::Client` with `Client::with_http(base_url, http)` for timeouts, a proxy or
-extra headers. The base URL must be `http` or `https` with no path, query or fragment.
+extra headers such as `Authorization`. The base URL must be `http` or `https` with no path,
+query, fragment or credentials (a user name or password in it is an `InvalidUrl` error).
+`Client::new` does not follow redirects, so a 3xx reply is an error with its status; a client
+you pass keeps its own redirect policy.
+
+The public API exposes reqwest 0.13 types (`Error::Transport(reqwest::Error)` and the
+`reqwest::Client` of `with_http`), so a reqwest major-version upgrade is a breaking release of
+this crate.
 
 ## Errors
 
@@ -83,7 +90,10 @@ Every method returns `Result<T, gadk_console_client::Error>`:
 | `Http { status, body }` | A non-2xx reply that is not the console's JSON error, such as a proxy's page; `body` is its first 1024 bytes |
 | `Transport(reqwest::Error)` | The request could not be sent or the reply could not be read |
 | `Decode { status, message }` | A 2xx body that does not decode into the route's type |
-| `InvalidUrl(String)` | A bad base URL, or a paging link that leaves the console |
+| `InvalidUrl(String)` | A bad base URL, a path parameter that is `.`, `..` or empty, or a paging link that leaves the console |
+
+The struct variants are `#[non_exhaustive]`: match them with `..`, as in
+`Error::Api { status, kind, .. }`.
 
 `Error::is_needs_bigquery()` is true when the console is not using the BigQuery trace source,
 and `Error::is_not_found()` for an unknown trace, a session without activity in the range or an
