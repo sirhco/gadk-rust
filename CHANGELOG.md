@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.22] - 2026-11-25
+
 ### Added
 
 - `gadk-prompts`: `PromptStore::promote_rollout_if(name, label, expected_version,
@@ -981,7 +983,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.21...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.22...HEAD
+[0.5.22]: https://github.com/sirhco/gadk-rust/compare/v0.5.21...v0.5.22
 [0.5.21]: https://github.com/sirhco/gadk-rust/compare/v0.5.20...v0.5.21
 [0.5.20]: https://github.com/sirhco/gadk-rust/compare/v0.5.19...v0.5.20
 [0.5.19]: https://github.com/sirhco/gadk-rust/compare/v0.5.18...v0.5.19
