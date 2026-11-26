@@ -580,24 +580,91 @@ impl PromptStore for FirestoreStore {
             Rollout::new(r.version, r.percent)?;
         }
         self.update_prompt(name, |cur| {
-            let at = cur.labels.get(label).copied();
-            if at != Some(expected_version) {
-                return Err(StoreError::Conflict {
-                    expected: Some(expected_version),
-                    actual: at,
-                });
-            }
-            let current = cur.rollouts.get(label).copied();
-            if current != expected_rollout {
-                return Err(StoreError::Conflict {
-                    expected: expected_rollout.map(|r| r.version),
-                    actual: current.map(|r| r.version),
-                });
-            }
+            check_read(cur, label, expected_version, expected_rollout)?;
             apply_rollout(cur, name, label, rollout)
         })
         .await
     }
+
+    async fn promote_rollout_if(
+        &self,
+        name: &str,
+        label: &Label,
+        expected_version: u32,
+        expected_rollout: Rollout,
+    ) -> Result<(), StoreError> {
+        self.update_prompt(name, |cur| {
+            check_read(cur, label, expected_version, Some(expected_rollout))?;
+            apply_label(cur, name, label, Some((expected_rollout.version, None)))
+        })
+        .await
+    }
+}
+
+/// The compare-and-set of `set_rollout_if` and `promote_rollout_if` on the prompt state `cur`
+/// read in the transaction: `label` must point at `expected_version`, then its rollout must
+/// equal `expected_rollout` (`None` = no rollout); each mismatch is its `Conflict`.
+fn check_read(
+    cur: &Current,
+    label: &Label,
+    expected_version: u32,
+    expected_rollout: Option<Rollout>,
+) -> Result<(), StoreError> {
+    let at = cur.labels.get(label).copied();
+    if at != Some(expected_version) {
+        return Err(StoreError::Conflict {
+            expected: Some(expected_version),
+            actual: at,
+        });
+    }
+    let current = cur.rollouts.get(label).copied();
+    if current != expected_rollout {
+        return Err(StoreError::Conflict {
+            expected: expected_rollout.map(|r| r.version),
+            actual: current.map(|r| r.version),
+        });
+    }
+    Ok(())
+}
+
+/// `label_op`'s checks and change on the prompt state `cur` read in the transaction:
+/// `Some((version, expected))` sets the label (`version` must exist, then the compare-and-set on
+/// `expected`), `None` removes it; either way the label's rollout is removed. Always `Ok(true)`.
+fn apply_label(
+    cur: &mut Current,
+    name: &str,
+    label: &Label,
+    set: Option<(u32, Option<Option<u32>>)>,
+) -> Result<bool, StoreError> {
+    let actual = cur.labels.get(label).copied();
+    match set {
+        Some((version, _)) if version == 0 || version > cur.latest => {
+            return Err(StoreError::NotFound {
+                name: name.into(),
+                selector: format!("v{version}"),
+            });
+        }
+        Some((_, Some(exp))) if exp != actual => {
+            return Err(StoreError::Conflict {
+                expected: exp,
+                actual,
+            });
+        }
+        None if actual.is_none() => {
+            return Err(StoreError::NotFound {
+                name: name.into(),
+                selector: label.to_string(),
+            });
+        }
+        Some((version, _)) => {
+            cur.labels.insert(label.clone(), version);
+        }
+        None => {
+            cur.labels.remove(label);
+        }
+    }
+    cur.rollouts.remove(label);
+    Ok(true)
 }
 
 /// `set_rollout`'s checks and change on the prompt state `cur` read in the transaction: `Ok(true)`
@@ -684,38 +751,8 @@ impl FirestoreStore {
         label: &Label,
         set: Option<(u32, Option<Option<u32>>)>,
     ) -> Result<(), StoreError> {
-        self.update_prompt(name, |cur| {
-            let actual = cur.labels.get(label).copied();
-            match set {
-                Some((version, _)) if version == 0 || version > cur.latest => {
-                    return Err(StoreError::NotFound {
-                        name: name.into(),
-                        selector: format!("v{version}"),
-                    });
-                }
-                Some((_, Some(exp))) if exp != actual => {
-                    return Err(StoreError::Conflict {
-                        expected: exp,
-                        actual,
-                    });
-                }
-                None if actual.is_none() => {
-                    return Err(StoreError::NotFound {
-                        name: name.into(),
-                        selector: label.to_string(),
-                    });
-                }
-                Some((version, _)) => {
-                    cur.labels.insert(label.clone(), version);
-                }
-                None => {
-                    cur.labels.remove(label);
-                }
-            }
-            cur.rollouts.remove(label);
-            Ok(true)
-        })
-        .await
+        self.update_prompt(name, |cur| apply_label(cur, name, label, set))
+            .await
     }
 
     /// Reads prompt `name` in a transaction, applies `f` and writes the prompt document back
