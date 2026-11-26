@@ -18,8 +18,10 @@
 //! A [`GuardSource`] answers three questions about the guard's calls — the `LLM_REQUEST` rows
 //! of one prompt and label at the baseline or rollout version in `[from, to)`:
 //! [`GuardSource::version_calls`], [`GuardSource::version_feedback`] and
-//! [`GuardSource::version_runs`]. [`BigQueryGuardSource`](crate::BigQueryGuardSource) reads
-//! them from the agent-analytics table; tests use a fake.
+//! [`GuardSource::version_runs`]. A `sequential` guard first asks a fourth,
+//! [`GuardSource::rollout_start`], for its sample's start.
+//! [`BigQueryGuardSource`](crate::BigQueryGuardSource) reads them from the agent-analytics
+//! table; tests use a fake.
 
 use chrono::{DateTime, Utc};
 
@@ -197,4 +199,53 @@ pub trait GuardSource: Send + Sync {
         version: u32,
         limit: usize,
     ) -> Result<Vec<ProductionRun>, MonitorError>;
+
+    /// The time of the earliest guard call at the rollout version `q.rollout` in
+    /// `[q.from, q.to)` (an `LLM_REQUEST` row of `q.prompt` / `q.label`), `None` without one. A
+    /// `sequential` guard measures from it. The default returns `Ok(None)`, so a source without
+    /// an override measures over the whole window.
+    async fn rollout_start(&self, q: &GuardQuery) -> Result<Option<DateTime<Utc>>, MonitorError> {
+        let _ = q;
+        Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::at;
+
+    /// A source with only the required methods.
+    struct Required;
+
+    #[async_trait::async_trait]
+    impl GuardSource for Required {
+        async fn version_calls(&self, _q: &GuardQuery) -> Result<Vec<VersionCalls>, MonitorError> {
+            Ok(Vec::new())
+        }
+
+        async fn version_feedback(
+            &self,
+            _q: &GuardQuery,
+            _name: &str,
+            _source: FeedbackSource,
+        ) -> Result<Vec<VersionFeedback>, MonitorError> {
+            Ok(Vec::new())
+        }
+
+        async fn version_runs(
+            &self,
+            _q: &GuardQuery,
+            _version: u32,
+            _limit: usize,
+        ) -> Result<Vec<ProductionRun>, MonitorError> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn the_default_rollout_start_is_none() {
+        let q = GuardQuery::new("support", "production", 1, 2, at(0), at(3600));
+        assert_eq!(Required.rollout_start(&q).await.unwrap(), None);
+    }
 }

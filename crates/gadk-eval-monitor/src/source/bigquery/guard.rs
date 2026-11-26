@@ -19,7 +19,8 @@
 //! The guard's calls are the `LLM_REQUEST` rows of `@prompt` / `@label` at `@baseline` or
 //! `@rollout` (one version, `@version`, for runs) logged in `[@from, @to)`. `LLM_ERROR` and
 //! `LLM_RESPONSE` rows join them on `trace_id` / `span_id` and are read from `@from` to an hour
-//! after `@to`; `FEEDBACK` rows join them by `invocation_id` and are read from `@from` on.
+//! after `@to`; `FEEDBACK` rows join them by `invocation_id` and are read from `@from` on. A
+//! `sequential` guard's sample starts at the first such call at `@rollout`.
 //!
 //! [`AlertSource`] for the same table: every `LLM_REQUEST` row in `[@from, @to)`, grouped by
 //! model × agent × prompt, with `LLM_ERROR` and `LLM_RESPONSE` rows read from `@from` on.
@@ -27,12 +28,13 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use gadk_model::HttpClient;
 use serde_json::{Map, Value};
 
 use super::{
-    BigQueryTranscriptSource, Columns, cell_str, param, run_headers, string_array_param,
-    timestamp_param,
+    BigQueryTranscriptSource, Columns, cell_str, cell_timestamp, param, run_headers,
+    string_array_param, timestamp_param,
 };
 use crate::alert_source::{AlertQuery, AlertSource, UsageGroup};
 use crate::error::MonitorError;
@@ -212,6 +214,15 @@ impl GuardSource for BigQueryGuardSource {
         let from = headers.iter().map(|h| h.started_at).min().unwrap_or(q.from);
         self.inner.build_runs(&columns, headers, from).await
     }
+
+    async fn rollout_start(&self, q: &GuardQuery) -> Result<Option<DateTime<Utc>>, MonitorError> {
+        self.columns("guards", false).await?;
+        let rows = self
+            .inner
+            .query(&rollout_start_sql(&self.inner.table), start_params(q))
+            .await?;
+        first_call(&rows)
+    }
 }
 
 /// The most model × agent × prompt groups [`AlertSource::usage`] returns; more is an error.
@@ -261,6 +272,12 @@ fn calls_filter(versions: &str) -> String {
     AND JSON_VALUE(attributes, '$.prompt.label') = @label
     AND SAFE_CAST(JSON_VALUE(attributes, '$.prompt.version') AS INT64) IN ({versions})"
     )
+}
+
+/// The time of the first guard call at `@rollout` (`first`, NULL without one).
+pub(crate) fn rollout_start_sql(table: &str) -> String {
+    let filter = calls_filter("@rollout");
+    format!("SELECT MIN(timestamp) AS first\nFROM {table}\nWHERE {filter}")
 }
 
 /// Per version and model of the guard's calls: calls, calls with an `LLM_ERROR` row, the
@@ -462,6 +479,13 @@ pub(crate) fn call_params(q: &GuardQuery) -> Vec<Value> {
     params
 }
 
+/// The parameters of [`rollout_start_sql`]: the window and `@rollout`.
+pub(crate) fn start_params(q: &GuardQuery) -> Vec<Value> {
+    let mut params = window_params(q);
+    params.push(param("rollout", "INT64", q.rollout.to_string()));
+    params
+}
+
 /// The parameters of [`version_feedback_sql`]: [`call_params`], `@name` and `@sources` (both
 /// sources for [`FeedbackSource::Any`]).
 pub(crate) fn feedback_params(q: &GuardQuery, name: &str, source: FeedbackSource) -> Vec<Value> {
@@ -501,6 +525,17 @@ fn cell_version(row: &Map<String, Value>) -> Result<u32, MonitorError> {
     let raw = cell_str(row, "version").unwrap_or_default();
     raw.parse()
         .map_err(|_| MonitorError::Source(format!("invalid prompt version {raw:?} in `version`")))
+}
+
+/// The `first` cell of a [`rollout_start_sql`] reply: `None` without a row or with a NULL (or
+/// missing) cell.
+fn first_call(rows: &[Map<String, Value>]) -> Result<Option<DateTime<Utc>>, MonitorError> {
+    match rows.first() {
+        Some(row) if !matches!(row.get("first"), None | Some(Value::Null)) => {
+            cell_timestamp(row, "first").map(Some)
+        }
+        _ => Ok(None),
+    }
 }
 
 #[cfg(test)]
@@ -1088,6 +1123,116 @@ mod tests {
                 .await
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn rollout_start_query_takes_the_first_rollout_call() {
+        let q = guard_query();
+        let sql = rollout_start_sql(TBL);
+        let params = start_params(&q);
+        assert_parameterised(&sql, &params, &q);
+        assert_eq!(
+            sql,
+            "SELECT MIN(timestamp) AS first
+FROM `proj.analytics.agent_events`
+WHERE event_type = 'LLM_REQUEST'
+    AND timestamp >= @from AND timestamp < @to
+    AND JSON_VALUE(attributes, '$.prompt.name') = @prompt
+    AND JSON_VALUE(attributes, '$.prompt.label') = @label
+    AND SAFE_CAST(JSON_VALUE(attributes, '$.prompt.version') AS INT64) IN (@rollout)"
+        );
+        assert_eq!(
+            Value::Array(params),
+            json!([
+                {"name": "prompt", "parameterType": {"type": "STRING"},
+                 "parameterValue": {"value": "tri'age`; DROP TABLE x; --"}},
+                {"name": "label", "parameterType": {"type": "STRING"},
+                 "parameterValue": {"value": "prod\"uction"}},
+                {"name": "from", "parameterType": {"type": "TIMESTAMP"},
+                 "parameterValue": {"value": "2025-11-17 03:26:40.000000+00:00"}},
+                {"name": "to", "parameterType": {"type": "TIMESTAMP"},
+                 "parameterValue": {"value": "2025-11-18 03:26:40.000000+00:00"}},
+                {"name": "rollout", "parameterType": {"type": "INT64"},
+                 "parameterValue": {"value": "4"}},
+            ])
+        );
+    }
+
+    /// The table lookup and the `rollout_start` query capped at `bytes`, answered with the
+    /// `first` cells `rows`.
+    fn start_exchanges(bytes: i64, rows: &[Vec<Value>]) -> Vec<Exchange> {
+        vec![
+            table_reply(&[]),
+            post(
+                &rollout_start_sql(TBL),
+                start_params(&guard_query()),
+                bytes,
+                &reply(&["first"], rows, None),
+            ),
+        ]
+    }
+
+    #[tokio::test]
+    async fn rollout_start_reads_the_first_call_under_the_byte_cap() {
+        let first = vec![vec![json!(((T + 120) * 1_000_000).to_string())]];
+        for (bytes, configured) in [
+            (BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED, None),
+            (5000, Some(5000)),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            // Replay matches the whole body: a query without this cap finds no answer.
+            let mut source = guard(replay(dir.path(), &start_exchanges(bytes, &first)));
+            if let Some(b) = configured {
+                source = source.with_max_bytes_billed(b);
+            }
+            assert_eq!(
+                source.rollout_start(&guard_query()).await.unwrap(),
+                Some(at(T + 120)),
+                "{bytes}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rollout_start_without_a_call_is_none() {
+        let bytes = BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED;
+        for rows in [vec![vec![Value::Null]], Vec::new()] {
+            let dir = tempfile::tempdir().unwrap();
+            let source = guard(replay(dir.path(), &start_exchanges(bytes, &rows)));
+            assert_eq!(
+                source.rollout_start(&guard_query()).await.unwrap(),
+                None,
+                "{rows:?}"
+            );
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let source = guard(replay(dir.path(), &[table_reply(&["attributes"])]));
+        assert_eq!(
+            source
+                .rollout_start(&guard_query())
+                .await
+                .unwrap_err()
+                .to_string(),
+            "transcript source: guards need the `attributes` column, which \
+             `proj.analytics.agent_events` does not have (payload_column_denylist)"
+        );
+    }
+
+    #[test]
+    fn first_call_is_none_without_a_row_or_a_value() {
+        let cell =
+            |v: Value| -> Map<String, Value> { [("first".to_owned(), v)].into_iter().collect() };
+        assert_eq!(first_call(&[]).unwrap(), None);
+        assert_eq!(first_call(&[cell(Value::Null)]).unwrap(), None);
+        assert_eq!(first_call(&[Map::new()]).unwrap(), None);
+        assert_eq!(
+            first_call(&[cell(json!("1763350120000000"))]).unwrap(),
+            Some(at(T + 120))
+        );
+        assert_eq!(
+            first_call(&[cell(json!("soon"))]).unwrap_err().to_string(),
+            "transcript source: invalid TIMESTAMP \"soon\" in `first`"
         );
     }
 

@@ -94,8 +94,10 @@ impl Guard {
     /// (nothing to guard).
     ///
     /// Reads the label's version B and its rollout (version R at p%) from `store` in one
-    /// `load_prompt`, gets both versions' calls in `[now − window, now)` from
-    /// `source`, and classifies each check: `insufficient` when a side has fewer than
+    /// `load_prompt`, gets both versions' calls in `[now − window, now)` from `source` (with
+    /// the spec's `sequential`, in `[start, now)`: start is
+    /// [`GuardSource::rollout_start`] over `[now − window, now)`, or `now − window` without
+    /// one), and classifies each check: `insufficient` when a side has fewer than
     /// `min_calls` calls (then neither feedback nor eval runs are queried), for `feedback`
     /// fewer than `min_count` scores, for `eval` fewer
     /// than [`MIN_EVAL_RUNS`](crate::guard_spec::MIN_EVAL_RUNS) scored runs; `unknown` when a
@@ -153,7 +155,20 @@ impl Guard {
         };
         let (rule, stats) = z_rule(spec);
         let now = self.now.unwrap_or_else(Utc::now);
-        let from = now - spec.window;
+        let lookback = now - spec.window;
+        let from = if spec.sequential {
+            let probe = GuardQuery::new(
+                spec.prompt.clone(),
+                spec.label.as_str(),
+                baseline,
+                read.version,
+                lookback,
+                now,
+            );
+            source.rollout_start(&probe).await?.unwrap_or(lookback)
+        } else {
+            lookback
+        };
         let q = GuardQuery::new(
             spec.prompt.clone(),
             spec.label.as_str(),

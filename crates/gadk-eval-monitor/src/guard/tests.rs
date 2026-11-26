@@ -37,6 +37,12 @@ struct FakeGuard {
     /// Rows by score name; `version_feedback` keeps those of the asked source (`any`: all).
     feedback: Vec<(String, Vec<VersionFeedback>)>,
     runs: Vec<(u32, Vec<ProductionRun>)>,
+    /// What `rollout_start` returns, unless `start_error` is set.
+    start: Option<DateTime<Utc>>,
+    /// Makes `rollout_start` fail with `MonitorError::Source(<this>)`.
+    start_error: Option<String>,
+    /// How many times `rollout_start` was called.
+    starts: AtomicUsize,
     log: Mutex<Vec<String>>,
     queries: Mutex<Vec<GuardQuery>>,
 }
@@ -101,6 +107,16 @@ impl GuardSource for FakeGuard {
             .filter(|(v, _)| *v == version)
             .flat_map(|(_, runs)| runs.iter().cloned())
             .collect())
+    }
+
+    async fn rollout_start(&self, q: &GuardQuery) -> Result<Option<DateTime<Utc>>, MonitorError> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        self.log.lock().unwrap().push("start".into());
+        self.queries.lock().unwrap().push(q.clone());
+        match &self.start_error {
+            Some(message) => Err(MonitorError::Source(message.clone())),
+            None => Ok(self.start),
+        }
     }
 }
 
@@ -271,6 +287,111 @@ async fn a_report_names_the_rollout_window_and_queries_once() {
         source.queries.lock().unwrap()[0],
         GuardQuery::new("support", "production", 1, 2, at(NOW - 3600), at(NOW))
     );
+}
+
+const SEQUENTIAL: &str = "sequential: true\n";
+
+#[tokio::test]
+async fn a_sequential_guard_measures_from_the_rollout_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let mut source = FakeGuard::new(plenty());
+    source.start = Some(at(NOW - 1200));
+    let report = dry(&spec(SEQUENTIAL, ERROR_RATE), &store, &source).await;
+    assert_eq!(source.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(source.log(), ["start", "calls"]);
+    assert_eq!(
+        source.queries.lock().unwrap().clone(),
+        [
+            GuardQuery::new("support", "production", 1, 2, at(NOW - 3600), at(NOW)),
+            GuardQuery::new("support", "production", 1, 2, at(NOW - 1200), at(NOW)),
+        ]
+    );
+    assert_eq!(
+        report.window,
+        Window {
+            from: at(NOW - 1200),
+            to: at(NOW)
+        }
+    );
+    assert_eq!(
+        report.stats,
+        Some(GuardStats::new(true, 0.95, 1, TimeDelta::hours(1)))
+    );
+    let summary = report.summary();
+    assert!(
+        summary.starts_with(
+            "guard g: support/production v1 → v2 (10%), \
+             since 1970-01-02 03:26 UTC (20m), lookback 1h\n\
+             stats: sequential, 95% across 1 interval check\n"
+        ),
+        "{summary}"
+    );
+}
+
+#[tokio::test]
+async fn a_sequential_guard_without_a_rollout_call_uses_the_lookback() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let source = FakeGuard::new(plenty());
+    let report = dry(&spec(SEQUENTIAL, ERROR_RATE), &store, &source).await;
+    assert_eq!(source.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        source.queries.lock().unwrap()[1],
+        GuardQuery::new("support", "production", 1, 2, at(NOW - 3600), at(NOW))
+    );
+    assert_eq!(
+        report.window,
+        Window {
+            from: at(NOW - 3600),
+            to: at(NOW)
+        }
+    );
+    let summary = report.summary();
+    assert!(
+        summary.starts_with(
+            "guard g: support/production v1 → v2 (10%), \
+             since 1970-01-02 02:46 UTC (1h), lookback 1h\n"
+        ),
+        "{summary}"
+    );
+}
+
+#[tokio::test]
+async fn only_a_sequential_guard_looks_for_the_rollout_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    for extra in ["", "confidence: 0.9\n"] {
+        let mut source = FakeGuard::new(plenty());
+        source.start = Some(at(NOW - 1200));
+        let report = dry(&spec(extra, ERROR_RATE), &store, &source).await;
+        assert_eq!(source.starts.load(Ordering::SeqCst), 0, "{extra}");
+        assert_eq!(source.log(), ["calls"], "{extra}");
+        assert_eq!(report.window.from, at(NOW - 3600), "{extra}");
+    }
+}
+
+#[tokio::test]
+async fn a_rollout_start_failure_is_the_sources_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let mut source = FakeGuard::new(plenty());
+    source.start_error = Some("query failed: boom".into());
+    let err = Guard::new()
+        .now(at(NOW))
+        .run(
+            &spec(SEQUENTIAL, ERROR_RATE),
+            &store,
+            &source,
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "transcript source: query failed: boom");
+    assert_eq!(source.log(), ["start"]);
 }
 
 #[tokio::test]
