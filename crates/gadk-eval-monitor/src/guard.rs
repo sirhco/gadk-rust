@@ -96,19 +96,19 @@ impl Guard {
     /// Reads the label's version B and its rollout (version R at p%) from `store` in one
     /// `load_prompt`, gets both versions' calls in `[now − window, now)` from `source` (with
     /// the spec's `sequential`, in `[start, now)`: start is
-    /// [`GuardSource::rollout_start`] over `[now − window, now)`, or `now − window` without
-    /// one), and classifies each check: `insufficient` when a side has fewer than
-    /// `min_calls` calls (then neither feedback nor eval runs are queried), for `feedback`
-    /// fewer than `min_count` scores, for `eval` fewer
+    /// [`GuardSource::rollout_start`] over `[now − window, now)`, clamped into
+    /// `[now − window, now]`, or `now − window` without one), and classifies each check:
+    /// `insufficient` when a side has fewer than `min_calls` calls (then neither feedback nor
+    /// eval runs are queried), for `feedback` fewer than `min_count` scores, for `eval` fewer
     /// than [`MIN_EVAL_RUNS`](crate::guard_spec::MIN_EVAL_RUNS) scored runs; `unknown` when a
     /// value cannot be computed; else `worse`, `ok` or `unsure` from the one-sided interval of
     /// the rollout's harm (cost and p95 latency: the point harm, `worse` or `ok`). Each bound is
     /// 95% on its own; with the spec's `confidence` the `error_rate`, `feedback` and `eval`
     /// checks share 1 − confidence (Bonferroni), and with `sequential` each of their intervals
     /// is also anytime-valid (the report's [`stats`](GuardReport::stats) and each check's `z`
-    /// record this). The
-    /// verdict is `abort` when a check is `worse`, `advance` when all are `ok`, else `wait`;
-    /// `advance` ramps to the first `ramp` step above p, or promotes R without one.
+    /// record this). The verdict is `abort` when a check is `worse`, `advance` when all are
+    /// `ok`, else `wait`; `advance` ramps to the first `ramp` step above p, or promotes R
+    /// without one.
     ///
     /// `previous` is the newest stored report of the same spec that applied a ramp step
     /// (the CLI skips held, waiting, dry-run and other reports; one made after `now` counts
@@ -165,7 +165,11 @@ impl Guard {
                 lookback,
                 now,
             );
-            source.rollout_start(&probe).await?.unwrap_or(lookback)
+            source
+                .rollout_start(&probe)
+                .await?
+                .map(|t| t.clamp(lookback, now))
+                .unwrap_or(lookback)
         } else {
             lookback
         };

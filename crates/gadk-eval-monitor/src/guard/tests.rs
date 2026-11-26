@@ -358,6 +358,30 @@ async fn a_sequential_guard_without_a_rollout_call_uses_the_lookback() {
 }
 
 #[tokio::test]
+async fn a_rollout_start_outside_the_lookback_is_clamped() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    for (start, from) in [(NOW - 7200, NOW - 3600), (NOW, NOW), (NOW + 600, NOW)] {
+        let mut source = FakeGuard::new(plenty());
+        source.start = Some(at(start));
+        let report = dry(&spec(SEQUENTIAL, ERROR_RATE), &store, &source).await;
+        assert_eq!(
+            source.queries.lock().unwrap()[1],
+            GuardQuery::new("support", "production", 1, 2, at(from), at(NOW)),
+            "{start}"
+        );
+        assert_eq!(
+            report.window,
+            Window {
+                from: at(from),
+                to: at(NOW)
+            },
+            "{start}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn only_a_sequential_guard_looks_for_the_rollout_start() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_in(dir.path(), Some(10)).await;

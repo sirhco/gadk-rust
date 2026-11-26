@@ -324,7 +324,7 @@ impl GuardReport {
 /// How a guard run chose the z of its interval checks (`error_rate`, `feedback` and `eval`):
 /// set on a [`GuardReport`] when the spec has `sequential` or `confidence`.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GuardStats {
     /// Whether the intervals are anytime-valid and measured from the rollout's first call.
     pub sequential: bool,

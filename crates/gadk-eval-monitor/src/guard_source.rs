@@ -202,8 +202,10 @@ pub trait GuardSource: Send + Sync {
 
     /// The time of the earliest guard call at the rollout version `q.rollout` in
     /// `[q.from, q.to)` (an `LLM_REQUEST` row of `q.prompt` / `q.label`), `None` without one. A
-    /// `sequential` guard measures from it. The default returns `Ok(None)`, so a source without
-    /// an override measures over the whole window.
+    /// `sequential` guard measures from it. The returned time must lie in `[q.from, q.to)`;
+    /// [`Guard::run`](crate::Guard::run) clamps any other value into `[q.from, q.to]`. The
+    /// default returns `Ok(None)`, so a source without an override measures over the whole
+    /// window.
     async fn rollout_start(&self, q: &GuardQuery) -> Result<Option<DateTime<Utc>>, MonitorError> {
         let _ = q;
         Ok(None)

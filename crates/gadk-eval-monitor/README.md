@@ -726,7 +726,9 @@ error budget, however often the guard runs:
   always wider than the fixed interval: at a = 0.05 and n* = 200, z is 3.04 at n = 200 and 3.25
   at n = 2000, against 1.64. In exchange a guard on any schedule (hourly, every five minutes)
   can `abort` or `advance` as soon as the evidence is enough, and the chance that some look
-  wrongly says `worse` stays within α over the whole rollout. In a simulation with a 5% error
+  wrongly says `worse` stays within about α over the whole rollout. The guarantee is
+  approximate: the confidence sequence is asymptotic (it holds as the sample grows), and taking
+  n as both sides' total is a conservative heuristic rather than an exact bound. In a simulation with a 5% error
   rate on both sides, 50 looks of 200 calls each and one check, 0.3% of rollouts were wrongly
   aborted at a 50% rollout share and 1.2% at 10%, against about 25% with the fixed z.
 - With `sequential`, the sample starts at the rollout's first call: the guard first looks for the
@@ -735,10 +737,14 @@ error budget, however often the guard runs:
   lookback, so set it (up to 30d) at least as long as your rollouts run: a rollout older than
   `window` slides again, as without `sequential`, and loses the guarantee. A rollout stopped and
   started again within the lookback includes the earlier attempt's calls; the header's `since`
-  shows where the sample starts.
+  shows where the sample starts. A long lookback (such as 30d) scans more of the table, so each
+  run costs more and can hit `--max-bytes` (default 1 GiB), which exits 2: raise `--max-bytes`
+  or shorten `window` for busy tables.
 - For `eval` the guarantee holds only while each side's scored runs stay below `limit`: once
   `limit` caps the sample, newer runs replace older ones instead of adding to them.
-- `cost_per_call` and `latency_p95` keep their point rule and do not count in k.
+- `cost_per_call` and `latency_p95` keep their point rule and do not count in k. A spec with
+  only those checks has no interval checks, so `confidence` and `sequential` change no decision
+  (the stats line shows `across 0 interval checks`).
 - Wider intervals mean more `wait` early in a rollout. A larger `min_calls` or `min_count` moves
   n*, and so the sharpest point of the boundary, later.
 
@@ -761,7 +767,8 @@ window. Without `min_step_age`, the schedule interval is the only soak time a ra
 an hourly guard whose checks are all `ok` steps through `ramp: [10, 25, 50]` and promotes within
 a few hours, each step judged mostly on calls made before it. With `ramp`, set `min_step_age`
 to about the window, so each step runs a full window before the next `advance` (this needs
-`--out`).
+`--out`). With `sequential: true`, `window` is only the lookback, so set `min_step_age` to the
+soak time you want per ramp step instead.
 
 Once the rollout ends (promoted, aborted, or removed by hand) its guard reports no rollout until
 a new rollout starts. Schedule `gadk-eval guards` rather than `guard`: advance, abort, wait and
