@@ -343,7 +343,8 @@ function trendChart(data, range) {
   });
   values.forEach((value, i) => {
     const h = max > 0 ? (value / max) * height : 0;
-    const rect = svg("rect", { class: "bar", x: i * bar, y: height - h, width: bar, height: h });
+    // Each bar is 90% of its slot, centred, so neighbouring bars never touch.
+    const rect = svg("rect", { class: "bar", x: (i + 0.05) * bar, y: height - h, width: bar * 0.9, height: h });
     const title = svg("title");
     const at = new Date(start + i * data.bucket_seconds * 1000).toISOString();
     title.textContent = `${at}: ${priced ? `$${value.toFixed(6)}` : `${num(value)} calls`}`;
@@ -360,6 +361,12 @@ function trendChart(data, range) {
 async function loadTrend() {
   const range = state.range;
   await load(panel("trend-body"), apiUrl(ROUTES.trend, { range }), (res, node) => {
+    // Without a positive bucket width the bar count would be NaN or Infinity.
+    const b = res.data.bucket_seconds;
+    if (!(typeof b === "number" && Number.isFinite(b) && b > 0)) {
+      banner(node, "The trend has no bucket width.");
+      return;
+    }
     node.append(trendChart(res.data, range));
   });
 }
@@ -428,6 +435,18 @@ async function loadSessions(append = false) {
   const more = document.getElementById("sessions-more");
   if (append && state.next === null) {
     return;
+  }
+  if (append) {
+    // A new page replaces the previous append's error banner and truncation note, so at most
+    // one of each shows; the rows already shown stay.
+    for (const old of node.querySelectorAll(".banner")) {
+      old.remove();
+    }
+    for (const old of node.querySelectorAll("p.note")) {
+      if (old.textContent === TRUNCATED) {
+        old.remove();
+      }
+    }
   }
   const url = append ? state.console + state.next : apiUrl(ROUTES.sessions, { range: r7(state.range) });
   const { live, signal } = begin(node, append);
