@@ -63,6 +63,7 @@ fn result(name: String, unit: Unit, baseline: SideValue, rollout: SideValue) -> 
         rollout,
         harm: None,
         interval: None,
+        z: None,
         status: Status::Unknown,
         reason: None,
     }

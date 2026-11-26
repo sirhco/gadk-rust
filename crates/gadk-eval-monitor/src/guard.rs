@@ -246,6 +246,7 @@ impl Guard {
             action,
             applied: apply && action != Action::None,
             note,
+            stats: None,
         }))
     }
 }

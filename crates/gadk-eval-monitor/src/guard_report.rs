@@ -158,8 +158,13 @@ pub struct CheckResult {
     /// The rollout's harm, positive = worse: absolute for rates, relative to the baseline
     /// otherwise.
     pub harm: Option<f64>,
-    /// The one-sided 95% bounds of the harm, when an interval was computed.
+    /// The one-sided bounds of the harm, when an interval was computed: each bound 95% on its
+    /// own, or with the quantile [`z`](Self::z) when the spec set `sequential` or `confidence`.
     pub interval: Option<(f64, f64)>,
+    /// The normal quantile of [`interval`](Self::interval), set exactly when an interval was
+    /// computed under `sequential` or `confidence` (`None` for the default 1.6448536269514722).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z: Option<f64>,
     /// The outcome.
     pub status: Status,
     /// Why the status is `insufficient` or `unknown`, or other detail.
@@ -200,23 +205,35 @@ pub struct GuardReport {
     /// `step at 25% is 3h old (< min_step_age 1d)` when `min_step_age` held back an `advance`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// How the interval checks chose their z, set when the spec has `sequential` or
+    /// `confidence`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stats: Option<GuardStats>,
 }
 
 impl GuardReport {
-    /// A text summary: a header line, one row per check (baseline and rollout values with
-    /// their sample sizes, harm, status and reason), the verdict, the note (when there is one)
-    /// and the action.
+    /// A text summary: a header line, the stats line (when there are
+    /// [`stats`](Self::stats)), one row per check (baseline and rollout values with their sample
+    /// sizes, harm, status and reason), the verdict, the note (when there is one) and the
+    /// action. The header ends `window <duration>`, or with `sequential` stats
+    /// `since <start> (<age>), lookback <window>`.
     pub fn summary(&self) -> String {
+        let length = duration_text(self.window.to - self.window.from);
+        let span = match &self.stats {
+            Some(stats) if stats.sequential => format!(
+                "since {} ({length}), lookback {}",
+                self.window.from.format("%Y-%m-%d %H:%M UTC"),
+                duration_text(stats.lookback)
+            ),
+            _ => format!("window {length}"),
+        };
         let mut out = format!(
-            "guard {}: {}/{} v{} → v{} ({}%), window {}\n",
-            self.spec,
-            self.prompt,
-            self.label,
-            self.baseline,
-            self.rollout,
-            self.percent,
-            duration_text(self.window.to - self.window.from)
+            "guard {}: {}/{} v{} → v{} ({}%), {span}\n",
+            self.spec, self.prompt, self.label, self.baseline, self.rollout, self.percent,
         );
+        if let Some(stats) = &self.stats {
+            let _ = writeln!(out, "stats: {}", stats.summary());
+        }
         let header = ["check", "baseline", "rollout", "harm"];
         let rows: Vec<[String; 5]> = self
             .checks
@@ -304,6 +321,87 @@ impl GuardReport {
     }
 }
 
+/// How a guard run chose the z of its interval checks (`error_rate`, `feedback` and `eval`):
+/// set on a [`GuardReport`] when the spec has `sequential` or `confidence`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GuardStats {
+    /// Whether the intervals are anytime-valid and measured from the rollout's first call.
+    pub sequential: bool,
+    /// The confidence the interval checks share (0.5-0.999).
+    pub confidence: f64,
+    /// The interval checks the error budget is split across.
+    pub interval_checks: u32,
+    /// The spec's `window`: with `sequential`, how far back the rollout's first call was
+    /// looked for. Stored in JSON as whole seconds.
+    #[serde(with = "lookback_seconds")]
+    pub lookback: TimeDelta,
+}
+
+impl GuardStats {
+    /// Stats of a run with `sequential`, the shared `confidence`, `interval_checks` interval
+    /// checks and the spec's `window` as `lookback`.
+    pub fn new(
+        sequential: bool,
+        confidence: f64,
+        interval_checks: u32,
+        lookback: TimeDelta,
+    ) -> Self {
+        Self {
+            sequential,
+            confidence,
+            interval_checks,
+            lookback,
+        }
+    }
+
+    /// `sequential, 95% across 2 interval checks` (`fixed, …` without `sequential`); the
+    /// confidence prints as a percent with at most one decimal and no trailing zero.
+    pub fn summary(&self) -> String {
+        format!(
+            "{}, {}% across {} interval {}",
+            if self.sequential {
+                "sequential"
+            } else {
+                "fixed"
+            },
+            percent_text(self.confidence),
+            self.interval_checks,
+            if self.interval_checks == 1 {
+                "check"
+            } else {
+                "checks"
+            }
+        )
+    }
+}
+
+/// `confidence` as a percent with at most one decimal and no trailing zero: `95`, `99.5`.
+fn percent_text(confidence: f64) -> String {
+    let text = format!("{:.1}", confidence * 100.0);
+    if let Some(whole) = text.strip_suffix(".0") {
+        return whole.to_owned();
+    }
+    text
+}
+
+/// [`GuardStats::lookback`] as a JSON integer of seconds.
+mod lookback_seconds {
+    use chrono::TimeDelta;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(d: &TimeDelta, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_i64(d.num_seconds())
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<TimeDelta, D::Error> {
+        let secs = i64::deserialize(d)?;
+        TimeDelta::try_seconds(secs).ok_or_else(|| {
+            serde::de::Error::custom(format!("a lookback of {secs} seconds is out of range"))
+        })
+    }
+}
+
 /// A duration in whole minutes (rounded down): `<n>d` when whole days, else `<n>h` when
 /// whole hours, else `<n>m`.
 pub(crate) fn duration_text(d: TimeDelta) -> String {
@@ -350,6 +448,7 @@ mod tests {
             rollout,
             harm,
             interval: harm.map(|h| (h - 0.01, h + 0.01)),
+            z: None,
             status,
             reason: reason.map(str::to_owned),
         }
@@ -421,6 +520,7 @@ mod tests {
             action: Action::Abort,
             applied: false,
             note: None,
+            stats: None,
         }
     }
 
@@ -650,5 +750,117 @@ action: would abort
                 format!("\"{}\"", v.as_str())
             );
         }
+    }
+
+    fn utc(text: &str) -> DateTime<Utc> {
+        text.parse().unwrap()
+    }
+
+    /// The lines of `report()`'s summary after its header.
+    fn plain_body() -> Vec<String> {
+        report()
+            .summary()
+            .lines()
+            .skip(1)
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn a_sequential_summary_shows_the_sample_start_and_the_lookback() {
+        let mut r = report();
+        r.window = Window {
+            from: utc("2026-11-24T08:00:00Z"),
+            to: utc("2026-11-25T12:00:00Z"),
+        };
+        r.stats = Some(GuardStats::new(true, 0.95, 2, TimeDelta::days(30)));
+        let summary = r.summary();
+        let lines: Vec<String> = summary.lines().map(str::to_owned).collect();
+        assert_eq!(
+            lines[0],
+            "guard support-guard: support/answer/production v3 → v4 (10%), \
+             since 2026-11-24 08:00 UTC (28h), lookback 30d"
+        );
+        assert_eq!(lines[1], "stats: sequential, 95% across 2 interval checks");
+        assert_eq!(lines[2..], plain_body()[..]);
+    }
+
+    #[test]
+    fn a_fixed_summary_keeps_the_window_and_adds_the_stats_line() {
+        let mut r = report();
+        r.stats = Some(GuardStats::new(false, 0.995, 3, TimeDelta::days(1)));
+        let summary = r.summary();
+        let lines: Vec<String> = summary.lines().map(str::to_owned).collect();
+        assert_eq!(
+            lines[0],
+            "guard support-guard: support/answer/production v3 → v4 (10%), window 1d"
+        );
+        assert_eq!(lines[1], "stats: fixed, 99.5% across 3 interval checks");
+        assert_eq!(lines[2..], plain_body()[..]);
+    }
+
+    #[test]
+    fn stats_print_the_confidence_as_a_short_percent() {
+        for (confidence, text) in [
+            (0.95, "95%"),
+            (0.995, "99.5%"),
+            (0.5, "50%"),
+            (0.999, "99.9%"),
+            (0.9, "90%"),
+        ] {
+            assert_eq!(
+                GuardStats::new(false, confidence, 1, TimeDelta::hours(1)).summary(),
+                format!("fixed, {text} across 1 interval check")
+            );
+        }
+        assert_eq!(
+            GuardStats::new(true, 0.95, 4, TimeDelta::days(30)).summary(),
+            "sequential, 95% across 4 interval checks"
+        );
+    }
+
+    #[test]
+    fn stats_and_z_round_trip_through_json() {
+        let mut r = report();
+        r.stats = Some(GuardStats::new(true, 0.95, 2, TimeDelta::days(30)));
+        r.checks[0].z = Some(3.0351224130285512);
+        let json = r.to_json().unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            v["stats"],
+            serde_json::json!({
+                "sequential": true,
+                "confidence": 0.95,
+                "interval_checks": 2,
+                "lookback": 2592000
+            })
+        );
+        assert_eq!(v["checks"][0]["z"], serde_json::json!(3.0351224130285512));
+        assert!(v["checks"][1].get("z").is_none(), "{json}");
+        assert_eq!(GuardReport::from_json(&json).unwrap(), r);
+    }
+
+    #[test]
+    fn a_report_without_stats_or_z_has_neither_key_and_still_parses() {
+        let r = report();
+        let json = r.to_json().unwrap();
+        assert!(!json.contains("\"stats\""), "{json}");
+        assert!(!json.contains("\"z\""), "{json}");
+        let parsed = GuardReport::from_json(&json).unwrap();
+        assert_eq!(parsed.stats, None);
+        assert!(parsed.checks.iter().all(|c| c.z.is_none()));
+        assert_eq!(parsed, r);
+    }
+
+    #[test]
+    fn an_out_of_range_lookback_is_invalid_data() {
+        let mut r = report();
+        r.stats = Some(GuardStats::new(true, 0.95, 2, TimeDelta::days(30)));
+        let mut v: serde_json::Value = serde_json::from_str(&r.to_json().unwrap()).unwrap();
+        v["stats"]["lookback"] = serde_json::json!(i64::MAX);
+        assert!(matches!(
+            GuardReport::from_json(&v.to_string()),
+            Err(MonitorError::Io(e)) if e.kind() == std::io::ErrorKind::InvalidData
+        ));
     }
 }
