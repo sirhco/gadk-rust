@@ -984,7 +984,7 @@ async fn a_rollout_changed_after_the_read_writes_nothing() {
             plenty(),
             Some(Rollout::new(2, 20).unwrap()),
             "report store: prompt store changed since it was read (v1, v2 at 10%): \
-             conflict: expected v2, found v2",
+             conflict: the v2 rollout changed (its percent); reload and retry",
         ),
         (
             ADVANCE,
@@ -998,7 +998,7 @@ async fn a_rollout_changed_after_the_read_writes_nothing() {
             plenty(),
             Some(Rollout::new(2, 20).unwrap()),
             "report store: prompt store changed since it was read (v1, v2 at 10%): \
-             conflict: expected v2, found v2",
+             conflict: the v2 rollout changed (its percent); reload and retry",
         ),
         (
             "",
@@ -1024,7 +1024,13 @@ async fn a_rollout_changed_after_the_read_writes_nothing() {
 
 #[tokio::test]
 async fn a_rollout_changed_inside_the_promote_writes_nothing() {
-    for (change, found) in [(Some(Rollout::new(2, 20).unwrap()), "v2"), (None, "unset")] {
+    for (change, conflict) in [
+        (
+            Some(Rollout::new(2, 20).unwrap()),
+            "the v2 rollout changed (its percent); reload and retry",
+        ),
+        (None, "expected v2, found unset"),
+    ] {
         let dir = tempfile::tempdir().unwrap();
         let store = Racing {
             inner: store_in(dir.path(), Some(10)).await,
@@ -1039,7 +1045,7 @@ async fn a_rollout_changed_inside_the_promote_writes_nothing() {
             err.to_string(),
             format!(
                 "report store: prompt store changed since it was read (v1, v2 at 10%): \
-                 conflict: expected v2, found {found}"
+                 conflict: {conflict}"
             ),
             "{change:?}"
         );

@@ -1457,7 +1457,13 @@ mod tests {
             .await
             .unwrap();
         // The page showed v2 at 10%; meanwhile the percent, then the version, changed.
-        for (now, want) in [((2, 50), "found v2"), ((3, 10), "found v3")] {
+        for (now, want) in [
+            (
+                (2, 50),
+                "the v2 rollout changed (its percent); reload and retry",
+            ),
+            ((3, 10), "expected v2, found v3"),
+        ] {
             store
                 .set_rollout(
                     "greet",
@@ -1477,7 +1483,7 @@ mod tests {
             assert!(body.contains("<h1>greet</h1>"), "{body}");
             assert!(
                 body.contains(&format!(
-                    r#"<div class="banner error"><p>conflict: expected v2, {want}</p></div>"#
+                    r#"<div class="banner error"><p>conflict: {want}</p></div>"#
                 )),
                 "{now:?}: {body}"
             );
