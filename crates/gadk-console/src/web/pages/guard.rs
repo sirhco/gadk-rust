@@ -20,9 +20,10 @@ use maud::{Markup, html};
 use super::eval_report::secs;
 use super::layout::{Nav, page};
 
-/// The guard report stored as `name`: the spec, the rollout, the window, the source and when it
-/// was made, then the checks table, the verdict, the note (when there is one) and the action,
-/// marked `applied` or `dry run`.
+/// The guard report stored as `name`: the spec, the rollout, the window, the stats (when the
+/// spec set `sequential` or `confidence`), the source and when it was made, then the checks
+/// table, the verdict, the note (when there is one) and the action, marked `applied` or
+/// `dry run`.
 pub(crate) fn render(name: &str, r: &GuardReport) -> Markup {
     let body = html! {
         h1 { "guard " (r.spec) }
@@ -32,6 +33,9 @@ pub(crate) fn render(name: &str, r: &GuardReport) -> Markup {
                 (r.prompt) "/" (r.label) " v" (r.baseline) " → v" (r.rollout) " (" (r.percent) "%)"
             }
             dt { "Window" } dd class="mono" { (secs(&r.window.from)) " – " (secs(&r.window.to)) }
+            @if let Some(stats) = &r.stats {
+                dt { "Stats" } dd { (stats.summary()) }
+            }
             dt { "Source" } dd class="mono" { (r.source) }
             dt { "Generated" } dd class="mono" { (secs(&r.generated_at)) }
             dt { "Report" } dd class="mono" { (name) }
@@ -95,7 +99,8 @@ fn interval(unit: Unit, i: Option<(f64, f64)>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use gadk_eval_monitor::Action;
+    use chrono::TimeDelta;
+    use gadk_eval_monitor::{Action, GuardStats};
 
     use super::render;
     use crate::web::testutil::guard;
@@ -190,6 +195,23 @@ mod tests {
         );
         assert!(
             out.contains(r#"<p>action: would ramp to 75% <span class="chip">dry run</span></p>"#),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_stats_row_shows_only_with_stats() {
+        let mut r = guard("g", 1_800_000_000, "support", 50, Action::Abort, true);
+        let out = render(NAME, &r).into_string();
+        assert!(!out.contains("<dt>Stats</dt>"), "{out}");
+        r.stats = Some(GuardStats::new(true, 0.95, 2, TimeDelta::days(30)));
+        let out = render(NAME, &r).into_string();
+        assert!(
+            out.contains(concat!(
+                r#"<dt>Window</dt><dd class="mono">2027-01-15T07:00:00Z – 2027-01-15T08:00:00Z</dd>"#,
+                r#"<dt>Stats</dt><dd>sequential, 95% across 2 interval checks</dd>"#,
+                r#"<dt>Source</dt>"#
+            )),
             "{out}"
         );
     }
