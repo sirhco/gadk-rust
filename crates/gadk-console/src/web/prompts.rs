@@ -523,10 +523,11 @@ struct RolloutForm {
     csrf: String,
 }
 
-/// `version` and `percent` as a [`Rollout`].
-fn rollout_args(form: &RolloutForm) -> Result<Rollout, StoreError> {
-    let version = number("version", &form.version)?;
-    let percent: u32 = number("percent", &form.percent)?;
+/// The `version` and `percent` form fields as a [`Rollout`]: `percent` parses as a `u32`, and
+/// [`Rollout::new`] checks the bounds.
+fn rollout_args(version: &str, percent: &str) -> Result<Rollout, StoreError> {
+    let version = number("version", version)?;
+    let percent: u32 = number("percent", percent)?;
     let percent = u8::try_from(percent).map_err(|_| {
         StoreError::Invalid(format!(
             "rollout percent must be between 1 and 99, got {percent}"
@@ -546,24 +547,27 @@ async fn start_rollout(
     let Some(store) = &state.store else {
         return no_store_404();
     };
-    let result = match Label::new(&label).and_then(|l| Ok((l, rollout_args(&form)?))) {
+    let args =
+        Label::new(&label).and_then(|l| Ok((l, rollout_args(&form.version, &form.percent)?)));
+    let result = match args {
         Ok((label, rollout)) => store.set_rollout(&name, &label, Some(rollout)).await,
         Err(e) => Err(e),
     };
     write_result(&state, &name, result).await
 }
 
-/// The promote form: the rollout version and the label version the page showed.
+/// The promote form: the rollout version and percent and the label version the page showed.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct PromoteForm {
     version: String,
+    percent: String,
     expected: String,
     csrf: String,
 }
 
-/// Moves the label to the rollout version if it still points at `expected`; the store
-/// removes the rollout with the move.
+/// Moves the label to the rollout version if it still points at `expected` and its rollout is
+/// still `version` at `percent`; the store removes the rollout with the move, in one write.
 async fn promote_rollout(
     State(state): State<AppState>,
     Path((name, label)): Path<(String, String)>,
@@ -576,14 +580,14 @@ async fn promote_rollout(
         return no_store_404();
     };
     let args = Label::new(&label).and_then(|l| {
-        let version: u32 = number("version", &form.version)?;
+        let read = rollout_args(&form.version, &form.percent)?;
         let expected: u32 = number("expected", &form.expected)?;
-        Ok((l, version, expected))
+        Ok((l, read, expected))
     });
     let result = match args {
-        Ok((label, version, expected)) => {
+        Ok((label, read, expected)) => {
             store
-                .set_label(&name, &label, version, Some(Some(expected)))
+                .promote_rollout_if(&name, &label, expected, read)
                 .await
         }
         Err(e) => Err(e),
@@ -759,7 +763,7 @@ mod tests {
             ),
             (
                 "/prompts/greet/labels/production/rollout/promote",
-                format!("version=2&expected=1&csrf={CSRF}"),
+                format!("version=2&percent=10&expected=1&csrf={CSRF}"),
             ),
             (
                 "/prompts/greet/labels/production/rollout/delete",
@@ -1100,7 +1104,7 @@ mod tests {
             ),
             (
                 "/prompts/greet/labels/production/rollout/promote",
-                format!("version=2&expected=1&csrf={wrong}"),
+                format!("version=2&percent=10&expected=1&csrf={wrong}"),
             ),
             (
                 "/prompts/greet/labels/production/rollout/delete",
@@ -1236,8 +1240,8 @@ mod tests {
         format!("version={version}&percent={percent}&csrf={CSRF}")
     }
 
-    fn promote_body(version: &str, expected: &str) -> String {
-        format!("version={version}&expected={expected}&csrf={CSRF}")
+    fn promote_body(version: &str, expected: &str, percent: &str) -> String {
+        format!("version={version}&percent={percent}&expected={expected}&csrf={CSRF}")
     }
 
     #[tokio::test]
@@ -1296,7 +1300,7 @@ mod tests {
         );
         assert!(
             body.contains(&format!(
-                r#"<form method="post" action="/prompts/greet/labels/production/rollout/promote" data-confirm="Promote v2 to production?" class="inline"><input type="hidden" name="csrf" value="{CSRF}"><input type="hidden" name="version" value="2"><input type="hidden" name="expected" value="1">"#
+                r#"<form method="post" action="/prompts/greet/labels/production/rollout/promote" data-confirm="Promote v2 to production?" class="inline"><input type="hidden" name="csrf" value="{CSRF}"><input type="hidden" name="version" value="2"><input type="hidden" name="expected" value="1"><input type="hidden" name="percent" value="10">"#
             )),
             "{body}"
         );
@@ -1360,11 +1364,19 @@ mod tests {
             ("/prompts/greet/labels/Bad/rollout", rollout_body("2", "10")),
             (
                 "/prompts/greet/labels/production/rollout/promote",
-                promote_body("two", "1"),
+                promote_body("two", "1", "10"),
             ),
             (
                 "/prompts/greet/labels/production/rollout/promote",
-                promote_body("2", ""),
+                promote_body("2", "", "10"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/promote",
+                promote_body("2", "1", "ten"),
+            ),
+            (
+                "/prompts/greet/labels/production/rollout/promote",
+                promote_body("2", "1", "0"),
             ),
             (
                 "/prompts/greet/labels/Bad/rollout/delete",
@@ -1421,7 +1433,7 @@ mod tests {
         let (status, headers, _) = post_form(
             st(&store),
             "/prompts/greet/labels/production/rollout/promote",
-            &promote_body("2", "1"),
+            &promote_body("2", "1", "10"),
             Some(ORIGIN),
         )
         .await;
@@ -1432,13 +1444,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn promote_with_a_changed_rollout_is_409_and_keeps_it() {
+        let (_dir, store) = seeded_with_rollout().await;
+        store
+            .create_version(NewVersion {
+                name: "greet".into(),
+                template: "Hey {{name}}\n".into(),
+                config: None,
+                author: "chris".into(),
+                message: "v3".into(),
+            })
+            .await
+            .unwrap();
+        // The page showed v2 at 10%; meanwhile the percent, then the version, changed.
+        for (now, want) in [((2, 50), "found v2"), ((3, 10), "found v3")] {
+            store
+                .set_rollout(
+                    "greet",
+                    &Label::production(),
+                    Some(Rollout::new(now.0, now.1).unwrap()),
+                )
+                .await
+                .unwrap();
+            let (status, _, body) = post_form(
+                st(&store),
+                "/prompts/greet/labels/production/rollout/promote",
+                &promote_body("2", "1", "10"),
+                Some(ORIGIN),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{now:?}");
+            assert!(body.contains("<h1>greet</h1>"), "{body}");
+            assert!(
+                body.contains(&format!(
+                    r#"<div class="banner error"><p>conflict: expected v2, {want}</p></div>"#
+                )),
+                "{now:?}: {body}"
+            );
+            assert_eq!(labels(&store, "greet").await["production"], 1);
+            assert_eq!(rollout(&store, "greet", "production").await, Some(now));
+        }
+    }
+
+    #[tokio::test]
     async fn promote_with_a_stale_expected_is_409_and_keeps_the_rollout() {
         let (_dir, store) = seeded_with_rollout().await;
         // `expected` says v2, but production is at v1.
         let (status, _, body) = post_form(
             st(&store),
             "/prompts/greet/labels/production/rollout/promote",
-            &promote_body("2", "2"),
+            &promote_body("2", "2", "10"),
             Some(ORIGIN),
         )
         .await;
@@ -1582,7 +1637,7 @@ mod tests {
             ),
             (
                 "/prompts/greet/labels/production/rollout/promote",
-                promote_body("2", "1"),
+                promote_body("2", "1", "10"),
             ),
             (
                 "/prompts/greet/labels/production/rollout/delete",
