@@ -126,6 +126,7 @@ The `gadk` crate re-exports the member crates as modules (`gadk::agent`, `gadk::
 | [`gadk-prompts-firestore`](crates/gadk-prompts-firestore/README.md) | Firestore store for `gadk-prompts` |
 | [`gadk-prompts-cli`](crates/gadk-prompts-cli/README.md) | `gadk-prompts` CLI: manage prompt versions and labels in a file or Firestore store |
 | [`gadk-console`](crates/gadk-console/README.md) | Local web console: Cloud Trace traces with their Cloud Logging entries, the prompt registry, and Evals pages for `gadk-eval-monitor` reports |
+| [`gadk-console-client`](crates/gadk-console-client/README.md) | Typed async client for the console's JSON API, generated from its OpenAPI document |
 | [`gadk-eval`](crates/gadk-eval/README.md) | Offline agent evaluation: YAML eval sets, deterministic, tool-trajectory and LLM-judge scorers, per-variant reports |
 | [`gadk-eval-monitor`](crates/gadk-eval-monitor/README.md) | Production eval monitors: grade logged runs from the BigQuery analytics table or Cloud Trace with gadk-eval scorers; the `gadk-eval` CLI |
 

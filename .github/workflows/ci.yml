@@ -25,6 +25,10 @@ jobs:
         run: |
           python3 scripts/check-workspace-deps.py
           python3 scripts/check_workspace_deps_test.py
+      - name: console client
+        run: |
+          python3 scripts/gen-console-client.py --check
+          python3 scripts/gen_console_client_test.py
       - name: go references
         run: |
           python3 scripts/check_go_refs_test.py

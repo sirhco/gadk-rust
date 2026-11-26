@@ -564,7 +564,9 @@ check, security headers and `--api-origin` CORS as the other routes.
 curl -s http://127.0.0.1:8765/api/v1/openapi.json > openapi.json
 ```
 
-Any OpenAPI 3.1 generator can make a typed client from it. For example,
+For Rust, [`gadk-console-client`](../gadk-console-client/README.md) is a typed async client
+generated from this document; the console's API tests check that it reads every response they
+produce. Any OpenAPI 3.1 generator can make a typed client from it too. For example,
 [openapi-typescript](https://openapi-ts.dev/) writes TypeScript types with
 `npx openapi-typescript openapi.json -o api.d.ts`; the console neither ships nor needs one. Each
 schema lists every field the console always writes as required and allows other fields, so a

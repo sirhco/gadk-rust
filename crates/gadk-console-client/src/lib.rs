@@ -58,3 +58,8 @@ mod generated;
 pub use client::{Client, SessionPages};
 pub use error::Error;
 pub use generated::*;
+
+/// The README's examples, compiled as doc tests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
