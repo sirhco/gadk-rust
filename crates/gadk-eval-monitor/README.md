@@ -555,7 +555,9 @@ With `--apply`:
 - ramp: `set_rollout_if(prompt, label, Some(R at the next step), B, Some(<the rollout read>))`;
 - abort: `set_rollout_if(prompt, label, None, B, Some(<the rollout read>))`;
 - promote: a fresh read that must still show the label at B with the same rollout, then
-  `set_label(prompt, label, R, Some(Some(B)))`, which moves the label and clears the rollout.
+  `promote_rollout_if(prompt, label, B, <the rollout read>)`, which moves the label to R and
+  clears the rollout in one atomic write, only while the label and the rollout are still as
+  read.
 
 These writes are compare-and-set: when the label or rollout changed since the guard read them
 (another guard run, someone in the console), nothing is written and the command fails with

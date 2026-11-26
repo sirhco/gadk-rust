@@ -56,7 +56,8 @@ Use a dedicated non-empty `root` (e.g. `envs/prod`) and set
 The store's REST semantics (paths, transactions, retries, error mapping) are verified against an
 in-process fake Firestore server, which also runs the `PromptStore` contract suites
 (`testsuite::run`, `testsuite::run_rollouts` and `testsuite::run_rollout_cas`, the last covering
-the compare-and-set `set_rollout_if`). `tests/live.rs` (ignored by default) runs the same three
+the compare-and-set `set_rollout_if` and the atomic promote `promote_rollout_if`, each run in one
+transaction). `tests/live.rs` (ignored by default) runs the same three
 suites against the Firestore emulator when `FIRESTORE_EMULATOR_HOST` is set. The store reads
 inside transactions with `batchGet` (the emulator does not answer transactional single-document
 GETs):

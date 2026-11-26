@@ -7,6 +7,27 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-prompts`: `PromptStore::promote_rollout_if(name, label, expected_version,
+  expected_rollout)` moves a label to its rollout's version and ends the rollout in one atomic
+  write, only while the label and the rollout (version and percent) are still what the caller
+  read. `FileStore` and the Firestore store override it; the trait's default calls `set_label`
+  and checks the label only. `testsuite::run_rollout_cas` covers it.
+
+### Fixed
+
+- Promote in `gadk-prompts rollout --promote`, the console's prompt page and the
+  `gadk-eval-monitor` guard no longer moves a label to a rollout version that changed after it
+  was read: all three call `promote_rollout_if` with the label version and the rollout they
+  read. The console's Promote form posts the rollout's percent in a hidden field; a prompt page
+  rendered before the upgrade gets a 400 on Promote until it is reloaded.
+- `examples/console-dashboard`: appending a sessions page removes the previous page's error
+  banner and truncation note, so they no longer pile up; the trend chart's bars take 90% of their
+  slot, centred; and a trend without a positive `bucket_seconds` shows the banner "The trend has
+  no bucket width." instead of a broken chart. A `gadk-console` test also rejects `/api/v1/` paths
+  in single-quoted or template literals in `app.js`.
+
 ## [0.5.21] - 2026-11-25
 
 ### Added
