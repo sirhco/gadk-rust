@@ -91,7 +91,8 @@ store.set_rollout("support-triage", &Label::production(), None).await?;
   automated ramp never overwrites a change made since it read the store. A stale label is
   `Conflict { expected: Some(expected_version), actual: <label version, or None when the label
   is gone> }`; a stale rollout is `Conflict { expected: <expected rollout version>, actual:
-  <current rollout version> }` (equal versions mean the percent changed). Out-of-bounds input is
+  <current rollout version> }` (equal versions mean the percent changed; the error then reads
+  `conflict: the v2 rollout changed (its percent); reload and retry`). Out-of-bounds input is
   `Invalid` and an unknown prompt `NotFound` before either check; `set_rollout`'s other errors
   follow them.
 

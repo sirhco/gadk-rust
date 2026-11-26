@@ -64,11 +64,16 @@ pub enum StoreError {
 }
 
 /// `conflict: expected v1, found unset`; `conflict: concurrent write; retry` when neither side
-/// is known (a lost transaction).
+/// is known (a lost transaction); `conflict: the v2 rollout changed (its percent); reload and
+/// retry` when both sides name the same version (only a rollout check can fail that way).
 fn conflict_message(expected: Option<u32>, actual: Option<u32>) -> String {
     let show = |v: Option<u32>| v.map_or_else(|| "unset".to_owned(), |n| format!("v{n}"));
     if expected.is_none() && actual.is_none() {
         "conflict: concurrent write; retry".to_owned()
+    } else if let (Some(e), Some(a)) = (expected, actual)
+        && e == a
+    {
+        format!("conflict: the v{e} rollout changed (its percent); reload and retry")
     } else {
         format!(
             "conflict: expected {}, found {}",
@@ -259,5 +264,9 @@ mod tests {
         assert_eq!(c(None, Some(1)), "conflict: expected unset, found v1");
         assert_eq!(c(Some(3), None), "conflict: expected v3, found unset");
         assert_eq!(c(None, None), "conflict: concurrent write; retry");
+        assert_eq!(
+            c(Some(2), Some(2)),
+            "conflict: the v2 rollout changed (its percent); reload and retry"
+        );
     }
 }

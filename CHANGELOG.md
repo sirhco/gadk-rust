@@ -7,6 +7,13 @@ the public API.
 
 ## [Unreleased]
 
+### Changed
+
+- gadk-prompts: a rollout conflict where only the percent changed now reads `conflict: the v2
+  rollout changed (its percent); reload and retry` instead of `conflict: expected v2, found v2`.
+  The `StoreError::Conflict` fields are unchanged; the CLI, console and eval-monitor guard show
+  the new text.
+
 ## [0.5.22] - 2026-11-25
 
 ### Added
