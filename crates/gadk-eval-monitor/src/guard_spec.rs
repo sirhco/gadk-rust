@@ -26,6 +26,10 @@
 //! min_step_age: 24h                 # optional, <n>m | <n>h | <n>d, at most 30d: hold an advance
 //!                                   # until the last applied ramp step is this old (needs --out)
 //! ramp: [10, 25, 50]                # optional: percents 1-99, strictly increasing
+//! sequential: true                  # optional, default false: anytime-valid intervals over the
+//!                                   # rollout's calls since its first call in the window
+//! confidence: 0.95                  # optional, 0.5-0.999 (default 0.95 with sequential): shared
+//!                                   # by the error_rate, feedback and eval checks
 //! checks:                           # at least one; only `feedback` may repeat
 //!   - error_rate: { max_increase: 0.01 }          # absolute, 0-1
 //!   - feedback:
@@ -66,6 +70,8 @@ pub const DEFAULT_MIN_COUNT: u64 = 30;
 pub const DEFAULT_EVAL_LIMIT: usize = 100;
 /// The fewest scored runs per version an `eval` check compares; fewer is `insufficient`.
 pub const MIN_EVAL_RUNS: u64 = 10;
+/// The confidence of a `sequential` spec without `confidence`.
+pub const DEFAULT_SEQUENTIAL_CONFIDENCE: f64 = 0.95;
 
 /// The longest `window` and `min_step_age` (and an alert spec's `window`).
 pub(crate) const MAX_WINDOW_DAYS: i64 = 30;
@@ -107,6 +113,12 @@ pub struct GuardSpec {
     pub checks: Vec<Check>,
     /// The judge model; set exactly when an `eval` check has an `llm_judge` scorer.
     pub judge: Option<JudgeSpec>,
+    /// Whether the `error_rate`, `feedback` and `eval` checks use anytime-valid intervals over
+    /// the rollout's calls since its first call in the window (default false).
+    pub sequential: bool,
+    /// The confidence (0.5-0.999) the `error_rate`, `feedback` and `eval` checks share; `None`
+    /// when the key is absent (see [`GuardSpec::effective_confidence`]).
+    pub confidence: Option<f64>,
 }
 
 /// One check of a guard: a production signal and how much worse the rollout may be.
@@ -215,6 +227,14 @@ impl GuardSpec {
             .map_err(|detail| MonitorError::Spec(format!("guard spec: {detail}")))
     }
 
+    /// The confidence the interval checks share: `confidence` when set, else
+    /// [`DEFAULT_SEQUENTIAL_CONFIDENCE`] with `sequential`, else `None` (each bound is 95% on
+    /// its own and nothing is split).
+    pub fn effective_confidence(&self) -> Option<f64> {
+        self.confidence
+            .or(self.sequential.then_some(DEFAULT_SEQUENTIAL_CONFIDENCE))
+    }
+
     /// Whether an `eval` check has an `llm_judge` scorer (and so a judge model is needed).
     pub fn wants_judge(&self) -> bool {
         self.checks.iter().any(|c| match c {
@@ -243,6 +263,8 @@ fn parse(doc: &Value) -> Result<GuardSpec, String> {
             "ramp",
             "checks",
             "judge",
+            "sequential",
+            "confidence",
         ],
     )?;
     let name = required(
@@ -285,6 +307,19 @@ fn parse(doc: &Value) -> Result<GuardSpec, String> {
             .ok_or("`min_calls` must be an integer of at least 2")?,
     };
     let ramp = parse_ramp(top.get("ramp"))?;
+    let sequential = match top.get("sequential") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err("`sequential` must be true or false".into()),
+    };
+    let confidence = match top.get("confidence") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_f64()
+                .filter(|c| (0.5..=0.999).contains(c))
+                .ok_or("`confidence` must be a number from 0.5 to 0.999")?,
+        ),
+    };
     let checks = match top.get("checks") {
         Some(Value::Array(a)) if !a.is_empty() => a
             .iter()
@@ -306,6 +341,8 @@ fn parse(doc: &Value) -> Result<GuardSpec, String> {
         ramp,
         checks,
         judge: None,
+        sequential,
+        confidence,
     };
     spec.judge = match (top.get("judge"), spec.wants_judge()) {
         (None | Some(Value::Null), false) => None,
@@ -747,7 +784,8 @@ judge:
         assert_eq!(
             printed(&with("rollout: 10")),
             "monitor spec: guard spec: unknown key `rollout` (expected one of: name, source, \
-             store, prompt, label, window, min_calls, min_step_age, ramp, checks, judge)"
+             store, prompt, label, window, min_calls, min_step_age, ramp, checks, judge, \
+             sequential, confidence)"
         );
     }
 
@@ -845,6 +883,68 @@ judge:
                 "{v}"
             );
         }
+    }
+
+    #[test]
+    fn sequential_is_an_optional_bool() {
+        assert!(
+            !GuardSpec::from_yaml(&with("window: 1h"))
+                .unwrap()
+                .sequential
+        );
+        assert!(
+            GuardSpec::from_yaml(&with("sequential: true"))
+                .unwrap()
+                .sequential
+        );
+        assert!(
+            !GuardSpec::from_yaml(&with("sequential: false"))
+                .unwrap()
+                .sequential
+        );
+        assert!(
+            !GuardSpec::from_yaml(&with("sequential: null"))
+                .unwrap()
+                .sequential
+        );
+        for v in ["3", "\"true\"", "[true]", "{ on: true }"] {
+            assert_eq!(
+                printed(&with(&format!("sequential: {v}"))),
+                "monitor spec: guard spec: `sequential` must be true or false",
+                "{v}"
+            );
+        }
+    }
+
+    #[test]
+    fn confidence_is_an_optional_number_from_0_5_to_0_999() {
+        let s = GuardSpec::from_yaml(&with("window: 1h")).unwrap();
+        assert_eq!((s.confidence, s.effective_confidence()), (None, None));
+        for (v, want) in [("0.5", 0.5), ("0.95", 0.95), ("0.999", 0.999)] {
+            let s = GuardSpec::from_yaml(&with(&format!("confidence: {v}"))).unwrap();
+            assert_eq!(s.confidence, Some(want), "{v}");
+            assert_eq!(s.effective_confidence(), Some(want), "{v}");
+            assert!(!s.sequential, "{v}");
+        }
+        for v in ["0.49", "1.0", "\"x\"", "-1", "1", "true"] {
+            assert_eq!(
+                printed(&with(&format!("confidence: {v}"))),
+                "monitor spec: guard spec: `confidence` must be a number from 0.5 to 0.999",
+                "{v}"
+            );
+        }
+    }
+
+    #[test]
+    fn sequential_without_confidence_resolves_to_95_percent() {
+        let s = GuardSpec::from_yaml(&with("sequential: true")).unwrap();
+        assert_eq!(s.confidence, None);
+        assert_eq!(s.effective_confidence(), Some(0.95));
+        assert_eq!(DEFAULT_SEQUENTIAL_CONFIDENCE, 0.95);
+        let s = GuardSpec::from_yaml(&format!("{}\nconfidence: 0.99", with("sequential: true")))
+            .unwrap();
+        assert!(s.sequential);
+        assert_eq!(s.effective_confidence(), Some(0.99));
     }
 
     #[test]
