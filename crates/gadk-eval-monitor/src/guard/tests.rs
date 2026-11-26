@@ -357,6 +357,172 @@ async fn min_calls_makes_every_check_insufficient() {
     assert_eq!(source.log(), ["calls"]);
 }
 
+const TWO_INTERVAL_CHECKS: &str = "  - error_rate: { max_increase: 0.02 }\n\
+                                   \x20 - feedback: { name: thumbs_up, max_decrease: 0.05 }\n";
+
+/// Plenty of calls and 600 bool `thumbs_up` app scores per side, 540 of them `true`.
+fn scored() -> FakeGuard {
+    let mut fake = FakeGuard::new(plenty());
+    fake.feedback = vec![(
+        "thumbs_up".into(),
+        vec![bools(1, "app", 600, 540), bools(2, "app", 600, 540)],
+    )];
+    fake
+}
+
+#[tokio::test]
+async fn a_default_spec_reports_no_stats_and_no_z() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let report = dry(&spec("", TWO_INTERVAL_CHECKS), &store, &scored()).await;
+    assert_eq!(report.stats, None);
+    assert_eq!(report.checks.len(), 2);
+    for c in &report.checks {
+        assert!(c.interval.is_some(), "{}", c.name);
+        assert_eq!(c.z, None, "{}", c.name);
+    }
+    let json = report.to_json().unwrap();
+    assert!(!json.contains("\"stats\""), "{json}");
+    assert!(!json.contains("\"z\""), "{json}");
+}
+
+#[tokio::test]
+async fn confidence_splits_alpha_across_the_interval_checks() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let report = dry(
+        &spec("confidence: 0.95\n", TWO_INTERVAL_CHECKS),
+        &store,
+        &scored(),
+    )
+    .await;
+    assert_eq!(
+        report.stats,
+        Some(GuardStats::new(false, 0.95, 2, TimeDelta::hours(1)))
+    );
+    assert_eq!(report.checks.len(), 2);
+    for c in &report.checks {
+        assert!(c.interval.is_some(), "{}", c.name);
+        let z = c.z.unwrap();
+        assert!((z - 1.959963984540054).abs() < 1e-9, "{}: {z}", c.name);
+    }
+    let summary = report.summary();
+    assert!(
+        summary.starts_with(
+            "guard g: support/production v1 → v2 (10%), window 1h\n\
+             stats: fixed, 95% across 2 interval checks\n"
+        ),
+        "{summary}"
+    );
+}
+
+#[tokio::test]
+async fn a_spec_without_interval_checks_reports_zero_and_no_z() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let report = dry(
+        &spec(
+            "confidence: 0.9\n",
+            "  - cost_per_call: { max_increase: 0.2 }\n",
+        ),
+        &store,
+        &FakeGuard::new(plenty()),
+    )
+    .await;
+    assert_eq!(
+        report.stats,
+        Some(GuardStats::new(false, 0.9, 0, TimeDelta::hours(1)))
+    );
+    assert_eq!(only(&report).z, None);
+}
+
+#[tokio::test]
+async fn the_anytime_interval_is_wider_than_the_fixed_one() {
+    let steps = "ramp: [10, 25, 50]\n";
+    let c = || calls((1000, 10), (1000, 15));
+    assert_eq!(
+        decide(steps, 10, c()).await,
+        (Verdict::Advance, Action::Ramp(25))
+    );
+    assert_eq!(
+        decide(&format!("{steps}sequential: true\n"), 10, c()).await,
+        (Verdict::Wait, Action::None)
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let fixed = dry(&spec("", ERROR_RATE), &store, &FakeGuard::new(c())).await;
+    let fixed = only(&fixed).clone();
+    assert_eq!((fixed.status, fixed.z), (Status::Ok, None));
+    let report = dry(
+        &spec("sequential: true\n", ERROR_RATE),
+        &store,
+        &FakeGuard::new(c()),
+    )
+    .await;
+    assert_eq!(
+        report.stats,
+        Some(GuardStats::new(true, 0.95, 1, TimeDelta::hours(1)))
+    );
+    assert_eq!((report.verdict, report.exit_code()), (Verdict::Wait, 3));
+    let check = only(&report);
+    assert_eq!(check.status, Status::Unsure);
+    // a = 0.05, n* = 2 × min_calls = 200, n = 2000.
+    let z = check.z.unwrap();
+    assert!((z - 3.2463107480762385).abs() < 1e-6, "{z}");
+    let (lower, upper) = check.interval.unwrap();
+    let (fixed_lower, fixed_upper) = fixed.interval.unwrap();
+    assert!(
+        lower < fixed_lower && upper > fixed_upper,
+        "{lower} {upper}"
+    );
+    assert!(lower < 0.02 && upper > 0.02, "{lower} {upper}");
+    assert_eq!(check.harm, fixed.harm);
+}
+
+#[tokio::test]
+async fn the_anytime_z_follows_each_checks_sample_and_n_star() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let checks = "  - error_rate: { max_increase: 0.02 }\n\
+                  \x20 - feedback: { name: thumbs_up, max_decrease: 0.05 }\n\
+                  \x20 - eval: { scorers: [contains: order], max_decrease: 0.1, limit: 50 }\n";
+    let mut source = scored();
+    source.runs = vec![runs(1, 40, 0, 0), runs(2, 40, 0, 0)];
+    let report = dry(&spec("sequential: true\n", checks), &store, &source).await;
+    assert_eq!(
+        report.stats,
+        Some(GuardStats::new(true, 0.95, 3, TimeDelta::hours(1)))
+    );
+    // a = 0.05 / 3. error_rate: n = 2000, n* = 200; feedback: n = 1200, n* = 2 × min_count =
+    // 60; eval: n = 80 scored runs, n* = 20.
+    let want = [
+        ("error_rate", 3.6036712892683824),
+        ("feedback thumbs_up (any)", 3.690220092133457),
+        ("eval", 3.4991630028688885),
+    ];
+    assert_eq!(report.checks.len(), 3);
+    for (c, (name, z)) in report.checks.iter().zip(want) {
+        assert_eq!(c.name, name);
+        assert!(c.interval.is_some(), "{name}");
+        let got = c.z.unwrap();
+        assert!((got - z).abs() < 1e-6, "{name}: {got}");
+    }
+}
+
+#[tokio::test]
+async fn checks_without_an_interval_record_no_z() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let few = FakeGuard::new(calls((1000, 0), (50, 0)));
+    let report = dry(&spec("sequential: true\n", ERROR_RATE), &store, &few).await;
+    let check = only(&report);
+    assert_eq!(
+        (check.status, check.interval, check.z),
+        (Status::Insufficient, None, None)
+    );
+    assert!(report.stats.is_some());
+}
+
 /// A bool row of `version` from `source`.
 fn bools(version: u32, source: &str, count: u64, positive: u64) -> VersionFeedback {
     VersionFeedback::new(version, source, "bool", count, positive, None, None)

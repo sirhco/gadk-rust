@@ -87,7 +87,6 @@ pub(crate) fn classify(lower: f64, upper: f64, tolerance: f64) -> Status {
 /// The standard normal quantile Φ⁻¹(`p`) for `p` in (0, 1): Wichura's algorithm AS 241
 /// (PPND16), a rational approximation accurate to about 1e-16.
 #[allow(clippy::excessive_precision)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn normal_quantile(p: f64) -> f64 {
     /// `c[0] + c[1]·x + … + c[7]·x⁷` by Horner's rule.
     fn poly(c: &[f64; 8], x: f64) -> f64 {
@@ -172,7 +171,6 @@ pub(crate) fn normal_quantile(p: f64) -> f64 {
 
 /// The one-sided normal quantile of each of `k` checks (`k ≥ 1`) sharing the error budget
 /// `alpha` (Bonferroni): Φ⁻¹(1 − `alpha` ÷ `k`).
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn bonferroni_z(alpha: f64, k: u32) -> f64 {
     normal_quantile(1.0 - alpha / f64::from(k))
 }
@@ -180,7 +178,6 @@ pub(crate) fn bonferroni_z(alpha: f64, k: u32) -> f64 {
 /// The mixture parameter ρ > 0 that makes `anytime_z` smallest at the total sample `n_star`
 /// for level `a`: a golden-section search over ln ρ in [ln(`n_star`·1e-4), ln(`n_star`·1e4)],
 /// stopped once the bracket is narrower than 1e-9 (a relative tolerance of 1e-9 on ρ).
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn mixture_rho(n_star: f64, a: f64) -> f64 {
     // z² as a function of ln ρ; it has one minimum.
     let z2 = |ln_rho: f64| {
@@ -214,7 +211,6 @@ pub(crate) fn mixture_rho(n_star: f64, a: f64) -> f64 {
 /// √((1 + ρ/n) · ln((n + ρ) / (ρ · a²))). This is Robbins' two-sided normal-mixture boundary at
 /// level `a`, used as a one-sided level-`a` bound on each side (conservative); it is above
 /// Φ⁻¹(1 − `a`) for every `n`.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn anytime_z(n: u64, rho: f64, a: f64) -> f64 {
     let n = n as f64;
     ((1.0 + rho / n) * ((n + rho) / (rho * a * a)).ln()).sqrt()

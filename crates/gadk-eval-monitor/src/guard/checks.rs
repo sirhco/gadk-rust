@@ -17,7 +17,7 @@
 use crate::guard_report::{CheckResult, SideValue, Status, Unit};
 use crate::guard_source::{VersionCalls, VersionFeedback};
 use crate::guard_spec::{FeedbackSource, MIN_EVAL_RUNS};
-use crate::guard_stats::{Z95, classify, newcombe_diff, welch_diff};
+use crate::guard_stats::{Z95, anytime_z, classify, mixture_rho, newcombe_diff, welch_diff};
 use crate::prices::PriceTable;
 use crate::report::MonitoredRun;
 
@@ -54,6 +54,34 @@ impl Sides<'_> {
     }
 }
 
+/// How the interval checks (`error_rate`, `feedback`, `eval`) pick their normal quantile z.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum ZRule {
+    /// Neither `sequential` nor `confidence` is set: [`Z95`], not recorded in the report.
+    Fixed95,
+    /// `confidence` without `sequential`: this Bonferroni z for every interval check.
+    Bonferroni(f64),
+    /// `sequential`: the anytime z at level `a` from each check's total sample.
+    Anytime {
+        /// The per-check level α ÷ k.
+        a: f64,
+    },
+}
+
+/// The z `rule` gives a check whose two sides hold `n` calls, scores or scored runs in all and
+/// whose anytime boundary is sharpest at `n_star`, and the z to record in the report (`None`
+/// under [`ZRule::Fixed95`]).
+pub(super) fn z_for(rule: &ZRule, n: u64, n_star: f64) -> (f64, Option<f64>) {
+    match *rule {
+        ZRule::Fixed95 => (Z95, None),
+        ZRule::Bonferroni(z) => (z, Some(z)),
+        ZRule::Anytime { a } => {
+            let z = anytime_z(n, mixture_rho(n_star, a), a);
+            (z, Some(z))
+        }
+    }
+}
+
 /// A result with both sides' values and no harm yet.
 fn result(name: String, unit: Unit, baseline: SideValue, rollout: SideValue) -> CheckResult {
     CheckResult {
@@ -85,22 +113,26 @@ fn status(mut out: CheckResult, status: Status, reason: Option<String>) -> Check
     out
 }
 
-/// Classifies the interval `[lower, upper]` of the harm `harm` against `tolerance`.
+/// Classifies the interval `[lower, upper]` of the harm `harm` against `tolerance`, recording
+/// the interval's z `z` (`None` for the default).
 fn interval(
     mut out: CheckResult,
     harm: f64,
     lower: f64,
     upper: f64,
     tolerance: f64,
+    z: Option<f64>,
 ) -> CheckResult {
     out.harm = Some(harm);
     out.interval = Some((lower, upper));
+    out.z = z;
     out.status = classify(lower, upper, tolerance);
     out
 }
 
-/// `error_rate`: h = rate(R) − rate(B), Newcombe's interval.
-pub(super) fn error_rate(s: &Sides<'_>, max_increase: f64) -> CheckResult {
+/// `error_rate`: h = rate(R) − rate(B), Newcombe's interval with `rule`'s z (n: both sides'
+/// calls; n* = 2 × `min_calls`).
+pub(super) fn error_rate(s: &Sides<'_>, max_increase: f64, rule: &ZRule) -> CheckResult {
     let (nb, nr) = s.calls();
     let eb = s.b.map_or(0, |c| c.errors);
     let er = s.r.map_or(0, |c| c.errors);
@@ -113,9 +145,10 @@ pub(super) fn error_rate(s: &Sides<'_>, max_increase: f64) -> CheckResult {
     if let Some(reason) = s.insufficient() {
         return status(out, Status::Insufficient, Some(reason));
     }
-    let (lower, upper) = newcombe_diff(eb, nb, er, nr, Z95);
+    let (z, used) = z_for(rule, nb + nr, 2.0 * s.min_calls as f64);
+    let (lower, upper) = newcombe_diff(eb, nb, er, nr, z);
     let harm = er as f64 / nr as f64 - eb as f64 / nb as f64;
-    interval(out, harm, lower, upper, max_increase)
+    interval(out, harm, lower, upper, max_increase, used)
 }
 
 /// One side's feedback rows merged across sources.
@@ -165,7 +198,8 @@ fn pool(rows: &[VersionFeedback], version: u32) -> Pooled {
 }
 
 /// `feedback`: bool scores h = rate(B) − rate(R) with Newcombe's interval; number scores
-/// h = (mean(B) − mean(R)) ÷ |mean(B)| with Welch's interval divided by |mean(B)|.
+/// h = (mean(B) − mean(R)) ÷ |mean(B)| with Welch's interval divided by |mean(B)|; both with
+/// `rule`'s z (n: both sides' scores; n* = 2 × `min_count`).
 pub(super) fn feedback(
     s: &Sides<'_>,
     name: &str,
@@ -173,6 +207,7 @@ pub(super) fn feedback(
     max_decrease: f64,
     min_count: u64,
     rows: &[VersionFeedback],
+    rule: &ZRule,
 ) -> CheckResult {
     let b = pool(rows, s.baseline);
     let r = pool(rows, s.rollout);
@@ -214,10 +249,11 @@ pub(super) fn feedback(
         let reason = s.counts(&format!("fewer than {min_count} scores"), b.count, r.count);
         return status(out, Status::Insufficient, Some(reason));
     }
+    let (z, used) = z_for(rule, b.count + r.count, 2.0 * min_count as f64);
     if !number {
-        let (lower, upper) = newcombe_diff(r.positive, r.count, b.positive, b.count, Z95);
+        let (lower, upper) = newcombe_diff(r.positive, r.count, b.positive, b.count, z);
         let harm = b.positive as f64 / b.count as f64 - r.positive as f64 / r.count as f64;
-        return interval(out, harm, lower, upper, max_decrease);
+        return interval(out, harm, lower, upper, max_decrease, used);
     }
     let (mb, mr) = (b.mean.unwrap_or(0.0), r.mean.unwrap_or(0.0));
     if mb == 0.0 {
@@ -232,10 +268,17 @@ pub(super) fn feedback(
         mr,
         r.stddev.unwrap_or(0.0),
         r.count,
-        Z95,
+        z,
     );
     // (l, u) bounds mean(R) − mean(B); the harm is its negation, relative to |mean(B)|.
-    interval(out, (mb - mr) / scale, -u / scale, -l / scale, max_decrease)
+    interval(
+        out,
+        (mb - mr) / scale,
+        -u / scale,
+        -l / scale,
+        max_decrease,
+        used,
+    )
 }
 
 /// Point harm `(r − b) ÷ b`: `worse` when above `max_increase`, else `ok`.
@@ -322,12 +365,14 @@ pub(super) fn latency_p95(s: &Sides<'_>, max_increase: f64) -> CheckResult {
 }
 
 /// `eval`: pass rates of the scored runs (runs with a scorer error excluded and counted),
-/// h = rate(B) − rate(R) with Newcombe's interval. `runs` is `None` when the runs were not
-/// scored because a side has too few calls.
+/// h = rate(B) − rate(R) with Newcombe's interval and `rule`'s z (n: both sides' scored runs;
+/// n* = 2 × [`MIN_EVAL_RUNS`]). `runs` is `None` when the runs were not scored because a side
+/// has too few calls.
 pub(super) fn eval(
     s: &Sides<'_>,
     max_decrease: f64,
     runs: Option<&(Vec<MonitoredRun>, Vec<MonitoredRun>)>,
+    rule: &ZRule,
 ) -> CheckResult {
     let tally = |runs: &[MonitoredRun]| {
         let errored = runs.iter().filter(|r| r.errored()).count() as u64;
@@ -356,9 +401,10 @@ pub(super) fn eval(
         let reason = s.counts(&format!("fewer than {MIN_EVAL_RUNS} scored runs"), nb, nr);
         return status(out, Status::Insufficient, Some(with_excluded(reason)));
     }
-    let (lower, upper) = newcombe_diff(pr, nr, pb, nb, Z95);
+    let (z, used) = z_for(rule, nb + nr, 2.0 * MIN_EVAL_RUNS as f64);
+    let (lower, upper) = newcombe_diff(pr, nr, pb, nb, z);
     let harm = pb as f64 / nb as f64 - pr as f64 / nr as f64;
-    let mut out = interval(out, harm, lower, upper, max_decrease);
+    let mut out = interval(out, harm, lower, upper, max_decrease, used);
     out.reason = excluded;
     out
 }
