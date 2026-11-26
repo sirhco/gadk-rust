@@ -376,23 +376,27 @@
         "required": ["error"],
         "properties": {
           "error": {
-            "description": "The error: its kind, message and hint.",
-            "type": "object",
-            "required": ["kind", "message", "hint"],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "description": "bad_request, needs_bigquery, not_found, method_not_allowed, or for a 502 the source's kind (bigquery, transport, …)."
-              },
-              "message": {
-                "type": "string",
-                "description": "What went wrong: the page's text or the error banner's."
-              },
-              "hint": {
-                "type": ["string", "null"],
-                "description": "How to fix it, from the error banner; null when there is none."
-              }
-            }
+            "$ref": "#/components/schemas/ApiErrorBody",
+            "description": "The error: its kind, message and hint."
+          }
+        }
+      },
+      "ApiErrorBody": {
+        "type": "object",
+        "description": "The error: its kind, message and hint.",
+        "required": ["kind", "message", "hint"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "bad_request, needs_bigquery, not_found, method_not_allowed, or for a 502 the source's kind (bigquery, transport, …)."
+          },
+          "message": {
+            "type": "string",
+            "description": "What went wrong: the page's text or the error banner's."
+          },
+          "hint": {
+            "type": ["string", "null"],
+            "description": "How to fix it, from the error banner; null when there is none."
           }
         }
       },
@@ -447,7 +451,10 @@
       "ModelTokens": {
         "type": "array",
         "description": "[model, usage]: one model's tokens.",
-        "prefixItems": [{"type": "string"}, {"$ref": "#/components/schemas/Usage"}],
+        "prefixItems": [
+          {"type": "string", "description": "The model name."},
+          {"$ref": "#/components/schemas/Usage", "description": "The model's token counts."}
+        ],
         "items": false,
         "minItems": 2
       },

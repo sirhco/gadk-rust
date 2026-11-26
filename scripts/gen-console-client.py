@@ -43,7 +43,7 @@ class GenError(Exception):
 
 def load(path):
     """The JSON document at `path`."""
-    return json.loads(pathlib.Path(path).read_text())
+    return json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
 
 
 def pascal(name):
@@ -231,7 +231,9 @@ class Gen:
             for i, item in enumerate(prefix):
                 rt, item_null = self.rust_type(item, f"{where}.prefixItems[{i}]", f"{name}{i}")
                 rt = f"Option<{rt}>" if item_null else rt
-                fields.append(doc(f"Element {i}: {text}", "    ") + f"    pub {rt},\n")
+                own = item.get("description") if isinstance(item, dict) else None
+                etext = own if isinstance(own, str) and own.strip() else f"Element {i}."
+                fields.append(doc(etext, "    ") + f"    pub {rt},\n")
             self.items.append(
                 doc(text) + STRUCT_DERIVE + "\n#[non_exhaustive]\n"
                 + f"pub struct {name}(\n" + "".join(fields) + ");\n"
@@ -347,7 +349,7 @@ class Gen:
         for p in query_params:
             rust = "bool" if p["kind"] == "flag" else f"Option<{p['rust']}>"
             fields.append(f"    {ident(p['name'], where)}: {rust},\n")
-        derive = "Debug, Clone, PartialEq, Eq" + ("" if path_params else ", Default")
+        derive = "Debug, Clone, PartialEq" + ("" if path_params else ", Default")
         new_doc = "The query with the server's defaults."
         if path_params:
             new_doc += ("\n\nEach path parameter is sent percent-encoded as one path segment;"
@@ -470,22 +472,22 @@ def main(argv=None):
     ap.add_argument("--spec", default=str(ROOT / SPEC), help="the OpenAPI document")
     ap.add_argument("--out", default=str(ROOT / OUT), help="the generated Rust file")
     args = ap.parse_args(argv)
+    out = pathlib.Path(args.out)
     try:
         text = generate(load(args.spec))
-    except (GenError, OSError, ValueError) as e:
+        if args.check:
+            current = out.read_text(encoding="utf-8") if out.exists() else None
+            if current != text:
+                print(f"{shown(out)} is stale: run python3 scripts/gen-console-client.py",
+                      file=sys.stderr)
+                return 1
+            return 0
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        return 0
+    except Exception as e:  # any failure is exit 2, never 1 (which means stale)
         print(f"gen-console-client: {e}", file=sys.stderr)
         return 2
-    out = pathlib.Path(args.out)
-    if args.check:
-        current = out.read_text() if out.exists() else None
-        if current != text:
-            print(f"{shown(out)} is stale: run python3 scripts/gen-console-client.py",
-                  file=sys.stderr)
-            return 1
-        return 0
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(text)
-    return 0
 
 
 if __name__ == "__main__":

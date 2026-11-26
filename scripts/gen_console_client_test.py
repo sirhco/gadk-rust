@@ -58,7 +58,11 @@ class RealDocumentTest(unittest.TestCase):
         self.assertIn("pub enum UsageRange {", first)
         self.assertIn("pub enum Range {", first)
         self.assertIn("pub struct ModelTokens(\n", first)
-        self.assertIn("pub struct ApiErrorError {", first)
+        self.assertIn("pub struct ApiErrorBody {", first)
+        self.assertIn("pub error: ApiErrorBody,", first)
+        self.assertNotIn("ApiErrorError", first)
+        self.assertIn("    /// The model name.\n    pub String,\n", first)
+        self.assertIn("    /// The model's token counts.\n    pub Usage,\n", first)
         self.assertIn("pub async fn get_open_api(", first)
         self.assertIn("Result<serde_json::Value, Error>", first)
 
@@ -74,6 +78,24 @@ class RealDocumentTest(unittest.TestCase):
                 out.unlink()
                 self.assertEqual(gen.main(args + ["--check"]), 1)
             self.assertEqual(err.getvalue().count("generated.rs is stale"), 2)
+
+    def test_an_unreadable_check_target_or_an_unexpected_error_exits_2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = ["--spec", str(REAL), "--out", tmp, "--check"]  # the output is a directory
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(gen.main(args), 2)
+            self.assertIn("gen-console-client:", err.getvalue())
+            real = gen.generate
+            def boom(doc):
+                raise RuntimeError("boom")
+            gen.generate = boom
+            try:
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertEqual(gen.main(["--spec", str(REAL), "--out",
+                                               str(pathlib.Path(tmp) / "g.rs")]), 2)
+            finally:
+                gen.generate = real
+            self.assertIn("boom", err.getvalue())
 
     def test_check_names_the_stale_file_on_stderr(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -157,15 +179,15 @@ class SchemaTest(unittest.TestCase):
         doc = document({
             "Usage": obj({"input": prop({"type": "integer", "minimum": 0})}),
             "ModelTokens": {"type": "array", "description": "[model, usage]: one model's tokens.",
-                            "prefixItems": [{"type": "string"},
+                            "prefixItems": [{"type": "string", "description": "The model."},
                                             {"$ref": "#/components/schemas/Usage"}],
                             "items": False, "minItems": 2},
         })
         src = gen.generate(doc)
         self.assertIn("#[non_exhaustive]\npub struct ModelTokens(\n"
-                      "    /// Element 0: [model, usage]: one model's tokens.\n"
+                      "    /// The model.\n"
                       "    pub String,\n"
-                      "    /// Element 1: [model, usage]: one model's tokens.\n"
+                      "    /// Element 1.\n"
                       "    pub Usage,\n);", src)
         self.assertIn("#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]\n"
                       "#[non_exhaustive]\npub struct ModelTokens(", src)
@@ -249,7 +271,7 @@ class ParameterTest(unittest.TestCase):
         self.assertIn("v.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)", src)
         self.assertIn("pub fn version(mut self, v: u64) -> Self {", src)
         self.assertIn('pairs.push(("version", v.to_string()));', src)
-        self.assertIn("#[derive(Debug, Clone, PartialEq, Eq, Default)]\n#[non_exhaustive]\n"
+        self.assertIn("#[derive(Debug, Clone, PartialEq, Default)]\n#[non_exhaustive]\n"
                       "pub struct ListAQuery {", src)
 
     def test_names_path_parameters_and_segments(self):
@@ -260,7 +282,7 @@ class ParameterTest(unittest.TestCase):
         }, {"/api/v1/prompts/{name}/versions": op("getPromptVersions", ["PromptName", "WeekRange"]),
             "/api/v1/openapi.json": op("getOpenApi", [], None)})
         src = render(doc)
-        self.assertIn("#[derive(Debug, Clone, PartialEq, Eq)]\n#[non_exhaustive]\n"
+        self.assertIn("#[derive(Debug, Clone, PartialEq)]\n#[non_exhaustive]\n"
                       "pub struct GetPromptVersionsQuery {", src)
         self.assertIn("pub fn new(name: impl Into<String>) -> Self {", src)
         self.assertIn("/// `name`: The prompt name.", src)

@@ -73,24 +73,24 @@ impl std::fmt::Display for Range {
     }
 }
 
+/// Every error response.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
+pub struct ApiError {
+    /// The error: its kind, message and hint.
+    pub error: ApiErrorBody,
+}
+
 /// The error: its kind, message and hint.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct ApiErrorError {
+pub struct ApiErrorBody {
     /// bad_request, needs_bigquery, not_found, method_not_allowed, or for a 502 the source's kind (bigquery, transport, …).
     pub kind: String,
     /// What went wrong: the page's text or the error banner's.
     pub message: String,
     /// How to fix it, from the error banner; null when there is none.
     pub hint: Option<String>,
-}
-
-/// Every error response.
-#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
-#[non_exhaustive]
-pub struct ApiError {
-    /// The error: its kind, message and hint.
-    pub error: ApiErrorError,
 }
 
 /// The cost fields of a priced row.
@@ -133,9 +133,9 @@ pub struct ModelCalls {
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct ModelTokens(
-    /// Element 0: [model, usage]: one model's tokens.
+    /// The model name.
     pub String,
-    /// Element 1: [model, usage]: one model's tokens.
+    /// The model's token counts.
     pub Usage,
 );
 
@@ -686,7 +686,7 @@ pub struct PendingReviewsResponse {
 }
 
 /// Calls and tokens per model, agent and prompt version.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct GetUsageBreakdownQuery {
     range: Option<UsageRange>,
@@ -715,7 +715,7 @@ impl GetUsageBreakdownQuery {
 }
 
 /// Calls and tokens per time bucket.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct GetUsageTrendQuery {
     range: Option<UsageRange>,
@@ -744,7 +744,7 @@ impl GetUsageTrendQuery {
 }
 
 /// The traces with the most tokens.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct GetUsageTopTracesQuery {
     range: Option<UsageRange>,
@@ -773,7 +773,7 @@ impl GetUsageTopTracesQuery {
 }
 
 /// Sessions, newest last activity first.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct ListSessionsQuery {
     range: Option<Range>,
@@ -845,7 +845,7 @@ impl ListSessionsQuery {
 }
 
 /// A session's row and its turns.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct GetSessionTurnsQuery {
     id: String,
@@ -882,7 +882,7 @@ impl GetSessionTurnsQuery {
 }
 
 /// Users and their activity.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct ListUsersQuery {
     range: Option<Range>,
@@ -921,7 +921,7 @@ impl ListUsersQuery {
 }
 
 /// Production metrics and feedback per prompt version.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct GetPromptVersionsQuery {
     name: String,
@@ -958,7 +958,7 @@ impl GetPromptVersionsQuery {
 }
 
 /// The scores of a trace and its invocations.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct GetTraceScoresQuery {
     id: String,
@@ -981,7 +981,7 @@ impl GetTraceScoresQuery {
 }
 
 /// The pending traces of a review queue.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct ListPendingReviewsQuery {
     score: Option<String>,
@@ -1060,7 +1060,7 @@ impl ListPendingReviewsQuery {
 }
 
 /// This OpenAPI document.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct GetOpenApiQuery {}
 
