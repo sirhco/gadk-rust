@@ -17,8 +17,15 @@ source:
 store: firestore://my-proj
 prompt: support/answer
 label: production
-window: 24h
+# With `sequential`, how far back the rollout's first call is looked for: at least as long as a
+# rollout runs (three ramp steps, 10, 25 and 50, of at least a day each here), at most 30d.
+window: 30d
 min_calls: 200
+# Anytime-valid decisions: every check is measured from the rollout's first call, and an
+# hourly schedule keeps the chance of a wrong `worse` across the whole rollout within 5%.
+sequential: true
+# Shared by the four interval checks (error_rate, two feedback, eval): each gets 1.25%.
+confidence: 0.95
 # Each ramp step runs at least this long before the next advance (needs --out).
 min_step_age: 24h
 ramp: [10, 25, 50]

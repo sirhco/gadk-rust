@@ -7,6 +7,19 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval-monitor`: guard specs take two optional keys for anytime-valid decisions.
+  `confidence` (0.5-0.999) splits one error budget across the `error_rate`, `feedback` and
+  `eval` checks (Bonferroni). `sequential: true` (confidence 0.95 unless set) also widens each of
+  their intervals with a normal-mixture confidence-sequence boundary and measures from the
+  rollout's first call within `window`, so a guard run on any schedule keeps the chance of a
+  wrong `worse` within the confidence. The new `GuardSource::rollout_start` (default
+  `Ok(None)`; the BigQuery source runs one query) finds that call. Reports gain `stats`
+  (`GuardStats`, with `GuardStats::summary`) and each interval check its `z`; the text report
+  shows a `since …, lookback …` header and a `stats:` line, and the console's guard report page
+  a `Stats` row. A spec with neither key prints and stores exactly what it did before.
+
 ## [0.5.23] - 2026-11-26
 
 ### Added

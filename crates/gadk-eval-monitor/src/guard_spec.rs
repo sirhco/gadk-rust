@@ -1335,6 +1335,14 @@ judge:
     }
 
     #[test]
+    fn the_example_spec_is_sequential() {
+        let s = GuardSpec::from_yaml(include_str!("../examples/guard.yaml")).unwrap();
+        assert!(s.sequential);
+        assert_eq!(s.confidence, Some(0.95));
+        assert_eq!(s.window, TimeDelta::days(30));
+    }
+
+    #[test]
     fn load_reads_a_file() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("g.yaml");
