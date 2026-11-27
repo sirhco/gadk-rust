@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.25] - 2026-11-26
+
 ### Changed
 
 - `gadk-eval-monitor`: the guard's measured ages (the sequential header's `since â€¦ (<age>)` and
@@ -1025,7 +1027,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.24...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.25...HEAD
+[0.5.25]: https://github.com/sirhco/gadk-rust/compare/v0.5.24...v0.5.25
 [0.5.24]: https://github.com/sirhco/gadk-rust/compare/v0.5.23...v0.5.24
 [0.5.23]: https://github.com/sirhco/gadk-rust/compare/v0.5.22...v0.5.23
 [0.5.22]: https://github.com/sirhco/gadk-rust/compare/v0.5.21...v0.5.22
