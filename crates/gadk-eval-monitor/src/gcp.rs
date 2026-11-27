@@ -30,8 +30,8 @@ use serde_json::Value;
 /// The OAuth scope requested for Application Default Credentials.
 const CLOUD_PLATFORM_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
 
-/// The longest error body quoted when the reply is not a Google API error.
-const BODY_QUOTE_MAX: usize = 512;
+/// The longest reply body quoted in an error ([`excerpt`]).
+pub(crate) const BODY_QUOTE_MAX: usize = 512;
 
 /// The headers that authenticate a Google Cloud request.
 #[async_trait::async_trait]
@@ -113,12 +113,15 @@ impl Reply {
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             })
-            .unwrap_or_else(|| {
-                let text = String::from_utf8_lossy(&self.body);
-                text[..text.floor_char_boundary(BODY_QUOTE_MAX.min(text.len()))].to_owned()
-            });
+            .unwrap_or_else(|| excerpt(&self.body));
         format!("HTTP {}: {message}", self.status)
     }
+}
+
+/// The start of `bytes`, at most [`BODY_QUOTE_MAX`] bytes, cut on a character boundary.
+pub(crate) fn excerpt(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    text[..text.floor_char_boundary(BODY_QUOTE_MAX.min(text.len()))].to_owned()
 }
 
 /// Authenticated requests to Google Cloud REST APIs.

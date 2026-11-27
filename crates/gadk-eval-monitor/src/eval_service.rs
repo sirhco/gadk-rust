@@ -28,16 +28,13 @@ use http::Method;
 use serde_json::{Value, json};
 
 use crate::error::MonitorError;
-use crate::gcp::{AdcTokenSource, GcpHttp, TokenSource, encode};
+use crate::gcp::{AdcTokenSource, GcpHttp, TokenSource, encode, excerpt};
 
 /// The API version of the `evaluateInstances` endpoint.
 const API_VERSION: &str = "v1";
 
 /// The host of the `global` location; other locations use `{location}-aiplatform.googleapis.com`.
 const GLOBAL_HOST: &str = "aiplatform.googleapis.com";
-
-/// The longest reply body quoted in a "no score" or "no choice" error.
-const BODY_QUOTE_MAX: usize = 512;
 
 /// The criteria of a `reference` grade.
 const REFERENCE_CRITERIA: &str = "The answer agrees in meaning with the reference answer and \
@@ -378,17 +375,12 @@ fn explanation(result: Option<&Value>) -> String {
         .to_owned()
 }
 
-/// The start of `body`, at most [`BODY_QUOTE_MAX`] bytes, cut on a character boundary.
-fn excerpt(body: &[u8]) -> String {
-    let text = String::from_utf8_lossy(body);
-    text[..text.floor_char_boundary(BODY_QUOTE_MAX.min(text.len()))].to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use gadk_model::rest::test_util::{FakeResponse, ScriptedClient, bearer_credentials};
 
     use super::*;
+    use crate::gcp::BODY_QUOTE_MAX;
 
     const MODEL: &str = "gemini-3.8-flash";
 
