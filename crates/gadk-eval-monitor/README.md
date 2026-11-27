@@ -728,9 +728,10 @@ error budget, however often the guard runs:
   can `abort` or `advance` as soon as the evidence is enough, and the chance that some look
   wrongly says `worse` stays within about α over the whole rollout. The guarantee is
   approximate: the confidence sequence is asymptotic (it holds as the sample grows), and taking
-  n as both sides' total is a conservative heuristic rather than an exact bound. In a simulation with a 5% error
-  rate on both sides, 50 looks of 200 calls each and one check, 0.3% of rollouts were wrongly
-  aborted at a 50% rollout share and 1.2% at 10%, against about 25% with the fixed z.
+  n as both sides' total is a conservative heuristic rather than an exact bound. In a simulation
+  with a 5% error rate on both sides, 50 looks of 200 calls each and one check, 0.3% of rollouts
+  were wrongly aborted at a 50% rollout share and 1.2% at 10%, against about 25% with the fixed
+  z.
 - With `sequential`, the sample starts at the rollout's first call: the guard first looks for the
   earliest `LLM_REQUEST` row of version R in `[now − window, now)` and then measures every check
   over `[that call, now)`, or over `[now − window, now)` when there is none. `window` is the
@@ -743,8 +744,9 @@ error budget, however often the guard runs:
 - For `eval` the guarantee holds only while each side's scored runs stay below `limit`: once
   `limit` caps the sample, newer runs replace older ones instead of adding to them.
 - `cost_per_call` and `latency_p95` keep their point rule and do not count in k. A spec with
-  only those checks has no interval checks, so `confidence` and `sequential` change no decision
-  (the stats line shows `across 0 interval checks`).
+  only those checks has no interval checks, so `confidence` changes nothing (the stats line
+  shows `across 0 interval checks`); `sequential` still starts the sample at the rollout's first
+  call, so cost and p95 cover `[that call, now)`.
 - Wider intervals mean more `wait` early in a rollout. A larger `min_calls` or `min_count` moves
   n*, and so the sharpest point of the boundary, later.
 
