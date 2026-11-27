@@ -19,7 +19,7 @@ use gadk_analytics::cost::{CostSum, Usage};
 use gadk_analytics::prompts::{
     FeedbackRow, InvocationVersions, VersionFeedback, VersionMetrics, VersionModel, VersionStats,
 };
-use gadk_analytics::review::{Cursor, PendingTrace};
+use gadk_analytics::review::{Cursor, JudgeScore, PendingTrace};
 use gadk_analytics::scores::{ScoreRow, TraceRoot, TraceScores};
 use gadk_analytics::sessions::{
     SessionCursor, SessionPage, SessionRow, TurnRow, TurnScore, UserPage, UserRow,
@@ -274,7 +274,16 @@ fn the_review_types_serialize_timestamps_as_rfc3339() {
             "first": "2026-11-23T11:00:00Z",
             "prompts": ["triage@2"],
             "thumbs_down": 1,
+            "judge": [],
         })
+    );
+    assert_eq!(
+        serde_json::to_value(
+            PendingTrace::new("0123456789abcdef0123456789abcdef".into(), at, vec![], 0,)
+                .with_judge(vec![JudgeScore::new("m/llm_judge".into(), 4.0, true)])
+        )
+        .unwrap()["judge"],
+        json!([{ "name": "m/llm_judge", "score": 4.0, "pass": true }])
     );
     assert_eq!(
         serde_json::to_value(Cursor::new(at, "0123456789abcdef0123456789abcdef".into())).unwrap(),

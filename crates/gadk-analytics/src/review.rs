@@ -158,6 +158,26 @@ pub fn at_text(t: DateTime<Utc>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Micros, true)
 }
 
+/// The newest judge score of one name on a pending trace: a `FEEDBACK` row with source `judge`,
+/// as `gadk-eval monitor --write-scores` writes them.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct JudgeScore {
+    /// The score name, `<monitor spec>/<scorer kind>` (`_<n>` for the n-th scorer of a kind).
+    pub name: String,
+    /// The judge's score.
+    pub score: f64,
+    /// Whether the judge passed the run (its comment starts with `pass:`).
+    pub pass: bool,
+}
+
+impl JudgeScore {
+    /// The judge score `name` with `score`, passing when `pass`.
+    pub fn new(name: String, score: f64, pass: bool) -> Self {
+        Self { name, score, pass }
+    }
+}
+
 /// A trace waiting for review.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
@@ -170,11 +190,14 @@ pub struct PendingTrace {
     pub prompts: Vec<String>,
     /// The distinct app thumbs-down scores on the trace.
     pub thumbs_down: u64,
+    /// The newest judge score per name, sorted by name (empty when none). Judge scores never
+    /// make a trace reviewed.
+    pub judge: Vec<JudgeScore>,
 }
 
 impl PendingTrace {
     /// The pending trace `trace_id` whose first LLM response is `first`, with its prompt
-    /// versions `prompts` and `thumbs_down` app thumbs-down scores.
+    /// versions `prompts`, `thumbs_down` app thumbs-down scores and no judge scores.
     pub fn new(
         trace_id: String,
         first: DateTime<Utc>,
@@ -186,7 +209,15 @@ impl PendingTrace {
             first,
             prompts,
             thumbs_down,
+            judge: Vec::new(),
         }
+    }
+
+    /// The trace with its judge scores `judge`.
+    #[must_use]
+    pub fn with_judge(mut self, judge: Vec<JudgeScore>) -> Self {
+        self.judge = judge;
+        self
     }
 }
 
@@ -254,7 +285,8 @@ fn pending_params(
     params
 }
 
-/// A row of [`pending_sql`]; a NULL `prompts` array is empty.
+/// A row of [`pending_sql`]; a NULL `prompts` or `judge` array is empty, and a judge item
+/// without a name or a numeric score is dropped. The judge scores are sorted by name.
 fn pending_row(row: &Map<String, Value>) -> Result<PendingTrace, SourceError> {
     let trace_id = text(row, "trace_id")
         .ok_or_else(|| SourceError::bigquery(None, None, "row without a valid trace_id"))?;
@@ -268,11 +300,27 @@ fn pending_row(row: &Map<String, Value>) -> Result<PendingTrace, SourceError> {
                 .collect()
         })
         .unwrap_or_default();
+    let mut judge: Vec<JudgeScore> = row
+        .get("judge")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter_map(|j| {
+            Some(JudgeScore::new(
+                text(j, "name")?,
+                j.get("score")?.as_f64()?,
+                j.get("pass").and_then(Value::as_bool).unwrap_or(false),
+            ))
+        })
+        .collect();
+    judge.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(PendingTrace {
         trace_id,
         first: timestamp(row, "first")?,
         prompts,
         thumbs_down: count(row, "thumbs_down"),
+        judge,
     })
 }
 
@@ -283,10 +331,13 @@ fn pending_row(row: &Map<String, Value>) -> Result<PendingTrace, SourceError> {
 /// - `p`: per trace, its `name@version` prompt versions and whether one matches `@prompt`
 ///   (and `@version` when set).
 /// - `inv`: the trace's invocations in the window.
-/// - `f`, `fm`: `FEEDBACK` rows since a day before `@start`, mapped to traces by `trace_id`
-///   or by invocation.
+/// - `f`, `fm`: `FEEDBACK` rows since a day before `@start`, with their time and comment,
+///   mapped to traces by `trace_id` or by invocation.
 /// - `agg`: per trace, whether it has a console score for every name in `@names` and how many
 ///   distinct app thumbs-down scores there are.
+/// - `j`: per trace, the newest `judge` row per name (by time, then `event_id`), dropped when its
+///   value is not a number, as `ARRAY<STRUCT<name, score, pass>>` sorted by name; `pass` is
+///   whether the comment starts with `pass:`. Judge rows never count toward `scored`.
 fn pending_sql(table: &str, with_cursor: bool) -> String {
     let cursor = if with_cursor {
         "\n  AND (t.first < @after OR (t.first = @after AND t.trace_id < @after_id))"
@@ -320,19 +371,21 @@ inv AS (
     AND REGEXP_CONTAINS(trace_id, r'^[0-9a-fA-F]{{32}}$')
     AND invocation_id IS NOT NULL AND invocation_id != ''),
 f AS (
-  SELECT event_id, trace_id, invocation_id, JSON_VALUE(attributes, '$.source') AS source,
-    JSON_VALUE(content, '$.name') AS name, JSON_VALUE(content, '$.data_type') AS data_type,
-    JSON_VALUE(content, '$.value') AS value
+  SELECT event_id, timestamp, trace_id, invocation_id,
+    JSON_VALUE(attributes, '$.source') AS source, JSON_VALUE(content, '$.name') AS name,
+    JSON_VALUE(content, '$.data_type') AS data_type, JSON_VALUE(content, '$.value') AS value,
+    JSON_VALUE(content, '$.comment') AS comment
   FROM {table}
   WHERE event_type = 'FEEDBACK'
     AND timestamp >= TIMESTAMP_SUB(@start, INTERVAL 1 DAY)
     AND timestamp <= CURRENT_TIMESTAMP()),
 fm AS (
-  SELECT LOWER(trace_id) AS tid, event_id, source, name, data_type, value
+  SELECT LOWER(trace_id) AS tid, event_id, timestamp, source, name, data_type, value, comment
   FROM f
   WHERE trace_id != ''
   UNION ALL
-  SELECT inv.trace_id AS tid, f.event_id, f.source, f.name, f.data_type, f.value
+  SELECT inv.trace_id AS tid, f.event_id, f.timestamp, f.source, f.name, f.data_type, f.value,
+    f.comment
   FROM f JOIN inv USING (invocation_id)),
 agg AS (
   SELECT tid,
@@ -341,10 +394,22 @@ agg AS (
     COUNT(DISTINCT IF(source = 'app' AND data_type = 'bool' AND value = 'false', event_id, NULL))
       AS thumbs_down
   FROM fm
+  GROUP BY tid),
+j AS (
+  SELECT tid,
+    ARRAY_AGG(STRUCT(name, SAFE_CAST(value AS FLOAT64) AS score,
+      IFNULL(STARTS_WITH(comment, 'pass:'), FALSE) AS pass) ORDER BY name) AS judge
+  FROM (
+    SELECT tid, name, value, comment
+    FROM fm
+    WHERE source = 'judge'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY tid, name ORDER BY timestamp DESC, event_id DESC) = 1)
+  WHERE SAFE_CAST(value AS FLOAT64) IS NOT NULL
   GROUP BY tid)
 SELECT t.trace_id AS trace_id, t.first AS first, p.prompts AS prompts,
-  IFNULL(agg.thumbs_down, 0) AS thumbs_down
+  IFNULL(agg.thumbs_down, 0) AS thumbs_down, j.judge AS judge
 FROM t LEFT JOIN p USING (trace_id) LEFT JOIN agg ON agg.tid = t.trace_id
+  LEFT JOIN j ON j.tid = t.trace_id
 WHERE NOT IFNULL(agg.scored, FALSE)
   AND (NOT @flagged OR IFNULL(agg.thumbs_down, 0) > 0)
   AND (@prompt IS NULL OR IFNULL(p.matches, FALSE)){cursor}
@@ -364,7 +429,9 @@ mod tests {
 
     use super::*;
     use crate::BigQueryTable;
-    use crate::testutil::{FakeHttp, param_value, pending_cells, pending_reply};
+    use crate::testutil::{
+        FakeHttp, param_value, pending_cells, pending_judge_cells, pending_reply, record, repeated,
+    };
 
     const TRACE: &str = "0123456789abcdef0123456789abcdef";
 
@@ -434,19 +501,21 @@ inv AS (
     AND REGEXP_CONTAINS(trace_id, r'^[0-9a-fA-F]{32}$')
     AND invocation_id IS NOT NULL AND invocation_id != ''),
 f AS (
-  SELECT event_id, trace_id, invocation_id, JSON_VALUE(attributes, '$.source') AS source,
-    JSON_VALUE(content, '$.name') AS name, JSON_VALUE(content, '$.data_type') AS data_type,
-    JSON_VALUE(content, '$.value') AS value
+  SELECT event_id, timestamp, trace_id, invocation_id,
+    JSON_VALUE(attributes, '$.source') AS source, JSON_VALUE(content, '$.name') AS name,
+    JSON_VALUE(content, '$.data_type') AS data_type, JSON_VALUE(content, '$.value') AS value,
+    JSON_VALUE(content, '$.comment') AS comment
   FROM `p.d.t`
   WHERE event_type = 'FEEDBACK'
     AND timestamp >= TIMESTAMP_SUB(@start, INTERVAL 1 DAY)
     AND timestamp <= CURRENT_TIMESTAMP()),
 fm AS (
-  SELECT LOWER(trace_id) AS tid, event_id, source, name, data_type, value
+  SELECT LOWER(trace_id) AS tid, event_id, timestamp, source, name, data_type, value, comment
   FROM f
   WHERE trace_id != ''
   UNION ALL
-  SELECT inv.trace_id AS tid, f.event_id, f.source, f.name, f.data_type, f.value
+  SELECT inv.trace_id AS tid, f.event_id, f.timestamp, f.source, f.name, f.data_type, f.value,
+    f.comment
   FROM f JOIN inv USING (invocation_id)),
 agg AS (
   SELECT tid,
@@ -455,10 +524,22 @@ agg AS (
     COUNT(DISTINCT IF(source = 'app' AND data_type = 'bool' AND value = 'false', event_id, NULL))
       AS thumbs_down
   FROM fm
+  GROUP BY tid),
+j AS (
+  SELECT tid,
+    ARRAY_AGG(STRUCT(name, SAFE_CAST(value AS FLOAT64) AS score,
+      IFNULL(STARTS_WITH(comment, 'pass:'), FALSE) AS pass) ORDER BY name) AS judge
+  FROM (
+    SELECT tid, name, value, comment
+    FROM fm
+    WHERE source = 'judge'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY tid, name ORDER BY timestamp DESC, event_id DESC) = 1)
+  WHERE SAFE_CAST(value AS FLOAT64) IS NOT NULL
   GROUP BY tid)
 SELECT t.trace_id AS trace_id, t.first AS first, p.prompts AS prompts,
-  IFNULL(agg.thumbs_down, 0) AS thumbs_down
+  IFNULL(agg.thumbs_down, 0) AS thumbs_down, j.judge AS judge
 FROM t LEFT JOIN p USING (trace_id) LEFT JOIN agg ON agg.tid = t.trace_id
+  LEFT JOIN j ON j.tid = t.trace_id
 WHERE NOT IFNULL(agg.scored, FALSE)
   AND (NOT @flagged OR IFNULL(agg.thumbs_down, 0) > 0)
   AND (@prompt IS NULL OR IFNULL(p.matches, FALSE))";
@@ -511,12 +592,14 @@ WHERE NOT IFNULL(agg.scored, FALSE)
                     first,
                     prompts: vec!["greet@1".into(), "triage@2".into()],
                     thumbs_down: 2,
+                    judge: vec![],
                 },
                 PendingTrace {
                     trace_id: "1".repeat(32),
                     first: first - chrono::TimeDelta::seconds(1),
                     prompts: vec![],
                     thumbs_down: 0,
+                    judge: vec![],
                 },
             ]
         );
@@ -621,6 +704,7 @@ WHERE NOT IFNULL(agg.scored, FALSE)
                 first,
                 prompts: vec!["triage@2".into()],
                 thumbs_down: 0,
+                judge: vec![],
             })
         );
         let body = fake.body(0);
@@ -682,5 +766,92 @@ WHERE NOT IFNULL(agg.scored, FALSE)
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), "BigQuery: HTTP 403: Access Denied");
+    }
+
+    #[tokio::test]
+    async fn pending_reads_the_judge_scores_sorted_by_name() {
+        let first = end() - chrono::TimeDelta::hours(2);
+        let fake = FakeHttp::new(vec![pending_reply(vec![
+            pending_judge_cells(
+                TRACE,
+                first,
+                &[],
+                0,
+                &[
+                    ("m/reference", 2.0, false),
+                    ("m/llm_judge", 4.0, true),
+                    ("m/llm_judge_2", 3.5, true),
+                ],
+            ),
+            pending_cells(
+                &"1".repeat(32),
+                first - chrono::TimeDelta::seconds(1),
+                &[],
+                0,
+            ),
+        ])]);
+        let rows = source(&fake)
+            .pending(
+                &ReviewQueue::new(TimeRange::Days7),
+                &names(&["quality"]),
+                end(),
+            )
+            .await
+            .unwrap();
+        // A trace with only judge scores is still pending: it is listed.
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].judge,
+            vec![
+                JudgeScore::new("m/llm_judge".into(), 4.0, true),
+                JudgeScore::new("m/llm_judge_2".into(), 3.5, true),
+                JudgeScore::new("m/reference".into(), 2.0, false),
+            ]
+        );
+        assert_eq!(rows[1].judge, Vec::<JudgeScore>::new());
+    }
+
+    #[tokio::test]
+    async fn judge_items_without_a_name_or_a_number_are_dropped() {
+        let mut cells = pending_cells(TRACE, end() - chrono::TimeDelta::hours(1), &[], 0);
+        *cells.last_mut().unwrap() = repeated(vec![
+            record(vec![json!("m/ok"), json!("3"), json!("true")]),
+            record(vec![json!("m/nan"), json!("NaN"), json!("true")]),
+            record(vec![Value::Null, json!("4"), json!("false")]),
+        ]);
+        let fake = FakeHttp::new(vec![pending_reply(vec![cells])]);
+        let rows = source(&fake)
+            .pending(&ReviewQueue::new(TimeRange::Days7), &names(&["q"]), end())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows[0].judge,
+            vec![JudgeScore::new("m/ok".into(), 3.0, true)]
+        );
+    }
+
+    #[test]
+    fn judge_rows_never_make_a_trace_reviewed() {
+        let sql = pending_sql("`p.d.t`", false);
+        // Only console scores count toward `scored`; judge rows feed `j` alone.
+        assert!(
+            sql.contains(
+                "COUNT(DISTINCT IF(source = 'console' AND name IN UNNEST(@names), name, NULL))"
+            ),
+            "{sql}"
+        );
+        assert_eq!(sql.matches("source = 'judge'").count(), 1, "{sql}");
+        assert!(sql.contains("WHERE NOT IFNULL(agg.scored, FALSE)"), "{sql}");
+    }
+
+    #[test]
+    fn with_judge_sets_the_judge_scores() {
+        let first = end();
+        let t = PendingTrace::new(TRACE.into(), first, vec![], 0);
+        assert!(t.judge.is_empty());
+        let judged = t.with_judge(vec![JudgeScore::new("m/llm_judge".into(), 5.0, true)]);
+        assert_eq!(judged.judge[0].name, "m/llm_judge");
+        assert_eq!(judged.judge[0].score, 5.0);
+        assert!(judged.judge[0].pass);
     }
 }
