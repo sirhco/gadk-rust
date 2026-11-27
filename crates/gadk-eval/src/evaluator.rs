@@ -76,20 +76,21 @@ enum JudgeSource {
 impl Evaluator {
     /// An evaluator whose `llm_judge` and `reference` scorers ask `judge`.
     pub fn new(judge: Arc<dyn Llm>) -> Self {
-        Evaluator {
-            judge: JudgeSource::Model(judge),
-            concurrency: 4,
-            runs_per_case: 1,
-            run_timeout: Duration::from_secs(120),
-        }
+        Self::from_source(JudgeSource::Model(judge))
     }
 
     /// An evaluator whose `llm_judge` and `reference` scorers are graded by `backend`; no judge
     /// model is needed. The run timeout does not bound `backend`'s calls; the backend bounds its
     /// own.
     pub fn with_backend(backend: Arc<dyn JudgeBackend>) -> Self {
+        Self::from_source(JudgeSource::Backend(backend))
+    }
+
+    /// An evaluator grading through `judge`, with the default concurrency (4), runs per case (1)
+    /// and run timeout (120 s).
+    fn from_source(judge: JudgeSource) -> Self {
         Evaluator {
-            judge: JudgeSource::Backend(backend),
+            judge,
             concurrency: 4,
             runs_per_case: 1,
             run_timeout: Duration::from_secs(120),

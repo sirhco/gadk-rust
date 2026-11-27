@@ -150,7 +150,7 @@ impl Guard {
             .judge
             .as_ref()
             .map_or(DEFAULT_JUDGE_TIMEOUT, |j| j.timeout);
-        let judge = gemini_backend(judge, timeout);
+        let judge = judge.map(|model| gemini_backend(model, timeout));
         self.run_with_backend(spec, store, source, prices, judge, previous, apply)
             .await
     }

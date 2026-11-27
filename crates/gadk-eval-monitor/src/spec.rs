@@ -187,6 +187,11 @@ pub(crate) fn is_dataset_or_table(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+/// Whether `s` is a usable Google Cloud location name: one or more of `[A-Za-z0-9-]`.
+pub(crate) fn is_location(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
 /// Whether `s` is a usable monitor name: 1-64 of `[A-Za-z0-9_-]`.
 pub(crate) fn is_monitor_name(s: &str) -> bool {
     is_project_id(s) && s.len() <= 64
@@ -395,7 +400,7 @@ pub(crate) fn parse_judge(v: &Value, source_project: &str) -> Result<JudgeSpec, 
     let location = string_field(
         m,
         "location",
-        |s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'),
+        is_location,
         "`judge.location` must match [A-Za-z0-9-]+",
     )?
     .unwrap_or_else(|| DEFAULT_JUDGE_LOCATION.to_owned());

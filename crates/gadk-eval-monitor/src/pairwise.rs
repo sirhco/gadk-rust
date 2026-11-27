@@ -316,7 +316,7 @@ cases:
         assert_eq!(a1.2, "User: hi\nAgent: v1-a1\n\n");
         let b1 = calls.iter().find(|c| c.2.contains("v2-b1")).unwrap();
         assert_eq!(b1.0, DEFAULT_PAIRWISE_CRITERIA);
-        assert!(judge.max_in_flight() <= 4, "{}", judge.max_in_flight());
+        assert_eq!(judge.max_in_flight(), 4, "the comparisons run 4 at a time");
     }
 
     #[tokio::test]

@@ -105,8 +105,12 @@ impl Monitor {
             .judge
             .as_ref()
             .map_or(DEFAULT_JUDGE_TIMEOUT, |j| j.timeout);
-        self.run_with_backend(spec, source, gemini_backend(judge, timeout))
-            .await
+        self.run_with_backend(
+            spec,
+            source,
+            judge.map(|model| gemini_backend(model, timeout)),
+        )
+        .await
     }
 
     /// [`Monitor::run`] with any [`JudgeBackend`] grading the `llm_judge` and `reference`
@@ -142,14 +146,11 @@ impl Monitor {
     }
 }
 
-/// `judge` as a [`GeminiJudge`] whose calls are bounded by `timeout` (values below 1 ms mean
+/// `model` as a [`GeminiJudge`] whose calls are bounded by `timeout` (values below 1 ms mean
 /// 1 ms), as [`gadk_eval::score_transcript`] bounds them.
-pub(crate) fn gemini_backend(
-    judge: Option<Arc<dyn Llm>>,
-    timeout: Duration,
-) -> Option<Arc<dyn JudgeBackend>> {
+pub(crate) fn gemini_backend(model: Arc<dyn Llm>, timeout: Duration) -> Arc<dyn JudgeBackend> {
     let timeout = timeout.max(Duration::from_millis(1));
-    judge.map(|model| Arc::new(GeminiJudge::new(model, timeout)) as Arc<dyn JudgeBackend>)
+    Arc::new(GeminiJudge::new(model, timeout))
 }
 
 /// `MonitorError::Judge` when `scorers` has an `llm_judge` scorer and there is no judge.

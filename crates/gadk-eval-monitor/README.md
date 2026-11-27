@@ -226,9 +226,12 @@ A judge call that fails or times out is an error result for that scorer, not exi
   since the service has no pass flag of its own. A failed or slow call (longer than the judge's
   `timeout`) is an error result for that scorer, and nothing is retried.
 
-`--eval-location` is ignored with `gemini`. It defaults to `global`, the location to use: the
-`us` and `eu` multi-regions are not served by the evaluation service, and regional locations
-such as `us-central1` do not serve `gemini-3.8-flash` as a judge model (the service replies 404
+`--eval-location` is ignored with `gemini`. It defaults to `global`. Use `global`
+(recommended) or a region such as `us-central1`; multi-region values (`us`, `eu`) are rejected,
+because this client does not build multi-region endpoints. With `eval-service`, any other value
+exits 2 before anything runs, for example `gadk-eval: monitor spec: --eval-location us is a
+multi-region; use global or a region such as us-central1`. Regional locations such as
+`us-central1` do not serve `gemini-3.8-flash` as a judge model (the service replies 404
 `Autorater model not found`, an error result). The service needs the `Vertex AI User` role on
 the judge's project, through Application Default Credentials.
 
@@ -244,7 +247,7 @@ both have, through the service's pairwise metric. The criteria are the case's fi
 rubric, or "Which conversation's agent is more helpful and correct, and follows the user's
 instructions better?" for a case without one. The baseline's conversation is always shown to the
 judge first. A pair in which either run failed is an error and is not sent; at most 4 calls are
-in flight. That is (variants − 1) × cases × runs extra service calls. The results are stored in
+in flight. That is at most (variants − 1) × cases × runs extra service calls. The results are stored in
 the report's `pairwise` list and printed after the summary table:
 
 ```text

@@ -34,7 +34,9 @@
 //! `--judge-backend` picks what grades `llm_judge` and `reference` scorers: `gemini` (the
 //! default) asks the spec's judge model for a JSON verdict, and `eval-service` sends each grade
 //! to the Vertex AI Gen AI evaluation service in `--eval-location` (default `global`), with the
-//! spec's judge model as the service's judge model ([`Backends::judge_backend`]).
+//! spec's judge model as the service's judge model ([`Backends::judge_backend`]). With
+//! `eval-service`, `--eval-location` must be `global` or a region such as `us-central1`; the
+//! multi-regions `us` and `eu` are refused (exit 2) before anything runs.
 //!
 //! `experiment --pairwise` (only with `--judge-backend eval-service`; otherwise it exits 2
 //! before running anything) then compares each variant after the first with the first, run
@@ -108,7 +110,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use gadk_agent::Agent;
 use gadk_engine::llm::{LlmAgentConfig, agent as llm_agent};
-use gadk_eval::{EvalSet, Evaluator, GeminiJudge, JudgeBackend, Variant};
+use gadk_eval::{EvalSet, Evaluator, JudgeBackend, Variant};
 use gadk_model::Llm;
 use gadk_prompts::{PromptRegistry, Selector, StoreError};
 
@@ -116,7 +118,7 @@ use crate::alert::{AlertCounts, AlertOutcome, RuleStatus, alerts_body, evaluate}
 use crate::alert_source::{AlertQuery, AlertSource, UsageGroup};
 use crate::alert_spec::{AlertMetric, AlertSpec};
 use crate::error::MonitorError;
-use crate::eval_service::{EvalServiceJudge, PairwiseJudge};
+use crate::eval_service::{EvalServiceJudge, PairwiseJudge, location_problem};
 use crate::experiment::run_experiment;
 use crate::experiment_spec::{AgentInstruction, ExperimentSpec};
 use crate::export::{
@@ -130,7 +132,7 @@ use crate::guard_sources::{load_alert_specs, load_prices, load_specs};
 use crate::guard_spec::GuardSpec;
 use crate::judge::vertex_judge;
 use crate::judge_rows::{ScoreSink, judge_rows, write_judge_rows};
-use crate::monitor::Monitor;
+use crate::monitor::{Monitor, gemini_backend};
 use crate::notify::{self, Counts, Notifier, NotifyFormat, Outcome};
 use crate::pairwise::run_pairwise;
 use crate::prices::PriceTable;
@@ -162,10 +164,10 @@ pub trait Backends: Send + Sync {
     async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError>;
 
     /// The judge backend `choice` for `spec`. The default builds [`Backends::judge`]'s model
-    /// as a [`GeminiJudge`] bounded by `spec.timeout` for [`JudgeBackendChoice::Gemini`], and
-    /// refuses [`JudgeBackendChoice::EvalService`]; [`CloudBackends`] builds an
-    /// [`EvalServiceJudge`] in `spec.project` / `eval_location` with `spec.model` as the judge
-    /// model.
+    /// as a [`GeminiJudge`](gadk_eval::GeminiJudge) bounded by `spec.timeout` for
+    /// [`JudgeBackendChoice::Gemini`], and refuses [`JudgeBackendChoice::EvalService`];
+    /// [`CloudBackends`] builds an [`EvalServiceJudge`] in `spec.project` / `eval_location` with
+    /// `spec.model` as the judge model.
     async fn judge_backend(
         &self,
         spec: &JudgeSpec,
@@ -174,7 +176,7 @@ pub trait Backends: Send + Sync {
     ) -> Result<Arc<dyn JudgeBackend>, MonitorError> {
         let _ = eval_location;
         match choice {
-            JudgeBackendChoice::Gemini => gemini_judge(self.judge(spec).await?, spec),
+            JudgeBackendChoice::Gemini => Ok(gemini_backend(self.judge(spec).await?, spec.timeout)),
             JudgeBackendChoice::EvalService => {
                 Err(MonitorError::Judge(EVAL_SERVICE_UNSUPPORTED.into()))
             }
@@ -325,16 +327,6 @@ const PAIRWISE_NEEDS_EVAL_SERVICE: &str = "--pairwise needs --judge-backend eval
 /// model.
 const DEFAULT_EVAL_LOCATION: &str = "global";
 
-/// `model` as a [`GeminiJudge`] bounded by `spec.timeout` (values below 1 ms mean 1 ms), as
-/// [`Monitor::run`] and [`Guard::run`] build it.
-fn gemini_judge(
-    model: Arc<dyn Llm>,
-    spec: &JudgeSpec,
-) -> Result<Arc<dyn JudgeBackend>, MonitorError> {
-    let timeout = spec.timeout.max(Duration::from_millis(1));
-    Ok(Arc::new(GeminiJudge::new(model, timeout)))
-}
-
 /// The error of the default [`Backends::list_objects`] and [`Backends::read_object`].
 const GS_REFUSED: &str = "gs:// sources are not supported by these backends";
 
@@ -403,7 +395,7 @@ impl Backends for CloudBackends {
         eval_location: &str,
     ) -> Result<Arc<dyn JudgeBackend>, MonitorError> {
         match choice {
-            JudgeBackendChoice::Gemini => gemini_judge(self.judge(spec).await?, spec),
+            JudgeBackendChoice::Gemini => Ok(gemini_backend(self.judge(spec).await?, spec.timeout)),
             JudgeBackendChoice::EvalService => Ok(Arc::new(EvalServiceJudge::new(
                 &spec.project,
                 eval_location,
@@ -563,6 +555,18 @@ impl JudgeFlags {
             .cloned()
             .unwrap_or_else(|| DEFAULT_EVAL_LOCATION.to_owned());
         JudgeFlags { backend, location }
+    }
+
+    /// [`JudgeFlags::of`], refusing a bad `--eval-location` with `--judge-backend eval-service`
+    /// ([`MonitorError::Spec`]: `--eval-location …`): it must be `global` or a region matching
+    /// `[A-Za-z0-9-]+`, and not a multi-region (`us`, `eu`).
+    fn read(m: &ArgMatches) -> Result<Self, MonitorError> {
+        let flags = Self::of(m);
+        if flags.backend == JudgeBackendChoice::EvalService {
+            location_problem(&flags.location)
+                .map_err(|why| MonitorError::Spec(format!("--eval-location {why}")))?;
+        }
+        Ok(flags)
     }
 }
 
@@ -898,16 +902,21 @@ pub async fn run(
         Some(("monitor", m)) => {
             let spec = m.get_one::<String>("spec").map_or("", String::as_str);
             let out = m.get_one::<String>("out").map(String::as_str);
-            monitor(
-                spec,
-                out,
-                limit(m),
-                m.get_flag("write-scores"),
-                &JudgeFlags::of(m),
-                backends,
-                stdout,
-            )
-            .await
+            match JudgeFlags::read(m) {
+                Ok(judge) => {
+                    monitor(
+                        spec,
+                        out,
+                        limit(m),
+                        m.get_flag("write-scores"),
+                        &judge,
+                        backends,
+                        stdout,
+                    )
+                    .await
+                }
+                Err(e) => Err(e),
+            }
         }
         Some(("report", m)) => {
             let url = m.get_one::<String>("url").map_or("", String::as_str);
@@ -918,8 +927,12 @@ pub async fn run(
         Some(("experiment", m)) => {
             let spec = m.get_one::<String>("spec").map_or("", String::as_str);
             let out = m.get_one::<String>("out").map(String::as_str);
-            let judge = JudgeFlags::of(m);
-            experiment(spec, out, &judge, m.get_flag("pairwise"), backends, stdout).await
+            match JudgeFlags::read(m) {
+                Ok(judge) => {
+                    experiment(spec, out, &judge, m.get_flag("pairwise"), backends, stdout).await
+                }
+                Err(e) => Err(e),
+            }
         }
         Some(("guard", m)) => guard(m, backends, stdout).await,
         Some(("guards", m)) => guards(m, backends, stdout).await,
@@ -1085,6 +1098,7 @@ async fn guard(
     backends: &dyn Backends,
     stdout: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
+    let judge = JudgeFlags::read(m)?;
     let spec_path = m.get_one::<String>("spec").map_or("", String::as_str);
     let spec = GuardSpec::load(spec_path)?;
     let out_url = m.get_one::<String>("out");
@@ -1103,7 +1117,7 @@ async fn guard(
             .get_one::<i64>("max-bytes")
             .copied()
             .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED),
-        judge: JudgeFlags::of(m),
+        judge,
     };
     Ok(run_one_guard(&spec, &opts, backends, stdout).await?.code)
 }
@@ -1206,6 +1220,7 @@ async fn guards(
     backends: &dyn Backends,
     stdout: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
+    let judge = JudgeFlags::read(m)?;
     let sources: Vec<String> = m
         .get_many::<String>("sources")
         .into_iter()
@@ -1237,7 +1252,7 @@ async fn guards(
             .get_one::<i64>("max-bytes")
             .copied()
             .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED),
-        judge: JudgeFlags::of(m),
+        judge,
     };
     let mut stdout = Watched {
         inner: stdout,
@@ -5781,7 +5796,7 @@ mod tests {
                         ));
                         Ok(self.backend.clone())
                     }
-                    _ => gemini_judge(self.judge(spec).await?, spec),
+                    _ => Ok(gemini_backend(self.judge(spec).await?, spec.timeout)),
                 }
             }
         }
@@ -5848,6 +5863,89 @@ mod tests {
             .await;
             assert_eq!((code, stdout.as_str()), (2, ""));
             assert!(stderr.contains("invalid value 'vertex'"), "{stderr}");
+        }
+
+        #[tokio::test]
+        async fn a_bad_eval_location_is_a_spec_error_before_anything_runs() {
+            for (location, want) in [
+                (
+                    "evil.example/x#",
+                    r#"gadk-eval: monitor spec: --eval-location "evil.example/x#" is not a location; use global or a region such as us-central1"#,
+                ),
+                (
+                    "us",
+                    "gadk-eval: monitor spec: --eval-location us is a multi-region; use global or a region such as us-central1",
+                ),
+                (
+                    "eu",
+                    "gadk-eval: monitor spec: --eval-location eu is a multi-region; use global or a region such as us-central1",
+                ),
+            ] {
+                for command in ["monitor", "experiment", "guard", "guards"] {
+                    // The spec file does not exist: the flag is refused before it is read.
+                    let fake = Fake::new(Vec::new());
+                    let (code, stdout, stderr) = cli_run(
+                        &[
+                            command,
+                            "missing.yaml",
+                            "--judge-backend",
+                            "eval-service",
+                            "--eval-location",
+                            location,
+                        ],
+                        &fake,
+                    )
+                    .await;
+                    assert_eq!((code, stdout.as_str()), (2, ""), "{command} {location}");
+                    assert_eq!(stderr.trim_end(), want, "{command} {location}");
+                    let m = cli()
+                        .try_get_matches_from([
+                            "gadk-eval",
+                            command,
+                            "missing.yaml",
+                            "--judge-backend",
+                            "eval-service",
+                            "--eval-location",
+                            location,
+                        ])
+                        .unwrap();
+                    let Err(e @ MonitorError::Spec(_)) =
+                        JudgeFlags::read(m.subcommand().unwrap().1)
+                    else {
+                        panic!("{command} {location} must be a spec error");
+                    };
+                    assert_eq!(format!("gadk-eval: {e}"), want, "{command} {location}");
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn global_and_regions_are_eval_locations() {
+            for location in ["global", "us-central1"] {
+                for command in ["monitor", "experiment", "guard", "guards"] {
+                    let argv = [
+                        "gadk-eval",
+                        command,
+                        "missing.yaml",
+                        "--judge-backend",
+                        "eval-service",
+                        "--eval-location",
+                        location,
+                    ];
+                    let m = cli().try_get_matches_from(argv).unwrap();
+                    let flags = JudgeFlags::read(m.subcommand().unwrap().1).unwrap();
+                    assert_eq!(flags.location, location, "{command}");
+                    // The run goes on to the (missing) spec file.
+                    let (code, _, stderr) = cli_run(&argv[1..], &Fake::new(Vec::new())).await;
+                    assert_eq!(code, 2, "{command} {location}");
+                    assert!(!stderr.contains("--eval-location"), "{stderr}");
+                }
+            }
+            // Without the evaluation service the location is not used, so it is not checked.
+            let m = cli()
+                .try_get_matches_from(["gadk-eval", "monitor", "m.yaml", "--eval-location", "us"])
+                .unwrap();
+            assert!(JudgeFlags::read(m.subcommand().unwrap().1).is_ok());
         }
 
         #[tokio::test]

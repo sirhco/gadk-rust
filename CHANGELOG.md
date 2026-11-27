@@ -21,8 +21,11 @@ the public API.
   and also a `PairwiseJudge` (`PairwiseOutcome`, `PairwiseChoice`).
   - `gadk-eval monitor`, `experiment`, `guard` and `guards` take `--judge-backend
     gemini|eval-service` (default `gemini`, unchanged output) and `--eval-location` (default
-    `global`); `Backends::judge_backend`, `Backends::pairwise_judge` and `JudgeBackendChoice`
-    back them, and `Monitor::run_with_backend` and `Guard::run_with_backend` take a backend.
+    `global`; takes `global` or a region such as `us-central1`, and rejects the multi-regions
+    `us` and `eu`, as does `EvalServiceJudge`); `gadk_eval_monitor::cli::Backends::judge_backend`,
+    `gadk_eval_monitor::cli::Backends::pairwise_judge` and
+    `gadk_eval_monitor::cli::JudgeBackendChoice` back them, and `Monitor::run_with_backend` and
+    `Guard::run_with_backend` take a backend.
   - `gadk-eval experiment --pairwise` (with `--judge-backend eval-service`) compares each variant
     with the first, run by run, and prints wins, losses and ties. `ExperimentReport` gains
     `pairwise` (`PairwiseResult`, `PairwiseVerdict`; absent in older reports), `with_pairwise`

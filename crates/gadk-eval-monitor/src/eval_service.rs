@@ -29,6 +29,7 @@ use serde_json::{Value, json};
 
 use crate::error::MonitorError;
 use crate::gcp::{AdcTokenSource, GcpHttp, TokenSource, encode, excerpt};
+use crate::spec::is_location;
 
 /// The API version of the `evaluateInstances` endpoint.
 const API_VERSION: &str = "v1";
@@ -173,34 +174,69 @@ impl fmt::Debug for EvalServiceJudge {
     }
 }
 
+/// Why `location` cannot be an evaluation service location, else `Ok`: it must be `global` or
+/// a region matching `[A-Za-z0-9-]+` (it becomes part of the endpoint host, which receives the
+/// bearer token). The multi-regions `us` and `eu` are refused, because their endpoints use a host
+/// form this client does not build. The text follows the location, as in
+/// `--eval-location {text}`.
+pub(crate) fn location_problem(location: &str) -> Result<(), String> {
+    if location == "global" {
+        Ok(())
+    } else if location.eq_ignore_ascii_case("us") || location.eq_ignore_ascii_case("eu") {
+        Err(format!(
+            "{location} is a multi-region; use global or a region such as us-central1"
+        ))
+    } else if is_location(location) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{location:?} is not a location; use global or a region such as us-central1"
+        ))
+    }
+}
+
+/// [`location_problem`] as `MonitorError::Judge("evaluation service location …")`.
+fn check_location(location: &str) -> Result<(), MonitorError> {
+    location_problem(location)
+        .map_err(|why| MonitorError::Judge(format!("evaluation service location {why}")))
+}
+
 impl EvalServiceJudge {
     /// The service in `project` / `location`, with Application Default Credentials. Use location
-    /// `global` unless the judge `model` is served in a region. Must be called inside a Tokio
-    /// runtime.
+    /// `global` (recommended) or a region such as `us-central1`; multi-region locations (`us`,
+    /// `eu`) are rejected, because this client does not build multi-region endpoints. Must be
+    /// called inside a Tokio runtime.
     ///
     /// # Errors
     ///
-    /// [`MonitorError::Judge`] (`Application Default Credentials: …`) when no credentials can be
-    /// built.
+    /// [`MonitorError::Judge`] (`evaluation service location …`) when `location` is not `global`
+    /// or a region matching `[A-Za-z0-9-]+`; [`MonitorError::Judge`]
+    /// (`Application Default Credentials: …`) when no credentials can be built.
     pub fn new(
         project: &str,
         location: &str,
         model: &str,
         timeout: Duration,
     ) -> Result<Self, MonitorError> {
+        check_location(location)?;
         let auth = AdcTokenSource::adc()
             .map_err(|e| MonitorError::Judge(format!("Application Default Credentials: {e}")))?;
-        Ok(Self::with_http(
+        Self::with_http(
             project,
             location,
             model,
             timeout,
             GcpHttp::default_http(),
             Arc::new(auth),
-        ))
+        )
     }
 
     /// [`EvalServiceJudge::new`] with an explicit HTTP client and credentials (tests).
+    ///
+    /// # Errors
+    ///
+    /// [`MonitorError::Judge`] (`evaluation service location …`) when `location` is not `global`
+    /// or a region matching `[A-Za-z0-9-]+`, as [`EvalServiceJudge::new`].
     pub fn with_http(
         project: &str,
         location: &str,
@@ -208,13 +244,14 @@ impl EvalServiceJudge {
         timeout: Duration,
         http: Arc<dyn HttpClient>,
         auth: Arc<dyn TokenSource>,
-    ) -> Self {
+    ) -> Result<Self, MonitorError> {
+        check_location(location)?;
         let host = if location == "global" {
             GLOBAL_HOST.to_owned()
         } else {
             format!("{location}-{GLOBAL_HOST}")
         };
-        EvalServiceJudge {
+        Ok(EvalServiceJudge {
             gcp: GcpHttp::new(http, auth),
             url: format!(
                 "https://{host}/{API_VERSION}/projects/{}/locations/{}:evaluateInstances",
@@ -225,7 +262,7 @@ impl EvalServiceJudge {
                 "projects/{project}/locations/{location}/publishers/google/models/{model}"
             ),
             timeout,
-        }
+        })
     }
 
     /// Sends `body` with the judge model added; the 2xx reply's body, else the error text.
@@ -401,6 +438,7 @@ mod tests {
             client,
             Arc::new(auth),
         )
+        .expect("a valid location")
     }
 
     fn rubric_request() -> JudgeRequest {
@@ -598,7 +636,8 @@ mod tests {
             Duration::from_millis(20),
             ScriptedClient::always(FakeResponse::never()),
             Arc::new(auth),
-        );
+        )
+        .expect("a valid location");
         assert_eq!(
             slow.grade(&rubric_request()).await,
             JudgeOutcome::Error("evaluation service timed out after 20ms".into())
@@ -695,5 +734,66 @@ mod tests {
             got,
             PairwiseOutcome::Error("evaluation service: HTTP 500: oops".into())
         );
+    }
+
+    #[test]
+    fn a_bad_location_is_a_judge_error() {
+        for (location, want) in [
+            (
+                "evil.example/x#",
+                r#"evaluation service location "evil.example/x#" is not a location; use global or a region such as us-central1"#,
+            ),
+            (
+                "",
+                r#"evaluation service location "" is not a location; use global or a region such as us-central1"#,
+            ),
+            (
+                "us",
+                "evaluation service location us is a multi-region; use global or a region such as us-central1",
+            ),
+            (
+                "eu",
+                "evaluation service location eu is a multi-region; use global or a region such as us-central1",
+            ),
+        ] {
+            let Err(MonitorError::Judge(got)) =
+                EvalServiceJudge::new("my-proj", location, MODEL, Duration::from_secs(5))
+            else {
+                panic!("{location:?} must be refused by new");
+            };
+            assert_eq!(got, want, "{location:?}");
+            let auth = AdcTokenSource::from_credentials(bearer_credentials("tok"));
+            let Err(MonitorError::Judge(got)) = EvalServiceJudge::with_http(
+                "my-proj",
+                location,
+                MODEL,
+                Duration::from_secs(5),
+                ScriptedClient::json("{}"),
+                Arc::new(auth),
+            ) else {
+                panic!("{location:?} must be refused by with_http");
+            };
+            assert_eq!(got, want, "{location:?}");
+        }
+    }
+
+    #[test]
+    fn global_and_regions_are_locations() {
+        for location in ["global", "us-central1", "europe-west4"] {
+            assert_eq!(location_problem(location), Ok(()), "{location}");
+            let auth = AdcTokenSource::from_credentials(bearer_credentials("tok"));
+            assert!(
+                EvalServiceJudge::with_http(
+                    "my-proj",
+                    location,
+                    MODEL,
+                    Duration::from_secs(5),
+                    ScriptedClient::json("{}"),
+                    Arc::new(auth),
+                )
+                .is_ok(),
+                "{location}"
+            );
+        }
     }
 }
