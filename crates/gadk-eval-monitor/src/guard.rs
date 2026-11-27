@@ -27,7 +27,7 @@ use gadk_prompts::{Label, PromptStore, Rollout, StoreError};
 
 use crate::error::MonitorError;
 use crate::guard_report::{
-    Action, CheckResult, GuardReport, GuardStats, Status, Verdict, duration_text,
+    Action, CheckResult, GuardReport, GuardStats, Status, Verdict, age_text, duration_text,
 };
 use crate::guard_source::{GuardQuery, GuardSource};
 use crate::guard_spec::{Check, GuardSpec};
@@ -343,7 +343,7 @@ fn young_step(
         .then(|| {
             format!(
                 "step at {q}% is {} old (< min_step_age {})",
-                duration_text(age),
+                age_text(age),
                 duration_text(min)
             )
         })

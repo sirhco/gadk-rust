@@ -753,7 +753,7 @@ error budget, however often the guard runs:
 The report shows the rule under the header:
 
 ```text
-guard support-answer-guard: support/answer/production v3 → v4 (10%), since 2026-11-24 08:00 UTC (28h), lookback 30d
+guard support-answer-guard: support/answer/production v3 → v4 (10%), since 2026-11-24 08:00 UTC (1d 4h), lookback 30d
 stats: sequential, 95% across 4 interval checks
 ```
 

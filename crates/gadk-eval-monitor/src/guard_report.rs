@@ -216,16 +216,18 @@ impl GuardReport {
     /// [`stats`](Self::stats)), one row per check (baseline and rollout values with their sample
     /// sizes, harm, status and reason), the verdict, the note (when there is one) and the
     /// action. The header ends `window <duration>`, or with `sequential` stats
-    /// `since <start> (<age>), lookback <window>`.
+    /// `since <start> (<age>), lookback <window>`, where `<age>` is rounded down to two units
+    /// (`1d 4h`).
     pub fn summary(&self) -> String {
-        let length = duration_text(self.window.to - self.window.from);
+        let length = self.window.to - self.window.from;
         let span = match &self.stats {
             Some(stats) if stats.sequential => format!(
-                "since {} ({length}), lookback {}",
+                "since {} ({}), lookback {}",
                 self.window.from.format("%Y-%m-%d %H:%M UTC"),
+                age_text(length),
                 duration_text(stats.lookback)
             ),
-            _ => format!("window {length}"),
+            _ => format!("window {}", duration_text(length)),
         };
         let mut out = format!(
             "guard {}: {}/{} v{} → v{} ({}%), {span}\n",
@@ -415,6 +417,28 @@ pub(crate) fn duration_text(d: TimeDelta) -> String {
     }
 }
 
+/// A measured age in whole minutes (rounded down; negative counts as 0): the largest non-zero
+/// unit of days, hours and minutes, then the next lower unit when it is non-zero (`4d 3h`,
+/// `1h 30m`, `45m`, `1d`, `0m`).
+pub(crate) fn age_text(d: TimeDelta) -> String {
+    let minutes = d.num_minutes().max(0);
+    let (days, hours, mins) = (minutes / 1440, minutes / 60 % 24, minutes % 60);
+    let pair = |big: i64, big_unit: &str, small: i64, small_unit: &str| {
+        if small == 0 {
+            format!("{big}{big_unit}")
+        } else {
+            format!("{big}{big_unit} {small}{small_unit}")
+        }
+    };
+    if days > 0 {
+        pair(days, "d", hours, "h")
+    } else if hours > 0 {
+        pair(hours, "h", mins, "m")
+    } else {
+        format!("{mins}m")
+    }
+}
+
 /// One side's cell: the value and `(n=<n>)`.
 fn side(unit: Unit, v: &SideValue) -> String {
     format!("{} (n={})", unit.format_value(v.value), v.n)
@@ -566,6 +590,25 @@ action: would abort
             (TimeDelta::seconds(59), "0m"),
         ] {
             assert_eq!(duration_text(d), text);
+        }
+    }
+
+    #[test]
+    fn ages_print_in_two_units_rounded_down() {
+        for (d, text) in [
+            (TimeDelta::zero(), "0m"),
+            (TimeDelta::minutes(-5), "0m"),
+            (TimeDelta::seconds(59), "0m"),
+            (TimeDelta::minutes(45), "45m"),
+            (TimeDelta::minutes(60), "1h"),
+            (TimeDelta::minutes(90), "1h 30m"),
+            (TimeDelta::hours(3), "3h"),
+            (TimeDelta::days(1) + TimeDelta::minutes(30), "1d"),
+            (TimeDelta::hours(28), "1d 4h"),
+            (TimeDelta::days(2), "2d"),
+            (TimeDelta::minutes(5974), "4d 3h"),
+        ] {
+            assert_eq!(age_text(d), text, "{d:?}");
         }
     }
 
@@ -779,7 +822,7 @@ action: would abort
         assert_eq!(
             lines[0],
             "guard support-guard: support/answer/production v3 → v4 (10%), \
-             since 2026-11-24 08:00 UTC (28h), lookback 30d"
+             since 2026-11-24 08:00 UTC (1d 4h), lookback 30d"
         );
         assert_eq!(lines[1], "stats: sequential, 95% across 2 interval checks");
         assert_eq!(lines[2..], plain_body()[..]);

@@ -7,6 +7,12 @@ the public API.
 
 ## [Unreleased]
 
+### Changed
+
+- `gadk-eval-monitor`: the guard's measured ages (the sequential header's `since … (<age>)` and
+  the `min_step_age` note's step age) print in two units rounded down (`4d 3h`, `1h 30m`);
+  configured durations are unchanged.
+
 ## [0.5.24] - 2026-11-26
 
 ### Added
