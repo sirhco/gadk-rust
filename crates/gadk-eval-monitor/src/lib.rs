@@ -85,6 +85,7 @@ pub mod guard_spec;
 pub mod judge;
 pub mod judge_rows;
 pub mod monitor;
+pub mod pairwise;
 pub mod prices;
 pub mod report;
 pub mod source;
@@ -115,6 +116,9 @@ pub use judge_rows::{
     JUDGE_ROWS_PER_INSERT, JudgeRow, ScoreSink, WriteOutcome, judge_rows, write_judge_rows,
 };
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
+pub use pairwise::{
+    DEFAULT_PAIRWISE_CRITERIA, PairwiseResult, PairwiseStats, PairwiseVerdict, run_pairwise,
+};
 pub use prices::{ModelPrice, PriceTable, TokenUsage};
 pub use report::{MonitorReport, MonitoredRun, Window};
 pub use source::bigquery::{BigQueryGuardSource, BigQueryTranscriptSource};

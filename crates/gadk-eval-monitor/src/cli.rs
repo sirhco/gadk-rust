@@ -20,7 +20,7 @@
 //! gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [--append]
 //!     [--name N] [--trace ID]... [--since <n>h|<n>d] [--agent A] [--score F]... [--limit N]
 //!     [--rubric T] [--min-good X] [--no-history] [--tool-args]
-//! gadk-eval experiment <spec.yaml> [--out <url>] [<judge flags>]
+//! gadk-eval experiment <spec.yaml> [--out <url>] [--pairwise] [<judge flags>]
 //! gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]
 //!     [<judge flags>]
 //! gadk-eval guards <source>... [--apply] [--prices <file|gs://bucket/object>] [--out <url>]
@@ -35,6 +35,12 @@
 //! default) asks the spec's judge model for a JSON verdict, and `eval-service` sends each grade
 //! to the Vertex AI Gen AI evaluation service in `--eval-location` (default `global`), with the
 //! spec's judge model as the service's judge model ([`Backends::judge_backend`]).
+//!
+//! `experiment --pairwise` (only with `--judge-backend eval-service`; otherwise it exits 2
+//! before running anything) then compares each variant after the first with the first, run
+//! by run, through the service's pairwise metric ([`Backends::pairwise_judge`],
+//! [`run_pairwise`]), stores the results in the report and prints `pairwise vs <baseline>:`
+//! with each variant's wins, losses and ties. Pairwise results never change the exit code.
 //!
 //! `monitor` exits 0 on success, 1 when the spec's `min_pass_rate` is set and either the pass
 //! rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0), and 2 when the spec cannot be loaded, the runs cannot be
@@ -126,6 +132,7 @@ use crate::judge::vertex_judge;
 use crate::judge_rows::{ScoreSink, judge_rows, write_judge_rows};
 use crate::monitor::Monitor;
 use crate::notify::{self, Counts, Notifier, NotifyFormat, Outcome};
+use crate::pairwise::run_pairwise;
 use crate::prices::PriceTable;
 use crate::source::bigquery::{BigQueryGuardSource, BigQueryTranscriptSource};
 use crate::source::cloud_trace::CloudTraceTranscriptSource;
@@ -310,6 +317,9 @@ impl JudgeBackendChoice {
 /// The error of the default [`Backends::judge_backend`] (for the evaluation service) and
 /// [`Backends::pairwise_judge`].
 const EVAL_SERVICE_UNSUPPORTED: &str = "the evaluation service is not supported by these backends";
+
+/// The error of `experiment --pairwise` without the evaluation service.
+const PAIRWISE_NEEDS_EVAL_SERVICE: &str = "--pairwise needs --judge-backend eval-service";
 
 /// The default `--eval-location`: `us-central1` does not serve `gemini-3.8-flash` as a judge
 /// model.
@@ -616,6 +626,15 @@ fn cli() -> Command {
                         .long("out")
                         .help("store the report: <dir>, file://<dir> or gs://<bucket>[/<prefix>]"),
                 )
+                .arg(
+                    Arg::new("pairwise")
+                        .long("pairwise")
+                        .action(ArgAction::SetTrue)
+                        .help(
+                            "compare each variant with the first through the evaluation \
+                             service (needs --judge-backend eval-service)",
+                        ),
+                )
                 .args(judge_flags()),
         )
         .subcommand(guard_cli())
@@ -899,7 +918,8 @@ pub async fn run(
         Some(("experiment", m)) => {
             let spec = m.get_one::<String>("spec").map_or("", String::as_str);
             let out = m.get_one::<String>("out").map(String::as_str);
-            experiment(spec, out, &JudgeFlags::of(m), backends, stdout).await
+            let judge = JudgeFlags::of(m);
+            experiment(spec, out, &judge, m.get_flag("pairwise"), backends, stdout).await
         }
         Some(("guard", m)) => guard(m, backends, stdout).await,
         Some(("guards", m)) => guards(m, backends, stdout).await,
@@ -1587,13 +1607,18 @@ fn prompts_error(e: StoreError) -> MonitorError {
 }
 
 /// `experiment`: 0 once the experiment ran and, with `--out`, was stored; errors map to 2.
+/// `pairwise` without the evaluation service is an error before anything runs.
 async fn experiment(
     spec_path: &str,
     out: Option<&str>,
     judge_flags: &JudgeFlags,
+    pairwise: bool,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
+    if pairwise && judge_flags.backend != JudgeBackendChoice::EvalService {
+        return Err(MonitorError::Spec(PAIRWISE_NEEDS_EVAL_SERVICE.into()));
+    }
     let spec = ExperimentSpec::load(spec_path)?;
     let text = std::fs::read_to_string(&spec.set).map_err(|e| set_error(&spec.set, e))?;
     let set = EvalSet::from_yaml(&text).map_err(|e| set_error(&spec.set, e))?;
@@ -1616,6 +1641,7 @@ async fn experiment(
         registry.as_ref(),
         out,
         judge_flags,
+        pairwise,
         backends,
         stdout,
     )
@@ -1628,12 +1654,14 @@ async fn experiment(
 }
 
 /// The `experiment` command after the spec, eval set and prompt registry are loaded.
+#[allow(clippy::too_many_arguments)]
 async fn run_spec(
     spec: &ExperimentSpec,
     set: &EvalSet,
     registry: Option<&PromptRegistry>,
     out: Option<&str>,
     judge_flags: &JudgeFlags,
+    pairwise: bool,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
@@ -1659,6 +1687,14 @@ async fn run_spec(
                 .await?,
         ),
     };
+    let pairwise = if pairwise {
+        let judge = backends
+            .pairwise_judge(&spec.judge, &judge_flags.location)
+            .await?;
+        Some(judge)
+    } else {
+        None
+    };
     let mut models: HashMap<&str, Arc<dyn Llm>> = HashMap::new();
     for name in spec.variants.iter().filter_map(Variant::model) {
         if !models.contains_key(name) {
@@ -1667,10 +1703,14 @@ async fn run_spec(
         }
     }
     let evaluator = evaluator.runs_per_case(spec.runs);
-    let report = run_experiment(&spec.name, &evaluator, set, &spec.variants, |v| {
+    let mut report = run_experiment(&spec.name, &evaluator, set, &spec.variants, |v| {
         build_agent(spec, registry, &models, v)
     })
     .await?;
+    if let Some(judge) = &pairwise {
+        let results = run_pairwise(judge.as_ref(), set, &report.report).await;
+        report = report.with_pairwise(results);
+    }
     // Store before printing, so a failing stdout (a closed pipe) does not lose the report.
     let stored = match store {
         Some(store) => Some(store.put_experiment(&report).await?),
@@ -3272,6 +3312,7 @@ mod tests {
         struct Serviced {
             lab: Lab,
             backend: Option<Arc<crate::testutil::FakeBackend>>,
+            pairwise: Option<Arc<crate::testutil::FakePairwise>>,
         }
 
         #[async_trait::async_trait]
@@ -3305,6 +3346,19 @@ mod tests {
                 ));
                 let backend = self.backend.clone().unwrap();
                 Ok(backend)
+            }
+
+            async fn pairwise_judge(
+                &self,
+                spec: &JudgeSpec,
+                eval_location: &str,
+            ) -> Result<Arc<dyn PairwiseJudge>, MonitorError> {
+                self.lab.calls.lock().unwrap().push(format!(
+                    "pairwise_judge {} {}/{eval_location}",
+                    spec.model, spec.project
+                ));
+                let judge = self.pairwise.clone().unwrap();
+                Ok(judge)
             }
         }
 
@@ -3380,6 +3434,129 @@ mod tests {
                 "gadk-eval: judge: the evaluation service is not supported by these backends\n"
             );
             assert!(lab.calls().is_empty(), "{:?}", lab.calls());
+        }
+
+        #[tokio::test]
+        async fn pairwise_needs_the_eval_service() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = judged_experiment(dir.path());
+            let lab = Lab::default();
+            for args in [
+                &["experiment", &spec, "--pairwise"][..],
+                &[
+                    "experiment",
+                    &spec,
+                    "--pairwise",
+                    "--judge-backend",
+                    "gemini",
+                ],
+            ] {
+                let (code, stdout, stderr) = cli_run(args, &lab).await;
+                assert_eq!((code, stdout.as_str()), (2, ""));
+                assert_eq!(
+                    stderr,
+                    "gadk-eval: monitor spec: --pairwise needs --judge-backend eval-service\n"
+                );
+            }
+            assert!(lab.calls().is_empty(), "{:?}", lab.calls());
+            let missing = dir.path().join("missing.yaml").display().to_string();
+            let (code, _, stderr) = cli_run(&["experiment", &missing, "--pairwise"], &lab).await;
+            assert_eq!(code, 2);
+            assert!(stderr.contains("--pairwise needs"), "{stderr}");
+        }
+
+        #[tokio::test]
+        async fn pairwise_compares_each_variant_with_the_first_and_stores_it() {
+            use crate::eval_service::PairwiseChoice;
+            use crate::pairwise::PairwiseVerdict;
+            use crate::testutil::{FakeBackend, FakePairwise};
+
+            let dir = tempfile::tempdir().unwrap();
+            let spec = judged_experiment(dir.path());
+            let out = dir.path().join("reports");
+            let backends = Serviced {
+                backend: Some(FakeBackend::new(4)),
+                pairwise: Some(FakePairwise::new(PairwiseChoice::Baseline)),
+                ..Serviced::default()
+            };
+            let (code, stdout, stderr) = cli_run(
+                &[
+                    "experiment",
+                    &spec,
+                    "--judge-backend",
+                    "eval-service",
+                    "--pairwise",
+                    "--out",
+                    &out.display().to_string(),
+                ],
+                &backends,
+            )
+            .await;
+            // 0 although every pair was lost: pairwise results never change the exit code.
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(
+                backends.lab.calls(),
+                [
+                    "judge_backend EvalService m-judge p/global",
+                    "pairwise_judge m-judge p/global",
+                    "model p/us/m-flash"
+                ]
+            );
+            // (2 variants - 1) x 1 case x 2 runs.
+            let calls = backends.pairwise.as_ref().unwrap().calls();
+            assert_eq!(calls.len(), 2);
+            assert_eq!(calls[0].0, "Polite");
+            assert!(
+                stdout.contains(
+                    "\npairwise vs a:\n  b: 0 wins, 2 losses, 0 ties\n    lost: polite#1, polite#2\n"
+                ),
+                "{stdout}"
+            );
+            let last = stdout.lines().last().unwrap();
+            let name = last.strip_prefix("stored report ").unwrap();
+            let json = std::fs::read_to_string(out.join("experiments").join(name)).unwrap();
+            let report = ExperimentReport::from_json(&json).unwrap();
+            let verdicts: Vec<(&str, &str, u32, PairwiseVerdict)> = report
+                .pairwise
+                .iter()
+                .map(|r| (r.variant.as_str(), r.case.as_str(), r.run, r.choice))
+                .collect();
+            assert_eq!(
+                verdicts,
+                [
+                    ("b", "polite", 1, PairwiseVerdict::Baseline),
+                    ("b", "polite", 2, PairwiseVerdict::Baseline)
+                ]
+            );
+        }
+
+        #[tokio::test]
+        async fn without_pairwise_the_report_has_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = judged_experiment(dir.path());
+            let out = dir.path().join("reports");
+            let backends = Serviced {
+                backend: Some(crate::testutil::FakeBackend::new(4)),
+                ..Serviced::default()
+            };
+            let (code, stdout, stderr) = cli_run(
+                &[
+                    "experiment",
+                    &spec,
+                    "--judge-backend",
+                    "eval-service",
+                    "--out",
+                    &out.display().to_string(),
+                ],
+                &backends,
+            )
+            .await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert!(!stdout.contains("pairwise"), "{stdout}");
+            let last = stdout.lines().last().unwrap();
+            let name = last.strip_prefix("stored report ").unwrap();
+            let json = std::fs::read_to_string(out.join("experiments").join(name)).unwrap();
+            assert!(!json.contains("pairwise"), "{json}");
         }
     }
 
