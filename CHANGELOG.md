@@ -7,6 +7,21 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-openapi`, a new crate: an OpenAPI 3.0 and 3.1 document (JSON or YAML, from a string,
+  a file or a URL) becomes a toolset with one tool per operation.
+  - `OpenApiSpec` loads the document; `OpenApiToolset::new(&spec, OpenApiConfig)` builds the
+    tools, and `skipped_operations()` lists the operations it could not use (cookie parameters,
+    non-JSON bodies, path item `$ref`s).
+  - Tools take the operation's path, query and header parameters plus a JSON `body`, and return
+    `{"status", "body"}` for any HTTP status (`"truncated": true` past `max_response_bytes`).
+  - Credentials come from a `gadk-auth` provider (`auth`) or a query-string key
+    (`query_api_key`); `post`, `put`, `patch` and `delete` calls need confirmation by default
+    (`RequireConfirmation::Mutating`).
+- `gadk`: the `openapi` feature (not default) re-exports it as `gadk::openapi`; the
+  `openapi_agent` example runs an agent over an embedded Open-Meteo forecast spec.
+
 ## [0.5.26] - 2026-11-26
 
 ### Added

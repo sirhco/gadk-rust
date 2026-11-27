@@ -1285,6 +1285,7 @@ dependencies = [
  "gadk-memory",
  "gadk-model",
  "gadk-openai",
+ "gadk-openapi",
  "gadk-platform",
  "gadk-prompts",
  "gadk-prompts-firestore",

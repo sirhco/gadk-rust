@@ -81,6 +81,7 @@ Always present: `agent`, `artifact`, `auth`, `compaction`, `engine`, `genai`, `m
 | `agentregistry` | | Google Cloud Agent Registry client (`gadk::agentregistry`) |
 | `agentanalytics` | | BigQuery Agent Analytics plugin (`gadk::agentanalytics`) |
 | `bigquery` | | BigQuery toolset: list datasets and tables, read metadata, run SQL (`gadk::bigquery`) |
+| `openapi` | | OpenAPI toolset: one tool per operation of an OpenAPI 3.0 or 3.1 document (`gadk::openapi`) |
 | `eval` | | Offline agent evaluation: eval sets, scorers, LLM judge (`gadk::eval`) |
 
 For PostgreSQL sessions, also enable the `postgres` feature of `gadk-session-database` in your

@@ -66,6 +66,9 @@ agentanalytics = ["dep:gadk-agentanalytics"]
 # The BigQuery toolset (gadk-bigquery: list datasets and tables, read their metadata, run SQL with
 # a read-only default); not in `default`.
 bigquery = ["dep:gadk-bigquery"]
+# The OpenAPI toolset (gadk-openapi: one tool per operation of an OpenAPI 3.0 or 3.1 document);
+# not in `default`.
+openapi = ["dep:gadk-openapi"]
 
 [dependencies]
 gadk-genai = { workspace = true }
@@ -93,6 +96,7 @@ gadk-telemetry = { workspace = true, optional = true }
 gadk-agentregistry = { workspace = true, optional = true }
 gadk-agentanalytics = { workspace = true, optional = true }
 gadk-bigquery = { workspace = true, optional = true }
+gadk-openapi = { workspace = true, optional = true }
 gadk-prompts = { workspace = true, optional = true }
 gadk-prompts-firestore = { workspace = true, optional = true }
 gadk-eval = { workspace = true, optional = true }
@@ -184,6 +188,10 @@ required-features = ["gemini", "launcher"]
 [[example]]
 name = "bigquery_agent"
 required-features = ["gemini", "launcher", "bigquery"]
+
+[[example]]
+name = "openapi_agent"
+required-features = ["gemini", "openapi"]
 
 [[example]]
 name = "toolsearch"

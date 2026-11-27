@@ -114,6 +114,9 @@
 - console-client: `gadk-console-client` (the typed client of the console's JSON API) has no
   gadk-* dependency, and no crate depends on it normally; `gadk-console` may dev-depend on it
   (its client conformance tests).
+- openapi: `gadk-openapi` (the OpenAPI toolset) depends on exactly `gadk-agent`, `gadk-auth` and
+  `gadk-genai`; it is a gadk-auth dependent (its tools send requests through `gadk_auth::client`),
+  and only the façade depends on it (feature `openapi`, optional).
 """
 import pathlib, sys, tomllib
 
@@ -175,7 +178,7 @@ ALLOWED = {
              "gadk-memory", "gadk-anthropic", "gadk-openai", "gadk-session-database",
              "gadk-artifact-gcs", "gadk-vertexai", "gadk-server", "gadk-a2a", "gadk-launcher",
              "gadk-agentregistry", "gadk-telemetry", "gadk-agentanalytics", "gadk-prompts",
-             "gadk-prompts-firestore", "gadk-eval", "gadk-bigquery"},
+             "gadk-prompts-firestore", "gadk-eval", "gadk-bigquery", "gadk-openapi"},
 }
 # (crate, dependency) normal edges that must be `optional = true`.
 OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("gadk-a2a", "gadk-server"),
@@ -184,7 +187,8 @@ OPTIONAL = {("gadk-engine", "gadk-gemini"), ("gadk-engine", "gadk-httprr"), ("ga
             ("gadk", "gadk-telemetry"), ("gadk", "gadk-agentanalytics"),
             ("gadk-prompts-cli", "gadk-prompts-firestore"), ("gadk", "gadk-prompts"),
             ("gadk", "gadk-prompts-firestore"), ("gadk", "gadk-eval"),
-            ("gadk", "gadk-bigquery"), ("gadk-analytics", "gadk-model")}
+            ("gadk", "gadk-bigquery"), ("gadk-analytics", "gadk-model"),
+            ("gadk", "gadk-openapi")}
 FACADE = "gadk"  # no crate may dev-depend on the façade
 ENGINE_DEPENDENTS = ("gadk", "gadk-tools", "gadk-server", "gadk-a2a", "gadk-launcher",
                      "gadk-agentregistry", "gadk-telemetry", "gadk-configurable",
