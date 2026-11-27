@@ -39,20 +39,23 @@ embedded Open-Meteo forecast spec on `gemini-3.8-flash` (Vertex AI, location `us
   with characters outside `[A-Za-z0-9_]` turned into `_`), plus `body` for an
   `application/json` (or `application/<x>+json`) request body. When two parameters map to the
   same property, or one maps to `body`, each gets a `_<in>` suffix (`id_path`, `id_query`).
+  Two properties that still clash after the suffix fail `OpenApiToolset::new` with
+  `Error::DuplicateName` (named `<tool>.<property>`).
 - **Schemas:** local `$ref`s (`#/components/…`) are expanded inline. A `$ref` that repeats
   on its own path (recursion), is more than 8 levels deep, or comes after a schema has grown
-  past 10,000 nodes becomes `{}`, so large and recursive specs still load. `nullable`, `discriminator`, `xml`, `example` and
-  `externalDocs` are removed, and in a 3.0 document `nullable: true` becomes
-  `type: [T, "null"]`.
-- **Skipped operations:** an operation with a cookie parameter, one whose request body has no
-  JSON content type, and every operation of a path item that is itself a `$ref`. They are listed
-  by `OpenApiToolset::skipped_operations()`.
+  past 10,000 nodes becomes `{}`, so large and recursive specs still load. `nullable`,
+  `discriminator`, `xml`, `example` and `externalDocs` are removed, and in a 3.0 document
+  `nullable: true` becomes `type: [T, "null"]`.
+- **Skipped operations:** an operation with a cookie parameter, one with a parameter whose `in`
+  is unknown (reason `parameter <name> has unsupported location "<in>"`), one whose request
+  body has no JSON content type, and every operation of a path item that is itself a `$ref`.
+  They are listed by `OpenApiToolset::skipped_operations()`.
 
 ## Configuration
 
 | `OpenApiConfig` method | Default | Effect |
 |---|---|---|
-| `base_url(url)` | `servers[0].url` | Base of every request URL. Server variables take their defaults; a relative server URL is resolved against the URL a fetched spec came from. |
+| `base_url(url)` | `servers[0].url` | Base of every request URL. Server variables take their defaults; a relative server URL is resolved against the URL a fetched spec came from. The base must be absolute and have no query or fragment, else `new` fails with `Error::NoBaseUrl`. |
 | `auth(provider)` | none | Sends every request through `gadk_auth::client` with this credential provider. |
 | `query_api_key(name, value)` | none | Appends `name=value` to every query string. |
 | `prefix(prefix)` | `""` | Exposes each tool as `<prefix>_<name>` (at most 64 bytes, else `Error::NameTooLong`). |
@@ -76,8 +79,10 @@ let config = OpenApiConfig::new()
 ## Auth
 
 - `auth(provider)` takes any `gadk_auth` credential provider: `static_token` (a bearer token),
-  `api_key(name, value)` (a header), `token_source`, `adc` or `service_account`. After a 401 or
-  403 the request is retried once with a refreshed credential.
+  `api_key(name, value)` (a header), `token_source`, `adc` or `service_account`. With a
+  provider that can refresh its credential (`adc` and `service_account`), a request rejected
+  with 401 or 403 is retried once with a refreshed credential; `static_token`, `api_key` and
+  `token_source` are not retried.
 - `query_api_key(name, value)` puts an API key in the query string, for APIs that want it there.
 - Both may be set. With neither, requests carry no credential.
 
@@ -97,9 +102,11 @@ text (lossy UTF-8); an empty body is `null`. A body over `max_response_bytes` is
 text, and the result gains `"truncated": true`. Redirects are not followed: a 3xx comes back as a
 normal result.
 
-A missing required argument, a non-object `args`, an object or array where a path, header
-or query value must be a scalar, or a path value of `"."` or `".."` is
-`ToolError::InvalidArgument`, and no request is sent. A transport failure is
+A missing required argument, a non-object `args`, an object or array for a path or header
+value, an object or a nested array for a query value (an array of scalars repeats the key), an
+empty path value, or a path value that makes a `.` or `..` segment (alone or together with the
+segment's other text, as `{x}{y}` with `.` and `.`) is `ToolError::InvalidArgument`, and no
+request is sent. A transport failure is
 `ToolError::Execution` holding `Error::Timeout`, `Error::Cancelled` (the invocation was
 cancelled) or `Error::Request` (connection, DNS, the credential provider, or the body read).
 

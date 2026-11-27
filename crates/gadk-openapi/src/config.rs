@@ -82,14 +82,20 @@ impl OpenApiConfig {
     }
 
     /// The base URL of every request, instead of the document's `servers[0].url`. It must be
-    /// absolute.
+    /// absolute, without a query or fragment, or [`OpenApiToolset::new`] fails with
+    /// [`Error::NoBaseUrl`].
+    ///
+    /// [`OpenApiToolset::new`]: crate::OpenApiToolset::new
+    /// [`Error::NoBaseUrl`]: crate::Error::NoBaseUrl
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = Some(url.into());
         self
     }
 
     /// Sends every request through [`gadk_auth::client`] with `provider`, which writes the
-    /// credential's headers (and retries once after a 401 or 403).
+    /// credential's headers. When the provider can refresh its credential (`adc` and
+    /// `service_account`), a 401 or 403 is retried once with a refreshed one; `static_token`,
+    /// `api_key` and `token_source` are not retried.
     pub fn auth(mut self, provider: Arc<dyn CredentialProvider>) -> Self {
         self.auth = Some(provider);
         self

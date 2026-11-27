@@ -49,7 +49,7 @@ impl OpenApiToolset {
     /// Fails with [`Error::DuplicateName`] when two operations (or two properties of one tool)
     /// share a name, [`Error::NameTooLong`] when a prefixed name is over 64 bytes,
     /// [`Error::Ref`] for a `$ref` that cannot be resolved, [`Error::NoBaseUrl`] when there
-    /// is no absolute base URL, and [`Error::HttpClient`] when the HTTP client cannot be built.
+    /// is no absolute base URL (or it has a query or fragment), and [`Error::HttpClient`] when the HTTP client cannot be built.
     pub fn new(spec: &OpenApiSpec, config: OpenApiConfig) -> Result<Self, Error> {
         let collected = operation::collect(spec)?;
         if !config.prefix.is_empty() {
@@ -146,7 +146,8 @@ impl Toolset for OpenApiToolset {
 }
 
 /// The base URL without a trailing `/`: `configured`, else `servers[0].url` with its variables
-/// set to their defaults and resolved against the URL the document was fetched from.
+/// set to their defaults and resolved against the URL the document was fetched from. A base
+/// that is not absolute, or that has a query or fragment, is [`Error::NoBaseUrl`].
 pub(crate) fn base_url(spec: &OpenApiSpec, configured: Option<&str>) -> Result<String, Error> {
     let url = match configured {
         Some(configured) => Url::parse(configured).map_err(|_| Error::NoBaseUrl)?,
@@ -178,7 +179,8 @@ pub(crate) fn base_url(spec: &OpenApiSpec, configured: Option<&str>) -> Result<S
             }
         }
     };
-    if url.cannot_be_a_base() {
+    // The operation's path is appended to the base, so a query or fragment would swallow it.
+    if url.cannot_be_a_base() || url.query().is_some() || url.fragment().is_some() {
         return Err(Error::NoBaseUrl);
     }
     Ok(url.as_str().trim_end_matches('/').to_string())

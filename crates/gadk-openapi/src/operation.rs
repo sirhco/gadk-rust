@@ -107,7 +107,7 @@ pub(crate) struct Operation {
     /// The unprefixed tool name.
     pub(crate) name: String,
     pub(crate) description: String,
-    /// Parameters in property order.
+    /// Parameters in declaration order (path-item parameters, then the operation's).
     pub(crate) params: Vec<Param>,
     pub(crate) body: Option<Body>,
     /// Whether the method changes state (`post`, `put`, `patch`, `delete`).
@@ -115,7 +115,8 @@ pub(crate) struct Operation {
 }
 
 impl Operation {
-    /// The declaration's `parameters_json_schema`.
+    /// The declaration's `parameters_json_schema`. Its `properties` is a `serde_json::Map`, so
+    /// they come out in sorted key order; `required` follows declaration order.
     pub(crate) fn parameters_schema(&self) -> Value {
         let mut properties = Map::new();
         let mut required = Vec::new();
@@ -233,6 +234,9 @@ fn operation(
     let mut json_body = None;
     if let Some(raw) = op.get("requestBody") {
         let body = resolve::object(doc, raw, &at)?;
+        // `content` is a `serde_json::Map`, so its media types come in sorted key order, not
+        // document order: the body is the first JSON one in that order, and the skip reason
+        // lists them in that order.
         let content = body.get("content").and_then(Value::as_object);
         match content.and_then(|c| c.iter().find(|(media, _)| is_json(media))) {
             Some((_, media)) => {

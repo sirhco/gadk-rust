@@ -81,6 +81,10 @@ pub(crate) fn object<'a>(doc: &'a Value, value: &'a Value, at: &str) -> Result<&
 /// expansion has produced [`MAX_EXPANDED_NODES`] objects and arrays. [`DROPPED_KEYS`] are
 /// removed from every schema object, and when `openapi_3_0` is set, `nullable: true` next to a
 /// string `type` turns `type` into `[type, "null"]`.
+///
+/// Object members, such as `properties`, are walked in sorted key order (the order of a
+/// `serde_json::Map`), not document order, so that order decides which `$ref`s the node limit
+/// turns into `{}`.
 pub(crate) fn schema(
     doc: &Value,
     schema: &Value,

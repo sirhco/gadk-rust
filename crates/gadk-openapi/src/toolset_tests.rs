@@ -75,6 +75,27 @@ fn the_configured_base_url_wins_and_loses_its_trailing_slash() {
 }
 
 #[test]
+fn a_base_url_with_a_query_or_fragment_has_no_base() {
+    for configured in ["https://h/api?v=1", "https://h/api#top", "https://h/api?"] {
+        assert!(
+            matches!(
+                new_error(&petstore(), OpenApiConfig::new().base_url(configured)),
+                Error::NoBaseUrl
+            ),
+            "{configured}"
+        );
+    }
+    let spec: OpenApiSpec =
+        r#"{"openapi": "3.1.0", "servers": [{"url": "https://h/api?v=1"}], "paths": {}}"#
+            .parse()
+            .unwrap();
+    assert!(matches!(
+        new_error(&spec, OpenApiConfig::new()),
+        Error::NoBaseUrl
+    ));
+}
+
+#[test]
 fn a_relative_server_url_resolves_against_the_fetch_url() {
     let source = Url::parse("https://api.example.com/specs/echo.json").unwrap();
     let fetched = OpenApiSpec::parse(ECHO_3_1, Some(source.clone())).unwrap();

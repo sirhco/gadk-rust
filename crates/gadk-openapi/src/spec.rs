@@ -198,7 +198,8 @@ fn check_version(doc: &Value) -> Result<(), Error> {
 }
 
 /// The path order when the document's paths cannot be read in order (a malformed path item):
-/// the JSON object's own order.
+/// sorted key order, since `serde_json::Map` (built without `preserve_order`) keeps its keys
+/// sorted.
 fn sorted_order(doc: &Value) -> Vec<(String, Vec<String>)> {
     let Some(paths) = doc.get("paths").and_then(Value::as_object) else {
         return Vec::new();

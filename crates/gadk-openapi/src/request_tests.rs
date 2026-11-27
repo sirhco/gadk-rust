@@ -197,3 +197,86 @@ fn dot_segment_path_arguments_are_rejected() {
         assert_eq!(parts.url.as_str(), path);
     }
 }
+
+const SEGMENTS: &str = r#"
+openapi: 3.0.3
+paths:
+  /a/{x}{y}:
+    get:
+      operationId: pair
+      parameters:
+        - {name: x, in: path}
+        - {name: "y", in: path}
+  /f/{name}.:
+    get:
+      operationId: dotted
+      parameters:
+        - {name: name, in: path}
+  /pets/{id}:
+    delete:
+      operationId: deletePet
+      parameters:
+        - {name: id, in: path}
+"#;
+
+fn segment_op(name: &str) -> Operation {
+    let spec: OpenApiSpec = SEGMENTS.parse().unwrap();
+    collect(&spec)
+        .unwrap()
+        .operations
+        .into_iter()
+        .find(|op| op.name == name)
+        .unwrap()
+}
+
+#[test]
+fn an_empty_path_argument_is_rejected() {
+    assert_eq!(
+        invalid(&segment_op("delete_pet"), json!({"id": ""})),
+        "argument id must not be empty"
+    );
+}
+
+#[test]
+fn adjacent_placeholders_must_not_form_a_dot_segment() {
+    assert_eq!(
+        invalid(&segment_op("pair"), json!({"x": ".", "y": "."})),
+        "arguments x, y must not form the path segment \"..\""
+    );
+}
+
+#[test]
+fn a_placeholder_and_template_text_must_not_form_a_dot_segment() {
+    assert_eq!(
+        invalid(&segment_op("dotted"), json!({"name": "."})),
+        "argument name must not form the path segment \"..\""
+    );
+    let parts = build(
+        &segment_op("dotted"),
+        "https://h",
+        None,
+        &json!({"name": "x"}),
+    )
+    .unwrap();
+    assert_eq!(parts.url.as_str(), "https://h/f/x.");
+}
+
+#[test]
+fn adjacent_placeholders_with_ordinary_values_still_build() {
+    let parts = build(
+        &segment_op("pair"),
+        "https://h",
+        None,
+        &json!({"x": "a", "y": "b"}),
+    )
+    .unwrap();
+    assert_eq!(parts.url.as_str(), "https://h/a/ab");
+    let parts = build(
+        &segment_op("pair"),
+        "https://h",
+        None,
+        &json!({"x": ".", "y": "a"}),
+    )
+    .unwrap();
+    assert_eq!(parts.url.as_str(), "https://h/a/.a");
+}

@@ -55,7 +55,8 @@ pub(crate) fn build(
         return Err(invalid("missing required argument body".to_string()));
     }
 
-    let mut path = op.path.clone();
+    // (placeholder, property, encoded value) of each path argument given.
+    let mut path_values = Vec::new();
     let mut query = Vec::new();
     let mut headers = Vec::new();
     for param in &op.params {
@@ -65,15 +66,18 @@ pub(crate) fn build(
         match param.location {
             Location::Path => {
                 let text = scalar(value).ok_or_else(|| not_scalar(&param.property))?;
-                // URL parsing would resolve a `.` or `..` segment and leave the operation's
-                // path. Other values cannot form a dot segment: `%` itself is encoded.
-                if text == "." || text == ".." {
+                // An empty value would leave an empty segment (`/pets/` for `/pets/{id}`).
+                if text.is_empty() {
                     return Err(invalid(format!(
-                        "argument {} must not be \".\" or \"..\"",
+                        "argument {} must not be empty",
                         param.property
                     )));
                 }
-                path = path.replace(&format!("{{{}}}", param.name), &encode_segment(&text));
+                path_values.push((
+                    format!("{{{}}}", param.name),
+                    param.property.as_str(),
+                    encode_segment(&text),
+                ));
             }
             Location::Header => {
                 let text = scalar(value).ok_or_else(|| not_scalar(&param.property))?;
@@ -93,6 +97,7 @@ pub(crate) fn build(
             },
         }
     }
+    let path = substitute_path(&op.path, &path_values)?;
     if let Some((name, value)) = query_api_key {
         query.push((name.clone(), value.clone()));
     }
@@ -110,6 +115,51 @@ pub(crate) fn build(
         None => None,
     };
     Ok(Parts { url, headers, body })
+}
+
+/// `template` with each placeholder replaced by its encoded value, one `/` segment at a time.
+/// A segment that holds a substituted value and comes out as `.` or `..` (`{x}{y}` with `.` and
+/// `.`, or `{name}.` with `.`) is [`ToolError::InvalidArgument`] naming the arguments. Segments
+/// of the template itself (no substituted value) are left as they are.
+fn substitute_path(template: &str, values: &[(String, &str, String)]) -> Result<String, ToolError> {
+    let mut segments = Vec::new();
+    for segment in template.split('/') {
+        let mut out = segment.to_string();
+        let mut used = Vec::new();
+        for (placeholder, property, encoded) in values {
+            if out.contains(placeholder.as_str()) {
+                out = out.replace(placeholder.as_str(), encoded);
+                used.push((placeholder.as_str(), *property));
+            }
+        }
+        // URL parsing would resolve a `.` or `..` segment and leave the operation's path.
+        // Values cannot add a `/` or `%`-encoded dot: `%` and `/` themselves are encoded.
+        if !used.is_empty() && (out == "." || out == "..") {
+            // The whole segment is one placeholder: the value itself is the dot segment.
+            if let [(placeholder, property)] = used[..]
+                && placeholder == segment
+            {
+                return Err(invalid(format!(
+                    "argument {property} must not be \".\" or \"..\""
+                )));
+            }
+            let names = used
+                .iter()
+                .map(|(_, property)| *property)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let noun = if used.len() == 1 {
+                "argument"
+            } else {
+                "arguments"
+            };
+            return Err(invalid(format!(
+                "{noun} {names} must not form the path segment \"{out}\""
+            )));
+        }
+        segments.push(out);
+    }
+    Ok(segments.join("/"))
 }
 
 /// An argument that is present and not `null`.

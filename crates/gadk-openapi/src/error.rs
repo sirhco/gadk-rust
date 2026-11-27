@@ -57,7 +57,8 @@ pub enum Error {
         name: String,
     },
     /// There is no absolute base URL: the server URL is relative, the document was not fetched,
-    /// and `OpenApiConfig::base_url` is not set (or is not an absolute URL).
+    /// and `OpenApiConfig::base_url` is not set (or is not an absolute URL). A base URL with a
+    /// query or fragment is rejected the same way.
     #[error(
         "no absolute base URL: set OpenApiConfig::base_url or give the document an absolute servers[0].url"
     )]
