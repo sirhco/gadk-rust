@@ -20,7 +20,10 @@
 #![allow(dead_code)]
 
 mod error;
+mod operation;
+mod resolve;
 mod spec;
 
 pub use error::Error;
+pub use operation::SkippedOperation;
 pub use spec::OpenApiSpec;
