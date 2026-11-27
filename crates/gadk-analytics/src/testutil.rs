@@ -419,40 +419,75 @@ impl<'a> TurnCells<'a> {
     }
 }
 
-/// The columns of the pending query (`prompts` is `ARRAY<STRING>`).
-const PENDING_FIELDS: [(&str, &str); 4] = [
-    ("trace_id", "STRING"),
-    ("first", "TIMESTAMP"),
-    ("prompts", "STRING"),
-    ("thumbs_down", "INT64"),
-];
-
-/// A `jobs.query` reply of pending-query rows
-/// ([`AnalyticsSource::pending`](crate::AnalyticsSource::pending); see [`pending_cells`]), with
-/// `prompts` `REPEATED`.
-pub fn pending_reply(rows: Vec<Vec<Value>>) -> Result<(u16, String), String> {
-    let (status, body) = reply(&PENDING_FIELDS, rows, false)?;
-    let mut body: Value = serde_json::from_str(&body).unwrap();
-    body["schema"]["fields"][2]["mode"] = Value::from("REPEATED");
-    Ok((status, body.to_string()))
+/// The schema of the pending query: `prompts` is `ARRAY<STRING>` and `judge` is
+/// `ARRAY<STRUCT<name STRING, score FLOAT64, pass BOOL>>`.
+fn pending_schema() -> Vec<Value> {
+    let field = |name: &str, ty: &str| json!({ "name": name, "type": ty, "mode": "NULLABLE" });
+    vec![
+        field("trace_id", "STRING"),
+        field("first", "TIMESTAMP"),
+        json!({ "name": "prompts", "type": "STRING", "mode": "REPEATED" }),
+        field("thumbs_down", "INT64"),
+        json!({ "name": "judge", "type": "RECORD", "mode": "REPEATED", "fields": [
+            field("name", "STRING"),
+            field("score", "FLOAT64"),
+            field("pass", "BOOL"),
+        ] }),
+    ]
 }
 
-/// The cells of one pending row; no `prompts` is a NULL array.
+/// A `jobs.query` reply of pending-query rows
+/// ([`AnalyticsSource::pending`](crate::AnalyticsSource::pending); see [`pending_cells`] and
+/// [`pending_judge_cells`]), with `prompts` and `judge` `REPEATED`.
+pub fn pending_reply(rows: Vec<Vec<Value>>) -> Result<(u16, String), String> {
+    schema_reply(pending_schema(), rows, false)
+}
+
+/// The cells of one pending row without judge scores; no `prompts` is a NULL array.
 pub fn pending_cells(
     trace_id: &str,
     first: DateTime<Utc>,
     prompts: &[&str],
     thumbs_down: u64,
 ) -> Vec<Value> {
+    pending_judge_cells(trace_id, first, prompts, thumbs_down, &[])
+}
+
+/// The cells of one pending row with its judge scores `(name, score, pass)`; no `prompts` or
+/// no `judge` is a NULL array.
+pub fn pending_judge_cells(
+    trace_id: &str,
+    first: DateTime<Utc>,
+    prompts: &[&str],
+    thumbs_down: u64,
+    judge: &[(&str, f64, bool)],
+) -> Vec<Value> {
     let prompts = if prompts.is_empty() {
         Value::Null
     } else {
         Value::Array(prompts.iter().map(|p| json!({ "v": p })).collect())
+    };
+    let judge = if judge.is_empty() {
+        Value::Null
+    } else {
+        repeated(
+            judge
+                .iter()
+                .map(|(name, score, pass)| {
+                    record(vec![
+                        Value::from(*name),
+                        Value::from(score.to_string()),
+                        Value::from(pass.to_string()),
+                    ])
+                })
+                .collect(),
+        )
     };
     vec![
         Value::from(trace_id),
         Value::from(first.timestamp_micros().to_string()),
         prompts,
         Value::from(thumbs_down.to_string()),
+        judge,
     ]
 }

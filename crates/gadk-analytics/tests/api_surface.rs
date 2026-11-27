@@ -28,7 +28,7 @@ use gadk_analytics::prompts::{
     FEEDBACK_CAP, FeedbackRow, InvocationVersions, VersionFeedback, VersionMetrics, VersionModel,
     VersionStats,
 };
-use gadk_analytics::review::{Cursor, PendingTrace, REVIEW_CAP, ReviewQueue, at_text};
+use gadk_analytics::review::{Cursor, JudgeScore, PendingTrace, REVIEW_CAP, ReviewQueue, at_text};
 use gadk_analytics::row::{
     BQ_BYTES_HINT, BQ_ROLES_HINT, from_bigquery, param, text, timestamp, ts_param,
 };
@@ -195,6 +195,8 @@ fn the_output_constructors() {
     let _: fn(&str, &str) -> Result<Cursor, String> = Cursor::parse;
     let _: fn(DateTime<Utc>) -> String = at_text;
     let _: fn(String, DateTime<Utc>, Vec<String>, u64) -> PendingTrace = PendingTrace::new;
+    let _: fn(PendingTrace, Vec<JudgeScore>) -> PendingTrace = PendingTrace::with_judge;
+    let _: fn(String, f64, bool) -> JudgeScore = JudgeScore::new;
     let _: usize = REVIEW_CAP;
 }
 
