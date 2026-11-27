@@ -371,8 +371,9 @@ fn rubric_form(id: &TraceId, rubric: &Rubric, review: Option<&ReviewBar>, csrf: 
 }
 
 /// The Scores section: the needs-BigQuery note, or the scores newest first (or the error
-/// banner) and the forms that add them: in a rubric review the rubric's form, then the score
-/// form, then outside review mode one collapsed form per loaded rubric.
+/// banner), in review mode the Judge section, and the forms that add them: in a rubric review
+/// the rubric's form, then the score form, then outside review mode one collapsed form per
+/// loaded rubric.
 fn scores_section(
     id: &TraceId,
     scores: &ScoresView,
@@ -424,6 +425,9 @@ fn scores_section(
             }
         }
         @if !matches!(scores, ScoresView::NeedsBigQuery) {
+            @if review.is_some() {
+                (judge_section(scores))
+            }
             @if let (Some(bar), Some(rubric)) = (review, review_rubric) {
                 (rubric_form(id, rubric, Some(bar), csrf))
             }
@@ -438,6 +442,59 @@ fn scores_section(
             }
         }
     }
+}
+
+/// The Judge section of a trace in review mode: the loaded scores with source `judge`, the first
+/// (newest) per name, as name, score, `pass` or `fail` and the rationale (the comment without its
+/// `pass: ` or `fail: ` prefix). Nothing without judge scores, or when the scores did not load.
+/// Older rows past the Scores section's cap are not loaded, so they are not shown.
+fn judge_section(scores: &ScoresView) -> Markup {
+    let ScoresView::Loaded(s) = scores else {
+        return html! {};
+    };
+    let mut rows: Vec<&ScoreRow> = Vec::new();
+    for r in s.rows.iter().filter(|r| r.source == "judge") {
+        if !rows.iter().any(|kept| kept.name == r.name) {
+            rows.push(r);
+        }
+    }
+    if rows.is_empty() {
+        return html! {};
+    }
+    html! {
+        h3 { "Judge" }
+        table {
+            thead {
+                tr { th { "Name" } th { "Score" } th { "Verdict" } th { "Rationale" } }
+            }
+            tbody {
+                @for r in &rows {
+                    @let (verdict, rationale) = judge_verdict(&r.comment);
+                    tr {
+                        td { (r.name) }
+                        td class="num" { (r.value) }
+                        td { (verdict) }
+                        td { (rationale) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A judge comment's verdict (`pass` when it starts with `pass:`, else `fail`) and its rationale
+/// without the `pass: ` or `fail: ` prefix.
+fn judge_verdict(comment: &str) -> (&'static str, &str) {
+    let verdict = if comment.starts_with("pass:") {
+        "pass"
+    } else {
+        "fail"
+    };
+    let rationale = comment
+        .strip_prefix("pass: ")
+        .or_else(|| comment.strip_prefix("fail: "))
+        .unwrap_or(comment);
+    (verdict, rationale)
 }
 
 /// The form that adds the trace's runs to a dataset (`POST /traces/{id}/dataset`, confirmed

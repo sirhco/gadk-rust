@@ -289,7 +289,7 @@ async fn users_reviews_and_the_document() {
         None,
     );
     let pending = envelope(
-        json!([{ "trace_id": "0af7651916cd43dd8448eb211c80319c", "first": "2026-11-16T11:00:00Z", "prompts": ["triage@2"], "thumbs_down": 1 }]),
+        json!([{ "trace_id": "0af7651916cd43dd8448eb211c80319c", "first": "2026-11-16T11:00:00Z", "prompts": ["triage@2"], "thumbs_down": 1, "judge": [{ "name": "support/llm_judge", "score": 4.0, "pass": true }] }]),
         None,
     );
     let (base, server) = serve(vec![
@@ -321,6 +321,10 @@ async fn users_reviews_and_the_document() {
         .range(Range::H24);
     let p = client.list_pending_reviews(&q).await.unwrap();
     assert_eq!(p.data[0].thumbs_down, 1);
+    let judge = p.data[0].judge.as_ref().unwrap();
+    assert_eq!(judge[0].name, "support/llm_judge");
+    assert_eq!(judge[0].score, 4.0);
+    assert!(judge[0].pass);
     let q = ListPendingReviewsQuery::new().rubric("tone").flagged(false);
     client.list_pending_reviews(&q).await.unwrap();
     let doc = client.get_open_api(&GetOpenApiQuery::new()).await.unwrap();
@@ -660,4 +664,25 @@ async fn dot_and_empty_path_parameters_are_refused() {
         assert!(matches!(e, Error::InvalidUrl(_)), "{bad:?}: {e:?}");
     }
     assert!(seen(&server).is_empty(), "{:?}", seen(&server));
+}
+
+#[test]
+fn a_pending_trace_from_an_older_console_has_no_judge() {
+    let p: gadk_console_client::PendingTrace = serde_json::from_value(json!({
+        "trace_id": "0af7651916cd43dd8448eb211c80319c",
+        "first": "2026-11-16T11:00:00Z",
+        "prompts": [],
+        "thumbs_down": 0,
+    }))
+    .unwrap();
+    assert_eq!(p.judge, None);
+    let p: gadk_console_client::PendingTrace = serde_json::from_value(json!({
+        "trace_id": "0af7651916cd43dd8448eb211c80319c",
+        "first": "2026-11-16T11:00:00Z",
+        "prompts": [],
+        "thumbs_down": 0,
+        "judge": [],
+    }))
+    .unwrap();
+    assert_eq!(p.judge, Some(vec![]));
 }
