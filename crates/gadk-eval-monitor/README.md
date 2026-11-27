@@ -242,11 +242,12 @@ gadk-eval monitor monitors/support.yaml --out gs://my-bucket/monitors --write-sc
   - The attributes are `{"source": "judge", "author": <spec name>, "adk": {"invocation_id": …}}`.
   - `trace_id`, `session_id` and `invocation_id` are the run's, and `user_id` is NULL.
 - Dedupe:
-  - One query per run finds the (invocation id, name) pairs that already have a `judge` row
-    written since the window's start, and those pairs are skipped. A second run over the same
-    window writes nothing new.
+  - One query per `monitor` command (for the whole report) finds the (invocation id, name) pairs
+    that already have a `judge` row written since the window's start, and those pairs are
+    skipped. A second run over the same window writes nothing new.
   - Two runs racing on the same invocations can both write a pair. This is harmless: the console
     shows the newest row per name.
+  - A trace with several invocations shows one value per name in the review queue: the newest.
 - Inserts:
   - The rows go in parameterized `INSERT … SELECT … FROM UNNEST(@rows)` statements of at most 500
     rows each.
@@ -258,6 +259,8 @@ gadk-eval monitor monitors/support.yaml --out gs://my-bucket/monitors --write-sc
   - BigQuery bills every DML statement at least 10 MiB. Each insert therefore runs with a byte cap
     of at least 10,485,760 bytes, about $0.00006 per insert of up to 500 rows at on-demand prices.
   - The dedupe query reads the window's `FEEDBACK` rows.
+  - Dedupe saves inserts, not judge calls: a schedule that overlaps windows (for example hourly
+    with `window: 1d`) still judges up to `limit` runs each time.
 - Judge rows appear in the console's per-version Feedback (source `judge`, per name). Guard
   `feedback` checks ignore judge rows: they read only `app` and `console` scores.
 - The review queue still waits for a console score: a judge score never takes a trace out of it.
