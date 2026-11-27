@@ -16,7 +16,7 @@
 //! and run builders.
 
 use std::any::Any;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -31,6 +31,7 @@ use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient};
 use serde_json::Map;
 
 use crate::error::MonitorError;
+use crate::judge_rows::{JudgeRow, ScoreSink};
 use crate::source::{ProductionRun, TranscriptQuery, TranscriptSource};
 
 /// One HTTP exchange of a trace.
@@ -156,6 +157,44 @@ impl TranscriptSource for FakeSource {
             Some(e) => Err(MonitorError::Source(e.clone())),
             None => Ok(self.runs.clone()),
         }
+    }
+}
+
+/// A score sink recording its calls: `existing` answers `present`, and `insert` records each
+/// chunk with its author, or fails with the source error `fail_insert`.
+#[derive(Default)]
+pub(crate) struct FakeSink {
+    pub(crate) present: HashSet<(String, String)>,
+    pub(crate) fail_insert: Option<String>,
+    /// The number of rows and the `since` of each `existing` call.
+    pub(crate) existing_calls: Mutex<Vec<(usize, DateTime<Utc>)>>,
+    /// The rows and author of each successful `insert` call.
+    pub(crate) inserts: Mutex<Vec<(Vec<JudgeRow>, String)>>,
+}
+
+#[async_trait::async_trait]
+impl ScoreSink for FakeSink {
+    async fn existing(
+        &self,
+        rows: &[JudgeRow],
+        since: DateTime<Utc>,
+    ) -> Result<HashSet<(String, String)>, MonitorError> {
+        self.existing_calls
+            .lock()
+            .unwrap()
+            .push((rows.len(), since));
+        Ok(self.present.clone())
+    }
+
+    async fn insert(&self, rows: &[JudgeRow], author: &str) -> Result<(), MonitorError> {
+        if let Some(e) = &self.fail_insert {
+            return Err(MonitorError::Source(e.clone()));
+        }
+        self.inserts
+            .lock()
+            .unwrap()
+            .push((rows.to_vec(), author.to_owned()));
+        Ok(())
     }
 }
 

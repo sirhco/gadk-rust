@@ -40,6 +40,10 @@
 //! `gadk-eval alerts <source>...` ([`cli`]) checks every rule, posts to a webhook when one fires
 //! and exits 1, so a scheduled run can page someone when usage goes over budget.
 //!
+//! [`judge_rows()`] turns a report's `llm_judge` and `reference` results into [`JudgeRow`]s
+//! (console `FEEDBACK` rows with source `judge`), and [`write_judge_rows`] writes the ones a
+//! [`ScoreSink`] does not hold yet, so the console's review queue can show them.
+//!
 //! ```no_run
 //! # async fn demo() -> Result<(), gadk_eval_monitor::MonitorError> {
 //! use gadk_eval_monitor::{
@@ -78,6 +82,7 @@ pub mod guard_report;
 pub mod guard_source;
 pub mod guard_spec;
 pub mod judge;
+pub mod judge_rows;
 pub mod monitor;
 pub mod prices;
 pub mod report;
@@ -104,6 +109,9 @@ pub use guard_report::{
 pub use guard_source::{GuardQuery, GuardSource, ModelTokens, VersionCalls, VersionFeedback};
 pub use guard_spec::{Check, FeedbackSource, GuardSpec};
 pub use judge::vertex_judge;
+pub use judge_rows::{
+    JUDGE_ROWS_PER_INSERT, JudgeRow, ScoreSink, WriteOutcome, judge_rows, write_judge_rows,
+};
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
 pub use prices::{ModelPrice, PriceTable, TokenUsage};
 pub use report::{MonitorReport, MonitoredRun, Window};
