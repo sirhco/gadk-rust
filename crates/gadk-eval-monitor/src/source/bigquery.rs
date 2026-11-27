@@ -25,6 +25,9 @@
 //! tool calls, for example) are ordered by `event_id`, which is random: the order is
 //! deterministic but not causal. Older tables without an `event_id` column leave such ties in
 //! no particular order.
+//!
+//! The source is also a [`ScoreSink`](crate::judge_rows::ScoreSink) (`gadk-eval monitor
+//! --write-scores`): one dedupe query, then parameterized `INSERT`s of judge `FEEDBACK` rows.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -42,6 +45,7 @@ use crate::spec::{is_dataset_or_table, is_project_id};
 
 mod export_queries;
 mod guard;
+mod judge_sink;
 
 pub use guard::BigQueryGuardSource;
 
@@ -184,16 +188,28 @@ impl BigQueryTranscriptSource {
         Ok(Columns::from_schema(&table))
     }
 
-    /// Runs `sql` with `params` and returns every result row as a column-name → cell map.
+    /// Runs `sql` with `params` under the source's byte cap and returns every result row as a
+    /// column-name → cell map.
     async fn query(
         &self,
         sql: &str,
         params: Vec<Value>,
     ) -> Result<Vec<Map<String, Value>>, MonitorError> {
+        self.query_capped(sql, params, self.max_bytes_billed).await
+    }
+
+    /// Runs `sql` with `params`, billed at most `max_bytes` (`maximumBytesBilled`) when set, and
+    /// returns every result row as a column-name → cell map.
+    async fn query_capped(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+        max_bytes: Option<i64>,
+    ) -> Result<Vec<Map<String, Value>>, MonitorError> {
         let source = |m: String| MonitorError::Source(m);
         let url = format!("{ENDPOINT}/projects/{}/queries", encode(&self.billing));
         let mut body = query_body(sql, params);
-        if let Some(bytes) = self.max_bytes_billed {
+        if let Some(bytes) = max_bytes {
             body["maximumBytesBilled"] = json!(bytes.to_string());
         }
         let mut resp = self
