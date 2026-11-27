@@ -41,9 +41,11 @@ const GLOBAL_HOST: &str = "aiplatform.googleapis.com";
 const REFERENCE_CRITERIA: &str = "The answer agrees in meaning with the reference answer and \
 does not contradict it or omit its key facts.";
 
-/// The pointwise template before the criteria.
+/// The pointwise template up to the `{criteria}` placeholder. The criteria (a rubric or the
+/// reference check) travel as an instance value, never in the template, because the service reads
+/// every `{word}` in a template as a variable (a rubric's literal braces would break the call).
 const POINTWISE_HEAD: &str = "# Instruction\nYou are an expert evaluator. Rate the AI response \
-against the criteria.\n\n# Evaluation\n## Criteria\n";
+against the criteria.\n\n# Evaluation\n## Criteria\n{criteria}";
 
 /// The pointwise rating rubric, 5 (best) down to 1 (worst).
 const POINTWISE_RUBRIC: &str = "\n\n## Rating Rubric\n5: fully meets the criteria\n4: mostly \
@@ -61,10 +63,11 @@ the reference answer.\nSTEP 2: Rate the response from 1 to 5 using the rubric.\n
 # User Inputs and AI-generated Response\n## Question\n{question}\n\n\
 ## AI-generated Response\n{response}\n\n## Reference Answer\n{reference}\n";
 
-/// The pairwise template before the criteria.
+/// The pairwise template up to the `{criteria}` placeholder (the criteria are an instance value,
+/// as for [`POINTWISE_HEAD`]).
 const PAIRWISE_HEAD: &str = "# Instruction\nYou are an expert evaluator. Compare two AI agent \
 conversations, a baseline and a candidate, against the criteria, and choose the better one.\n\n\
-# Evaluation\n## Criteria\n";
+# Evaluation\n## Criteria\n{criteria}";
 
 /// The pairwise rubric, steps and inputs; `A` is the baseline and `B` the candidate.
 const PAIRWISE_TAIL: &str = "\n\n## Rating Rubric\n\"A\": the baseline conversation is better.\n\
@@ -327,20 +330,27 @@ impl PairwiseJudge for EvalServiceJudge {
 /// The `pointwiseMetricInput` request for `req` (without the judge model); `None` for a kind
 /// the service does not grade.
 fn pointwise_body(req: &JudgeRequest) -> Option<Value> {
-    let (criteria, tail, instance) = match &req.kind {
+    let (tail, instance) = match &req.kind {
         JudgeKind::Rubric { rubric } => (
-            rubric.as_str(),
             RUBRIC_TAIL,
-            json!({ "conversation": req.conversation, "response": req.reply }),
+            json!({
+                "criteria": rubric,
+                "conversation": req.conversation,
+                "response": req.reply,
+            }),
         ),
         JudgeKind::Reference { question, answer } => (
-            REFERENCE_CRITERIA,
             REFERENCE_TAIL,
-            json!({ "question": question, "response": req.reply, "reference": answer }),
+            json!({
+                "criteria": REFERENCE_CRITERIA,
+                "question": question,
+                "response": req.reply,
+                "reference": answer,
+            }),
         ),
         _ => return None,
     };
-    let template = format!("{POINTWISE_HEAD}{criteria}{POINTWISE_RUBRIC}{tail}");
+    let template = format!("{POINTWISE_HEAD}{POINTWISE_RUBRIC}{tail}");
     Some(json!({
         "pointwiseMetricInput": {
             "metricSpec": { "metricPromptTemplate": template },
@@ -351,11 +361,11 @@ fn pointwise_body(req: &JudgeRequest) -> Option<Value> {
 
 /// The `pairwiseMetricInput` request (without the judge model).
 fn pairwise_body(criteria: &str, baseline: &str, candidate: &str) -> Value {
-    let instance = json!({ "baseline": baseline, "candidate": candidate });
+    let instance = json!({ "criteria": criteria, "baseline": baseline, "candidate": candidate });
     json!({
         "pairwiseMetricInput": {
             "metricSpec": {
-                "metricPromptTemplate": format!("{PAIRWISE_HEAD}{criteria}{PAIRWISE_TAIL}"),
+                "metricPromptTemplate": format!("{PAIRWISE_HEAD}{PAIRWISE_TAIL}"),
             },
             "instance": { "jsonInstance": instance.to_string() },
         }
@@ -423,10 +433,10 @@ mod tests {
 
     /// The live-verified pointwise template for the rubric
     /// "The agent answers the question correctly and politely.".
-    const VERIFIED_POINTWISE: &str = "# Instruction\nYou are an expert evaluator. Rate the AI response against the criteria.\n\n# Evaluation\n## Criteria\nThe agent answers the question correctly and politely.\n\n## Rating Rubric\n5: fully meets the criteria\n4: mostly meets\n3: partly meets\n2: barely meets\n1: does not meet\n\n## Evaluation Steps\nSTEP 1: Read the conversation and response.\nSTEP 2: Rate the response from 1 to 5 using the rubric.\n\n# User Inputs and AI-generated Response\n## Conversation\n{conversation}\n\n## AI-generated Response\n{response}\n";
+    const VERIFIED_POINTWISE: &str = "# Instruction\nYou are an expert evaluator. Rate the AI response against the criteria.\n\n# Evaluation\n## Criteria\n{criteria}\n\n## Rating Rubric\n5: fully meets the criteria\n4: mostly meets\n3: partly meets\n2: barely meets\n1: does not meet\n\n## Evaluation Steps\nSTEP 1: Read the conversation and response.\nSTEP 2: Rate the response from 1 to 5 using the rubric.\n\n# User Inputs and AI-generated Response\n## Conversation\n{conversation}\n\n## AI-generated Response\n{response}\n";
 
     /// The live-verified pairwise template for the default experiment criteria.
-    const VERIFIED_PAIRWISE: &str = "# Instruction\nYou are an expert evaluator. Compare two AI agent conversations, a baseline and a candidate, against the criteria, and choose the better one.\n\n# Evaluation\n## Criteria\nWhich conversation's agent is more helpful and correct, and follows the user's instructions better?\n\n## Rating Rubric\n\"A\": the baseline conversation is better.\n\"SAME\": both are equally good.\n\"B\": the candidate conversation is better.\n\n## Evaluation Steps\nSTEP 1: Read both conversations.\nSTEP 2: Judge each against the criteria.\nSTEP 3: Choose \"A\", \"SAME\" or \"B\" and explain why.\n\n# User Inputs and AI-generated Responses\n## Baseline conversation (A)\n{baseline}\n\n## Candidate conversation (B)\n{candidate}\n";
+    const VERIFIED_PAIRWISE: &str = "# Instruction\nYou are an expert evaluator. Compare two AI agent conversations, a baseline and a candidate, against the criteria, and choose the better one.\n\n# Evaluation\n## Criteria\n{criteria}\n\n## Rating Rubric\n\"A\": the baseline conversation is better.\n\"SAME\": both are equally good.\n\"B\": the candidate conversation is better.\n\n## Evaluation Steps\nSTEP 1: Read both conversations.\nSTEP 2: Judge each against the criteria.\nSTEP 3: Choose \"A\", \"SAME\" or \"B\" and explain why.\n\n# User Inputs and AI-generated Responses\n## Baseline conversation (A)\n{baseline}\n\n## Candidate conversation (B)\n{candidate}\n";
 
     fn judge(location: &str, client: Arc<ScriptedClient>) -> EvalServiceJudge {
         let auth = AdcTokenSource::from_credentials(bearer_credentials("tok"));
@@ -493,6 +503,7 @@ mod tests {
         assert_eq!(req.header("authorization"), "Bearer tok");
         assert_eq!(req.header("content-type"), "application/json");
         let instance = json!({
+            "criteria": "The agent answers the question correctly and politely.",
             "conversation": "User: What is 2+2?\nAgent: \"4\"\n\n",
             "response": "\"4\"",
         });
@@ -521,6 +532,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn criteria_with_braces_go_in_the_instance_not_the_template() {
+        let rubric = "Names the key {name} and keeps {response} as is.";
+        let req = JudgeRequest::new(
+            JudgeKind::Rubric {
+                rubric: rubric.into(),
+            },
+            "User: q\nAgent: a\n\n",
+            "a",
+        );
+        let body = pointwise_body(&req).unwrap();
+        let template = body
+            .pointer("/pointwiseMetricInput/metricSpec/metricPromptTemplate")
+            .and_then(Value::as_str)
+            .unwrap();
+        assert!(!template.contains("{name}"), "{template}");
+        assert_eq!(template.matches("{response}").count(), 1, "{template}");
+        let instance: Value = serde_json::from_str(
+            body.pointer("/pointwiseMetricInput/instance/jsonInstance")
+                .and_then(Value::as_str)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(instance["criteria"], rubric);
+
+        let body = pairwise_body("Prefer {name}.", "b", "c");
+        let template = body
+            .pointer("/pairwiseMetricInput/metricSpec/metricPromptTemplate")
+            .and_then(Value::as_str)
+            .unwrap();
+        assert!(!template.contains("{name}"), "{template}");
+        let instance: Value = serde_json::from_str(
+            body.pointer("/pairwiseMetricInput/instance/jsonInstance")
+                .and_then(Value::as_str)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(instance["criteria"], "Prefer {name}.");
+    }
+
+    #[tokio::test]
     async fn reference_request_body() {
         let client = pointwise("5");
         assert_eq!(
@@ -528,14 +579,14 @@ mod tests {
             verdict(5)
         );
         let template = "# Instruction\nYou are an expert evaluator. Rate the AI response against the criteria.\n\n\
-             # Evaluation\n## Criteria\nThe answer agrees in meaning with the reference answer and does \
-             not contradict it or omit its key facts.\n\n## Rating Rubric\n5: fully meets the criteria\n\
+             # Evaluation\n## Criteria\n{criteria}\n\n## Rating Rubric\n5: fully meets the criteria\n\
              4: mostly meets\n3: partly meets\n2: barely meets\n1: does not meet\n\n\
              ## Evaluation Steps\nSTEP 1: Read the question, the response and the reference answer.\n\
              STEP 2: Rate the response from 1 to 5 using the rubric.\n\n\
              # User Inputs and AI-generated Response\n## Question\n{question}\n\n\
              ## AI-generated Response\n{response}\n\n## Reference Answer\n{reference}\n";
         let instance = json!({
+            "criteria": REFERENCE_CRITERIA,
             "question": "Capital of France?",
             "response": "Paris.",
             "reference": "Paris",
@@ -670,6 +721,7 @@ mod tests {
             }
         );
         let instance = json!({
+            "criteria": DEFAULT_CRITERIA,
             "baseline": "User: q\nAgent: a\n\n",
             "candidate": "User: q\nAgent: \"b\"\n\n",
         });
