@@ -253,6 +253,22 @@ async fn a_long_body_is_truncated() {
 }
 
 #[tokio::test]
+async fn a_redirect_is_a_result_and_not_followed() {
+    let srv = TestServer::replying(Reply::redirect("/elsewhere", 307)).await;
+    let set = toolset(
+        srv.url(),
+        OpenApiConfig::new().header("X-API-Key", "secret"),
+    );
+    let create = tool(&set, "create_item").await;
+    let result = call(&create, json!({"body": {"name": "Rex"}}))
+        .await
+        .unwrap();
+    assert_eq!(Value::Object(result), json!({"status": 307, "body": null}));
+    assert_eq!(srv.calls(), 1);
+    assert_eq!(srv.requests()[0].path, "/items");
+}
+
+#[tokio::test]
 async fn a_missing_required_argument_sends_nothing() {
     let srv = TestServer::replying(Reply::json("{}")).await;
     let set = toolset(srv.url(), OpenApiConfig::new());

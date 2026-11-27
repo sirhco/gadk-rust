@@ -34,7 +34,8 @@ use crate::tool::{RestApiTool, Shared};
 ///
 /// Each tool's declaration lists the operation's path, query and header parameters and, for an
 /// `application/json` request body, `body`. A call returns `{"status": <u16>, "body": <body>}`
-/// for any HTTP status, plus `"truncated": true` when the body was cut.
+/// for any HTTP status, plus `"truncated": true` when the body was cut. Redirects are not
+/// followed: a 3xx response is returned as a result like any other status.
 pub struct OpenApiToolset {
     tools: Vec<RestApiTool>,
     skipped: Vec<SkippedOperation>,
@@ -47,8 +48,8 @@ impl OpenApiToolset {
     ///
     /// Fails with [`Error::DuplicateName`] when two operations (or two properties of one tool)
     /// share a name, [`Error::NameTooLong`] when a prefixed name is over 64 bytes,
-    /// [`Error::Ref`] for a `$ref` that cannot be resolved, and [`Error::NoBaseUrl`] when there
-    /// is no absolute base URL.
+    /// [`Error::Ref`] for a `$ref` that cannot be resolved, [`Error::NoBaseUrl`] when there
+    /// is no absolute base URL, and [`Error::HttpClient`] when the HTTP client cannot be built.
     pub fn new(spec: &OpenApiSpec, config: OpenApiConfig) -> Result<Self, Error> {
         let collected = operation::collect(spec)?;
         if !config.prefix.is_empty() {
@@ -60,7 +61,14 @@ impl OpenApiToolset {
             }
         }
         let shared = Arc::new(Shared {
-            client: reqwest::Client::new(),
+            // Redirects are not followed: a configured header or header parameter (and a
+            // confirmed body) must not reach another URL. A 3xx is returned as a result.
+            client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|err| Error::HttpClient {
+                    source: Box::new(err),
+                })?,
             base_url: base_url(spec, config.base_url.as_deref())?,
             auth: config.auth,
             query_api_key: config.query_api_key,

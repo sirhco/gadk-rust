@@ -70,6 +70,13 @@ pub enum Error {
         /// What went wrong.
         message: String,
     },
+    /// The HTTP client for the tools' requests could not be built (for example, the TLS backend
+    /// failed to initialize).
+    #[error("cannot build the HTTP client: {source}")]
+    HttpClient {
+        /// The underlying error.
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     /// Sending a tool's request or reading its response failed.
     #[error("tool {tool}: request failed: {source}")]
     Request {

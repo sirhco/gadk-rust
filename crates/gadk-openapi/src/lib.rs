@@ -19,7 +19,8 @@
 //! [`OpenApiToolset`] with an [`OpenApiConfig`]. Each operation becomes one tool, named after
 //! its `operationId` in snake_case. A tool's arguments are the operation's path, query and
 //! header parameters plus `body` for an `application/json` request body; a call returns
-//! `{"status": <u16>, "body": <body>}` for any HTTP status.
+//! `{"status": <u16>, "body": <body>}` for any HTTP status. Redirects are not followed: a 3xx
+//! response is returned as a result.
 //!
 //! Calls of `post`, `put`, `patch` and `delete` operations need the user's confirmation by
 //! default ([`RequireConfirmation::Mutating`]). Credentials come from a `gadk_auth` credential

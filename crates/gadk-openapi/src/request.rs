@@ -65,6 +65,14 @@ pub(crate) fn build(
         match param.location {
             Location::Path => {
                 let text = scalar(value).ok_or_else(|| not_scalar(&param.property))?;
+                // URL parsing would resolve a `.` or `..` segment and leave the operation's
+                // path. Other values cannot form a dot segment: `%` itself is encoded.
+                if text == "." || text == ".." {
+                    return Err(invalid(format!(
+                        "argument {} must not be \".\" or \"..\"",
+                        param.property
+                    )));
+                }
                 path = path.replace(&format!("{{{}}}", param.name), &encode_segment(&text));
             }
             Location::Header => {

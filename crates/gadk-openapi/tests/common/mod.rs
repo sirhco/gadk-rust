@@ -87,6 +87,11 @@ impl Reply {
         Self::ok(body).with_header("Content-Type", "application/json")
     }
 
+    /// `status` (a 3xx) with an empty body and `Location: location`.
+    pub fn redirect(location: impl Into<String>, status: u16) -> Self {
+        Self::status(status, Vec::new()).with_header("Location", location)
+    }
+
     /// Adds a response header (`Content-Length` and `Connection` are always the server's own).
     pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));

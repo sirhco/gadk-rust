@@ -176,3 +176,24 @@ paths:
         other => panic!("want InvalidArgument, got {other:?}"),
     }
 }
+
+#[test]
+fn dot_segment_path_arguments_are_rejected() {
+    let get = op("get_item");
+    for dots in [".", ".."] {
+        assert_eq!(
+            invalid(&get, json!({"id": dots, "X_Trace": "t"})),
+            "argument id must not be \".\" or \"..\""
+        );
+    }
+    for (id, path) in [
+        ("a..b", "https://h/items/a..b"),
+        ("..x", "https://h/items/..x"),
+        ("...", "https://h/items/..."),
+        ("%2e%2e", "https://h/items/%252e%252e"),
+        (".%2E", "https://h/items/.%252E"),
+    ] {
+        let parts = build(&get, "https://h", None, &json!({"id": id, "X_Trace": "t"})).unwrap();
+        assert_eq!(parts.url.as_str(), path);
+    }
+}
