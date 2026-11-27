@@ -7,6 +7,28 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval-monitor`: `gadk-eval monitor --write-scores` writes the report's `llm_judge` and
+  `reference` results to the BigQuery table as `FEEDBACK` rows with source `judge`.
+  - Rows are named `<spec>/<kind>`, or `<spec>/<kind>_<n>` for the n-th scorer of a kind.
+  - One dedupe query first skips the (invocation, name) pairs already written. The command then
+    prints `scores: wrote <W> judge rows (<P> already present)`.
+  - A non-`bigquery` source exits 2 before the monitor runs.
+  - The library side is `judge_rows`, `JudgeRow`, `ScoreSink` (implemented by
+    `BigQueryTranscriptSource`), `write_judge_rows`, `WriteOutcome` and `JUDGE_ROWS_PER_INSERT`,
+    plus `cli::Backends::score_sink`, whose default refuses.
+  - Without the flag, the output and the stored report are unchanged.
+- `gadk-analytics`: `PendingTrace.judge` holds a pending trace's newest judge score per name
+  (`JudgeScore`, `PendingTrace::with_judge`). Judge scores never take a trace out of the review
+  queue.
+- `gadk-console`:
+  - `/review` shows a Judge column.
+  - A trace in review mode shows a Judge section with each judge score's rationale.
+  - `/api/v1/review/pending` items always carry `judge`. In `gadk-console-client` this is
+    `JudgeScore` and `PendingTrace.judge`, an `Option<Vec<JudgeScore>>`. The field is optional
+    because consoles before this release omit `judge`, and it decodes to `None` from them.
+
 ## [0.5.25] - 2026-11-26
 
 ### Changed

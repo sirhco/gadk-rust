@@ -167,7 +167,9 @@ mod tests {
     use crate::web::testutil::{FakeSource, fixed_now, get, state, test_rubrics};
     use gadk_analytics::AnalyticsSource;
     use gadk_analytics::review::Cursor;
-    use gadk_analytics::testutil::{FakeHttp, param_value, pending_cells, pending_reply};
+    use gadk_analytics::testutil::{
+        FakeHttp, param_value, pending_cells, pending_judge_cells, pending_reply,
+    };
 
     const ACTIVE: &str = r#"<a class="active" href="/review">Review</a>"#;
     const A: &str = "0123456789abcdef0123456789abcdef";
@@ -265,10 +267,10 @@ mod tests {
         );
         for row in [
             format!(
-                r#"<tr><td class="mono">2026-11-16T11:58:59.999Z</td><td class="mono"><a href="/traces/{A}?{qs}&amp;at=2026-11-16T11%3A58%3A59.999750Z">{A}</a></td><td>&lt;b&gt;&amp;&quot;x@1, triage@2</td><td class="num">2</td></tr>"#
+                r#"<tr><td class="mono">2026-11-16T11:58:59.999Z</td><td class="mono"><a href="/traces/{A}?{qs}&amp;at=2026-11-16T11%3A58%3A59.999750Z">{A}</a></td><td>&lt;b&gt;&amp;&quot;x@1, triage@2</td><td class="num">2</td><td>—</td></tr>"#
             ),
             format!(
-                r#"<tr><td class="mono">2026-11-16T11:57:59.999Z</td><td class="mono"><a href="/traces/{B}?{qs}&amp;at=2026-11-16T11%3A57%3A59.999750Z">{B}</a></td><td></td><td class="num">0</td></tr>"#
+                r#"<tr><td class="mono">2026-11-16T11:57:59.999Z</td><td class="mono"><a href="/traces/{B}?{qs}&amp;at=2026-11-16T11%3A57%3A59.999750Z">{B}</a></td><td></td><td class="num">0</td><td>—</td></tr>"#
             ),
         ] {
             assert!(body.contains(&row), "{row}\n{body}");
@@ -292,6 +294,46 @@ mod tests {
             param_value(&sent, "flagged")["parameterValue"]["value"],
             json!("true")
         );
+    }
+
+    #[tokio::test]
+    async fn the_judge_column_shows_each_score_with_its_full_name_or_a_dash() {
+        let c = "c".repeat(32);
+        let fake = FakeHttp::new(vec![pending_reply(vec![
+            pending_judge_cells(
+                A,
+                ago(60),
+                &[],
+                0,
+                &[
+                    ("support-monitor/llm_judge", 4.0, true),
+                    ("support-monitor/reference", 2.0, false),
+                ],
+            ),
+            pending_judge_cells(
+                B,
+                ago(120),
+                &[],
+                0,
+                &[("support-monitor/llm_judge_2", 3.5, true)],
+            ),
+            pending_cells(&c, ago(180), &[], 0),
+        ])]);
+        let (status, _, body) = get(bq_state(&fake), "/review?score=quality").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        // Traces with only judge scores are still pending.
+        assert!(body.contains("<p>3 pending</p>"), "{body}");
+        assert!(
+            body.contains("<th>Thumbs down</th><th>Judge</th>"),
+            "{body}"
+        );
+        for cell in [
+            r#"<td class="num">0</td><td><span title="support-monitor/llm_judge">llm_judge 4 ✓</span> · <span title="support-monitor/reference">reference 2 ✗</span></td></tr>"#,
+            r#"<td class="num">0</td><td><span title="support-monitor/llm_judge_2">llm_judge_2 3.5 ✓</span></td></tr>"#,
+            r#"<td class="num">0</td><td>—</td></tr>"#,
+        ] {
+            assert!(body.contains(cell), "{cell}\n{body}");
+        }
     }
 
     #[tokio::test]

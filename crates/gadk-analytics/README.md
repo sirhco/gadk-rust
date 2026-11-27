@@ -37,7 +37,7 @@ as RFC 3339), so results can be served as JSON as they are.
 | `sessions` | `sessions`, `users`, `session_turns` | Sessions (`SessionPage`, filtered and paged with `SessionQuery` and `SessionCursor`), users (`UserPage`, `UserQuery`), the turns of a session (`TurnRow`) |
 | `prompts` | `version_metrics`, `version_feedback`, `versions_for_invocations` | Per-version calls, mean tokens and p50/p95 latency (`VersionMetrics`), per-version scores (`VersionFeedback`), the versions each invocation used (`InvocationVersions`) |
 | `scores` | `trace_scores`, `trace_root`, `insert_score`, `insert_scores` | The scores of a trace (`TraceScores`), the identity a new score is written under (`TraceRoot`), and adding scores (`NewScore`) |
-| `review` | `pending`, `next_pending` | The traces of a `ReviewQueue` still missing a console score for some of the given score names (`PendingTrace`, paged with `Cursor`) |
+| `review` | `pending`, `next_pending` | The traces of a `ReviewQueue` still missing a console score for some of the given score names (`PendingTrace`, with the newest judge score per name as `JudgeScore`s, paged with `Cursor`) |
 | `cost` | none | `Usage` (four token counts), `cost_of` (a usage priced with a `gadk_eval_monitor::PriceTable`), `CostSum` (a sum that remembers unpriced calls) |
 | `row` | none | The row readers and query-parameter builders the queries share |
 | `testutil` (feature `test-util`) | none | `FakeHttp`, a scripted HTTP client to build a `BigQueryClient` over, and row fixtures |

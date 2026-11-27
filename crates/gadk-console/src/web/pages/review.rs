@@ -14,7 +14,7 @@
 
 //! The review page: the queue's filter form and its pending traces.
 
-use gadk_analytics::review::{PendingTrace, REVIEW_CAP};
+use gadk_analytics::review::{JudgeScore, PendingTrace, REVIEW_CAP};
 use maud::{Markup, html};
 
 use super::layout::{Nav, page};
@@ -133,12 +133,15 @@ fn filter_form(queue: Option<&ReviewQueue>, rubrics: Option<&Rubrics>) -> Markup
 }
 
 /// One row per pending trace: its first LLM response, its link in review mode, its prompt
-/// versions and its app thumbs-down count.
+/// versions, its app thumbs-down count and its judge scores.
 fn pending_table(q: &ReviewQueue, rows: &[PendingTrace]) -> Markup {
     html! {
         table {
             thead {
-                tr { th { "Time" } th { "Trace" } th { "Prompt versions" } th { "Thumbs down" } }
+                tr {
+                    th { "Time" } th { "Trace" } th { "Prompt versions" } th { "Thumbs down" }
+                    th { "Judge" }
+                }
             }
             tbody {
                 @for t in rows {
@@ -149,9 +152,34 @@ fn pending_table(q: &ReviewQueue, rows: &[PendingTrace]) -> Markup {
                         }
                         td { (t.prompts.join(", ")) }
                         td class="num" { (t.thumbs_down) }
+                        td { (judge_cell(&t.judge)) }
                     }
                 }
             }
         }
     }
+}
+
+/// A pending trace's judge scores, joined by ` · `: each `<short> <score> ✓` (pass) or `✗`
+/// (fail) in a `span` titled with the full name, `<short>` being the part after the last `/`.
+/// A whole-number score prints without a decimal point (`f64`'s `Display`). `—` without judge
+/// scores.
+fn judge_cell(scores: &[JudgeScore]) -> Markup {
+    html! {
+        @if scores.is_empty() {
+            "—"
+        }
+        @for (i, s) in scores.iter().enumerate() {
+            @if i > 0 { " · " }
+            span title=(s.name) {
+                (short_name(&s.name)) " " (s.score.to_string()) " "
+                (if s.pass { "✓" } else { "✗" })
+            }
+        }
+    }
+}
+
+/// The part of a score name after its last `/` (the whole name without one).
+fn short_name(name: &str) -> &str {
+    name.rsplit_once('/').map_or(name, |(_, short)| short)
 }

@@ -76,7 +76,7 @@ shows as an error banner with a hint ("needs roles/cloudtrace.user",
 | `/experiments/{report}` | One experiment, with a column per variant (the first is the baseline): prompt, model (only when a variant records one), runs, pass rate and its difference from the baseline in percentage points, mean judge score, errors, p50 and p95 duration, input, output, cached and reasoning tokens, and cost. Then the cases where the variants disagree, each with every variant's verdict and, expanded, every run's last reply, run error and score rationales; `?cases=all` lists every case. See [Experiments](#experiments). |
 | `/guards` | The newest 100 guard reports in the `--reports` store (its `guards/`): a card per rollout (prompt, label, baseline and rollout version, linking to the prompt) with its latest verdict, action and percent, how many reports it has and how many applied their action, and its timeline; then a table of the reports, newest first. `?prompt=<name>` shows only that prompt's rollouts. See [Guards](#guards). |
 | `/guards/{report}` | One guard report: the rollout and its percent, window, its stats when the spec set `sequential` or `confidence` (for example `sequential, 95% across 2 interval checks`), source and when it was made, then one row per check (baseline and rollout values with their sample sizes, harm, the interval of the harm, and a status badge with its reason), the verdict, the note and the action, marked `applied` or `dry run`. |
-| `/review` | BigQuery source only. A review queue: `?score=<name>` (required) with optional `prompt`, `version`, `flagged=1` and `range` (`1h`, `6h`, `24h`, `7d` default) lists the recent traces with no console score of that name, newest first, at most 100, with a "Start reviewing" link. Without `score` it shows the form alone. See [Review](#review). |
+| `/review` | BigQuery source only. A review queue: `?score=<name>` (required) with optional `prompt`, `version`, `flagged=1` and `range` (`1h`, `6h`, `24h`, `7d` default) lists the recent traces with no console score of that name, newest first, at most 100, with a "Start reviewing" link and a Judge column (the newest `gadk-eval monitor --write-scores` judge score per name). Without `score` it shows the form alone. See [Review](#review). |
 | `/review/next` | BigQuery source only. `?<queue>&after=<time>&after_id=<trace id>` redirects (303) to the queue's next trace after that one, or back to `/review?<queue>&done=1` when none is left. |
 | `/sessions` | BigQuery source only. The sessions with activity in the window, newest last activity first, at most 100 per page, with their user, agent, turns, tokens, cost, errors and thumbs. `?range=` (`1h`, `6h`, `24h` default, `7d`), `user`, `agent`. See [Sessions and users](#sessions-and-users). |
 | `/sessions/{id}` | BigQuery source only. One session's turns as a conversation, oldest first, each with its metrics. `?range=` (default `7d`). |
@@ -310,10 +310,20 @@ answer 404 with a note.
 - The page lists at most 100 pending traces, newest first by their first LLM response: the time,
   the trace, its prompt versions (`name@version`) and its app thumbs-down count. With more it
   says `100+ pending (showing 100)`.
+- The Judge column shows the judge scores that `gadk-eval monitor --write-scores` wrote on the
+  trace (`FEEDBACK` rows with source `judge`), the newest per name, joined by ` · `: each is
+  `<short name> <score> ✓` (pass) or `<short name> <score> ✗` (fail), with its full name
+  (`<monitor spec>/<scorer kind>`) as a tooltip; `—` when there are none. Judge scores never take
+  a trace out of the queue: only a console score of the queue's name does.
 - "Start reviewing" (or a trace link) opens the trace in review mode. A bar above the trace shows
   `Reviewing <score>`, `Skip →` (the next trace) and `Back to queue`, and the score form's name is
   pre-filled. Adding a score opens the next trace; when none is left the queue page says
   `Queue empty — all caught up`.
+- In review mode the Scores section shows a Judge section after the scores table and before the
+  forms, so you can see why the judge passed or failed the run before scoring it: the newest
+  judge score per name with its score, `pass` or `fail` and the judge's rationale. It is left out
+  when the trace has no judge scores, and outside review mode. Judge rows past the newest 200
+  scores the page loads are not shown.
 - The queue is the URL: nothing is stored, nothing is locked. Two reviewers on the same queue may
   score the same trace; both scores are kept. A trace drops out of the queue once its first model
   response is older than the range.
@@ -489,7 +499,7 @@ document at `/api/v1/openapi.json` is served without the BigQuery source too.
 | `/api/v1/users` | `range` (default `7d`), `agent`, as on `/users` | at most 100 users, each priced |
 | `/api/v1/prompts/{name}/versions` | `range` as on `/prompts/{name}` (`1h`, `6h`, `24h`, `7d`; unknown or missing is `7d`) | `{"metrics": {"stats", "models", "truncated"}, "feedback"}`: per-version calls, mean tokens and latency with their cost, the calls per version and model with theirs, and the scores per version |
 | `/api/v1/traces/{id}/scores` | none | `{"rows", "truncated"}`: the trace's scores and its invocations', newest first, as in the trace page's Scores section |
-| `/api/v1/review/pending` | `score` or `rubric` (one is required), `prompt`, `version`, `flagged=1`, `range`, as on `/review` | the queue's pending traces, newest first, at most 100 |
+| `/api/v1/review/pending` | `score` or `rubric` (one is required), `prompt`, `version`, `flagged=1`, `range`, as on `/review` | the queue's pending traces, newest first, at most 100, each with `judge`: `[{"name", "score", "pass"}]`, its newest judge score per name (empty when none) |
 | `/api/v1/openapi.json` | none | not an envelope: the [OpenAPI](#openapi) document of these routes, also without the BigQuery source |
 
 A name in a path is percent-encoded (`/api/v1/prompts/team%2Fgreet/versions`). The prompt route

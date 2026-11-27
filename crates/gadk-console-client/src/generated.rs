@@ -489,6 +489,18 @@ pub struct ScoreRow {
     pub comment: String,
 }
 
+/// The newest judge score of one name on a trace (a FEEDBACK row with source judge).
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
+pub struct JudgeScore {
+    /// The score name: the monitor spec and the scorer kind joined by /, with _n appended for the n-th scorer of a kind (for example support-monitor/llm_judge_2).
+    pub name: String,
+    /// The judge's score.
+    pub score: f64,
+    /// Whether the judge passed the run (its comment starts with pass:).
+    pub pass: bool,
+}
+
 /// A trace waiting for review.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
@@ -501,6 +513,8 @@ pub struct PendingTrace {
     pub prompts: Vec<String>,
     /// The distinct app thumbs-down scores on the trace.
     pub thumbs_down: u64,
+    /// The newest judge score per name, sorted by name; empty when none. Judge scores never make a trace reviewed. This console always sends it; consoles before this release omit it.
+    pub judge: Option<Vec<JudgeScore>>,
 }
 
 /// The usage breakdown.
