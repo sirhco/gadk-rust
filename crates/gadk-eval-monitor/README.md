@@ -463,6 +463,10 @@ min_step_age: 24h                 # optional, <n>m | <n>h | <n>d, at most 30d: a
                                   #   step runs at least this long before the next advance;
                                   #   needs --out
 ramp: [10, 25, 50]                # optional: percents 1-99, strictly increasing
+sequential: true                  # optional, default false: anytime-valid intervals from the
+                                  #   rollout's first call; `window` becomes the lookback
+confidence: 0.95                  # optional, 0.5-0.999 (default 0.95 with sequential): shared
+                                  #   by the error_rate, feedback and eval checks
 checks:                           # at least one; only `feedback` may repeat (with another
                                   #   name or source)
   - error_rate: { max_increase: 0.01 }          # absolute, 0-1
@@ -529,7 +533,8 @@ Each check gets a status:
   number means it is Welch's interval (normal quantile, no t distribution) divided by
   |mean(B)|. The check is `worse` when L > t (the rollout is worse by more than the tolerance
   even at its best), `ok` when U ≤ t (no worse than the tolerance even at its worst), and
-  `unsure` otherwise (more data needed).
+  `unsure` otherwise (more data needed). With `confidence` or `sequential`, z is larger; see
+  [Sequential decisions](#sequential-decisions).
 - `cost_per_call` and `latency_p95` use the point value h = (value(R) − value(B)) ÷ value(B):
   `worse` when h > t, else `ok`. They can flap near the tolerance, so give them looser
   tolerances.
@@ -691,12 +696,69 @@ increase is U ≈ 0.026: a `max_increase` of 0.01 cannot be `ok` until each side
 calls, even with no errors at all. Pick a window, `min_calls` and tolerances your traffic can
 meet, and remember that the rollout side only gets its percent of the traffic.
 
-The decision rule has no correction for repeated looks or for several checks: every scheduled
-run, and every check in it, is another chance for noise to cross a tolerance, so a guard run
-hourly for days with five checks will now and then abort a rollout that was fine. An abort only
-removes the rollout (every session goes back to B) and can be undone by starting the rollout
-again; use looser tolerances, fewer checks or a longer interval between runs if false aborts
-cost you too much.
+Without `sequential` or `confidence`, the decision rule has no correction for repeated looks or
+for several checks: every scheduled run, and every check in it, is another chance for noise to
+cross a tolerance, so a guard run hourly for days with five checks will now and then abort a
+rollout that was fine. An abort only removes the rollout (every session goes back to B) and can
+be undone by starting the rollout again; use looser tolerances, fewer checks or a longer
+interval between runs if false aborts cost you too much, or turn on
+[sequential decisions](#sequential-decisions).
+
+### Sequential decisions
+
+Two optional spec keys make the interval checks (`error_rate`, `feedback` and `eval`) share one
+error budget, however often the guard runs:
+
+- `confidence: <c>` (0.5-0.999) splits α = 1 − c across the spec's k interval checks
+  (Bonferroni): each check's bounds use z = Φ⁻¹(1 − α ÷ k) instead of 1.6448536269514722. With
+  `confidence: 0.95` and two interval checks, z = 1.959963984540054.
+- `sequential: true` (confidence 0.95 unless `confidence` says otherwise) also makes each of
+  those intervals hold at every look, not just at one. Each check uses the anytime z at level
+  a = α ÷ k, which grows slowly with the check's total sample n (calls on both sides for
+  `error_rate`, scores on both sides for `feedback`, scored runs on both sides for `eval`):
+
+  z(n) = √((1 + ρ/n) · ln((n + ρ) / (ρ · a²)))
+
+  ρ is chosen so that z is smallest at n* = 2 × `min_calls` for `error_rate`, 2 × `min_count`
+  for `feedback` and 20 for `eval`, about where each check first has enough data. This is
+  Robbins' normal-mixture boundary, the asymptotic confidence sequence of Waudby-Smith, Ramdas
+  et al. (2024), *Time-uniform central limit theory and asymptotic confidence sequences*. It is
+  always wider than the fixed interval: at a = 0.05 and n* = 200, z is 3.04 at n = 200 and 3.25
+  at n = 2000, against 1.64. In exchange a guard on any schedule (hourly, every five minutes)
+  can `abort` or `advance` as soon as the evidence is enough, and the chance that some look
+  wrongly says `worse` stays within about α over the whole rollout. The guarantee is
+  approximate: the confidence sequence is asymptotic (it holds as the sample grows), and taking
+  n as both sides' total is a conservative heuristic rather than an exact bound. In a simulation with a 5% error
+  rate on both sides, 50 looks of 200 calls each and one check, 0.3% of rollouts were wrongly
+  aborted at a 50% rollout share and 1.2% at 10%, against about 25% with the fixed z.
+- With `sequential`, the sample starts at the rollout's first call: the guard first looks for the
+  earliest `LLM_REQUEST` row of version R in `[now − window, now)` and then measures every check
+  over `[that call, now)`, or over `[now − window, now)` when there is none. `window` is the
+  lookback, so set it (up to 30d) at least as long as your rollouts run: a rollout older than
+  `window` slides again, as without `sequential`, and loses the guarantee. A rollout stopped and
+  started again within the lookback includes the earlier attempt's calls; the header's `since`
+  shows where the sample starts. A long lookback (such as 30d) scans more of the table, so each
+  run costs more and can hit `--max-bytes` (default 1 GiB), which exits 2: raise `--max-bytes`
+  or shorten `window` for busy tables.
+- For `eval` the guarantee holds only while each side's scored runs stay below `limit`: once
+  `limit` caps the sample, newer runs replace older ones instead of adding to them.
+- `cost_per_call` and `latency_p95` keep their point rule and do not count in k. A spec with
+  only those checks has no interval checks, so `confidence` and `sequential` change no decision
+  (the stats line shows `across 0 interval checks`).
+- Wider intervals mean more `wait` early in a rollout. A larger `min_calls` or `min_count` moves
+  n*, and so the sharpest point of the boundary, later.
+
+The report shows the rule under the header:
+
+```text
+guard support-answer-guard: support/answer/production v3 → v4 (10%), since 2026-11-24 08:00 UTC (28h), lookback 30d
+stats: sequential, 95% across 4 interval checks
+```
+
+Without `sequential` the header keeps `window <duration>` and the line reads
+`stats: fixed, 95% across 4 interval checks`. The JSON report gains `stats` (`sequential`,
+`confidence`, `interval_checks` and `lookback` in seconds) and each interval check its `z`. A
+spec with neither key prints and stores exactly what it did before.
 
 ### Scheduling
 
@@ -705,7 +767,8 @@ window. Without `min_step_age`, the schedule interval is the only soak time a ra
 an hourly guard whose checks are all `ok` steps through `ramp: [10, 25, 50]` and promotes within
 a few hours, each step judged mostly on calls made before it. With `ramp`, set `min_step_age`
 to about the window, so each step runs a full window before the next `advance` (this needs
-`--out`).
+`--out`). With `sequential: true`, `window` is only the lookback, so set `min_step_age` to the
+soak time you want per ramp step instead.
 
 Once the rollout ends (promoted, aborted, or removed by hand) its guard reports no rollout until
 a new rollout starts. Schedule `gadk-eval guards` rather than `guard`: advance, abort, wait and

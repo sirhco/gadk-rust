@@ -555,6 +555,7 @@ mod tests {
                 },
                 harm: Some(0.0),
                 interval: Some((-0.01, 0.012)),
+                z: None,
                 status: Status::Ok,
                 reason: None,
             }],
@@ -562,6 +563,7 @@ mod tests {
             action: Action::Ramp(25),
             applied: false,
             note: None,
+            stats: None,
         }
     }
 

@@ -120,6 +120,7 @@ pub(crate) fn origin(url: &str) -> String {
 /// A guard that advanced, aborted or errored in a `guards` run (waits and "no rollout" are not
 /// recorded).
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)] // a few outcomes per run; the report is not boxed
 pub(crate) enum Outcome {
     /// The guard advanced or aborted.
     Report {
@@ -396,6 +397,7 @@ mod tests {
             action,
             applied,
             note: None,
+            stats: None,
         }
     }
 

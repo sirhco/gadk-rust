@@ -26,15 +26,18 @@ use gadk_model::Llm;
 use gadk_prompts::{Label, PromptStore, Rollout, StoreError};
 
 use crate::error::MonitorError;
-use crate::guard_report::{Action, CheckResult, GuardReport, Status, Verdict, duration_text};
+use crate::guard_report::{
+    Action, CheckResult, GuardReport, GuardStats, Status, Verdict, duration_text,
+};
 use crate::guard_source::{GuardQuery, GuardSource};
 use crate::guard_spec::{Check, GuardSpec};
+use crate::guard_stats::bonferroni_z;
 use crate::monitor::{DEFAULT_CONCURRENCY, score_runs};
 use crate::prices::PriceTable;
 use crate::report::Window;
 use crate::spec::DEFAULT_JUDGE_TIMEOUT;
 
-use checks::Sides;
+use checks::{Sides, ZRule};
 
 /// Runs a [`GuardSpec`]: reads the label's version and rollout from the prompt store, compares
 /// both versions' calls over the spec's window, decides whether to advance, abort or wait, and
@@ -91,15 +94,21 @@ impl Guard {
     /// (nothing to guard).
     ///
     /// Reads the label's version B and its rollout (version R at p%) from `store` in one
-    /// `load_prompt`, gets both versions' calls in `[now − window, now)` from
-    /// `source`, and classifies each check: `insufficient` when a side has fewer than
-    /// `min_calls` calls (then neither feedback nor eval runs are queried), for `feedback`
-    /// fewer than `min_count` scores, for `eval` fewer
+    /// `load_prompt`, gets both versions' calls in `[now − window, now)` from `source` (with
+    /// the spec's `sequential`, in `[start, now)`: start is
+    /// [`GuardSource::rollout_start`] over `[now − window, now)`, clamped into
+    /// `[now − window, now]`, or `now − window` without one), and classifies each check:
+    /// `insufficient` when a side has fewer than `min_calls` calls (then neither feedback nor
+    /// eval runs are queried), for `feedback` fewer than `min_count` scores, for `eval` fewer
     /// than [`MIN_EVAL_RUNS`](crate::guard_spec::MIN_EVAL_RUNS) scored runs; `unknown` when a
-    /// value cannot be computed; else `worse`, `ok` or `unsure` from the one-sided 95% interval
-    /// of the rollout's harm (cost and p95 latency: the point harm, `worse` or `ok`). The
-    /// verdict is `abort` when a check is `worse`, `advance` when all are `ok`, else `wait`;
-    /// `advance` ramps to the first `ramp` step above p, or promotes R without one.
+    /// value cannot be computed; else `worse`, `ok` or `unsure` from the one-sided interval of
+    /// the rollout's harm (cost and p95 latency: the point harm, `worse` or `ok`). Each bound is
+    /// 95% on its own; with the spec's `confidence` the `error_rate`, `feedback` and `eval`
+    /// checks share 1 − confidence (Bonferroni), and with `sequential` each of their intervals
+    /// is also anytime-valid (the report's [`stats`](GuardReport::stats) and each check's `z`
+    /// record this). The verdict is `abort` when a check is `worse`, `advance` when all are
+    /// `ok`, else `wait`; `advance` ramps to the first `ramp` step above p, or promotes R
+    /// without one.
     ///
     /// `previous` is the newest stored report of the same spec that applied a ramp step
     /// (the CLI skips held, waiting, dry-run and other reports; one made after `now` counts
@@ -144,8 +153,26 @@ impl Guard {
         let (baseline, Some(read)) = read_rollout(store, &spec.prompt, &spec.label).await? else {
             return Ok(None);
         };
+        let (rule, stats) = z_rule(spec);
         let now = self.now.unwrap_or_else(Utc::now);
-        let from = now - spec.window;
+        let lookback = now - spec.window;
+        let from = if spec.sequential {
+            let probe = GuardQuery::new(
+                spec.prompt.clone(),
+                spec.label.as_str(),
+                baseline,
+                read.version,
+                lookback,
+                now,
+            );
+            source
+                .rollout_start(&probe)
+                .await?
+                .map(|t| t.clamp(lookback, now))
+                .unwrap_or(lookback)
+        } else {
+            lookback
+        };
         let q = GuardQuery::new(
             spec.prompt.clone(),
             spec.label.as_str(),
@@ -169,7 +196,9 @@ impl Guard {
         let mut results: Vec<CheckResult> = Vec::with_capacity(spec.checks.len());
         for check in &spec.checks {
             let result = match check {
-                Check::ErrorRate { max_increase } => checks::error_rate(&sides, *max_increase),
+                Check::ErrorRate { max_increase } => {
+                    checks::error_rate(&sides, *max_increase, &rule)
+                }
                 Check::Feedback {
                     name,
                     source: from_source,
@@ -180,7 +209,15 @@ impl Guard {
                         Some(_) => Vec::new(),
                         None => source.version_feedback(&q, name, *from_source).await?,
                     };
-                    checks::feedback(&sides, name, *from_source, *max_decrease, *min_count, &rows)
+                    checks::feedback(
+                        &sides,
+                        name,
+                        *from_source,
+                        *max_decrease,
+                        *min_count,
+                        &rows,
+                        &rule,
+                    )
                 }
                 Check::CostPerCall { max_increase } => {
                     checks::cost_per_call(&sides, prices, *max_increase)
@@ -213,7 +250,7 @@ impl Guard {
                             Some((b, r))
                         }
                     };
-                    checks::eval(&sides, *max_decrease, runs.as_ref())
+                    checks::eval(&sides, *max_decrease, runs.as_ref(), &rule)
                 }
             };
             results.push(result);
@@ -246,8 +283,40 @@ impl Guard {
             action,
             applied: apply && action != Action::None,
             note,
+            stats,
         }))
     }
+}
+
+/// The z rule of `spec`'s interval checks (`error_rate`, `feedback` and `eval`) and the
+/// report's stats: [`ZRule::Fixed95`] and `None` unless the spec sets `sequential` or
+/// `confidence`. With k interval checks and α = 1 − confidence, each check gets level α ÷ k:
+/// the Bonferroni z, or with `sequential` the anytime z (no z is computed when k is 0).
+fn z_rule(spec: &GuardSpec) -> (ZRule, Option<GuardStats>) {
+    let Some(confidence) = spec.effective_confidence() else {
+        return (ZRule::Fixed95, None);
+    };
+    let k = spec
+        .checks
+        .iter()
+        .filter(|c| {
+            matches!(
+                c,
+                Check::ErrorRate { .. } | Check::Feedback { .. } | Check::Eval { .. }
+            )
+        })
+        .count();
+    let k = u32::try_from(k).unwrap_or(u32::MAX);
+    let alpha = 1.0 - confidence;
+    let rule = match (k, spec.sequential) {
+        (0, _) => ZRule::Fixed95,
+        (_, false) => ZRule::Bonferroni(bonferroni_z(alpha, k)),
+        (_, true) => ZRule::Anytime {
+            a: alpha / f64::from(k),
+        },
+    };
+    let stats = GuardStats::new(spec.sequential, confidence, k, spec.window);
+    (rule, Some(stats))
 }
 
 /// `step at <q>% is <age> old (< min_step_age <min>)` when `previous` applied the ramp step

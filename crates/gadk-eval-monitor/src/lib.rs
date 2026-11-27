@@ -99,7 +99,7 @@ pub use export::{
 pub use gcp::{AdcTokenSource, NoAuth, TokenSource};
 pub use guard::Guard;
 pub use guard_report::{
-    Action, CheckResult, GuardReport, SideValue, Status, Unit, Verdict as GuardVerdict,
+    Action, CheckResult, GuardReport, GuardStats, SideValue, Status, Unit, Verdict as GuardVerdict,
 };
 pub use guard_source::{GuardQuery, GuardSource, ModelTokens, VersionCalls, VersionFeedback};
 pub use guard_spec::{Check, FeedbackSource, GuardSpec};
