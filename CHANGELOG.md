@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.28] - 2026-11-27
+
 ### Added
 
 - `gadk-eval`: a judge seam. `JudgeBackend` grades the `llm_judge` and `reference` scorers from a
@@ -1095,7 +1097,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.27...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.28...HEAD
+[0.5.28]: https://github.com/sirhco/gadk-rust/compare/v0.5.27...v0.5.28
 [0.5.27]: https://github.com/sirhco/gadk-rust/compare/v0.5.26...v0.5.27
 [0.5.26]: https://github.com/sirhco/gadk-rust/compare/v0.5.25...v0.5.26
 [0.5.25]: https://github.com/sirhco/gadk-rust/compare/v0.5.24...v0.5.25
