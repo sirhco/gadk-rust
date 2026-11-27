@@ -190,7 +190,7 @@ Limits:
 
 | Command | Does |
 |---|---|
-| `gadk-eval monitor <spec.yaml> [--out <url>] [--limit N]` | Runs the monitor, prints its summary and, with `--out`, stores the report. `--limit` (1-1000) overrides the spec. |
+| `gadk-eval monitor <spec.yaml> [--out <url>] [--limit N] [--write-scores]` | Runs the monitor, prints its summary and, with `--out`, stores the report. `--limit` (1-1000) overrides the spec. `--write-scores` then writes the judge scores to the BigQuery table for the console ([Judge scores in the console](#judge-scores-in-the-console)). |
 | `gadk-eval report <url> [<name>] [--limit N]` | Lists the newest stored reports (name, spec, time, runs, pass rate, runs with errors; default 20), or prints one report's summary. |
 | `gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [options]` | Writes production runs as eval-set cases to a new file, or `--append`s them; see [Exporting runs as eval cases](#exporting-runs-as-eval-cases). |
 | `gadk-eval experiment <spec.yaml> [--out <url>]` | Runs an experiment from an experiment spec (one Gemini agent on Vertex AI per variant), stores it under `experiments/` of `<url>` when `--out` is given, then prints its summary and, with `--out`, `stored report <name>`; see [Experiment spec](#experiment-spec). |
@@ -206,9 +206,61 @@ Limits:
 |---|---|---|---|---|---|
 | 0 | success | success | at least one case was added | the experiment ran (whatever its case results) and, with `--out`, was stored | every guard reached an outcome (advance, abort, wait or no rollout) |
 | 1 | `min_pass_rate` is set and either the pass rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0) | — | no case was added (nothing is written) | — | — |
-| 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, or a usage error | a store error, an unknown or invalid report name, or a usage error | the file exists (without `--append`) or cannot be read, appended to or written, a query fails, or a usage error | the spec is invalid, the eval set cannot be read or is invalid, the prompt store or a variant's prompt version cannot be loaded, a model or the judge cannot be built, the experiment fails, the report cannot be stored, or a usage error | a guard failed, a check before the run failed (a source, a spec, the price file, `--out` or `--notify`), the `--notify` post failed, or a usage error |
+| 2 | the spec cannot be loaded, the runs cannot be listed, the judge cannot be built, the report cannot be stored, with `--write-scores` the source is not `bigquery` or the judge rows cannot be written, or a usage error | a store error, an unknown or invalid report name, or a usage error | the file exists (without `--append`) or cannot be read, appended to or written, a query fails, or a usage error | the spec is invalid, the eval set cannot be read or is invalid, the prompt store or a variant's prompt version cannot be loaded, a model or the judge cannot be built, the experiment fails, the report cannot be stored, or a usage error | a guard failed, a check before the run failed (a source, a spec, the price file, `--out` or `--notify`), the `--notify` post failed, or a usage error |
 
 A judge call that fails or times out is an error result for that scorer, not exit 2.
+
+## Judge scores in the console
+
+`gadk-eval monitor <spec.yaml> --write-scores` also writes the judge's results to the BigQuery
+table the spec reads, as `FEEDBACK` rows with source `judge`. The console's review queue then shows
+them in a Judge column, and a trace in review mode shows them with the judge's rationale
+([`gadk-console`](../gadk-console/README.md#review)).
+
+```sh
+gadk-eval monitor monitors/support.yaml --out gs://my-bucket/monitors --write-scores
+# … the summary, then:
+# stored report support-bot-prod-20261126T080000Z.json
+# scores: wrote 37 judge rows (0 already present)
+```
+
+- It needs a `bigquery` source. With another source it exits 2 with
+  `--write-scores needs a bigquery source` before grading anything.
+- After the report is stored and printed, it writes one row per `llm_judge` or `reference` result
+  that passed or failed with a score. Error results and the other scorers write nothing. It then
+  prints `scores: wrote <W> judge rows (<P> already present)`, and `min_pass_rate` applies after
+  that.
+- Names:
+  - A row's name is `<spec name>/<kind>` for the first scorer of a kind, and
+    `<spec name>/<kind>_<n>` for the n-th. For example, scorers
+    `[llm_judge, not_contains, llm_judge, reference]` on spec `support-monitor` write
+    `support-monitor/llm_judge`, `support-monitor/llm_judge_2` and `support-monitor/reference`.
+  - Names follow scorer order, so reordering a spec's scorers renames its rows.
+- Row contents:
+  - The value is the judge's 1-5 score (`data_type` `number`).
+  - The comment is `pass: <rationale>` or `fail: <rationale>`.
+  - The attributes are `{"source": "judge", "author": <spec name>, "adk": {"invocation_id": …}}`.
+  - `trace_id`, `session_id` and `invocation_id` are the run's, and `user_id` is NULL.
+- Dedupe:
+  - One query per run finds the (invocation id, name) pairs that already have a `judge` row
+    written since the window's start, and those pairs are skipped. A second run over the same
+    window writes nothing new.
+  - Two runs racing on the same invocations can both write a pair. This is harmless: the console
+    shows the newest row per name.
+- Inserts:
+  - The rows go in parameterized `INSERT … SELECT … FROM UNNEST(@rows)` statements of at most 500
+    rows each.
+  - A failed dedupe query or insert exits 2 after the summary, with no `scores:` line. The
+    BigQuery error is followed by `; writing scores needs roles/bigquery.dataEditor on the table`.
+  - Inserts that ran before the failure stay written, and a rerun skips them.
+- Role and cost:
+  - Writing needs `roles/bigquery.dataEditor` on the table.
+  - BigQuery bills every DML statement at least 10 MiB. Each insert therefore runs with a byte cap
+    of at least 10,485,760 bytes, about $0.00006 per insert of up to 500 rows at on-demand prices.
+  - The dedupe query reads the window's `FEEDBACK` rows.
+- Judge rows appear in the console's per-version Feedback (source `judge`, per name). Guard
+  `feedback` checks ignore judge rows: they read only `app` and `console` scores.
+- The review queue still waits for a console score: a judge score never takes a trace out of it.
 
 ## Exporting runs as eval cases
 
@@ -1012,6 +1064,12 @@ queries in another project with `with_billing_project` and cap them with
 `with_max_bytes_billed`), `run_to_case`, `export_runs`, `cases_text`, `write_set_file`,
 `ScoreFilter` (with `ScoreFilter::parse` for the `--score` syntax) and `ExportedCase::new`.
 
+`judge_rows(&report, &spec.name)` turns a report's `llm_judge` and `reference` results into
+`JudgeRow`s, and `write_judge_rows(sink, rows, report.window.from, &spec.name)` writes the ones
+the `ScoreSink` does not hold yet, `JUDGE_ROWS_PER_INSERT` (500) per insert, returning a
+`WriteOutcome`. `BigQueryTranscriptSource` is a `ScoreSink`. A custom `cli::Backends`
+implements `score_sink(spec)`. The default refuses with `--write-scores needs a bigquery source`.
+
 `Guard::new().run(&spec, store, source, prices, judge, previous, apply)` is the library side of
 `gadk-eval guard`: a `GuardSpec`, a `gadk_prompts::PromptStore`, a `GuardSource`
 (`BigQueryGuardSource`, or your own for other data), an optional `PriceTable` and judge, and
@@ -1038,6 +1096,8 @@ written to as you would the analytics table.
   BigQuery Job User on the project that runs the queries (the source project).
 - Cloud Trace User on the trace project (only with a `cloud_trace` source).
 - Vertex AI User on the judge project (only with `llm_judge` scorers).
+- BigQuery Data Editor (`roles/bigquery.dataEditor`) on the table, only with
+  `monitor --write-scores`.
 - Vertex AI User on the experiment spec's `project` (`gadk-eval experiment`: the agents and,
   by default, the judge), and read access to a `firestore://` prompt store when the spec uses
   one.
@@ -1058,6 +1118,8 @@ that started in the window, then the rows of at most `limit` of them. Both filte
 `timestamp` (the analytics plugin's default) scans only the window's partitions; keep the window
 short and the event types filtered. Judge cost grows with `limit` times the number of
 `llm_judge` scorers; runs are graded 8 at a time.
+With `--write-scores` a run adds one dedupe query over the window's `FEEDBACK` rows and one
+`INSERT` per 500 judge rows, each billed at least 10 MiB.
 `export` issues up to eight queries per call (the trace's invocations or the matching ones,
 their run headers and rows, the sessions' earlier run headers and rows, the scores and the
 prompt versions), each bounded by `timestamp` and by invocation, session or trace ids, with no
