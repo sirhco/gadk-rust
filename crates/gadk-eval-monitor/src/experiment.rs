@@ -26,6 +26,7 @@ use gadk_eval::{
 use serde::{Deserialize, Serialize};
 
 use crate::error::MonitorError;
+use crate::pairwise::{PairwiseResult, PairwiseStats, PairwiseVerdict};
 use crate::spec::is_monitor_name;
 
 /// One variant of an experiment: its name and the prompt selector and model it used, if any.
@@ -80,6 +81,11 @@ pub struct ExperimentReport {
     /// `metrics`.
     #[serde(default)]
     pub metrics: Vec<Vec<RunMetrics>>,
+    /// Each later variant's runs compared with the baseline's (`experiment --pairwise`),
+    /// ordered by variant, case and run. Empty when the JSON has no `pairwise`, and left out of
+    /// the JSON when empty, so reports without pairwise results keep their earlier shape.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pairwise: Vec<PairwiseResult>,
 }
 
 /// One variant's numbers, from [`ExperimentReport::variant_stats`].
@@ -184,7 +190,74 @@ impl ExperimentReport {
                 .collect(),
             report: measured.report,
             metrics: measured.metrics,
+            pairwise: Vec::new(),
         }
+    }
+
+    /// This report with its pairwise results set to `pairwise` (see
+    /// [`run_pairwise`](crate::run_pairwise)).
+    pub fn with_pairwise(mut self, pairwise: Vec<PairwiseResult>) -> Self {
+        self.pairwise = pairwise;
+        self
+    }
+
+    /// One entry per variant after the first (in variant order): its wins, losses, ties and
+    /// errors against the first variant in [`ExperimentReport::pairwise`].
+    pub fn pairwise_stats(&self) -> Vec<PairwiseStats> {
+        let Some((baseline, candidates)) = self.report.variants.split_first() else {
+            return Vec::new();
+        };
+        candidates
+            .iter()
+            .map(|v| {
+                let mut stats = PairwiseStats::new(&v.name, &baseline.name, 0, 0, 0, 0);
+                for r in self.pairwise.iter().filter(|r| r.variant == v.name) {
+                    match r.choice {
+                        PairwiseVerdict::Candidate => stats.wins += 1,
+                        PairwiseVerdict::Baseline => stats.losses += 1,
+                        PairwiseVerdict::Tie => stats.ties += 1,
+                        PairwiseVerdict::Error => stats.errors += 1,
+                    }
+                }
+                stats
+            })
+            .collect()
+    }
+
+    /// The `pairwise vs <baseline>:` block of [`ExperimentReport::summary`]: one line of counts
+    /// per later variant, then the first 10 lost pairs (`<case>#<run>`).
+    fn pairwise_summary(&self) -> String {
+        /// The most lost pairs listed per variant.
+        const LOST_SHOWN: usize = 10;
+        let stats = self.pairwise_stats();
+        let Some(first) = stats.first() else {
+            return String::new();
+        };
+        let mut out = format!("\npairwise vs {}:\n", first.baseline);
+        for s in &stats {
+            out.push_str(&format!(
+                "  {}: {} wins, {} losses, {} ties",
+                s.variant, s.wins, s.losses, s.ties
+            ));
+            if s.errors > 0 {
+                out.push_str(&format!(", {} errors", s.errors));
+            }
+            out.push('\n');
+            let lost: Vec<String> = self
+                .pairwise
+                .iter()
+                .filter(|r| r.variant == s.variant && r.choice == PairwiseVerdict::Baseline)
+                .map(|r| format!("{}#{}", r.case, r.run))
+                .collect();
+            if !lost.is_empty() {
+                let mut line = lost[..lost.len().min(LOST_SHOWN)].join(", ");
+                if lost.len() > LOST_SHOWN {
+                    line.push_str(", …");
+                }
+                out.push_str(&format!("    lost: {line}\n"));
+            }
+        }
+        out
     }
 
     /// The report as pretty-printed JSON.
@@ -298,6 +371,11 @@ impl ExperimentReport {
     /// A text table with one row per variant: runs, pass rate (passed / (passed + failed)
     /// runs), mean judge score, errors, p50 and p95 duration, input and output tokens. When any
     /// variant has a model, a `model` column follows `variant` (`—` for a variant without one).
+    ///
+    /// With [`ExperimentReport::pairwise`] results, a blank line and a `pairwise vs
+    /// <baseline>:` block follow: per later variant `<variant>: <W> wins, <L> losses, <T>
+    /// ties` (`, <E> errors` when E > 0) and, when it lost a pair, `lost: <case>#<run>, …`
+    /// (at most 10, then `, …`).
     pub fn summary(&self) -> String {
         let with_models = self.variants.iter().any(|v| v.model.is_some());
         let mut header: Vec<String> = vec!["variant".into()];
@@ -360,6 +438,9 @@ impl ExperimentReport {
                 .collect();
             out.push_str(line.join("  ").trim_end());
             out.push('\n');
+        }
+        if !self.pairwise.is_empty() {
+            out.push_str(&self.pairwise_summary());
         }
         out
     }
@@ -929,5 +1010,88 @@ cases:
                 ),
             ]
         );
+    }
+
+    // ---- pairwise ----
+
+    /// v2 against v1: 2 wins, 12 losses (`c0#1` .. `c11#1`), 1 tie and 1 error.
+    fn with_pairwise() -> ExperimentReport {
+        let mut results = vec![
+            PairwiseResult::new("v2", "a", 1, PairwiseVerdict::Candidate, "better"),
+            PairwiseResult::new("v2", "a", 2, PairwiseVerdict::Candidate, "better"),
+            PairwiseResult::new("v2", "b", 1, PairwiseVerdict::Tie, "same"),
+            PairwiseResult::new(
+                "v2",
+                "c",
+                1,
+                PairwiseVerdict::Error,
+                "evaluation service: HTTP 500: oops",
+            ),
+        ];
+        for i in 0..12 {
+            results.push(PairwiseResult::new(
+                "v2",
+                format!("c{i}"),
+                1,
+                PairwiseVerdict::Baseline,
+                "worse",
+            ));
+        }
+        report().with_pairwise(results)
+    }
+
+    #[test]
+    fn pairwise_stats_count_each_verdict() {
+        assert_eq!(
+            with_pairwise().pairwise_stats(),
+            [PairwiseStats::new("v2", "v1", 2, 12, 1, 1)]
+        );
+        assert_eq!(
+            report().pairwise_stats(),
+            [PairwiseStats::new("v2", "v1", 0, 0, 0, 0)]
+        );
+    }
+
+    #[test]
+    fn summary_appends_the_pairwise_block() {
+        let table = report().summary();
+        let want = format!(
+            "{table}\npairwise vs v1:\n  v2: 2 wins, 12 losses, 1 ties, 1 errors\n    \
+             lost: c0#1, c1#1, c2#1, c3#1, c4#1, c5#1, c6#1, c7#1, c8#1, c9#1, …\n"
+        );
+        assert_eq!(with_pairwise().summary(), want);
+        let few = report().with_pairwise(vec![
+            PairwiseResult::new("v2", "a", 1, PairwiseVerdict::Candidate, ""),
+            PairwiseResult::new("v2", "a", 2, PairwiseVerdict::Baseline, ""),
+        ]);
+        assert_eq!(
+            few.summary(),
+            format!("{table}\npairwise vs v1:\n  v2: 1 wins, 1 losses, 0 ties\n    lost: a#2\n")
+        );
+        let won = report().with_pairwise(vec![PairwiseResult::new(
+            "v2",
+            "a",
+            1,
+            PairwiseVerdict::Tie,
+            "",
+        )]);
+        assert_eq!(
+            won.summary(),
+            format!("{table}\npairwise vs v1:\n  v2: 0 wins, 0 losses, 1 ties\n")
+        );
+        assert_eq!(report().with_pairwise(Vec::new()).summary(), table);
+    }
+
+    #[test]
+    fn pairwise_results_round_trip_and_older_reports_load_without_them() {
+        let r = with_pairwise();
+        let json = r.to_json().unwrap();
+        assert!(json.contains("\"pairwise\""), "{json}");
+        let back = ExperimentReport::from_json(&json).unwrap();
+        assert_eq!(back, r);
+        assert_eq!(back.pairwise[0].choice, PairwiseVerdict::Candidate);
+        let old = ExperimentReport::from_json(REPORT_0_5_1).unwrap();
+        assert!(old.pairwise.is_empty());
+        assert!(!report().to_json().unwrap().contains("pairwise"));
     }
 }

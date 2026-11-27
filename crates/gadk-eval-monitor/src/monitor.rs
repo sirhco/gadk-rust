@@ -14,16 +14,18 @@
 
 //! The monitor runner: lists a spec's runs and grades each one.
 
-use std::any::Any;
 use std::cmp::Reverse;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use futures::StreamExt as _;
-use futures::stream::BoxStream;
-use gadk_eval::{ScoreResult, ScorerSpec, score_transcript};
-use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError};
+use futures::future::BoxFuture;
+use gadk_eval::{
+    GeminiJudge, JudgeBackend, JudgeOutcome, JudgeRequest, ScoreResult, ScorerSpec,
+    score_transcript_with,
+};
+use gadk_model::Llm;
 
 use crate::error::MonitorError;
 use crate::report::{MonitorReport, MonitoredRun, Window};
@@ -99,17 +101,38 @@ impl Monitor {
         source: &dyn TranscriptSource,
         judge: Option<Arc<dyn Llm>>,
     ) -> Result<MonitorReport, MonitorError> {
-        check_judge(judge.as_ref(), &spec.scorers)?;
+        let timeout = spec
+            .judge
+            .as_ref()
+            .map_or(DEFAULT_JUDGE_TIMEOUT, |j| j.timeout);
+        self.run_with_backend(
+            spec,
+            source,
+            judge.map(|model| gemini_backend(model, timeout)),
+        )
+        .await
+    }
+
+    /// [`Monitor::run`] with any [`JudgeBackend`] grading the `llm_judge` and `reference`
+    /// scorers; the backend bounds its own calls.
+    ///
+    /// # Errors
+    ///
+    /// As [`Monitor::run`]: [`MonitorError::Judge`] when a scorer is `llm_judge` and `judge` is
+    /// `None`; the source's error when listing fails.
+    pub async fn run_with_backend(
+        &self,
+        spec: &MonitorSpec,
+        source: &dyn TranscriptSource,
+        judge: Option<Arc<dyn JudgeBackend>>,
+    ) -> Result<MonitorReport, MonitorError> {
+        check_judge(judge.is_some(), &spec.scorers)?;
         let now = self.now.unwrap_or_else(Utc::now);
         let q = spec.query(now);
         let mut runs = source.list(&q).await?;
         runs.sort_by_key(|r| Reverse(r.started_at));
         runs.truncate(q.limit);
-        let timeout = spec
-            .judge
-            .as_ref()
-            .map_or(DEFAULT_JUDGE_TIMEOUT, |j| j.timeout);
-        let runs = score_runs(judge, timeout, &spec.scorers, runs, self.concurrency).await?;
+        let runs = score_runs(judge, &spec.scorers, runs, self.concurrency).await?;
         Ok(MonitorReport {
             spec: spec.name.clone(),
             generated_at: now,
@@ -123,12 +146,19 @@ impl Monitor {
     }
 }
 
-/// `MonitorError::Judge` when `scorers` has an `llm_judge` scorer and `judge` is `None`.
-fn check_judge(judge: Option<&Arc<dyn Llm>>, scorers: &[ScorerSpec]) -> Result<(), MonitorError> {
+/// `model` as a [`GeminiJudge`] whose calls are bounded by `timeout` (values below 1 ms mean
+/// 1 ms), as [`gadk_eval::score_transcript`] bounds them.
+pub(crate) fn gemini_backend(model: Arc<dyn Llm>, timeout: Duration) -> Arc<dyn JudgeBackend> {
+    let timeout = timeout.max(Duration::from_millis(1));
+    Arc::new(GeminiJudge::new(model, timeout))
+}
+
+/// `MonitorError::Judge` when `scorers` has an `llm_judge` scorer and there is no judge.
+fn check_judge(has_judge: bool, scorers: &[ScorerSpec]) -> Result<(), MonitorError> {
     let wants_judge = scorers
         .iter()
         .any(|s| matches!(s, ScorerSpec::LlmJudge { .. }));
-    if wants_judge && judge.is_none() {
+    if wants_judge && !has_judge {
         return Err(MonitorError::Judge(
             "the spec has llm_judge scorers but no judge model was given".into(),
         ));
@@ -138,25 +168,24 @@ fn check_judge(judge: Option<&Arc<dyn Llm>>, scorers: &[ScorerSpec]) -> Result<(
 
 /// Scores each of `runs` with `scorers` (see [`Monitor::run`] for the per-run rules), at most
 /// `concurrency` runs at once (values below 1 mean 1), and returns them in the order given.
-/// `judge` grades `llm_judge` scorers, each call bounded by `timeout`.
+/// `judge` grades `llm_judge` and `reference` scorers.
 ///
 /// # Errors
 ///
 /// [`MonitorError::Judge`] when a scorer is `llm_judge` and `judge` is `None`.
 pub(crate) async fn score_runs(
-    judge: Option<Arc<dyn Llm>>,
-    timeout: Duration,
+    judge: Option<Arc<dyn JudgeBackend>>,
     scorers: &[ScorerSpec],
     runs: Vec<ProductionRun>,
     concurrency: usize,
 ) -> Result<Vec<MonitoredRun>, MonitorError> {
-    check_judge(judge.as_ref(), scorers)?;
-    let judge: Arc<dyn Llm> = judge.unwrap_or_else(|| Arc::new(NoJudge));
-    let judge = &judge;
+    check_judge(judge.is_some(), scorers)?;
+    let judge: Arc<dyn JudgeBackend> = judge.unwrap_or_else(|| Arc::new(NoJudge));
+    let judge = judge.as_ref();
     let mut graded: Vec<(usize, MonitoredRun)> =
         futures::stream::iter(runs.into_iter().enumerate())
             .map(|(i, run)| async move {
-                let scores = score_run(judge, timeout, scorers, &run).await;
+                let scores = score_run(judge, scorers, &run).await;
                 (i, MonitoredRun { run, scores })
             })
             .buffer_unordered(concurrency.max(1))
@@ -168,14 +197,13 @@ pub(crate) async fn score_runs(
 
 /// Scores one run (see [`Monitor::run`]).
 async fn score_run(
-    judge: &Arc<dyn Llm>,
-    timeout: Duration,
+    judge: &dyn JudgeBackend,
     scorers: &[ScorerSpec],
     run: &ProductionRun,
 ) -> Vec<ScoreResult> {
     let t = &run.transcript;
     if t.error.is_some() {
-        return score_transcript(judge.clone(), timeout, scorers, t).await;
+        return score_transcript_with(judge, scorers, t).await;
     }
     let mut out: Vec<Option<ScoreResult>> = vec![None; scorers.len()];
     let mut todo: Vec<(usize, ScorerSpec)> = Vec::new();
@@ -187,7 +215,7 @@ async fn score_run(
     }
     if !todo.is_empty() {
         let specs: Vec<ScorerSpec> = todo.iter().map(|(_, s)| s.clone()).collect();
-        let scored = score_transcript(judge.clone(), timeout, &specs, t).await;
+        let scored = score_transcript_with(judge, &specs, t).await;
         for ((i, _), r) in todo.into_iter().zip(scored) {
             out[i] = Some(r);
         }
@@ -226,24 +254,13 @@ fn precheck(s: &ScorerSpec, run: &ProductionRun) -> Option<String> {
     }
 }
 
-/// The judge used when no scorer needs one; never called.
+/// The judge used when no `llm_judge` scorer needs one: every grade is an error (a
+/// `reference` scorer without a judge), with the text the judge model error had.
 struct NoJudge;
 
-impl Llm for NoJudge {
-    fn name(&self) -> &str {
-        "no-judge"
-    }
-
-    fn generate_content(
-        &self,
-        _req: LlmRequest,
-        _stream: bool,
-    ) -> BoxStream<'static, Result<LlmResponse, ModelError>> {
-        futures::stream::once(async { Err(ModelError::Other("no judge model".into())) }).boxed()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
+impl JudgeBackend for NoJudge {
+    fn grade<'a>(&'a self, _req: &'a JudgeRequest) -> BoxFuture<'a, JudgeOutcome> {
+        Box::pin(async { JudgeOutcome::Error("judge model error: no judge model".into()) })
     }
 }
 
@@ -550,6 +567,46 @@ scorers:
             judge.rationale.starts_with("judge model error"),
             "{}",
             judge.rationale
+        );
+    }
+
+    #[tokio::test]
+    async fn run_with_backend_grades_through_the_backend() {
+        use crate::testutil::FakeBackend;
+
+        let backend = FakeBackend::new(4);
+        let report = Monitor::new()
+            .now(at(100_000))
+            .run_with_backend(
+                &spec(SPEC),
+                &FakeSource::new(vec![run(
+                    "inv",
+                    90_000,
+                    &[("u", "order", &["lookup_order"])],
+                )]),
+                Some(backend.clone()),
+            )
+            .await
+            .unwrap();
+        let judge = &report.runs[0].scores[2];
+        assert_eq!(
+            (judge.kind.as_str(), judge.outcome, judge.score),
+            ("llm_judge", Outcome::Pass, Some(4))
+        );
+        assert_eq!(judge.rationale, "fake backend");
+        assert_eq!(backend.calls(), 1);
+        assert_eq!(backend.requests.lock().unwrap()[0].reply, "order");
+    }
+
+    #[tokio::test]
+    async fn run_with_backend_without_a_backend_needs_no_judge_scorers() {
+        let err = Monitor::new()
+            .run_with_backend(&spec(SPEC), &FakeSource::new(Vec::new()), None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "judge: the spec has llm_judge scorers but no judge model was given"
         );
     }
 }

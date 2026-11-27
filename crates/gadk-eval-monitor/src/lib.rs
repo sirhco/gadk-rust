@@ -73,6 +73,7 @@ mod testutil;
 pub mod alert_source;
 pub mod alert_spec;
 pub mod cli;
+pub mod eval_service;
 pub mod experiment;
 pub mod experiment_spec;
 pub mod export;
@@ -84,6 +85,7 @@ pub mod guard_spec;
 pub mod judge;
 pub mod judge_rows;
 pub mod monitor;
+pub mod pairwise;
 pub mod prices;
 pub mod report;
 pub mod source;
@@ -93,6 +95,7 @@ pub mod store;
 pub use alert_source::{AlertQuery, AlertSource, UsageGroup};
 pub use alert_spec::{AlertFilter, AlertMetric, AlertRule, AlertSpec};
 pub use error::MonitorError;
+pub use eval_service::{EvalServiceJudge, PairwiseChoice, PairwiseJudge, PairwiseOutcome};
 pub use experiment::{
     CaseVerdicts, ExperimentReport, ExperimentVariant, VariantStats, Verdict, run_experiment,
 };
@@ -113,6 +116,9 @@ pub use judge_rows::{
     JUDGE_ROWS_PER_INSERT, JudgeRow, ScoreSink, WriteOutcome, judge_rows, write_judge_rows,
 };
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
+pub use pairwise::{
+    DEFAULT_PAIRWISE_CRITERIA, PairwiseResult, PairwiseStats, PairwiseVerdict, run_pairwise,
+};
 pub use prices::{ModelPrice, PriceTable, TokenUsage};
 pub use report::{MonitorReport, MonitoredRun, Window};
 pub use source::bigquery::{BigQueryGuardSource, BigQueryTranscriptSource};

@@ -103,6 +103,36 @@ The judge is called at temperature 0 and must reply with JSON
 `{"pass": bool, "score": 1-5, "rationale": "…"}` (bare, in a ```json block, or embedded in
 text). An unparseable reply is retried once.
 
+## Judge backends
+
+The `llm_judge` and `reference` scorers are graded by a `JudgeBackend`. `Evaluator::new(model)`
+and `score_transcript(model, timeout, …)` wrap the model in `GeminiJudge`, the judge described
+above; any other backend plugs in without a judge model:
+
+```rust
+// Inside an async fn; `backend` is an `Arc<dyn JudgeBackend>`, `set` an `EvalSet` and `t` a
+// `RunTranscript`.
+use gadk_eval::{Evaluator, score_transcript_with};
+
+// Every judge scorer of every run is graded by `backend`; no judge model is built.
+let evaluator = Evaluator::with_backend(backend.clone()).runs_per_case(3);
+// The same, on an evaluator built with a judge model.
+let evaluator = Evaluator::new(model).with_judge_backend(backend.clone());
+// One transcript, graded as `Evaluator::run` grades a run.
+let scores = score_transcript_with(backend.as_ref(), &set.cases[0].expect, &t).await;
+```
+
+A backend implements one method, `grade(&JudgeRequest) -> BoxFuture<JudgeOutcome>`
+(`Box::pin(async move { … })`). The request carries the scorer kind
+(`JudgeKind::Rubric { rubric }` or `JudgeKind::Reference { question, answer }`), the
+conversation as `render_conversation` prints it (`User:`, `Agent tool calls:` and `Agent:`
+lines) and the graded turn's reply. A `JudgeOutcome::Verdict { pass, score, rationale }`
+passes when `pass` is set and `score` (1-5) is at least the scorer's `min_score`; a
+`JudgeOutcome::Error(text)` is an error result with that text. With `Evaluator::with_backend`,
+the run timeout does not bound the backend's calls; the backend bounds its own.
+`gadk-eval-monitor`'s `EvalServiceJudge` is a backend that asks the Vertex AI Gen AI evaluation
+service.
+
 ## Errors versus failures
 
 A result is `pass`, `fail` or `error`. Errors are counted apart from failures:

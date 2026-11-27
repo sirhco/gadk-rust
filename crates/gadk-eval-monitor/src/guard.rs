@@ -22,6 +22,7 @@ mod tests;
 use std::sync::Arc;
 
 use chrono::{DateTime, TimeDelta, Utc};
+use gadk_eval::JudgeBackend;
 use gadk_model::Llm;
 use gadk_prompts::{Label, PromptStore, Rollout, StoreError};
 
@@ -32,7 +33,7 @@ use crate::guard_report::{
 use crate::guard_source::{GuardQuery, GuardSource};
 use crate::guard_spec::{Check, GuardSpec};
 use crate::guard_stats::bonferroni_z;
-use crate::monitor::{DEFAULT_CONCURRENCY, score_runs};
+use crate::monitor::{DEFAULT_CONCURRENCY, gemini_backend, score_runs};
 use crate::prices::PriceTable;
 use crate::report::Window;
 use crate::spec::DEFAULT_JUDGE_TIMEOUT;
@@ -145,6 +146,32 @@ impl Guard {
         previous: Option<&GuardReport>,
         apply: bool,
     ) -> Result<Option<GuardReport>, MonitorError> {
+        let timeout = spec
+            .judge
+            .as_ref()
+            .map_or(DEFAULT_JUDGE_TIMEOUT, |j| j.timeout);
+        let judge = judge.map(|model| gemini_backend(model, timeout));
+        self.run_with_backend(spec, store, source, prices, judge, previous, apply)
+            .await
+    }
+
+    /// [`Guard::run`] with any [`JudgeBackend`] grading the `eval` checks' `llm_judge` and
+    /// `reference` scorers; the backend bounds its own calls.
+    ///
+    /// # Errors
+    ///
+    /// As [`Guard::run`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_with_backend(
+        &self,
+        spec: &GuardSpec,
+        store: &dyn PromptStore,
+        source: &dyn GuardSource,
+        prices: Option<&PriceTable>,
+        judge: Option<Arc<dyn JudgeBackend>>,
+        previous: Option<&GuardReport>,
+        apply: bool,
+    ) -> Result<Option<GuardReport>, MonitorError> {
         if spec.wants_judge() && judge.is_none() {
             return Err(MonitorError::Judge(
                 "the spec has llm_judge scorers but no judge model was given".into(),
@@ -189,10 +216,6 @@ impl Guard {
             r: calls.iter().find(|c| c.version == read.version),
             min_calls: spec.min_calls,
         };
-        let timeout = spec
-            .judge
-            .as_ref()
-            .map_or(DEFAULT_JUDGE_TIMEOUT, |j| j.timeout);
         let mut results: Vec<CheckResult> = Vec::with_capacity(spec.checks.len());
         for check in &spec.checks {
             let result = match check {
@@ -235,14 +258,8 @@ impl Guard {
                             for version in [baseline, read.version] {
                                 let runs = source.version_runs(&q, version, *limit).await?;
                                 scored.push(
-                                    score_runs(
-                                        judge.clone(),
-                                        timeout,
-                                        scorers,
-                                        runs,
-                                        self.concurrency,
-                                    )
-                                    .await?,
+                                    score_runs(judge.clone(), scorers, runs, self.concurrency)
+                                        .await?,
                                 );
                             }
                             let r = scored.pop().unwrap_or_default();

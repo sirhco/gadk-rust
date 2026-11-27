@@ -210,6 +210,57 @@ Limits:
 
 A judge call that fails or times out is an error result for that scorer, not exit 2.
 
+## Judge backends
+
+`monitor`, `experiment`, `guard` and `guards` take `--judge-backend gemini|eval-service`
+(default `gemini`) and `--eval-location <location>` (default `global`):
+
+- `gemini` grades `llm_judge` and `reference` scorers with the spec's judge model, which replies
+  with a JSON verdict (see the [`gadk-eval` README](../gadk-eval/README.md)). Output and stored
+  reports are what they were before the flag existed.
+- `eval-service` sends each grade to the Vertex AI Gen AI evaluation service
+  (`evaluateInstances`, pointwise) in the judge's project and `--eval-location`, with the spec's
+  judge model (for example `gemini-3.8-flash`) as the service's judge model. No Gemini judge
+  model is built. The service returns a score, which is rounded to the nearest integer (half
+  away from zero) and clamped to 1-5; a scorer passes when that score reaches its `min_score`,
+  since the service has no pass flag of its own. A failed or slow call (longer than the judge's
+  `timeout`) is an error result for that scorer, and nothing is retried.
+
+`--eval-location` is ignored with `gemini`. It defaults to `global`. Use `global`
+(recommended) or a region such as `us-central1`; multi-region values (`us`, `eu`) are rejected,
+because this client does not build multi-region endpoints. With `eval-service`, any other value
+exits 2 before anything runs, for example `gadk-eval: monitor spec: --eval-location us is a
+multi-region; use global or a region such as us-central1`. Regional locations such as
+`us-central1` do not serve `gemini-3.8-flash` as a judge model (the service replies 404
+`Autorater model not found`, an error result). The service needs the `Vertex AI User` role on
+the judge's project, through Application Default Credentials.
+
+```sh
+gadk-eval monitor monitors/support.yaml --judge-backend eval-service
+gadk-eval experiment experiments/support-v8.yaml --judge-backend eval-service --pairwise
+```
+
+`experiment --pairwise` (only with `--judge-backend eval-service`; otherwise it exits 2 with
+`gadk-eval: monitor spec: --pairwise needs --judge-backend eval-service` before running
+anything) also compares each variant after the first with the first, for every case and run
+both have, through the service's pairwise metric. The criteria are the case's first `llm_judge`
+rubric, or "Which conversation's agent is more helpful and correct, and follows the user's
+instructions better?" for a case without one. The baseline's conversation is always shown to the
+judge first. A pair in which either run failed is an error and is not sent; at most 4 calls are
+in flight. That is at most (variants − 1) × cases × runs extra service calls. The results are stored in
+the report's `pairwise` list and printed after the summary table:
+
+```text
+pairwise vs v7:
+  v8: 9 wins, 2 losses, 1 ties
+    lost: refund-late#1, refund-late#3
+```
+
+`, <E> errors` follows the ties when a pair could not be compared, and `lost:` lists at most
+10 pairs, then `, …`. Pairwise results never change pass or fail, the stats or the exit code.
+In Rust, `run_pairwise(judge, &set, &report.report)` returns the results and
+`ExperimentReport::with_pairwise` stores them; `pairwise_stats()` counts them.
+
 ## Judge scores in the console
 
 `gadk-eval monitor <spec.yaml> --write-scores` also writes the judge's results to the BigQuery
@@ -1149,4 +1200,13 @@ The Cloud Trace source has its own read-only live test:
 ```sh
 GADK_EVAL_MONITOR_LIVE_TRACE_PROJECT=<project> \
   cargo test -p gadk-eval-monitor --test cloudtrace_live -- --ignored --nocapture
+```
+
+The evaluation service backend has one too (three pointwise calls and one pairwise call;
+`GADK_EVAL_MONITOR_LIVE_EVAL_LOCATION`, default `global`, and
+`GADK_EVAL_MONITOR_LIVE_JUDGE_MODEL`, default `gemini-3.8-flash`, override the defaults):
+
+```sh
+GADK_EVAL_MONITOR_LIVE_PROJECT=<project> \
+  cargo test -p gadk-eval-monitor --all-features live_eval_service -- --ignored --nocapture
 ```

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Test helpers: hand-built httprr traces, a scripted judge model, a fixed transcript source
-//! and run builders.
+//! Test helpers: hand-built httprr traces, a scripted judge model, a fixed judge backend and
+//! pairwise judge, a fixed transcript source and run builders.
 
 use std::any::Any;
 use std::collections::{HashSet, VecDeque};
@@ -23,14 +23,16 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use futures::StreamExt as _;
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
-use gadk_eval::{RunTranscript, ToolCall, TurnRecord};
+use gadk_eval::{JudgeBackend, JudgeOutcome, JudgeRequest, RunTranscript, ToolCall, TurnRecord};
 use gadk_genai::{Content, ROLE_MODEL};
 use gadk_httprr::RecordReplay;
 use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient};
 use serde_json::Map;
 
 use crate::error::MonitorError;
+use crate::eval_service::{PairwiseChoice, PairwiseJudge, PairwiseOutcome};
 use crate::judge_rows::{JudgeRow, ScoreSink};
 use crate::source::{ProductionRun, TranscriptQuery, TranscriptSource};
 
@@ -129,6 +131,106 @@ impl Llm for FakeJudge {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+/// A judge backend that gives every request the verdict `score` (rationale `fake backend`)
+/// and records the requests.
+pub(crate) struct FakeBackend {
+    score: u8,
+    pub(crate) requests: Mutex<Vec<JudgeRequest>>,
+}
+
+impl FakeBackend {
+    pub(crate) fn new(score: u8) -> Arc<Self> {
+        Arc::new(Self {
+            score,
+            requests: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// The number of requests so far.
+    pub(crate) fn calls(&self) -> usize {
+        self.requests.lock().unwrap().len()
+    }
+}
+
+impl JudgeBackend for FakeBackend {
+    fn grade<'a>(&'a self, req: &'a JudgeRequest) -> BoxFuture<'a, JudgeOutcome> {
+        self.requests.lock().unwrap().push(req.clone());
+        let score = self.score;
+        Box::pin(async move {
+            JudgeOutcome::Verdict {
+                pass: true,
+                score,
+                rationale: "fake backend".into(),
+            }
+        })
+    }
+}
+
+/// A pairwise judge giving every comparison `outcome`, recording each `(criteria, baseline,
+/// candidate)` and the most calls in flight at once.
+pub(crate) struct FakePairwise {
+    outcome: PairwiseOutcome,
+    calls: Mutex<Vec<(String, String, String)>>,
+    in_flight: AtomicUsize,
+    max_in_flight: AtomicUsize,
+}
+
+impl FakePairwise {
+    /// Chooses `choice` with the explanation `fake pairwise`.
+    pub(crate) fn new(choice: PairwiseChoice) -> Arc<Self> {
+        Self::with(PairwiseOutcome::Choice {
+            choice,
+            explanation: "fake pairwise".into(),
+        })
+    }
+
+    /// Fails every comparison with `message`.
+    pub(crate) fn failing(message: &str) -> Arc<Self> {
+        Self::with(PairwiseOutcome::Error(message.into()))
+    }
+
+    fn with(outcome: PairwiseOutcome) -> Arc<Self> {
+        Arc::new(Self {
+            outcome,
+            calls: Mutex::new(Vec::new()),
+            in_flight: AtomicUsize::new(0),
+            max_in_flight: AtomicUsize::new(0),
+        })
+    }
+
+    /// Every comparison so far, in call order.
+    pub(crate) fn calls(&self) -> Vec<(String, String, String)> {
+        self.calls.lock().unwrap().clone()
+    }
+
+    /// The most comparisons that were in flight at once.
+    pub(crate) fn max_in_flight(&self) -> usize {
+        self.max_in_flight.load(Ordering::SeqCst)
+    }
+}
+
+impl PairwiseJudge for FakePairwise {
+    fn compare<'a>(
+        &'a self,
+        criteria: &'a str,
+        baseline: &'a str,
+        candidate: &'a str,
+    ) -> BoxFuture<'a, PairwiseOutcome> {
+        Box::pin(async move {
+            let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_in_flight.fetch_max(now, Ordering::SeqCst);
+            self.calls.lock().unwrap().push((
+                criteria.to_owned(),
+                baseline.to_owned(),
+                candidate.to_owned(),
+            ));
+            tokio::task::yield_now().await;
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+            self.outcome.clone()
+        })
     }
 }
 

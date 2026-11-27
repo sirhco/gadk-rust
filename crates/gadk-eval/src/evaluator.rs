@@ -26,7 +26,8 @@ use crate::metrics::{MeasuredReport, RunMetrics};
 use crate::report::{CaseRun, EvalReport, VariantReport};
 use crate::result::RunTranscript;
 use crate::run::run_case_measured;
-use crate::score::judge::Judge;
+use crate::score::backend::JudgeBackend;
+use crate::score::judge::GeminiJudge;
 use crate::score::score_scorers;
 use crate::spec::EvalSet;
 use crate::variant::{Variant, check_variants};
@@ -58,21 +59,49 @@ use crate::variant::{Variant, check_variants};
 /// # Ok(()) }
 /// ```
 pub struct Evaluator {
-    judge: Arc<dyn Llm>,
+    judge: JudgeSource,
     concurrency: usize,
     runs_per_case: u32,
     run_timeout: Duration,
 }
 
+/// Where an [`Evaluator`]'s judge scorers are graded.
+enum JudgeSource {
+    /// A model, wrapped in a [`GeminiJudge`] bounded by the run timeout when a run starts.
+    Model(Arc<dyn Llm>),
+    /// Any backend, used as is.
+    Backend(Arc<dyn JudgeBackend>),
+}
+
 impl Evaluator {
     /// An evaluator whose `llm_judge` and `reference` scorers ask `judge`.
     pub fn new(judge: Arc<dyn Llm>) -> Self {
+        Self::from_source(JudgeSource::Model(judge))
+    }
+
+    /// An evaluator whose `llm_judge` and `reference` scorers are graded by `backend`; no judge
+    /// model is needed. The run timeout does not bound `backend`'s calls; the backend bounds its
+    /// own.
+    pub fn with_backend(backend: Arc<dyn JudgeBackend>) -> Self {
+        Self::from_source(JudgeSource::Backend(backend))
+    }
+
+    /// An evaluator grading through `judge`, with the default concurrency (4), runs per case (1)
+    /// and run timeout (120 s).
+    fn from_source(judge: JudgeSource) -> Self {
         Evaluator {
             judge,
             concurrency: 4,
             runs_per_case: 1,
             run_timeout: Duration::from_secs(120),
         }
+    }
+
+    /// Grades `llm_judge` and `reference` scorers through `backend` instead of the judge model
+    /// given to [`Evaluator::new`].
+    pub fn with_judge_backend(mut self, backend: Arc<dyn JudgeBackend>) -> Self {
+        self.judge = JudgeSource::Backend(backend);
+        self
     }
 
     /// At most `n` runs at once (values below 1 mean 1).
@@ -146,7 +175,14 @@ impl Evaluator {
             .iter()
             .map(|v| build(v).map_err(|e| format!("building variant {}: {e}", v.name())))
             .collect();
-        let judge = Judge::new(self.judge.clone(), self.run_timeout);
+        let gemini;
+        let judge: &dyn JudgeBackend = match &self.judge {
+            JudgeSource::Model(model) => {
+                gemini = GeminiJudge::new(model.clone(), self.run_timeout);
+                &gemini
+            }
+            JudgeSource::Backend(backend) => backend.as_ref(),
+        };
         let mut jobs = Vec::new();
         for vi in 0..variants.len() {
             for ci in 0..set.cases.len() {
@@ -155,7 +191,7 @@ impl Evaluator {
                 }
             }
         }
-        let (agents, judge, timeout) = (&agents, &judge, self.run_timeout);
+        let (agents, timeout) = (&agents, self.run_timeout);
         let mut done: Vec<((usize, usize, u32), CaseRun, RunMetrics)> = futures::stream::iter(jobs)
             .map(|(vi, ci, run)| async move {
                 let case = &set.cases[ci];

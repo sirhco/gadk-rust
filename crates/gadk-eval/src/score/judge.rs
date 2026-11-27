@@ -19,11 +19,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt as _;
+use futures::future::BoxFuture;
 use gadk_genai::{Content, GenerateContentConfig, ROLE_USER};
 use gadk_model::{Llm, LlmRequest, ModelError};
 use serde_json::Value;
 
-use crate::result::{RunTranscript, ScoreResult, excerpt};
+#[cfg(test)]
+use super::backend::score_outcome;
+use super::backend::{JudgeBackend, JudgeKind, JudgeOutcome, JudgeRequest};
+#[cfg(test)]
+use crate::result::ScoreResult;
+use crate::result::{RunTranscript, excerpt};
 
 /// The longest unparseable judge reply quoted in an error rationale.
 const RAW_REPLY_MAX: usize = 1024;
@@ -45,27 +51,43 @@ pub(crate) struct Verdict {
     pub(crate) rationale: String,
 }
 
+/// The `llm_judge` prompt: grades `conversation` against `rubric`.
+fn rubric_prompt(conversation: &str, rubric: &str) -> String {
+    format!(
+        "You are grading an AI agent's conversation against a rubric.\n\n\
+         Rubric:\n{rubric}\n\nConversation:\n{conversation}\n{REPLY_FORMAT}"
+    )
+}
+
+/// The `reference` prompt: whether `reply` to `question` agrees with the reference `answer`.
+fn reference_prompt(question: &str, reply: &str, answer: &str) -> String {
+    format!(
+        "You are checking whether an AI agent's answer agrees in meaning with a reference \
+         answer. Wording may differ; the answer must not contradict the reference or omit \
+         its key facts.\n\nQuestion:\n{question}\n\nAgent answer:\n{reply}\n\n\
+         Reference answer:\n{answer}\n\n{REPLY_FORMAT}"
+    )
+}
+
 impl Judge {
     pub(crate) fn new(model: Arc<dyn Llm>, timeout: Duration) -> Self {
         Judge { model, timeout }
     }
 
     /// `llm_judge`: grades the whole conversation against `rubric`.
+    #[cfg(test)]
     pub(crate) async fn rubric(
         &self,
         t: &RunTranscript,
         rubric: &str,
         min_score: u8,
     ) -> ScoreResult {
-        let prompt = format!(
-            "You are grading an AI agent's conversation against a rubric.\n\n\
-             Rubric:\n{rubric}\n\nConversation:\n{}\n{REPLY_FORMAT}",
-            render_conversation(t)
-        );
-        self.ask("llm_judge", &prompt, min_score).await
+        let prompt = rubric_prompt(&render_conversation(t), rubric);
+        score_outcome("llm_judge", self.ask(&prompt).await, min_score)
     }
 
     /// `reference`: whether the reply of `turn` is consistent with the reference `answer`.
+    #[cfg(test)]
     pub(crate) async fn reference(
         &self,
         t: &RunTranscript,
@@ -74,46 +96,50 @@ impl Judge {
         min_score: u8,
     ) -> ScoreResult {
         let question = t.turn(turn).map_or("", |r| r.user.as_str());
-        let prompt = format!(
-            "You are checking whether an AI agent's answer agrees in meaning with a reference \
-             answer. Wording may differ; the answer must not contradict the reference or omit \
-             its key facts.\n\nQuestion:\n{question}\n\nAgent answer:\n{}\n\n\
-             Reference answer:\n{answer}\n\n{REPLY_FORMAT}",
-            t.reply(turn)
-        );
-        self.ask("reference", &prompt, min_score).await
+        let prompt = reference_prompt(question, t.reply(turn), answer);
+        score_outcome("reference", self.ask(&prompt).await, min_score)
+    }
+
+    /// Grades `req` with the prompt of its kind.
+    pub(crate) async fn grade_request(&self, req: &JudgeRequest) -> JudgeOutcome {
+        let prompt = match &req.kind {
+            JudgeKind::Rubric { rubric } => rubric_prompt(&req.conversation, rubric),
+            JudgeKind::Reference { question, answer } => {
+                reference_prompt(question, &req.reply, answer)
+            }
+        };
+        self.ask(&prompt).await
     }
 
     /// Asks the judge, retrying once on an unparseable reply; a model error or a call that takes
     /// longer than `timeout` is not retried.
-    async fn ask(&self, kind: &str, prompt: &str, min_score: u8) -> ScoreResult {
+    async fn ask(&self, prompt: &str) -> JudgeOutcome {
         let mut last = String::new();
         for _ in 0..2 {
             match tokio::time::timeout(self.timeout, self.call(prompt)).await {
                 Err(_) => {
-                    return ScoreResult::error(
-                        kind,
-                        format!("judge timed out after {:?}", self.timeout),
-                    );
+                    return JudgeOutcome::Error(format!(
+                        "judge timed out after {:?}",
+                        self.timeout
+                    ));
                 }
-                Ok(Err(e)) => return ScoreResult::error(kind, format!("judge model error: {e}")),
+                Ok(Err(e)) => return JudgeOutcome::Error(format!("judge model error: {e}")),
                 Ok(Ok(text)) => match parse_verdict(&text) {
                     Some(v) => {
-                        return ScoreResult::judged(
-                            kind,
-                            v.pass && v.score >= min_score,
-                            v.score,
-                            v.rationale,
-                        );
+                        return JudgeOutcome::Verdict {
+                            pass: v.pass,
+                            score: v.score,
+                            rationale: v.rationale,
+                        };
                     }
                     None => last = text,
                 },
             }
         }
-        ScoreResult::error(
-            kind,
-            format!("unparseable judge reply: {}", excerpt(&last, RAW_REPLY_MAX)),
-        )
+        JudgeOutcome::Error(format!(
+            "unparseable judge reply: {}",
+            excerpt(&last, RAW_REPLY_MAX)
+        ))
     }
 
     async fn call(&self, prompt: &str) -> Result<String, ModelError> {
@@ -140,8 +166,30 @@ impl Judge {
     }
 }
 
-/// The conversation as the judge sees it: each user turn, the tools called, and the reply.
-fn render_conversation(t: &RunTranscript) -> String {
+/// The judge backend that asks a Gemini (or any [`Llm`]) model for a JSON verdict, the one
+/// [`crate::Evaluator::new`] and [`crate::score_transcript`] use.
+///
+/// Each call runs at temperature 0 and is bounded by `timeout`. An unparseable reply is retried
+/// once; a model error or a timeout is not.
+#[non_exhaustive]
+pub struct GeminiJudge(Judge);
+
+impl GeminiJudge {
+    /// A backend that asks `model`, each call bounded by `timeout`.
+    pub fn new(model: Arc<dyn Llm>, timeout: Duration) -> Self {
+        GeminiJudge(Judge::new(model, timeout))
+    }
+}
+
+impl JudgeBackend for GeminiJudge {
+    fn grade<'a>(&'a self, req: &'a JudgeRequest) -> BoxFuture<'a, JudgeOutcome> {
+        Box::pin(self.0.grade_request(req))
+    }
+}
+
+/// The conversation as the judge sees it: each user turn (`User: …`), the tools called
+/// (`Agent tool calls: a, b`) and the reply (`Agent: …`), each turn followed by a blank line.
+pub fn render_conversation(t: &RunTranscript) -> String {
     let mut out = String::new();
     for turn in &t.turns {
         let _ = writeln!(out, "User: {}", turn.user);
