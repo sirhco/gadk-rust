@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.26] - 2026-11-26
+
 ### Added
 
 - `gadk-eval-monitor`: `gadk-eval monitor --write-scores` writes the report's `llm_judge` and
@@ -1049,7 +1051,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.25...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.26...HEAD
+[0.5.26]: https://github.com/sirhco/gadk-rust/compare/v0.5.25...v0.5.26
 [0.5.25]: https://github.com/sirhco/gadk-rust/compare/v0.5.24...v0.5.25
 [0.5.24]: https://github.com/sirhco/gadk-rust/compare/v0.5.23...v0.5.24
 [0.5.23]: https://github.com/sirhco/gadk-rust/compare/v0.5.22...v0.5.23
