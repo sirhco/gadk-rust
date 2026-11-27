@@ -1,0 +1,22 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "Echo", "version": "1"},
+  "servers": [{"url": "/v1"}],
+  "paths": {
+    "/echo": {
+      "post": {
+        "operationId": "echo",
+        "summary": "Echo the body back",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"type": "string", "nullable": true}
+            }
+          }
+        },
+        "responses": {"200": {"description": "The body."}}
+      }
+    }
+  }
+}

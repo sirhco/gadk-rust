@@ -60,9 +60,10 @@ class EdgeTest(unittest.TestCase):
         self.assertEqual(cwd.ALLOWED["gadk-auth"], {"gadk-agent", "gadk-platform"})
         self.assertIn("gadk-auth", cwd.ALLOWED["gadk"])
         # 2c: gadk-mcp applies credentials to MCP requests; 5b: gadk-a2a applies them to A2A calls;
-        # 5c: gadk-agentregistry authenticates registry calls with ADC.
+        # 5c: gadk-agentregistry authenticates registry calls with ADC; openapi: gadk-openapi
+        # sends its tools' requests through gadk_auth::client.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-auth" in deps],
-                         ["gadk-mcp", "gadk-a2a", "gadk-agentregistry", "gadk"])
+                         ["gadk-mcp", "gadk-a2a", "gadk-agentregistry", "gadk-openapi", "gadk"])
 
     def test_auth_normal_dependency_on_engine_is_rejected(self):
         self.edit("gadk-auth", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
