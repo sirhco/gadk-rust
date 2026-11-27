@@ -7,6 +7,27 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval`: a judge seam. `JudgeBackend` grades the `llm_judge` and `reference` scorers from a
+  `JudgeRequest` (`JudgeKind::Rubric` or `JudgeKind::Reference`, the rendered conversation and
+  the graded reply) and returns a `JudgeOutcome` (`Verdict` or `Error`).
+  - `GeminiJudge` is today's judge as a backend; `Evaluator::new` and `score_transcript` use it
+    and behave as before.
+  - `Evaluator::with_backend`, `Evaluator::with_judge_backend` and `score_transcript_with` grade
+    through any backend; `render_conversation` is public.
+- `gadk-eval-monitor`: `EvalServiceJudge`, a backend that grades through the Vertex AI Gen AI
+  evaluation service (`evaluateInstances`, pointwise; the score is rounded and clamped to 1-5),
+  and also a `PairwiseJudge` (`PairwiseOutcome`, `PairwiseChoice`).
+  - `gadk-eval monitor`, `experiment`, `guard` and `guards` take `--judge-backend
+    gemini|eval-service` (default `gemini`, unchanged output) and `--eval-location` (default
+    `global`); `Backends::judge_backend`, `Backends::pairwise_judge` and `JudgeBackendChoice`
+    back them, and `Monitor::run_with_backend` and `Guard::run_with_backend` take a backend.
+  - `gadk-eval experiment --pairwise` (with `--judge-backend eval-service`) compares each variant
+    with the first, run by run, and prints wins, losses and ties. `ExperimentReport` gains
+    `pairwise` (`PairwiseResult`, `PairwiseVerdict`; absent in older reports), `with_pairwise`
+    and `pairwise_stats` (`PairwiseStats`); `run_pairwise` runs the comparisons.
+
 ## [0.5.27] - 2026-11-27
 
 ### Added
