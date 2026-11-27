@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Test helpers: hand-built httprr traces, a scripted judge model, a fixed transcript source
-//! and run builders.
+//! Test helpers: hand-built httprr traces, a scripted judge model, a fixed judge backend, a
+//! fixed transcript source and run builders.
 
 use std::any::Any;
 use std::collections::{HashSet, VecDeque};
@@ -23,8 +23,9 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use futures::StreamExt as _;
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
-use gadk_eval::{RunTranscript, ToolCall, TurnRecord};
+use gadk_eval::{JudgeBackend, JudgeOutcome, JudgeRequest, RunTranscript, ToolCall, TurnRecord};
 use gadk_genai::{Content, ROLE_MODEL};
 use gadk_httprr::RecordReplay;
 use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient};
@@ -129,6 +130,41 @@ impl Llm for FakeJudge {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+/// A judge backend that gives every request the verdict `score` (rationale `fake backend`)
+/// and records the requests.
+pub(crate) struct FakeBackend {
+    score: u8,
+    pub(crate) requests: Mutex<Vec<JudgeRequest>>,
+}
+
+impl FakeBackend {
+    pub(crate) fn new(score: u8) -> Arc<Self> {
+        Arc::new(Self {
+            score,
+            requests: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// The number of requests so far.
+    pub(crate) fn calls(&self) -> usize {
+        self.requests.lock().unwrap().len()
+    }
+}
+
+impl JudgeBackend for FakeBackend {
+    fn grade<'a>(&'a self, req: &'a JudgeRequest) -> BoxFuture<'a, JudgeOutcome> {
+        self.requests.lock().unwrap().push(req.clone());
+        let score = self.score;
+        Box::pin(async move {
+            JudgeOutcome::Verdict {
+                pass: true,
+                score,
+                rationale: "fake backend".into(),
+            }
+        })
     }
 }
 

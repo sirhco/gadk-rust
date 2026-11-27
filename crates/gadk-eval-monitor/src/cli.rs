@@ -15,18 +15,26 @@
 //! The `gadk-eval` command-line tool, as a library for testing.
 //!
 //! ```text
-//! gadk-eval monitor <spec.yaml> [--out <url>] [--limit N] [--write-scores]
+//! gadk-eval monitor <spec.yaml> [--out <url>] [--limit N] [--write-scores] [<judge flags>]
 //! gadk-eval report <url> [<name>] [--limit N]
 //! gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [--append]
 //!     [--name N] [--trace ID]... [--since <n>h|<n>d] [--agent A] [--score F]... [--limit N]
 //!     [--rubric T] [--min-good X] [--no-history] [--tool-args]
-//! gadk-eval experiment <spec.yaml> [--out <url>]
+//! gadk-eval experiment <spec.yaml> [--out <url>] [<judge flags>]
 //! gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]
+//!     [<judge flags>]
 //! gadk-eval guards <source>... [--apply] [--prices <file|gs://bucket/object>] [--out <url>]
-//!     [--max-bytes <n>] [--notify <url|env:NAME>] [--notify-format slack|json]
+//!     [--max-bytes <n>] [--notify <url|env:NAME>] [--notify-format slack|json] [<judge flags>]
 //! gadk-eval alerts <source>... [--prices <file|gs://bucket/object>] [--max-bytes <n>]
 //!     [--notify <url|env:NAME>] [--notify-format slack|json]
+//!
+//! <judge flags>: [--judge-backend gemini|eval-service] [--eval-location <location>]
 //! ```
+//!
+//! `--judge-backend` picks what grades `llm_judge` and `reference` scorers: `gemini` (the
+//! default) asks the spec's judge model for a JSON verdict, and `eval-service` sends each grade
+//! to the Vertex AI Gen AI evaluation service in `--eval-location` (default `global`), with the
+//! spec's judge model as the service's judge model ([`Backends::judge_backend`]).
 //!
 //! `monitor` exits 0 on success, 1 when the spec's `min_pass_rate` is set and either the pass
 //! rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0), and 2 when the spec cannot be loaded, the runs cannot be
@@ -94,7 +102,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use gadk_agent::Agent;
 use gadk_engine::llm::{LlmAgentConfig, agent as llm_agent};
-use gadk_eval::{EvalSet, Evaluator, Variant};
+use gadk_eval::{EvalSet, Evaluator, GeminiJudge, JudgeBackend, Variant};
 use gadk_model::Llm;
 use gadk_prompts::{PromptRegistry, Selector, StoreError};
 
@@ -102,6 +110,7 @@ use crate::alert::{AlertCounts, AlertOutcome, RuleStatus, alerts_body, evaluate}
 use crate::alert_source::{AlertQuery, AlertSource, UsageGroup};
 use crate::alert_spec::{AlertMetric, AlertSpec};
 use crate::error::MonitorError;
+use crate::eval_service::{EvalServiceJudge, PairwiseJudge};
 use crate::experiment::run_experiment;
 use crate::experiment_spec::{AgentInstruction, ExperimentSpec};
 use crate::export::{
@@ -144,6 +153,38 @@ pub trait Backends: Send + Sync {
 
     /// The judge model for `spec`.
     async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError>;
+
+    /// The judge backend `choice` for `spec`. The default builds [`Backends::judge`]'s model
+    /// as a [`GeminiJudge`] bounded by `spec.timeout` for [`JudgeBackendChoice::Gemini`], and
+    /// refuses [`JudgeBackendChoice::EvalService`]; [`CloudBackends`] builds an
+    /// [`EvalServiceJudge`] in `spec.project` / `eval_location` with `spec.model` as the judge
+    /// model.
+    async fn judge_backend(
+        &self,
+        spec: &JudgeSpec,
+        choice: JudgeBackendChoice,
+        eval_location: &str,
+    ) -> Result<Arc<dyn JudgeBackend>, MonitorError> {
+        let _ = eval_location;
+        match choice {
+            JudgeBackendChoice::Gemini => gemini_judge(self.judge(spec).await?, spec),
+            JudgeBackendChoice::EvalService => {
+                Err(MonitorError::Judge(EVAL_SERVICE_UNSUPPORTED.into()))
+            }
+        }
+    }
+
+    /// The pairwise judge for `experiment --pairwise`, in `spec.project` / `eval_location` with
+    /// `spec.model` as the judge model. The default refuses; [`CloudBackends`] returns an
+    /// [`EvalServiceJudge`].
+    async fn pairwise_judge(
+        &self,
+        spec: &JudgeSpec,
+        eval_location: &str,
+    ) -> Result<Arc<dyn PairwiseJudge>, MonitorError> {
+        let _ = (spec, eval_location);
+        Err(MonitorError::Judge(EVAL_SERVICE_UNSUPPORTED.into()))
+    }
 
     /// The sink `monitor --write-scores` writes judge rows to, for the source `spec`. The
     /// default refuses with `--write-scores needs a bigquery source`; [`CloudBackends`] returns
@@ -244,6 +285,46 @@ pub trait Backends: Send + Sync {
     }
 }
 
+/// What grades `llm_judge` and `reference` scorers (`--judge-backend`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum JudgeBackendChoice {
+    /// The spec's judge model, asked for a JSON verdict (`gemini`, the default).
+    #[default]
+    Gemini,
+    /// The Vertex AI Gen AI evaluation service (`eval-service`).
+    EvalService,
+}
+
+impl JudgeBackendChoice {
+    /// The choice named `name` on the command line: `gemini` or `eval-service`.
+    pub fn from_flag(name: &str) -> Option<Self> {
+        match name {
+            "gemini" => Some(Self::Gemini),
+            "eval-service" => Some(Self::EvalService),
+            _ => None,
+        }
+    }
+}
+
+/// The error of the default [`Backends::judge_backend`] (for the evaluation service) and
+/// [`Backends::pairwise_judge`].
+const EVAL_SERVICE_UNSUPPORTED: &str = "the evaluation service is not supported by these backends";
+
+/// The default `--eval-location`: `us-central1` does not serve `gemini-3.8-flash` as a judge
+/// model.
+const DEFAULT_EVAL_LOCATION: &str = "global";
+
+/// `model` as a [`GeminiJudge`] bounded by `spec.timeout` (values below 1 ms mean 1 ms), as
+/// [`Monitor::run`] and [`Guard::run`] build it.
+fn gemini_judge(
+    model: Arc<dyn Llm>,
+    spec: &JudgeSpec,
+) -> Result<Arc<dyn JudgeBackend>, MonitorError> {
+    let timeout = spec.timeout.max(Duration::from_millis(1));
+    Ok(Arc::new(GeminiJudge::new(model, timeout)))
+}
+
 /// The error of the default [`Backends::list_objects`] and [`Backends::read_object`].
 const GS_REFUSED: &str = "gs:// sources are not supported by these backends";
 
@@ -303,6 +384,36 @@ impl Backends for CloudBackends {
 
     async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError> {
         vertex_judge(spec).await
+    }
+
+    async fn judge_backend(
+        &self,
+        spec: &JudgeSpec,
+        choice: JudgeBackendChoice,
+        eval_location: &str,
+    ) -> Result<Arc<dyn JudgeBackend>, MonitorError> {
+        match choice {
+            JudgeBackendChoice::Gemini => gemini_judge(self.judge(spec).await?, spec),
+            JudgeBackendChoice::EvalService => Ok(Arc::new(EvalServiceJudge::new(
+                &spec.project,
+                eval_location,
+                &spec.model,
+                spec.timeout,
+            )?)),
+        }
+    }
+
+    async fn pairwise_judge(
+        &self,
+        spec: &JudgeSpec,
+        eval_location: &str,
+    ) -> Result<Arc<dyn PairwiseJudge>, MonitorError> {
+        Ok(Arc::new(EvalServiceJudge::new(
+            &spec.project,
+            eval_location,
+            &spec.model,
+            spec.timeout,
+        )?))
     }
 
     fn score_sink(&self, spec: &SourceSpec) -> Result<Arc<dyn ScoreSink>, MonitorError> {
@@ -409,6 +520,42 @@ impl Backends for CloudBackends {
     }
 }
 
+/// `--judge-backend` and `--eval-location` (`monitor`, `experiment`, `guard` and `guards`).
+fn judge_flags() -> [Arg; 2] {
+    [
+        Arg::new("judge-backend")
+            .long("judge-backend")
+            .value_parser(["gemini", "eval-service"])
+            .default_value("gemini")
+            .help("what grades llm_judge and reference scorers"),
+        Arg::new("eval-location")
+            .long("eval-location")
+            .default_value(DEFAULT_EVAL_LOCATION)
+            .help("the evaluation service location (with --judge-backend eval-service)"),
+    ]
+}
+
+/// The judge flags of a command.
+#[derive(Debug, Clone)]
+struct JudgeFlags {
+    backend: JudgeBackendChoice,
+    location: String,
+}
+
+impl JudgeFlags {
+    fn of(m: &ArgMatches) -> Self {
+        let backend = m
+            .get_one::<String>("judge-backend")
+            .and_then(|name| JudgeBackendChoice::from_flag(name))
+            .unwrap_or_default();
+        let location = m
+            .get_one::<String>("eval-location")
+            .cloned()
+            .unwrap_or_else(|| DEFAULT_EVAL_LOCATION.to_owned());
+        JudgeFlags { backend, location }
+    }
+}
+
 fn limit_arg() -> Arg {
     Arg::new("limit")
         .long("limit")
@@ -441,7 +588,8 @@ fn cli() -> Command {
                             "write the judge scores to the bigquery table as FEEDBACK rows \
                              (source judge)",
                         ),
-                ),
+                )
+                .args(judge_flags()),
         )
         .subcommand(
             Command::new("report")
@@ -467,7 +615,8 @@ fn cli() -> Command {
                     Arg::new("out")
                         .long("out")
                         .help("store the report: <dir>, file://<dir> or gs://<bucket>[/<prefix>]"),
-                ),
+                )
+                .args(judge_flags()),
         )
         .subcommand(guard_cli())
         .subcommand(guards_cli())
@@ -503,6 +652,7 @@ fn guard_cli() -> Command {
                 .value_parser(value_parser!(PathBuf))
                 .help("price file (YAML) for cost_per_call checks"),
         ))
+        .args(judge_flags())
 }
 
 fn guards_cli() -> Command {
@@ -535,6 +685,7 @@ fn guards_cli() -> Command {
                 .requires("notify")
                 .help("webhook body: slack (default) or json"),
         )
+        .args(judge_flags())
 }
 
 fn alerts_cli() -> Command {
@@ -733,6 +884,7 @@ pub async fn run(
                 out,
                 limit(m),
                 m.get_flag("write-scores"),
+                &JudgeFlags::of(m),
                 backends,
                 stdout,
             )
@@ -747,7 +899,7 @@ pub async fn run(
         Some(("experiment", m)) => {
             let spec = m.get_one::<String>("spec").map_or("", String::as_str);
             let out = m.get_one::<String>("out").map(String::as_str);
-            experiment(spec, out, backends, stdout).await
+            experiment(spec, out, &JudgeFlags::of(m), backends, stdout).await
         }
         Some(("guard", m)) => guard(m, backends, stdout).await,
         Some(("guards", m)) => guards(m, backends, stdout).await,
@@ -771,6 +923,7 @@ async fn monitor(
     out: Option<&str>,
     limit: Option<usize>,
     write_scores: bool,
+    judge_flags: &JudgeFlags,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
@@ -786,10 +939,16 @@ async fn monitor(
     };
     let source = backends.source(&spec.source)?;
     let judge = match &spec.judge {
-        Some(j) => Some(backends.judge(j).await?),
+        Some(j) => Some(
+            backends
+                .judge_backend(j, judge_flags.backend, &judge_flags.location)
+                .await?,
+        ),
         None => None,
     };
-    let report = Monitor::new().run(&spec, source.as_ref(), judge).await?;
+    let report = Monitor::new()
+        .run_with_backend(&spec, source.as_ref(), judge)
+        .await?;
     // Store before printing, so a failing stdout (a closed pipe) does not lose the report.
     let stored = match store {
         Some(store) => Some(store.put(&report).await?),
@@ -896,6 +1055,8 @@ struct GuardRunOpts {
     out: Option<ReportStore>,
     /// The most bytes billed per BigQuery query.
     max_bytes: i64,
+    /// `--judge-backend` and `--eval-location`.
+    judge: JudgeFlags,
 }
 
 /// `guard`: 0 (advance), 1 (abort), 3 (wait) or 4 (no rollout); errors map to 2.
@@ -922,6 +1083,7 @@ async fn guard(
             .get_one::<i64>("max-bytes")
             .copied()
             .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED),
+        judge: JudgeFlags::of(m),
     };
     Ok(run_one_guard(&spec, &opts, backends, stdout).await?.code)
 }
@@ -971,11 +1133,15 @@ async fn run_one_guard(
     };
     let source = backends.guard_source(project, dataset, table, opts.max_bytes)?;
     let judge = match &spec.judge {
-        Some(j) if spec.wants_judge() => Some(backends.judge(j).await?),
+        Some(j) if spec.wants_judge() => Some(
+            backends
+                .judge_backend(j, opts.judge.backend, &opts.judge.location)
+                .await?,
+        ),
         _ => None,
     };
     let report = Guard::new()
-        .run(
+        .run_with_backend(
             spec,
             store.as_ref(),
             source.as_ref(),
@@ -1051,6 +1217,7 @@ async fn guards(
             .get_one::<i64>("max-bytes")
             .copied()
             .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED),
+        judge: JudgeFlags::of(m),
     };
     let mut stdout = Watched {
         inner: stdout,
@@ -1423,6 +1590,7 @@ fn prompts_error(e: StoreError) -> MonitorError {
 async fn experiment(
     spec_path: &str,
     out: Option<&str>,
+    judge_flags: &JudgeFlags,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
@@ -1442,7 +1610,16 @@ async fn experiment(
         }
         _ => None,
     };
-    let result = run_spec(&spec, &set, registry.as_ref(), out, backends, stdout).await;
+    let result = run_spec(
+        &spec,
+        &set,
+        registry.as_ref(),
+        out,
+        judge_flags,
+        backends,
+        stdout,
+    )
+    .await;
     // Closed on every path once loaded, whatever `run_spec` returned.
     if let Some(registry) = &registry {
         registry.close();
@@ -1456,6 +1633,7 @@ async fn run_spec(
     set: &EvalSet,
     registry: Option<&PromptRegistry>,
     out: Option<&str>,
+    judge_flags: &JudgeFlags,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
@@ -1471,7 +1649,16 @@ async fn run_spec(
     }
     // Opened before the run, so a bad URL fails before any model call.
     let store = out.map(ReportStore::open).transpose()?;
-    let judge = backends.judge(&spec.judge).await?;
+    // The Gemini judge is the run-timeout-bounded model of `Evaluator::new`, as before; the
+    // evaluation service needs no judge model.
+    let evaluator = match judge_flags.backend {
+        JudgeBackendChoice::Gemini => Evaluator::new(backends.judge(&spec.judge).await?),
+        JudgeBackendChoice::EvalService => Evaluator::with_backend(
+            backends
+                .judge_backend(&spec.judge, judge_flags.backend, &judge_flags.location)
+                .await?,
+        ),
+    };
     let mut models: HashMap<&str, Arc<dyn Llm>> = HashMap::new();
     for name in spec.variants.iter().filter_map(Variant::model) {
         if !models.contains_key(name) {
@@ -1479,7 +1666,7 @@ async fn run_spec(
             models.insert(name, model);
         }
     }
-    let evaluator = Evaluator::new(judge).runs_per_case(spec.runs);
+    let evaluator = evaluator.runs_per_case(spec.runs);
     let report = run_experiment(&spec.name, &evaluator, set, &spec.variants, |v| {
         build_agent(spec, registry, &models, v)
     })
@@ -3078,6 +3265,122 @@ mod tests {
             assert_eq!(code, 0);
             assert!(stdout.contains("experiment"), "{stdout}");
         }
+
+        /// [`Lab`] with an evaluation service: `judge_backend` returns `backend` (recording
+        /// `judge_backend <choice> <model> <project>/<location>`).
+        #[derive(Default)]
+        struct Serviced {
+            lab: Lab,
+            backend: Option<Arc<crate::testutil::FakeBackend>>,
+        }
+
+        #[async_trait::async_trait]
+        impl Backends for Serviced {
+            fn source(&self, spec: &SourceSpec) -> Result<Arc<dyn TranscriptSource>, MonitorError> {
+                self.lab.source(spec)
+            }
+
+            async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError> {
+                self.lab.judge(spec).await
+            }
+
+            async fn model(
+                &self,
+                project: &str,
+                location: &str,
+                name: &str,
+            ) -> Result<Arc<dyn Llm>, MonitorError> {
+                self.lab.model(project, location, name).await
+            }
+
+            async fn judge_backend(
+                &self,
+                spec: &JudgeSpec,
+                choice: JudgeBackendChoice,
+                eval_location: &str,
+            ) -> Result<Arc<dyn JudgeBackend>, MonitorError> {
+                self.lab.calls.lock().unwrap().push(format!(
+                    "judge_backend {choice:?} {} {}/{eval_location}",
+                    spec.model, spec.project
+                ));
+                let backend = self.backend.clone().unwrap();
+                Ok(backend)
+            }
+        }
+
+        /// One case graded by `llm_judge: Polite`.
+        const JUDGED: &str = "name: judged\ncases:\n  - id: polite\n    turns: [\"Say something.\"]\n    expect: [llm_judge: Polite]\n";
+
+        /// [`experiment_file`] with [`TEXT_AGENT`] and the [`JUDGED`] set.
+        fn judged_experiment(dir: &Path) -> String {
+            let spec = experiment_file(dir, TEXT_AGENT);
+            std::fs::write(dir.join("sets/smoke.yaml"), JUDGED).unwrap();
+            spec
+        }
+
+        #[tokio::test]
+        async fn the_eval_service_grades_without_a_judge_model() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = judged_experiment(dir.path());
+            let backends = Serviced {
+                backend: Some(crate::testutil::FakeBackend::new(4)),
+                ..Serviced::default()
+            };
+            let (code, stdout, stderr) = cli_run(
+                &[
+                    "experiment",
+                    &spec,
+                    "--judge-backend",
+                    "eval-service",
+                    "--eval-location",
+                    "us-central1",
+                ],
+                &backends,
+            )
+            .await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(
+                backends.lab.calls(),
+                [
+                    "judge_backend EvalService m-judge p/us-central1",
+                    "model p/us/m-flash"
+                ]
+            );
+            // 2 variants x 1 case x 2 runs.
+            assert_eq!(backends.backend.as_ref().unwrap().calls(), 4);
+            assert!(stdout.contains("2/2 (100%)"), "{stdout}");
+        }
+
+        #[tokio::test]
+        async fn the_default_judge_backend_builds_the_judge_model() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = judged_experiment(dir.path());
+            let backends = Serviced::default();
+            let (code, stdout, stderr) = cli_run(&["experiment", &spec], &backends).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(
+                backends.lab.calls(),
+                ["judge m-judge p/us", "model p/us/m-flash"]
+            );
+        }
+
+        #[tokio::test]
+        async fn backends_without_the_eval_service_refuse_it() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = judged_experiment(dir.path());
+            let lab = Lab::default();
+            let (code, _, stderr) = cli_run(
+                &["experiment", &spec, "--judge-backend", "eval-service"],
+                &lab,
+            )
+            .await;
+            assert_eq!(code, 2);
+            assert_eq!(
+                stderr,
+                "gadk-eval: judge: the evaluation service is not supported by these backends\n"
+            );
+            assert!(lab.calls().is_empty(), "{:?}", lab.calls());
+        }
     }
 
     // ---- guard ----
@@ -4395,6 +4698,74 @@ mod tests {
             assert_eq!(code, 2);
             assert!(fake.posts().is_empty(), "{:?}", fake.posts());
         }
+
+        /// A guard spec in `dir` with an `llm_judge` eval check and a judge.
+        async fn judged_guard(dir: &Path) -> String {
+            prompts(dir, Some(10)).await;
+            let spec = guard_file(dir, ERROR_RATE);
+            let judged = dir.join("judged.yaml");
+            let text = std::fs::read_to_string(&spec).unwrap()
+                + "  - eval:\n      scorers: [llm_judge: be nice]\n      max_decrease: 0.05\n\
+                   judge: { model: m-judge }\n";
+            std::fs::write(&judged, text).unwrap();
+            judged.display().to_string()
+        }
+
+        #[tokio::test]
+        async fn guard_builds_the_chosen_judge_backend() {
+            let dir = tempfile::tempdir().unwrap();
+            let judged = judged_guard(dir.path()).await;
+            let fake = healthy();
+            let (code, _, stderr) = cli_run(
+                &["guard", &judged, "--judge-backend", "eval-service"],
+                &fake,
+            )
+            .await;
+            assert_eq!(code, 2);
+            assert_eq!(
+                stderr,
+                "gadk-eval: judge: the evaluation service is not supported by these backends\n"
+            );
+            assert_eq!(fake.calls(), ["guard_source p.d.t 1073741824"]);
+        }
+
+        #[tokio::test]
+        async fn guards_builds_the_chosen_judge_backend() {
+            let dir = tempfile::tempdir().unwrap();
+            let judged = judged_guard(dir.path()).await;
+            let fake = healthy();
+            let (code, stdout, _) = cli_run(
+                &[
+                    "guards",
+                    &judged,
+                    "--judge-backend",
+                    "eval-service",
+                    "--eval-location",
+                    "europe-west4",
+                ],
+                &fake,
+            )
+            .await;
+            assert_eq!(code, 2);
+            assert!(
+                stdout.contains(
+                    "error: judge: the evaluation service is not supported by these backends\n"
+                ),
+                "{stdout}"
+            );
+            assert!(!fake.calls().iter().any(|c| c.starts_with("judge ")));
+        }
+
+        #[tokio::test]
+        async fn guard_help_lists_the_judge_flags() {
+            for command in ["guard", "guards"] {
+                let (code, stdout, _) = cli_run(&[command, "--help"], &healthy()).await;
+                assert_eq!(code, 0);
+                for flag in ["--judge-backend", "--eval-location"] {
+                    assert!(stdout.contains(flag), "{command} {flag}: {stdout}");
+                }
+            }
+        }
     }
 
     // ---- alerts ----
@@ -5172,5 +5543,239 @@ mod tests {
             list_full_names(&gcp, "evals", "p/").await.unwrap(),
             ["p/a.yaml"]
         );
+    }
+
+    // ---- judge backends ----
+
+    mod judge_backends {
+        use gadk_eval::{JudgeKind, JudgeOutcome, JudgeRequest};
+
+        use crate::testutil::FakeBackend;
+
+        use super::*;
+
+        /// [`Fake`] whose `judge_backend` returns `backend` for the evaluation service,
+        /// recording each `judge` and `judge_backend` call.
+        struct Serviced {
+            fake: Fake,
+            backend: Arc<FakeBackend>,
+            calls: Mutex<Vec<String>>,
+        }
+
+        impl Serviced {
+            fn new(runs: Vec<ProductionRun>) -> Self {
+                Self {
+                    fake: Fake::new(runs),
+                    backend: FakeBackend::new(4),
+                    calls: Mutex::new(Vec::new()),
+                }
+            }
+
+            fn calls(&self) -> Vec<String> {
+                self.calls.lock().unwrap().clone()
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl Backends for Serviced {
+            fn source(&self, spec: &SourceSpec) -> Result<Arc<dyn TranscriptSource>, MonitorError> {
+                self.fake.source(spec)
+            }
+
+            async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError> {
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push(format!("judge {}", spec.model));
+                self.fake.judge(spec).await
+            }
+
+            async fn judge_backend(
+                &self,
+                spec: &JudgeSpec,
+                choice: JudgeBackendChoice,
+                eval_location: &str,
+            ) -> Result<Arc<dyn JudgeBackend>, MonitorError> {
+                match choice {
+                    JudgeBackendChoice::EvalService => {
+                        self.calls.lock().unwrap().push(format!(
+                            "eval-service {} {}/{eval_location}",
+                            spec.model, spec.project
+                        ));
+                        Ok(self.backend.clone())
+                    }
+                    _ => gemini_judge(self.judge(spec).await?, spec),
+                }
+            }
+        }
+
+        /// A monitor spec in `dir` with a judge and an `llm_judge` scorer.
+        fn judged_spec(dir: &Path) -> String {
+            let p = dir.join("judged.yaml");
+            std::fs::write(
+                &p,
+                "name: support\nsource: { bigquery: { project: p, dataset: d, table: t } }\n\
+                 window: 1d\njudge: { model: m-judge }\nscorers: [llm_judge: Polite]\n",
+            )
+            .unwrap();
+            p.display().to_string()
+        }
+
+        fn judge_spec() -> JudgeSpec {
+            JudgeSpec {
+                model: "m-judge".into(),
+                project: "p".into(),
+                location: "us-central1".into(),
+                timeout: Duration::from_secs(5),
+            }
+        }
+
+        #[test]
+        fn judge_flags_parse_with_defaults() {
+            for argv in [
+                &["gadk-eval", "monitor", "m.yaml"][..],
+                &["gadk-eval", "experiment", "e.yaml"],
+                &["gadk-eval", "guard", "g.yaml"],
+                &["gadk-eval", "guards", "g.yaml"],
+            ] {
+                let m = cli().try_get_matches_from(argv).unwrap();
+                let flags = JudgeFlags::of(m.subcommand().unwrap().1);
+                assert_eq!(flags.backend, JudgeBackendChoice::Gemini, "{argv:?}");
+                assert_eq!(flags.location, "global", "{argv:?}");
+                let mut argv = argv.to_vec();
+                argv.extend([
+                    "--judge-backend",
+                    "eval-service",
+                    "--eval-location",
+                    "us-central1",
+                ]);
+                let m = cli().try_get_matches_from(&argv).unwrap();
+                let flags = JudgeFlags::of(m.subcommand().unwrap().1);
+                assert_eq!(flags.backend, JudgeBackendChoice::EvalService, "{argv:?}");
+                assert_eq!(flags.location, "us-central1", "{argv:?}");
+            }
+            assert_eq!(
+                JudgeBackendChoice::from_flag("gemini"),
+                Some(JudgeBackendChoice::Gemini)
+            );
+            assert_eq!(JudgeBackendChoice::from_flag("vertex"), None);
+            assert_eq!(JudgeBackendChoice::default(), JudgeBackendChoice::Gemini);
+        }
+
+        #[tokio::test]
+        async fn an_unknown_judge_backend_is_a_usage_error() {
+            let (code, stdout, stderr) = cli_run(
+                &["monitor", "m.yaml", "--judge-backend", "vertex"],
+                &Fake::new(Vec::new()),
+            )
+            .await;
+            assert_eq!((code, stdout.as_str()), (2, ""));
+            assert!(stderr.contains("invalid value 'vertex'"), "{stderr}");
+        }
+
+        #[tokio::test]
+        async fn the_default_judge_backend_wraps_the_judge_model() {
+            let fake = Fake::new(Vec::new());
+            let backend = fake
+                .judge_backend(&judge_spec(), JudgeBackendChoice::Gemini, "global")
+                .await
+                .unwrap();
+            let req = JudgeRequest::new(
+                JudgeKind::Rubric {
+                    rubric: "Polite".into(),
+                },
+                "User: hi\nAgent: hello\n\n",
+                "hello",
+            );
+            assert_eq!(
+                backend.grade(&req).await,
+                JudgeOutcome::Verdict {
+                    pass: true,
+                    score: 5,
+                    rationale: "ok".into()
+                }
+            );
+            let err = fake
+                .judge_backend(&judge_spec(), JudgeBackendChoice::EvalService, "global")
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(
+                err.to_string(),
+                "judge: the evaluation service is not supported by these backends"
+            );
+            let err = fake
+                .pairwise_judge(&judge_spec(), "global")
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(
+                err.to_string(),
+                "judge: the evaluation service is not supported by these backends"
+            );
+        }
+
+        #[tokio::test]
+        async fn monitor_grades_through_the_eval_service() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = judged_spec(dir.path());
+            let backends = Serviced::new(vec![passing("a"), failing("b")]);
+            let (code, stdout, stderr) = cli_run(
+                &[
+                    "monitor",
+                    &spec,
+                    "--judge-backend",
+                    "eval-service",
+                    "--eval-location",
+                    "us-central1",
+                ],
+                &backends,
+            )
+            .await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(backends.calls(), ["eval-service m-judge p/us-central1"]);
+            assert_eq!(backends.backend.calls(), 2);
+            assert!(
+                stdout.contains("llm_judge      pass 2  fail 0  error 0"),
+                "{stdout}"
+            );
+        }
+
+        #[tokio::test]
+        async fn monitor_defaults_to_the_judge_model() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = judged_spec(dir.path());
+            let backends = Serviced::new(vec![passing("a")]);
+            let (code, stdout, stderr) =
+                cli_run(&["monitor", &spec, "--eval-location", "x"], &backends).await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert_eq!(backends.calls(), ["judge m-judge"]);
+            assert_eq!(backends.backend.calls(), 0);
+        }
+
+        #[tokio::test]
+        async fn monitor_without_a_judge_builds_no_backend() {
+            let dir = tempfile::tempdir().unwrap();
+            let spec = spec_file(dir.path(), "");
+            let backends = Serviced::new(vec![passing("a")]);
+            let (code, stdout, stderr) = cli_run(
+                &["monitor", &spec, "--judge-backend", "eval-service"],
+                &backends,
+            )
+            .await;
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            assert!(backends.calls().is_empty(), "{:?}", backends.calls());
+        }
+
+        #[tokio::test]
+        async fn monitor_help_lists_the_judge_flags() {
+            for command in ["monitor", "experiment"] {
+                let (code, stdout, _) = cli_run(&[command, "--help"], &Fake::new(Vec::new())).await;
+                assert_eq!(code, 0);
+                for flag in ["--judge-backend", "--eval-location"] {
+                    assert!(stdout.contains(flag), "{command} {flag}: {stdout}");
+                }
+            }
+        }
     }
 }

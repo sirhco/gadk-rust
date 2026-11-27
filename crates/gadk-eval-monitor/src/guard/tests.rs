@@ -1608,3 +1608,46 @@ async fn an_abort_is_never_held() {
     assert_eq!(report.note, None);
     assert_eq!(now, (Some(1), None));
 }
+
+#[tokio::test]
+async fn run_with_backend_grades_eval_checks_through_the_backend() {
+    use crate::testutil::FakeBackend;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(dir.path(), Some(10)).await;
+    let checks = "  - eval: { scorers: [llm_judge: Polite], max_decrease: 0.1, limit: 10 }\n";
+    let spec = spec("judge: { model: m, timeout: 5s }\n", checks);
+    let mut source = FakeGuard::new(plenty());
+    source.runs = vec![runs(1, 10, 0, 0), runs(2, 10, 0, 0)];
+    let err = Guard::new()
+        .run_with_backend(&spec, &store, &source, None, None, None, false)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "judge: the spec has llm_judge scorers but no judge model was given"
+    );
+    let backend = FakeBackend::new(5);
+    let report = Guard::new()
+        .now(at(NOW))
+        .run_with_backend(
+            &spec,
+            &store,
+            &source,
+            None,
+            Some(backend.clone()),
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(backend.calls(), 20);
+    assert_eq!(
+        only(&report).baseline,
+        SideValue {
+            value: Some(1.0),
+            n: 10
+        }
+    );
+}
