@@ -7,6 +7,8 @@ the public API.
 
 ## [Unreleased]
 
+## [0.5.27] - 2026-11-27
+
 ### Added
 
 - `gadk-openapi`, a new crate: an OpenAPI 3.0 and 3.1 document (JSON or YAML, from a string,
@@ -19,6 +21,9 @@ the public API.
   - Credentials come from a `gadk-auth` provider (`auth`) or a query-string key
     (`query_api_key`); `post`, `put`, `patch` and `delete` calls need confirmation by default
     (`RequireConfirmation::Mutating`).
+  - Redirects are not followed (a 3xx is a normal result), and a path argument cannot form a
+    `.` or `..` segment or be empty. Schema `$ref`s are expanded inline, cut at a cycle, at 8
+    levels or past 10,000 nodes.
 - `gadk`: the `openapi` feature (not default) re-exports it as `gadk::openapi`; the
   `openapi_agent` example runs an agent over an embedded Open-Meteo forecast spec.
 
@@ -1066,7 +1071,8 @@ deliberately differs from ADK-Go, the source is marked `// Divergence (ledger â€
 - Some `gadk-goyaml` type-name error texts differ from yaml.v3.
 - The live GCS artifact test has not been run against a real bucket.
 
-[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.26...HEAD
+[Unreleased]: https://github.com/sirhco/gadk-rust/compare/v0.5.27...HEAD
+[0.5.27]: https://github.com/sirhco/gadk-rust/compare/v0.5.26...v0.5.27
 [0.5.26]: https://github.com/sirhco/gadk-rust/compare/v0.5.25...v0.5.26
 [0.5.25]: https://github.com/sirhco/gadk-rust/compare/v0.5.24...v0.5.25
 [0.5.24]: https://github.com/sirhco/gadk-rust/compare/v0.5.23...v0.5.24
