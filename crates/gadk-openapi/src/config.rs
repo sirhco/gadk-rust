@@ -93,9 +93,11 @@ impl OpenApiConfig {
     }
 
     /// Sends every request through [`gadk_auth::client`] with `provider`, which writes the
-    /// credential's headers. When the provider can refresh its credential (`adc` and
-    /// `service_account`), a 401 or 403 is retried once with a refreshed one; `static_token`,
-    /// `api_key` and `token_source` are not retried.
+    /// credential's headers. A 401 or 403 is retried once with a refreshed credential only when
+    /// the provider is a refreshing provider (such as `gadk_auth::gcp::new_provider`, or your own
+    /// `RefreshingProvider`); `static_token`, `api_key`, `token_source`, `adc` and
+    /// `service_account` are not retried (`adc` and `service_account` renew their tokens before
+    /// they expire).
     pub fn auth(mut self, provider: Arc<dyn CredentialProvider>) -> Self {
         self.auth = Some(provider);
         self

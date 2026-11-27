@@ -79,10 +79,11 @@ let config = OpenApiConfig::new()
 ## Auth
 
 - `auth(provider)` takes any `gadk_auth` credential provider: `static_token` (a bearer token),
-  `api_key(name, value)` (a header), `token_source`, `adc` or `service_account`. With a
-  provider that can refresh its credential (`adc` and `service_account`), a request rejected
-  with 401 or 403 is retried once with a refreshed credential; `static_token`, `api_key` and
-  `token_source` are not retried.
+  `api_key(name, value)` (a header), `token_source`, `adc` or `service_account`. A request
+  rejected with 401 or 403 is retried once with a refreshed credential only when the provider
+  is a refreshing provider, such as `gadk_auth::gcp::new_provider` (feature `gcp`) or your own
+  `RefreshingProvider`. None of the five providers above retries; `adc` and `service_account`
+  renew their tokens before they expire.
 - `query_api_key(name, value)` puts an API key in the query string, for APIs that want it there.
 - Both may be set. With neither, requests carry no credential.
 
@@ -106,9 +107,9 @@ A missing required argument, a non-object `args`, an object or array for a path 
 value, an object or a nested array for a query value (an array of scalars repeats the key), an
 empty path value, or a path value that makes a `.` or `..` segment (alone or together with the
 segment's other text, as `{x}{y}` with `.` and `.`) is `ToolError::InvalidArgument`, and no
-request is sent. A transport failure is
-`ToolError::Execution` holding `Error::Timeout`, `Error::Cancelled` (the invocation was
-cancelled) or `Error::Request` (connection, DNS, the credential provider, or the body read).
+request is sent. A transport failure is `ToolError::Execution` holding `Error::Timeout`,
+`Error::Cancelled` (the invocation was cancelled) or `Error::Request` (connection, DNS, the
+credential provider, or the body read).
 
 ## Confirmation
 

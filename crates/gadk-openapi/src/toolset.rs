@@ -49,7 +49,8 @@ impl OpenApiToolset {
     /// Fails with [`Error::DuplicateName`] when two operations (or two properties of one tool)
     /// share a name, [`Error::NameTooLong`] when a prefixed name is over 64 bytes,
     /// [`Error::Ref`] for a `$ref` that cannot be resolved, [`Error::NoBaseUrl`] when there
-    /// is no absolute base URL (or it has a query or fragment), and [`Error::HttpClient`] when the HTTP client cannot be built.
+    /// is no absolute base URL (or it has a query or fragment), and [`Error::HttpClient`] when
+    /// the HTTP client cannot be built.
     pub fn new(spec: &OpenApiSpec, config: OpenApiConfig) -> Result<Self, Error> {
         let collected = operation::collect(spec)?;
         if !config.prefix.is_empty() {
