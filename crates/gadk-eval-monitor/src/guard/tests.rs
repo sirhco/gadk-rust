@@ -1537,7 +1537,7 @@ async fn a_young_step_holds_an_advance() {
     let (report, _) = after_step(STEPS, 90 * 60 + 59, |_| {}, None, plenty()).await;
     assert_eq!(
         report.note.as_deref(),
-        Some("step at 25% is 90m old (< min_step_age 1d)")
+        Some("step at 25% is 1h 30m old (< min_step_age 1d)")
     );
 }
 
