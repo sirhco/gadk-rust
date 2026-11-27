@@ -92,6 +92,11 @@ pub use gadk_model as model;
 /// default; re-export of `gadk-openai`).
 #[cfg(feature = "openai")]
 pub use gadk_openai as openai;
+/// The OpenAPI toolset: one tool per operation of an OpenAPI 3.0 or 3.1 document, with static
+/// credentials and confirmation before changes (feature `openapi`, not on by default; re-export
+/// of `gadk-openapi`).
+#[cfg(feature = "openapi")]
+pub use gadk_openapi as openapi;
 pub use gadk_platform as platform;
 /// The prompt registry: versioned, labelled prompts and instruction providers (feature
 /// `prompts`, not on by default; re-export of `gadk-prompts`). The Firestore store is

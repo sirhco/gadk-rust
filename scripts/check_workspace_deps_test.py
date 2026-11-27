@@ -60,9 +60,10 @@ class EdgeTest(unittest.TestCase):
         self.assertEqual(cwd.ALLOWED["gadk-auth"], {"gadk-agent", "gadk-platform"})
         self.assertIn("gadk-auth", cwd.ALLOWED["gadk"])
         # 2c: gadk-mcp applies credentials to MCP requests; 5b: gadk-a2a applies them to A2A calls;
-        # 5c: gadk-agentregistry authenticates registry calls with ADC.
+        # 5c: gadk-agentregistry authenticates registry calls with ADC; openapi: gadk-openapi
+        # sends its tools' requests through gadk_auth::client.
         self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-auth" in deps],
-                         ["gadk-mcp", "gadk-a2a", "gadk-agentregistry", "gadk"])
+                         ["gadk-mcp", "gadk-a2a", "gadk-agentregistry", "gadk-openapi", "gadk"])
 
     def test_auth_normal_dependency_on_engine_is_rejected(self):
         self.edit("gadk-auth", "[dependencies]\n", "[dependencies]\ngadk-engine = { workspace = true }\n")
@@ -607,6 +608,15 @@ class EdgeTest(unittest.TestCase):
         self.assertIn("gadk-console-client = { workspace = true }\n", dev)
         self.assertNotIn("gadk-console-client", cwd.ALLOWED["gadk-console"])
         self.assertEqual(cwd.check(self.repo), [])
+
+    def test_openapi_edges_are_exactly_agent_auth_genai_and_only_the_facade_depends_on_it(self):
+        self.assertEqual(cwd.ALLOWED["gadk-openapi"], {"gadk-agent", "gadk-auth", "gadk-genai"})
+        self.assertEqual([c for c, deps in cwd.ALLOWED.items() if "gadk-openapi" in deps], ["gadk"])
+        self.assertIn(("gadk", "gadk-openapi"), cwd.OPTIONAL)
+        self.edit("gadk", "gadk-openapi = { workspace = true, optional = true }",
+                  "gadk-openapi = { workspace = true }")
+        errs = cwd.check(self.repo)
+        self.assertTrue(any("gadk -> gadk-openapi must be optional = true" in e for e in errs), errs)
 
 
 if __name__ == "__main__":

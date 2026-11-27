@@ -1,0 +1,32 @@
+[package]
+name = "gadk-openapi"
+description = "An OpenAPI 3.0 and 3.1 toolset for gadk agents: one tool per REST operation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gadk-agent = { workspace = true }
+gadk-auth = { workspace = true }
+gadk-genai = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+reqwest-middleware = { workspace = true }
+serde = { workspace = true }
+serde-saphyr = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+gadk-session = { workspace = true }
+http = { workspace = true }
+parking_lot = { workspace = true }
+tokio-util = { workspace = true }
