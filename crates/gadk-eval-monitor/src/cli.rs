@@ -15,7 +15,7 @@
 //! The `gadk-eval` command-line tool, as a library for testing.
 //!
 //! ```text
-//! gadk-eval monitor <spec.yaml> [--out <url>] [--limit N]
+//! gadk-eval monitor <spec.yaml> [--out <url>] [--limit N] [--write-scores]
 //! gadk-eval report <url> [<name>] [--limit N]
 //! gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [--append]
 //!     [--name N] [--trace ID]... [--since <n>h|<n>d] [--agent A] [--score F]... [--limit N]
@@ -30,7 +30,12 @@
 //!
 //! `monitor` exits 0 on success, 1 when the spec's `min_pass_rate` is set and either the pass
 //! rate is below it or there are no runs (without `min_pass_rate`, zero runs exit 0), and 2 when the spec cannot be loaded, the runs cannot be
-//! listed, the judge cannot be built or the report cannot be stored. `report` exits 0, or 2 on a
+//! listed, the judge cannot be built or the report cannot be stored, or, with `--write-scores`,
+//! when the source is not BigQuery (checked before anything runs) or the judge rows cannot be
+//! written. With `--write-scores` it writes the report's judge results as `FEEDBACK` rows
+//! ([`write_judge_rows`]) after the report is stored and
+//! printed, then prints `scores: wrote <W> judge rows (<P> already present)` and applies
+//! `min_pass_rate`. `report` exits 0, or 2 on a
 //! store error or an unknown or invalid report name. `export` exits 0 when it added at least one
 //! case, 1 when it added none (and wrote nothing), and 2 when the eval-set file cannot be read,
 //! extended or written or the source fails. `experiment` runs an
@@ -109,6 +114,7 @@ use crate::guard_source::GuardSource;
 use crate::guard_sources::{load_alert_specs, load_prices, load_specs};
 use crate::guard_spec::GuardSpec;
 use crate::judge::vertex_judge;
+use crate::judge_rows::{ScoreSink, judge_rows, write_judge_rows};
 use crate::monitor::Monitor;
 use crate::notify::{self, Counts, Notifier, NotifyFormat, Outcome};
 use crate::prices::PriceTable;
@@ -138,6 +144,13 @@ pub trait Backends: Send + Sync {
 
     /// The judge model for `spec`.
     async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError>;
+
+    /// The sink `monitor --write-scores` writes judge rows to, for the source `spec`. The
+    /// default refuses with `--write-scores needs a bigquery source`; [`CloudBackends`] returns
+    /// a [`BigQueryTranscriptSource`] for a `bigquery` source.
+    fn score_sink(&self, _spec: &SourceSpec) -> Result<Arc<dyn ScoreSink>, MonitorError> {
+        Err(MonitorError::Spec(WRITE_SCORES_NEEDS_BIGQUERY.into()))
+    }
 
     /// The export source for the agent-analytics table `project.dataset.table` (`export`). The
     /// default refuses; [`CloudBackends`] returns a [`BigQueryTranscriptSource`].
@@ -234,6 +247,9 @@ pub trait Backends: Send + Sync {
 /// The error of the default [`Backends::list_objects`] and [`Backends::read_object`].
 const GS_REFUSED: &str = "gs:// sources are not supported by these backends";
 
+/// The error of `monitor --write-scores` without a BigQuery source.
+const WRITE_SCORES_NEEDS_BIGQUERY: &str = "--write-scores needs a bigquery source";
+
 /// The error of the default [`Backends::post_webhook`].
 pub(crate) const WEBHOOKS_UNSUPPORTED: &str = "webhooks are not supported by these backends";
 
@@ -287,6 +303,21 @@ impl Backends for CloudBackends {
 
     async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError> {
         vertex_judge(spec).await
+    }
+
+    fn score_sink(&self, spec: &SourceSpec) -> Result<Arc<dyn ScoreSink>, MonitorError> {
+        match spec {
+            SourceSpec::BigQuery {
+                project,
+                dataset,
+                table,
+            } => Ok(Arc::new(BigQueryTranscriptSource::new(
+                project, dataset, table,
+            )?)),
+            SourceSpec::CloudTrace { .. } => {
+                Err(MonitorError::Spec(WRITE_SCORES_NEEDS_BIGQUERY.into()))
+            }
+        }
     }
 
     fn export_source(
@@ -401,7 +432,16 @@ fn cli() -> Command {
                         .long("out")
                         .help("store the report: <dir>, file://<dir> or gs://<bucket>[/<prefix>]"),
                 )
-                .arg(limit_arg().help("runs to grade, 1-1000 (overrides the spec)")),
+                .arg(limit_arg().help("runs to grade, 1-1000 (overrides the spec)"))
+                .arg(
+                    Arg::new("write-scores")
+                        .long("write-scores")
+                        .action(ArgAction::SetTrue)
+                        .help(
+                            "write the judge scores to the bigquery table as FEEDBACK rows \
+                             (source judge)",
+                        ),
+                ),
         )
         .subcommand(
             Command::new("report")
@@ -688,7 +728,15 @@ pub async fn run(
         Some(("monitor", m)) => {
             let spec = m.get_one::<String>("spec").map_or("", String::as_str);
             let out = m.get_one::<String>("out").map(String::as_str);
-            monitor(spec, out, limit(m), backends, stdout).await
+            monitor(
+                spec,
+                out,
+                limit(m),
+                m.get_flag("write-scores"),
+                backends,
+                stdout,
+            )
+            .await
         }
         Some(("report", m)) => {
             let url = m.get_one::<String>("url").map_or("", String::as_str);
@@ -715,11 +763,14 @@ pub async fn run(
     }
 }
 
-/// `monitor`: 0 or 1 (below `min_pass_rate`); errors map to 2.
+/// `monitor`: 0 or 1 (below `min_pass_rate`); errors map to 2. With `write_scores` the score
+/// sink is resolved before anything runs, and the report's judge rows are written after it is
+/// stored and printed, before `min_pass_rate` is applied.
 async fn monitor(
     spec_path: &str,
     out: Option<&str>,
     limit: Option<usize>,
+    write_scores: bool,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
@@ -728,6 +779,11 @@ async fn monitor(
         spec.limit = n;
     }
     let store = out.map(ReportStore::open).transpose()?;
+    let sink = if write_scores {
+        Some(backends.score_sink(&spec.source)?)
+    } else {
+        None
+    };
     let source = backends.source(&spec.source)?;
     let judge = match &spec.judge {
         Some(j) => Some(backends.judge(j).await?),
@@ -742,6 +798,20 @@ async fn monitor(
     write!(stdout, "{}", report.summary())?;
     if let Some(name) = stored {
         writeln!(stdout, "stored report {name}")?;
+    }
+    if let Some(sink) = sink {
+        let outcome = write_judge_rows(
+            sink.as_ref(),
+            judge_rows(&report, &spec.name),
+            report.window.from,
+            &spec.name,
+        )
+        .await?;
+        writeln!(
+            stdout,
+            "scores: wrote {} judge rows ({} already present)",
+            outcome.written, outcome.present
+        )?;
     }
     if let Some(min) = spec.min_pass_rate {
         match report.pass_rate() {
@@ -1465,7 +1535,7 @@ mod tests {
 
     use crate::export::{ExportContext, RunScore, TraceInvocation};
     use crate::source::ProductionRun;
-    use crate::testutil::{FakeJudge, FakeSource, at, run as prod_run};
+    use crate::testutil::{FakeJudge, FakeSink, FakeSource, at, run as prod_run};
 
     use super::*;
 
@@ -1796,6 +1866,223 @@ mod tests {
             matches!(&err, MonitorError::Source(m) if m.contains("\"bad project\"")),
             "{err}"
         );
+    }
+
+    /// [`Fake`] with `sink` as its score sink.
+    struct Scoring {
+        inner: Fake,
+        sink: Arc<FakeSink>,
+    }
+
+    #[async_trait::async_trait]
+    impl Backends for Scoring {
+        fn source(&self, spec: &SourceSpec) -> Result<Arc<dyn TranscriptSource>, MonitorError> {
+            self.inner.source(spec)
+        }
+
+        async fn judge(&self, spec: &JudgeSpec) -> Result<Arc<dyn Llm>, MonitorError> {
+            self.inner.judge(spec).await
+        }
+
+        fn score_sink(&self, _spec: &SourceSpec) -> Result<Arc<dyn ScoreSink>, MonitorError> {
+            Ok(self.sink.clone())
+        }
+    }
+
+    fn scoring(runs: Vec<ProductionRun>, sink: FakeSink) -> Scoring {
+        Scoring {
+            inner: Fake::new(runs),
+            sink: Arc::new(sink),
+        }
+    }
+
+    /// A spec file in `dir` with `extra` YAML lines, a judge, and scorers `contains: "order"`
+    /// and `llm_judge`.
+    fn judged_spec(dir: &Path, extra: &str) -> String {
+        let p = dir.join("judged.yaml");
+        std::fs::write(
+            &p,
+            format!(
+                "name: support\nsource: {{ bigquery: {{ project: p, dataset: d, table: t }} }}\n\
+                 window: 1d\n{extra}judge: {{ model: gemini-3.8-flash }}\n\
+                 scorers: [contains: \"order\", llm_judge: be nice]\n"
+            ),
+        )
+        .unwrap();
+        p.display().to_string()
+    }
+
+    #[tokio::test]
+    async fn write_scores_prints_the_scores_line_after_the_stored_report() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = judged_spec(dir.path(), "");
+        let out = dir.path().join("reports");
+        let mut sink = FakeSink::default();
+        sink.present
+            .insert(("c".to_owned(), "support/llm_judge".to_owned()));
+        let backends = scoring(vec![passing("a"), passing("b"), passing("c")], sink);
+        let (code, stdout, stderr) = cli_run(
+            &[
+                "monitor",
+                &spec,
+                "--out",
+                &out.display().to_string(),
+                "--write-scores",
+            ],
+            &backends,
+        )
+        .await;
+        assert_eq!(code, 0, "{stdout}{stderr}");
+        let lines: Vec<&str> = stdout.lines().collect();
+        let n = lines.len();
+        assert!(
+            lines[n - 2].starts_with("stored report support-"),
+            "{stdout}"
+        );
+        assert_eq!(
+            lines[n - 1],
+            "scores: wrote 2 judge rows (1 already present)"
+        );
+
+        let stored = std::fs::read_dir(&out)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let report = crate::report::MonitorReport::read_json(&stored).unwrap();
+        let calls = backends.sink.existing_calls.lock().unwrap();
+        assert_eq!(*calls, [(3, report.window.from)]);
+        let inserts = backends.sink.inserts.lock().unwrap();
+        assert_eq!(inserts.len(), 1);
+        let mut ids: Vec<&str> = inserts[0]
+            .0
+            .iter()
+            .map(|r| r.invocation_id.as_str())
+            .collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["a", "b"]);
+        assert!(
+            inserts[0]
+                .0
+                .iter()
+                .all(|r| r.name == "support/llm_judge" && r.score == 5 && r.pass),
+            "{:?}",
+            inserts[0].0
+        );
+        assert_eq!(inserts[0].1, "support");
+        // The stored report has no new field.
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&stored).unwrap()).unwrap();
+        let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["generated_at", "runs", "source", "spec", "window"]);
+    }
+
+    #[tokio::test]
+    async fn write_scores_without_a_score_sink_exits_2_before_any_query() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = judged_spec(dir.path(), "");
+        let fake = Fake::new(vec![passing("a")]);
+        let (code, stdout, stderr) = cli_run(&["monitor", &spec, "--write-scores"], &fake).await;
+        assert_eq!(code, 2);
+        assert_eq!(stdout, "");
+        assert!(
+            stderr.contains("--write-scores needs a bigquery source"),
+            "{stderr}"
+        );
+        assert_eq!(
+            stderr,
+            "gadk-eval: monitor spec: --write-scores needs a bigquery source\n"
+        );
+        assert!(fake.source.queries.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn cloud_backends_have_no_score_sink_for_cloud_trace() {
+        let err = CloudBackends
+            .score_sink(&SourceSpec::cloud_trace("proj"))
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.to_string(),
+            "monitor spec: --write-scores needs a bigquery source"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_write_exits_2_after_the_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = judged_spec(dir.path(), "min_pass_rate: 0.9\n");
+        let hint = "query failed: Access Denied; writing scores needs \
+                    roles/bigquery.dataEditor on the table";
+        let backends = scoring(
+            vec![passing("a")],
+            FakeSink {
+                fail_insert: Some(hint.into()),
+                ..FakeSink::default()
+            },
+        );
+        let (code, stdout, stderr) =
+            cli_run(&["monitor", &spec, "--write-scores"], &backends).await;
+        assert_eq!(code, 2);
+        assert!(
+            stdout.starts_with("monitor support: 1 runs, 1 passed"),
+            "{stdout}"
+        );
+        assert!(!stdout.contains("scores:"), "{stdout}");
+        assert!(!stdout.contains("FAILED"), "{stdout}");
+        assert!(
+            stderr.contains("; writing scores needs roles/bigquery.dataEditor on the table"),
+            "{stderr}"
+        );
+        assert_eq!(stderr, format!("gadk-eval: transcript source: {hint}\n"));
+    }
+
+    #[tokio::test]
+    async fn min_pass_rate_applies_after_a_successful_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = judged_spec(dir.path(), "min_pass_rate: 0.9\n");
+        let backends = scoring(vec![passing("a"), failing("b")], FakeSink::default());
+        let (code, stdout, _) = cli_run(&["monitor", &spec, "--write-scores"], &backends).await;
+        assert_eq!(code, 1);
+        assert!(
+            stdout.ends_with(
+                "scores: wrote 2 judge rows (0 already present)\n\
+                 FAILED: pass rate 50.0% is below the minimum 90.0%\n"
+            ),
+            "{stdout}"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_judge_rows_print_zero_and_call_no_sink() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = spec_file(dir.path(), "");
+        let backends = scoring(vec![passing("a")], FakeSink::default());
+        let (code, stdout, _) = cli_run(&["monitor", &spec, "--write-scores"], &backends).await;
+        assert_eq!(code, 0);
+        assert!(
+            stdout.ends_with("scores: wrote 0 judge rows (0 already present)\n"),
+            "{stdout}"
+        );
+        assert!(backends.sink.existing_calls.lock().unwrap().is_empty());
+        assert!(backends.sink.inserts.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn without_the_flag_nothing_is_written_or_printed() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = judged_spec(dir.path(), "");
+        let backends = scoring(vec![passing("a")], FakeSink::default());
+        let (code, stdout, _) = cli_run(&["monitor", &spec], &backends).await;
+        assert_eq!(code, 0);
+        assert!(!stdout.contains("scores:"), "{stdout}");
+        assert!(backends.sink.existing_calls.lock().unwrap().is_empty());
+        assert!(backends.sink.inserts.lock().unwrap().is_empty());
+        let (code, help, _) = cli_run(&["monitor", "--help"], &backends).await;
+        assert_eq!(code, 0);
+        assert!(help.contains("--write-scores"), "{help}");
     }
 
     // ---- export ----
