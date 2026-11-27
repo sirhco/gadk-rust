@@ -17,10 +17,13 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, TimeDelta, Utc};
-use gadk_analytics::testutil::{FakeHttp, param_value, pending_cells, pending_reply};
+use gadk_analytics::testutil::{
+    FakeHttp, param_value, pending_cells, pending_judge_cells, pending_reply,
+};
 use http::StatusCode;
 use serde_json::json;
 
+use super::openapi_tests::assert_matches_pointer;
 use super::tests::{api_get, assert_api_headers, bq_state, error_body};
 use super::usage_tests::{denied, denied_body};
 use crate::review::NEEDS_BIGQUERY_REVIEW;
@@ -80,6 +83,34 @@ async fn a_score_queue_lists_its_pending_traces() {
         param_value(&sent, "names")["parameterValue"],
         json!({ "arrayValues": [{ "value": "quality" }] })
     );
+}
+
+#[tokio::test]
+async fn pending_items_carry_their_judge_scores() {
+    let fake = FakeHttp::new(vec![pending_reply(vec![
+        pending_judge_cells(
+            A,
+            ago(60),
+            &[],
+            0,
+            &[("m/llm_judge", 4.0, true), ("m/reference", 2.5, false)],
+        ),
+        pending_cells(B, ago(120), &[], 0),
+    ])]);
+    let (status, _, body) = api_get(bq_state(&fake, false), "/api/v1/review/pending?score=q").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["data"][0]["judge"],
+        json!([
+            { "name": "m/llm_judge", "score": 4.0, "pass": true },
+            { "name": "m/reference", "score": 2.5, "pass": false },
+        ])
+    );
+    assert_eq!(body["data"][1]["judge"], json!([]));
+    // Each item matches the documented JudgeScore schema.
+    for item in body["data"][0]["judge"].as_array().unwrap() {
+        assert_matches_pointer("#/components/schemas/JudgeScore", item);
+    }
 }
 
 #[tokio::test]

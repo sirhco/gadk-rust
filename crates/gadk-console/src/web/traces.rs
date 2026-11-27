@@ -1611,6 +1611,114 @@ mod tests {
         page
     }
 
+    /// GET `/traces/{ID}{query}` with the BigQuery source answering the scores query with
+    /// `rows` (of `SCORE_FIELDS`); returns the page.
+    async fn scored_page(query: &str, rows: Vec<Vec<Value>>) -> String {
+        let fake = FakeHttp::new(vec![reply(&SCORE_FIELDS, rows, false)]);
+        let (status, _, page) = get(
+            bq_get(invocation_detail(), &fake),
+            &format!("/traces/{ID}{query}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{query}: {page}");
+        page
+    }
+
+    /// Newest first: a passing `m/llm_judge`, a console score, a failing `m/reference` and an
+    /// older failing `m/llm_judge`.
+    fn judged_rows() -> Vec<Vec<Value>> {
+        vec![
+            score_cells(
+                60,
+                [
+                    json!("judge"),
+                    json!("m"),
+                    json!("m/llm_judge"),
+                    json!("number"),
+                    json!("4"),
+                    json!("pass: polite <and> accurate"),
+                ],
+            ),
+            score_cells(
+                120,
+                [
+                    json!("console"),
+                    json!("chris"),
+                    json!("quality"),
+                    json!("number"),
+                    json!("5"),
+                    Value::Null,
+                ],
+            ),
+            score_cells(
+                180,
+                [
+                    json!("judge"),
+                    json!("m"),
+                    json!("m/reference"),
+                    json!("number"),
+                    json!("2"),
+                    json!("fail: wrong order id"),
+                ],
+            ),
+            score_cells(
+                240,
+                [
+                    json!("judge"),
+                    json!("m"),
+                    json!("m/llm_judge"),
+                    json!("number"),
+                    json!("1"),
+                    json!("fail: rude"),
+                ],
+            ),
+        ]
+    }
+
+    const JUDGE_SECTION: &str = r#"<h3>Judge</h3><table><thead><tr><th>Name</th><th>Score</th><th>Verdict</th><th>Rationale</th></tr></thead><tbody><tr><td>m/llm_judge</td><td class="num">4</td><td>pass</td><td>polite &lt;and&gt; accurate</td></tr><tr><td>m/reference</td><td class="num">2</td><td>fail</td><td>wrong order id</td></tr></tbody></table>"#;
+
+    #[tokio::test]
+    async fn review_mode_shows_the_newest_judge_score_per_name_before_the_forms() {
+        let page = scored_page(&format!("?score=quality&at={AT}"), judged_rows()).await;
+        let scores = scores_section(&page);
+        let at = scores
+            .find(JUDGE_SECTION)
+            .unwrap_or_else(|| panic!("no Judge section: {scores}"));
+        let table_end = scores.find("</table>").unwrap();
+        assert!(table_end < at, "after the Scores table: {scores}");
+        let form = scores
+            .find(&format!(r#"action="/traces/{ID}/scores""#))
+            .unwrap();
+        assert!(at < form, "before the score form: {scores}");
+        // The judge rows stay in the Scores table too.
+        assert!(
+            scores.contains(
+                "<td>judge</td><td>m</td><td>m/llm_judge</td><td>1</td><td>fail: rude</td>"
+            ),
+            "{scores}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_judge_section_is_left_out_without_judge_rows_or_outside_review_mode() {
+        let plain = scored_page("", judged_rows()).await;
+        assert!(
+            !scores_section(&plain).contains("<h3>Judge</h3>"),
+            "{plain}"
+        );
+        assert!(
+            scores_section(&plain).contains("<td>m/reference</td>"),
+            "the Scores table still lists judge rows: {plain}"
+        );
+        let console_only = vec![judged_rows().remove(1)];
+        let page = scored_page(&format!("?score=quality&at={AT}"), console_only).await;
+        assert!(
+            page.contains("Reviewing <strong>quality</strong>"),
+            "{page}"
+        );
+        assert!(!scores_section(&page).contains("<h3>Judge</h3>"), "{page}");
+    }
+
     #[tokio::test]
     async fn a_queue_and_at_render_the_review_bar_and_fill_the_score_form() {
         let page = review_page(&format!(
