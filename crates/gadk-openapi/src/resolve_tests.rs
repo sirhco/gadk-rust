@@ -16,7 +16,7 @@
 
 use serde_json::{Value, json};
 
-use super::{MAX_REF_DEPTH, lookup, object, schema};
+use super::{MAX_EXPANDED_NODES, MAX_REF_DEPTH, lookup, object, schema};
 use crate::error::Error;
 
 fn doc() -> Value {
@@ -178,7 +178,7 @@ fn keys_next_to_a_ref_apply_on_top() {
 }
 
 #[test]
-fn a_recursive_schema_stops_with_an_empty_schema_after_eight_levels() {
+fn a_recursive_schema_stops_with_an_empty_schema_at_its_first_repeat() {
     let doc = doc();
     let got = schema(
         &doc,
@@ -187,13 +187,77 @@ fn a_recursive_schema_stops_with_an_empty_schema_after_eight_levels() {
         false,
     )
     .unwrap();
-    let mut node = &got;
-    // The root is the first expanded `$ref`; levels 2 to 8 are its `child` chain.
-    for level in 1..MAX_REF_DEPTH {
-        assert_eq!(node["type"], json!("object"), "level {level}");
-        node = &node["properties"]["child"];
+    assert_eq!(got, json!({"type": "object", "properties": {"child": {}}}));
+}
+
+/// A document whose `L1` … `L<count>` each hold `fanout` properties `p0` … that refer to the
+/// next level; the last level is a string.
+fn levels(count: usize, fanout: usize) -> Value {
+    let mut schemas = serde_json::Map::new();
+    for level in 1..=count {
+        let value = if level == count {
+            json!({"type": "string"})
+        } else {
+            let next = json!({"$ref": format!("#/components/schemas/L{}", level + 1)});
+            let properties: serde_json::Map<String, Value> = (0..fanout)
+                .map(|i| (format!("p{i}"), next.clone()))
+                .collect();
+            json!({"type": "object", "properties": properties})
+        };
+        schemas.insert(format!("L{level}"), value);
     }
-    assert_eq!(node["type"], json!("object"), "level {MAX_REF_DEPTH}");
+    json!({"components": {"schemas": schemas}})
+}
+
+#[test]
+fn an_acyclic_chain_stops_with_an_empty_schema_at_level_nine() {
+    let doc = levels(10, 1);
+    let got = schema(
+        &doc,
+        &json!({"$ref": "#/components/schemas/L1"}),
+        "GET /x",
+        false,
+    )
+    .unwrap();
+    let mut node = &got;
+    for level in 1..=MAX_REF_DEPTH {
+        assert_eq!(node["type"], json!("object"), "level {level}");
+        node = &node["properties"]["p0"];
+    }
     // The ninth `$ref` becomes `{}`.
-    assert_eq!(node["properties"]["child"], json!({}));
+    assert_eq!(node, &json!({}));
+}
+
+/// The objects and arrays in `value`.
+fn nodes(value: &Value) -> usize {
+    match value {
+        Value::Object(map) => 1 + map.values().map(nodes).sum::<usize>(),
+        Value::Array(items) => 1 + items.iter().map(nodes).sum::<usize>(),
+        _ => 0,
+    }
+}
+
+#[test]
+fn an_expansion_past_the_node_budget_cuts_later_refs() {
+    // Fully expanded this is about 2 * 10^6 objects.
+    let doc = levels(7, 10);
+    let got = schema(
+        &doc,
+        &json!({"$ref": "#/components/schemas/L1"}),
+        "GET /x",
+        false,
+    )
+    .unwrap();
+    let total = nodes(&got);
+    assert!(
+        (MAX_EXPANDED_NODES..2 * MAX_EXPANDED_NODES).contains(&total),
+        "{total} nodes"
+    );
+    // The first branch is expanded to the leaf; the last property of the root is cut.
+    let mut node = &got;
+    for _ in 1..7 {
+        node = &node["properties"]["p0"];
+    }
+    assert_eq!(node, &json!({"type": "string"}));
+    assert_eq!(got["properties"]["p9"], json!({}));
 }

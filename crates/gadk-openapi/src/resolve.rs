@@ -21,6 +21,10 @@ use crate::error::Error;
 /// How many `$ref`s are expanded along one path through a schema; a deeper `$ref` becomes `{}`.
 pub(crate) const MAX_REF_DEPTH: usize = 8;
 
+/// How many objects and arrays one [`schema`] expansion (one parameter or request-body schema)
+/// produces before every further `$ref` in it becomes `{}`.
+pub(crate) const MAX_EXPANDED_NODES: usize = 10_000;
+
 /// Keys removed from every schema object.
 const DROPPED_KEYS: [&str; 5] = [
     "nullable",
@@ -70,10 +74,13 @@ pub(crate) fn object<'a>(doc: &'a Value, value: &'a Value, at: &str) -> Result<&
     })
 }
 
-/// `schema` with its `$ref`s expanded (up to [`MAX_REF_DEPTH`] nested levels; a deeper one
-/// becomes `{}`) and cleaned for the model: [`DROPPED_KEYS`] are removed from every schema
-/// object, and when `openapi_3_0` is set, `nullable: true` next to a string `type` turns `type`
-/// into `[type, "null"]`.
+/// `schema` with its `$ref`s expanded and cleaned for the model.
+///
+/// A `$ref` becomes `{}` instead of being expanded when it is already being expanded on the
+/// current path (a cycle), when it lies beyond [`MAX_REF_DEPTH`] nested levels, or once this
+/// expansion has produced [`MAX_EXPANDED_NODES`] objects and arrays. [`DROPPED_KEYS`] are
+/// removed from every schema object, and when `openapi_3_0` is set, `nullable: true` next to a
+/// string `type` turns `type` into `[type, "null"]`.
 pub(crate) fn schema(
     doc: &Value,
     schema: &Value,
@@ -84,45 +91,59 @@ pub(crate) fn schema(
         doc,
         at,
         openapi_3_0,
+        active: Vec::new(),
+        nodes: 0,
     }
-    .schema(schema, 0)
+    .schema(schema)
 }
 
 struct Expander<'a> {
     doc: &'a Value,
     at: &'a str,
     openapi_3_0: bool,
+    /// The `$ref`s being expanded on the current path, outermost first.
+    active: Vec<&'a str>,
+    /// The objects and arrays produced so far.
+    nodes: usize,
 }
 
-impl Expander<'_> {
-    /// One schema, `depth` `$ref`s below the root.
-    fn schema(&self, value: &Value, depth: usize) -> Result<Value, Error> {
+impl<'a> Expander<'a> {
+    /// One schema.
+    fn schema(&mut self, value: &'a Value) -> Result<Value, Error> {
         let Value::Object(map) = value else {
             return Ok(value.clone());
         };
         if let Some(reference) = map.get("$ref").and_then(Value::as_str) {
-            if depth >= MAX_REF_DEPTH {
+            if self.active.len() >= MAX_REF_DEPTH
+                || self.nodes >= MAX_EXPANDED_NODES
+                || self.active.contains(&reference)
+            {
                 return Ok(Value::Object(Map::new()));
             }
             let target = lookup(self.doc, reference, self.at)?;
-            let mut expanded = self.schema(target, depth + 1)?;
+            self.active.push(reference);
+            let expanded = self.schema(target);
+            self.active.pop();
+            let mut expanded = expanded?;
             // Keys next to `$ref` apply on top of the target.
             if let Value::Object(out) = &mut expanded {
                 for (key, member) in map {
                     if key == "$ref" || DROPPED_KEYS.contains(&key.as_str()) {
                         continue;
                     }
-                    out.insert(key.clone(), self.member(key, member, depth)?);
+                    let member = self.member(key, member)?;
+                    out.insert(key.clone(), member);
                 }
             }
             return Ok(expanded);
         }
+        self.nodes += 1;
         let mut out = Map::new();
         for (key, member) in map {
             if DROPPED_KEYS.contains(&key.as_str()) {
                 continue;
             }
-            out.insert(key.clone(), self.member(key, member, depth)?);
+            out.insert(key.clone(), self.member(key, member)?);
         }
         if self.openapi_3_0
             && map.get("nullable") == Some(&Value::Bool(true))
@@ -135,24 +156,28 @@ impl Expander<'_> {
     }
 
     /// The value of a schema object's `key`.
-    fn member(&self, key: &str, member: &Value, depth: usize) -> Result<Value, Error> {
+    fn member(&mut self, key: &str, member: &'a Value) -> Result<Value, Error> {
         if DATA_KEYS.contains(&key) {
             return Ok(member.clone());
         }
         match member {
             Value::Object(named) if NAMED_SCHEMA_KEYS.contains(&key) => {
+                self.nodes += 1;
                 let mut out = Map::new();
                 for (name, schema) in named {
-                    out.insert(name.clone(), self.schema(schema, depth)?);
+                    out.insert(name.clone(), self.schema(schema)?);
                 }
                 Ok(Value::Object(out))
             }
-            Value::Array(items) => items
-                .iter()
-                .map(|item| self.schema(item, depth))
-                .collect::<Result<Vec<_>, _>>()
-                .map(Value::Array),
-            _ => self.schema(member, depth),
+            Value::Array(items) => {
+                self.nodes += 1;
+                items
+                    .iter()
+                    .map(|item| self.schema(item))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Value::Array)
+            }
+            _ => self.schema(member),
         }
     }
 }
