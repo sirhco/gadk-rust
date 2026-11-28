@@ -16,11 +16,12 @@
 //!
 //! ```text
 //! gadk-eval monitor <spec.yaml> [--out <url>] [--limit N] [--write-scores] [<judge flags>]
+//!     [<batch flags>]
 //! gadk-eval report <url> [<name>] [--limit N]
 //! gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [--append]
 //!     [--name N] [--trace ID]... [--since <n>h|<n>d] [--agent A] [--score F]... [--limit N]
 //!     [--rubric T] [--min-good X] [--no-history] [--tool-args]
-//! gadk-eval experiment <spec.yaml> [--out <url>] [--pairwise] [<judge flags>]
+//! gadk-eval experiment <spec.yaml> [--out <url>] [--pairwise] [<judge flags>] [<batch flags>]
 //! gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]
 //!     [<judge flags>]
 //! gadk-eval guards <source>... [--apply] [--prices <file|gs://bucket/object>] [--out <url>]
@@ -29,6 +30,8 @@
 //!     [--notify <url|env:NAME>] [--notify-format slack|json]
 //!
 //! <judge flags>: [--judge-backend gemini|eval-service] [--eval-location <location>]
+//! <batch flags>: [--judge-mode live|batch] [--batch-staging gs://<bucket>/<prefix>]
+//!     [--batch-timeout <n>m|<n>h|<n>d]
 //! ```
 //!
 //! `--judge-backend` picks what grades `llm_judge` and `reference` scorers: `gemini` (the
@@ -37,6 +40,17 @@
 //! spec's judge model as the service's judge model ([`Backends::judge_backend`]). With
 //! `eval-service`, `--eval-location` must be `global` or a region such as `us-central1`; the
 //! multi-regions `us` and `eu` are refused (exit 2) before anything runs.
+//!
+//! `--judge-mode batch` (`monitor` and `experiment`; the default `live` ignores the other batch
+//! flags) grades every `llm_judge` and `reference` scorer of the command in one Vertex AI batch
+//! prediction job of the spec's judge model ([`Backends::batch_predictor`]), staged under
+//! `--batch-staging` and cancelled after `--batch-timeout` (default `6h`): the command scores
+//! once with a [`RecordingJudge`], runs the job ([`judge_in_batch`]) and scores again from its
+//! replies, then reports as a live run does and prints `batch job: <name>` to stderr. With
+//! nothing to judge no job is created and nothing is printed. It exits 2 before anything runs
+//! without `--batch-staging`, with a staging value that is not `gs://<bucket>/<prefix>`, with a
+//! bad `--batch-timeout`, with `--judge-backend eval-service` or with `--pairwise`, and when
+//! the job fails or times out (no report is stored).
 //!
 //! `experiment --pairwise` (only with `--judge-backend eval-service`; otherwise it exits 2
 //! before running anything) then compares each variant after the first with the first, run
@@ -117,6 +131,8 @@ use gadk_prompts::{PromptRegistry, Selector, StoreError};
 use crate::alert::{AlertCounts, AlertOutcome, RuleStatus, alerts_body, evaluate};
 use crate::alert_source::{AlertQuery, AlertSource, UsageGroup};
 use crate::alert_spec::{AlertMetric, AlertSpec};
+use crate::batch::{BatchPredictor, RecordingJudge, judge_in_batch};
+use crate::batch_vertex::{VertexBatchPredictor, parse_staging, staging_error};
 use crate::error::MonitorError;
 use crate::eval_service::{EvalServiceJudge, PairwiseJudge, location_problem};
 use crate::experiment::run_experiment;
@@ -141,7 +157,7 @@ use crate::source::cloud_trace::CloudTraceTranscriptSource;
 use crate::source::{TranscriptQuery, TranscriptSource};
 use crate::spec::{
     DEFAULT_JUDGE_TIMEOUT, JudgeSpec, MAX_LIMIT, MonitorSpec, SourceSpec, amount,
-    is_dataset_or_table, is_project_id,
+    is_dataset_or_table, is_project_id, parse_window,
 };
 use crate::store::{ReportStore, gcs};
 
@@ -193,6 +209,19 @@ pub trait Backends: Send + Sync {
     ) -> Result<Arc<dyn PairwiseJudge>, MonitorError> {
         let _ = (spec, eval_location);
         Err(MonitorError::Judge(EVAL_SERVICE_UNSUPPORTED.into()))
+    }
+
+    /// The batch predictor for `--judge-mode batch`: jobs of `spec.model` in `spec.project` /
+    /// `spec.location`, staged under `staging` (`gs://<bucket>/<prefix>`), each cancelled after
+    /// `timeout`. The default refuses; [`CloudBackends`] returns a [`VertexBatchPredictor`].
+    async fn batch_predictor(
+        &self,
+        spec: &JudgeSpec,
+        staging: &str,
+        timeout: Duration,
+    ) -> Result<Arc<dyn BatchPredictor>, MonitorError> {
+        let _ = (spec, staging, timeout);
+        Err(MonitorError::Judge(BATCH_UNSUPPORTED.into()))
     }
 
     /// The sink `monitor --write-scores` writes judge rows to, for the source `spec`. The
@@ -323,6 +352,21 @@ const EVAL_SERVICE_UNSUPPORTED: &str = "the evaluation service is not supported 
 /// The error of `experiment --pairwise` without the evaluation service.
 const PAIRWISE_NEEDS_EVAL_SERVICE: &str = "--pairwise needs --judge-backend eval-service";
 
+/// The error of the default [`Backends::batch_predictor`].
+const BATCH_UNSUPPORTED: &str = "batch prediction is not supported by these backends";
+
+/// The error of `--judge-mode batch` without `--batch-staging`.
+const BATCH_NEEDS_STAGING: &str = "--judge-mode batch needs --batch-staging gs://<bucket>/<prefix>";
+
+/// The error of `--judge-mode batch` with `--judge-backend eval-service`.
+const BATCH_NEEDS_GEMINI: &str = "--judge-mode batch needs --judge-backend gemini";
+
+/// The error of `--judge-mode batch` with `--pairwise`.
+const BATCH_WITHOUT_PAIRWISE: &str = "--judge-mode batch cannot be used with --pairwise";
+
+/// The default `--batch-timeout`.
+const DEFAULT_BATCH_TIMEOUT: &str = "6h";
+
 /// The default `--eval-location`: `us-central1` does not serve `gemini-3.8-flash` as a judge
 /// model.
 const DEFAULT_EVAL_LOCATION: &str = "global";
@@ -415,6 +459,21 @@ impl Backends for CloudBackends {
             eval_location,
             &spec.model,
             spec.timeout,
+        )?))
+    }
+
+    async fn batch_predictor(
+        &self,
+        spec: &JudgeSpec,
+        staging: &str,
+        timeout: Duration,
+    ) -> Result<Arc<dyn BatchPredictor>, MonitorError> {
+        Ok(Arc::new(VertexBatchPredictor::new(
+            &spec.project,
+            &spec.location,
+            &spec.model,
+            staging,
+            timeout,
         )?))
     }
 
@@ -570,6 +629,97 @@ impl JudgeFlags {
     }
 }
 
+/// `--judge-mode`, `--batch-staging` and `--batch-timeout` (`monitor` and `experiment`).
+fn batch_flags() -> [Arg; 3] {
+    [
+        Arg::new("judge-mode")
+            .long("judge-mode")
+            .value_parser(["live", "batch"])
+            .default_value("live")
+            .help("grade judge scorers call by call (live) or in one batch prediction job"),
+        Arg::new("batch-staging")
+            .long("batch-staging")
+            .help("gs://<bucket>/<prefix> for the batch job's input and output (with batch)"),
+        Arg::new("batch-timeout")
+            .long("batch-timeout")
+            .default_value(DEFAULT_BATCH_TIMEOUT)
+            .help("cancel the batch job after <n>m, <n>h or <n>d (with batch)"),
+    ]
+}
+
+/// How judge scorers are graded (`--judge-mode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum JudgeMode {
+    /// One judge call per scorer (`live`, the default).
+    #[default]
+    Live,
+    /// Every judge request of the command in one batch prediction job (`batch`).
+    Batch,
+}
+
+impl JudgeMode {
+    /// The mode named `name` on the command line: `live` or `batch`.
+    fn from_flag(name: &str) -> Option<Self> {
+        match name {
+            "live" => Some(Self::Live),
+            "batch" => Some(Self::Batch),
+            _ => None,
+        }
+    }
+}
+
+/// The batch flags of a command in `--judge-mode batch`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BatchFlags {
+    /// `gs://<bucket>/<prefix>`, without a trailing `/`.
+    staging: String,
+    timeout: Duration,
+}
+
+impl BatchFlags {
+    /// The batch flags of `m`, or `None` in `--judge-mode live` (the other batch flags are then
+    /// ignored). In batch mode it refuses ([`MonitorError::Spec`]), in this order: a missing
+    /// `--batch-staging`, a staging value that is not `gs://<bucket>/<prefix>`, a bad
+    /// `--batch-timeout`, `--judge-backend eval-service` (`judge`), and `pairwise`.
+    fn read(
+        m: &ArgMatches,
+        judge: &JudgeFlags,
+        pairwise: bool,
+    ) -> Result<Option<Self>, MonitorError> {
+        let mode = m
+            .get_one::<String>("judge-mode")
+            .and_then(|name| JudgeMode::from_flag(name))
+            .unwrap_or_default();
+        if mode == JudgeMode::Live {
+            return Ok(None);
+        }
+        let staging = m
+            .get_one::<String>("batch-staging")
+            .ok_or_else(|| MonitorError::Spec(BATCH_NEEDS_STAGING.into()))?;
+        let (bucket, prefix) = parse_staging(staging).ok_or_else(|| staging_error(staging))?;
+        let timeout = m
+            .get_one::<String>("batch-timeout")
+            .map_or(DEFAULT_BATCH_TIMEOUT, String::as_str);
+        let timeout = parse_window(timeout)
+            .and_then(|d| d.to_std().ok())
+            .ok_or_else(|| {
+                MonitorError::Spec(format!(
+                    "--batch-timeout must be <n>m, <n>h or <n>d with n >= 1, got {timeout}"
+                ))
+            })?;
+        if judge.backend != JudgeBackendChoice::Gemini {
+            return Err(MonitorError::Spec(BATCH_NEEDS_GEMINI.into()));
+        }
+        if pairwise {
+            return Err(MonitorError::Spec(BATCH_WITHOUT_PAIRWISE.into()));
+        }
+        Ok(Some(BatchFlags {
+            staging: format!("gs://{bucket}/{prefix}"),
+            timeout,
+        }))
+    }
+}
+
 fn limit_arg() -> Arg {
     Arg::new("limit")
         .long("limit")
@@ -603,7 +753,8 @@ fn cli() -> Command {
                              (source judge)",
                         ),
                 )
-                .args(judge_flags()),
+                .args(judge_flags())
+                .args(batch_flags()),
         )
         .subcommand(
             Command::new("report")
@@ -639,7 +790,8 @@ fn cli() -> Command {
                              service (needs --judge-backend eval-service)",
                         ),
                 )
-                .args(judge_flags()),
+                .args(judge_flags())
+                .args(batch_flags()),
         )
         .subcommand(guard_cli())
         .subcommand(guards_cli())
@@ -902,16 +1054,20 @@ pub async fn run(
         Some(("monitor", m)) => {
             let spec = m.get_one::<String>("spec").map_or("", String::as_str);
             let out = m.get_one::<String>("out").map(String::as_str);
-            match JudgeFlags::read(m) {
-                Ok(judge) => {
+            match JudgeFlags::read(m)
+                .and_then(|judge| Ok((BatchFlags::read(m, &judge, false)?, judge)))
+            {
+                Ok((batch, judge)) => {
                     monitor(
                         spec,
                         out,
                         limit(m),
                         m.get_flag("write-scores"),
                         &judge,
+                        batch.as_ref(),
                         backends,
                         stdout,
+                        stderr,
                     )
                     .await
                 }
@@ -927,9 +1083,22 @@ pub async fn run(
         Some(("experiment", m)) => {
             let spec = m.get_one::<String>("spec").map_or("", String::as_str);
             let out = m.get_one::<String>("out").map(String::as_str);
-            match JudgeFlags::read(m) {
-                Ok(judge) => {
-                    experiment(spec, out, &judge, m.get_flag("pairwise"), backends, stdout).await
+            let pairwise = m.get_flag("pairwise");
+            match JudgeFlags::read(m)
+                .and_then(|judge| Ok((BatchFlags::read(m, &judge, pairwise)?, judge)))
+            {
+                Ok((batch, judge)) => {
+                    experiment(
+                        spec,
+                        out,
+                        &judge,
+                        batch.as_ref(),
+                        pairwise,
+                        backends,
+                        stdout,
+                        stderr,
+                    )
+                    .await
                 }
                 Err(e) => Err(e),
             }
@@ -950,15 +1119,19 @@ pub async fn run(
 
 /// `monitor`: 0 or 1 (below `min_pass_rate`); errors map to 2. With `write_scores` the score
 /// sink is resolved before anything runs, and the report's judge rows are written after it is
-/// stored and printed, before `min_pass_rate` is applied.
+/// stored and printed, before `min_pass_rate` is applied. With `batch` and a `judge` section,
+/// the judge scorers are graded in one batch job, whose name is written to `stderr`.
+#[allow(clippy::too_many_arguments)]
 async fn monitor(
     spec_path: &str,
     out: Option<&str>,
     limit: Option<usize>,
     write_scores: bool,
     judge_flags: &JudgeFlags,
+    batch: Option<&BatchFlags>,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
     let mut spec = MonitorSpec::load(spec_path)?;
     if let Some(n) = limit {
@@ -971,17 +1144,38 @@ async fn monitor(
         None
     };
     let source = backends.source(&spec.source)?;
-    let judge = match &spec.judge {
-        Some(j) => Some(
-            backends
-                .judge_backend(j, judge_flags.backend, &judge_flags.location)
-                .await?,
-        ),
-        None => None,
+    let report = match (batch, &spec.judge) {
+        (Some(batch), Some(j)) => {
+            let predictor = backends
+                .batch_predictor(j, &batch.staging, batch.timeout)
+                .await?;
+            let (report, job) = Monitor::new()
+                .run_batch(&spec, source.as_ref(), predictor.as_ref())
+                .await?;
+            if let Some(job) = job {
+                let _ = writeln!(stderr, "batch job: {job}");
+            }
+            report
+        }
+        (Some(_), None) => {
+            Monitor::new()
+                .run_with_backend(&spec, source.as_ref(), None)
+                .await?
+        }
+        (None, _) => {
+            let judge = match &spec.judge {
+                Some(j) => Some(
+                    backends
+                        .judge_backend(j, judge_flags.backend, &judge_flags.location)
+                        .await?,
+                ),
+                None => None,
+            };
+            Monitor::new()
+                .run_with_backend(&spec, source.as_ref(), judge)
+                .await?
+        }
     };
-    let report = Monitor::new()
-        .run_with_backend(&spec, source.as_ref(), judge)
-        .await?;
     // Store before printing, so a failing stdout (a closed pipe) does not lose the report.
     let stored = match store {
         Some(store) => Some(store.put(&report).await?),
@@ -1622,14 +1816,18 @@ fn prompts_error(e: StoreError) -> MonitorError {
 }
 
 /// `experiment`: 0 once the experiment ran and, with `--out`, was stored; errors map to 2.
-/// `pairwise` without the evaluation service is an error before anything runs.
+/// `pairwise` without the evaluation service is an error before anything runs. With `batch`
+/// the judge scorers are graded in one batch job, whose name is written to `stderr`.
+#[allow(clippy::too_many_arguments)]
 async fn experiment(
     spec_path: &str,
     out: Option<&str>,
     judge_flags: &JudgeFlags,
+    batch: Option<&BatchFlags>,
     pairwise: bool,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
     if pairwise && judge_flags.backend != JudgeBackendChoice::EvalService {
         return Err(MonitorError::Spec(PAIRWISE_NEEDS_EVAL_SERVICE.into()));
@@ -1656,9 +1854,11 @@ async fn experiment(
         registry.as_ref(),
         out,
         judge_flags,
+        batch,
         pairwise,
         backends,
         stdout,
+        stderr,
     )
     .await;
     // Closed on every path once loaded, whatever `run_spec` returned.
@@ -1676,9 +1876,11 @@ async fn run_spec(
     registry: Option<&PromptRegistry>,
     out: Option<&str>,
     judge_flags: &JudgeFlags,
+    batch: Option<&BatchFlags>,
     pairwise: bool,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
     // Every variant's prompt version must exist before any model is built or run.
     if let (AgentInstruction::Prompt(prompt), Some(registry)) = (&spec.agent.instruction, registry)
@@ -1692,11 +1894,22 @@ async fn run_spec(
     }
     // Opened before the run, so a bad URL fails before any model call.
     let store = out.map(ReportStore::open).transpose()?;
+    // In batch mode the runs are scored by a recorder, then graded in one job and scored again.
+    let batch = match batch {
+        Some(flags) => Some((
+            backends
+                .batch_predictor(&spec.judge, &flags.staging, flags.timeout)
+                .await?,
+            Arc::new(RecordingJudge::new()),
+        )),
+        None => None,
+    };
     // The Gemini judge is the run-timeout-bounded model of `Evaluator::new`, as before; the
     // evaluation service needs no judge model.
-    let evaluator = match judge_flags.backend {
-        JudgeBackendChoice::Gemini => Evaluator::new(backends.judge(&spec.judge).await?),
-        JudgeBackendChoice::EvalService => Evaluator::with_backend(
+    let evaluator = match (&batch, judge_flags.backend) {
+        (Some((_, recorder)), _) => Evaluator::with_backend(recorder.clone()),
+        (None, JudgeBackendChoice::Gemini) => Evaluator::new(backends.judge(&spec.judge).await?),
+        (None, JudgeBackendChoice::EvalService) => Evaluator::with_backend(
             backends
                 .judge_backend(&spec.judge, judge_flags.backend, &judge_flags.location)
                 .await?,
@@ -1722,6 +1935,13 @@ async fn run_spec(
         build_agent(spec, registry, &models, v)
     })
     .await?;
+    if let Some((predictor, recorder)) = &batch {
+        let (replay, job) = judge_in_batch(predictor.as_ref(), recorder).await?;
+        if let Some(job) = job {
+            let _ = writeln!(stderr, "batch job: {job}");
+        }
+        report = report.rescore(set, &replay).await;
+    }
     if let Some(judge) = &pairwise {
         let results = run_pairwise(judge.as_ref(), set, &report.report).await;
         report = report.with_pairwise(results);
@@ -1771,6 +1991,8 @@ fn build_agent(
 
 #[cfg(test)]
 mod tests {
+    mod batch_mode;
+
     use std::collections::HashMap;
     use std::path::Path;
     use std::sync::Mutex;

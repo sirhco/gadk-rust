@@ -20,8 +20,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use gadk_agent::Agent;
 use gadk_eval::{
-    CaseRun, EvalReport, EvalSet, Evaluator, MeasuredReport, Outcome, RunMetrics, TokenCounts,
-    Variant,
+    CaseRun, EvalReport, EvalSet, Evaluator, JudgeBackend, MeasuredReport, Outcome, RunMetrics,
+    TokenCounts, Variant, score_transcript_with,
 };
 use serde::{Deserialize, Serialize};
 
@@ -192,6 +192,25 @@ impl ExperimentReport {
             metrics: measured.metrics,
             pairwise: Vec::new(),
         }
+    }
+
+    /// This report with every run scored again by `judge` grading the `llm_judge` and
+    /// `reference` scorers: each run's scores become
+    /// [`score_transcript_with`]`(judge, &case.expect, &run.transcript)` for the case of `set`
+    /// whose id is the run's case, one run at a time. A run whose case is not in `set` keeps its
+    /// scores; transcripts, metrics, variants and pairwise results are unchanged.
+    ///
+    /// Batch judging uses it with the [`ReplayJudge`](crate::ReplayJudge) of
+    /// [`judge_in_batch`](crate::judge_in_batch).
+    pub async fn rescore(mut self, set: &EvalSet, judge: &dyn JudgeBackend) -> Self {
+        for variant in &mut self.report.variants {
+            for run in &mut variant.runs {
+                if let Some(case) = set.cases.iter().find(|c| c.id == run.case) {
+                    run.scores = score_transcript_with(judge, &case.expect, &run.transcript).await;
+                }
+            }
+        }
+        self
     }
 
     /// This report with its pairwise results set to `pairwise` (see
@@ -627,6 +646,76 @@ mod tests {
                 vec![m1, m2],
             ),
         )
+    }
+
+    /// `r` with every run's scores removed.
+    fn without_scores(mut r: ExperimentReport) -> ExperimentReport {
+        for v in &mut r.report.variants {
+            for run in &mut v.runs {
+                run.scores.clear();
+            }
+        }
+        r
+    }
+
+    #[tokio::test]
+    async fn rescore_replaces_only_the_scores_of_cases_in_the_set() {
+        use crate::pairwise::{PairwiseResult, PairwiseVerdict};
+        use crate::testutil::FakeBackend;
+
+        let set = EvalSet::from_yaml(
+            "name: support\ncases:\n\
+             \x20 - id: a\n    turns: [hi]\n    expect: [contains: hello, llm_judge: Polite]\n\
+             \x20 - id: b\n    turns: [hi]\n    expect: [llm_judge: Polite]\n",
+        )
+        .unwrap();
+        let original = report().with_pairwise(vec![PairwiseResult::new(
+            "v2",
+            "a",
+            1,
+            PairwiseVerdict::Tie,
+            "same",
+        )]);
+        let judge = FakeBackend::new(4);
+        let rescored = original.clone().rescore(&set, judge.as_ref()).await;
+
+        assert_eq!(
+            without_scores(rescored.clone()),
+            without_scores(original.clone())
+        );
+        let scores = |v: usize, i: usize| -> Vec<(String, Outcome, Option<u8>, String)> {
+            rescored.report.variants[v].runs[i]
+                .scores
+                .iter()
+                .map(|s| (s.kind.clone(), s.outcome, s.score, s.rationale.clone()))
+                .collect()
+        };
+        let judged = (
+            "llm_judge".to_owned(),
+            Outcome::Pass,
+            Some(4),
+            "fake backend".to_owned(),
+        );
+        // v1 a#1 and a#2: `contains` passes on "hello", the judge gives 4.
+        for i in [0, 1] {
+            assert_eq!(scores(0, i)[1], judged);
+            assert_eq!(scores(0, i)[0].1, Outcome::Pass);
+        }
+        // v1 b#1 failed: every scorer is the run's error, and the judge is not asked.
+        assert_eq!(
+            scores(0, 2),
+            [(
+                "llm_judge".to_owned(),
+                Outcome::Error,
+                None,
+                "turn 1: boom".to_owned()
+            )]
+        );
+        // v2 b#1 is graded again; c is not in the set and keeps its (empty) scores.
+        assert_eq!(scores(1, 2), [judged]);
+        assert!(scores(0, 3).is_empty() && scores(1, 3).is_empty());
+        // Two `a` runs per variant and v2's `b` run asked the judge.
+        assert_eq!(judge.calls(), 5);
     }
 
     #[test]

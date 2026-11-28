@@ -7,6 +7,25 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval`: `judge_prompt(&JudgeRequest)` returns the exact prompt `GeminiJudge` sends, and
+  `parse_judge_reply(text)` reads a reply to it as `GeminiJudge` does (a `Verdict`, or
+  `Error("unparseable judge reply: …")`). `JudgeRequest` and `JudgeKind` derive `Hash`.
+- `gadk-eval-monitor`: batch judging. `gadk-eval monitor` and `experiment` take
+  `--judge-mode live|batch` (default `live`, unchanged output), `--batch-staging
+  gs://<bucket>/<prefix>` and `--batch-timeout <n>m|<n>h|<n>d` (default `6h`). With `batch`,
+  every `llm_judge` and `reference` grade goes into one Vertex AI batch prediction job of the
+  judge model, staged under the prefix and cancelled after the timeout, and `batch job: <name>`
+  is printed to stderr. `guard` and `guards` stay live; `batch` needs `--judge-backend gemini`
+  and cannot be used with `--pairwise`.
+  - `RecordingJudge`, `ReplayJudge` and `judge_in_batch` record a scoring pass's judge requests,
+    grade them through a `BatchPredictor` (`BatchLine`, `BatchReply`, `BatchResult`) and replay
+    the outcomes; `VertexBatchPredictor` is the Vertex AI predictor.
+  - `Monitor::run_batch`, `ExperimentReport::rescore` and
+    `gadk_eval_monitor::cli::Backends::batch_predictor` (default: not supported) back the
+    commands.
+
 ## [0.5.28] - 2026-11-27
 
 ### Added

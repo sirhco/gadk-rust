@@ -19,7 +19,7 @@ use futures::future::BoxFuture;
 use crate::result::ScoreResult;
 
 /// What a judge scorer asks a [`JudgeBackend`] to grade.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct JudgeRequest {
     /// Which scorer is asking, with its criteria.
@@ -42,7 +42,7 @@ impl JudgeRequest {
 }
 
 /// The scorer behind a [`JudgeRequest`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum JudgeKind {
     /// `llm_judge`: grade the whole conversation against `rubric`.

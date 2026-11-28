@@ -58,8 +58,8 @@ use serde_json::{Map, Value};
 
 use crate::error::MonitorError;
 use crate::spec::{
-    JudgeSpec, SourceSpec, check_keys, is_monitor_name, parse_bigquery, parse_judge, parse_scorer,
-    parse_window, required, yaml_value,
+    JudgeSpec, SourceSpec, check_keys, has_llm_judge, is_monitor_name, parse_bigquery, parse_judge,
+    parse_scorer, parse_window, required, yaml_value,
 };
 
 /// The default `min_calls`.
@@ -238,9 +238,7 @@ impl GuardSpec {
     /// Whether an `eval` check has an `llm_judge` scorer (and so a judge model is needed).
     pub fn wants_judge(&self) -> bool {
         self.checks.iter().any(|c| match c {
-            Check::Eval { scorers, .. } => scorers
-                .iter()
-                .any(|s| matches!(s, ScorerSpec::LlmJudge { .. })),
+            Check::Eval { scorers, .. } => has_llm_judge(scorers),
             _ => false,
         })
     }
@@ -709,6 +707,23 @@ judge:
                 timeout: Duration::from_secs(60),
             })
         );
+    }
+
+    #[test]
+    fn a_reference_scorer_does_not_want_a_judge() {
+        let mut s = GuardSpec::from_yaml(&with(
+            "checks: [eval: { scorers: [contains: x], max_decrease: 0.1 }]",
+        ))
+        .unwrap();
+        let Check::Eval { scorers, .. } = &mut s.checks[0] else {
+            panic!("expected an eval check, got {:?}", s.checks[0]);
+        };
+        *scorers = vec![ScorerSpec::Reference {
+            answer: "Paris".into(),
+            min_score: 3,
+            turn: None,
+        }];
+        assert!(!s.wants_judge());
     }
 
     #[test]

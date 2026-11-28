@@ -100,15 +100,9 @@ impl Judge {
         score_outcome("reference", self.ask(&prompt).await, min_score)
     }
 
-    /// Grades `req` with the prompt of its kind.
+    /// Grades `req` with the prompt of its kind ([`judge_prompt`]).
     pub(crate) async fn grade_request(&self, req: &JudgeRequest) -> JudgeOutcome {
-        let prompt = match &req.kind {
-            JudgeKind::Rubric { rubric } => rubric_prompt(&req.conversation, rubric),
-            JudgeKind::Reference { question, answer } => {
-                reference_prompt(question, &req.reply, answer)
-            }
-        };
-        self.ask(&prompt).await
+        self.ask(&judge_prompt(req)).await
     }
 
     /// Asks the judge, retrying once on an unparseable reply; a model error or a call that takes
@@ -124,22 +118,13 @@ impl Judge {
                     ));
                 }
                 Ok(Err(e)) => return JudgeOutcome::Error(format!("judge model error: {e}")),
-                Ok(Ok(text)) => match parse_verdict(&text) {
-                    Some(v) => {
-                        return JudgeOutcome::Verdict {
-                            pass: v.pass,
-                            score: v.score,
-                            rationale: v.rationale,
-                        };
-                    }
-                    None => last = text,
+                Ok(Ok(text)) => match parse_judge_reply(&text) {
+                    JudgeOutcome::Error(e) => last = e,
+                    verdict => return verdict,
                 },
             }
         }
-        JudgeOutcome::Error(format!(
-            "unparseable judge reply: {}",
-            excerpt(&last, RAW_REPLY_MAX)
-        ))
+        JudgeOutcome::Error(last)
     }
 
     async fn call(&self, prompt: &str) -> Result<String, ModelError> {
@@ -184,6 +169,38 @@ impl GeminiJudge {
 impl JudgeBackend for GeminiJudge {
     fn grade<'a>(&'a self, req: &'a JudgeRequest) -> BoxFuture<'a, JudgeOutcome> {
         Box::pin(self.0.grade_request(req))
+    }
+}
+
+/// The prompt [`GeminiJudge`] sends for `req`: the `llm_judge` prompt (the rubric and the
+/// conversation) for [`JudgeKind::Rubric`], the `reference` prompt (the question, the reply and
+/// the reference answer) for [`JudgeKind::Reference`]. Both end by asking for a JSON verdict
+/// (`{"pass", "score", "rationale"}`), which [`parse_judge_reply`] reads.
+///
+/// Use it to send the judge's prompt through another channel, such as a batch prediction job.
+pub fn judge_prompt(req: &JudgeRequest) -> String {
+    match &req.kind {
+        JudgeKind::Rubric { rubric } => rubric_prompt(&req.conversation, rubric),
+        JudgeKind::Reference { question, answer } => reference_prompt(question, &req.reply, answer),
+    }
+}
+
+/// The outcome of a judge's reply `text` to a [`judge_prompt`]: [`JudgeOutcome::Verdict`] when
+/// the text holds a valid verdict (the whole reply, a fenced JSON block or the first JSON
+/// object), else [`JudgeOutcome::Error`] with `unparseable judge reply: <at most the first 1024
+/// bytes of the text>`. [`GeminiJudge`] reads each reply this way; it retries once when the
+/// first reply is unparseable.
+pub fn parse_judge_reply(text: &str) -> JudgeOutcome {
+    match parse_verdict(text) {
+        Some(v) => JudgeOutcome::Verdict {
+            pass: v.pass,
+            score: v.score,
+            rationale: v.rationale,
+        },
+        None => JudgeOutcome::Error(format!(
+            "unparseable judge reply: {}",
+            excerpt(text, RAW_REPLY_MAX)
+        )),
     }
 }
 
@@ -436,5 +453,66 @@ mod tests {
         assert_eq!(r.outcome, Outcome::Error);
         assert_eq!(r.rationale, "judge model error: quota");
         assert_eq!(model.requests().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn judge_prompt_is_the_prompt_the_live_judge_sends() {
+        let t = transcript();
+        let requests = [
+            JudgeRequest::new(
+                JudgeKind::Rubric {
+                    rubric: "Offers store credit".into(),
+                },
+                render_conversation(&t),
+                t.reply(None),
+            ),
+            JudgeRequest::new(
+                JudgeKind::Reference {
+                    question: "Order 123".into(),
+                    answer: "Refunds only within 30 days.".into(),
+                },
+                render_conversation(&t),
+                t.reply(Some(2)),
+            ),
+        ];
+        for (i, req) in requests.iter().enumerate() {
+            let model = MockModel::from_contents(vec![reply(
+                r#"{"pass": true, "score": 4, "rationale": "ok"}"#,
+            )]);
+            let outcome = GeminiJudge::new(model.clone(), T).grade(req).await;
+            assert!(
+                matches!(outcome, JudgeOutcome::Verdict { score: 4, .. }),
+                "{i}"
+            );
+            assert_eq!(prompt_of(&model, 0), judge_prompt(req), "{i}");
+        }
+        let rubric = judge_prompt(&requests[0]);
+        assert!(rubric.contains("Rubric:\nOffers store credit"), "{rubric}");
+        assert!(rubric.ends_with(REPLY_FORMAT), "{rubric}");
+        let reference = judge_prompt(&requests[1]);
+        assert!(reference.contains("Question:\nOrder 123"), "{reference}");
+        assert!(reference.ends_with(REPLY_FORMAT), "{reference}");
+    }
+
+    #[test]
+    fn parse_judge_reply_gives_a_verdict_or_the_unparseable_error() {
+        assert_eq!(
+            parse_judge_reply(
+                "```json\n{\"pass\": false, \"score\": 2, \"rationale\": \"rude\"}\n```"
+            ),
+            JudgeOutcome::Verdict {
+                pass: false,
+                score: 2,
+                rationale: "rude".into(),
+            }
+        );
+        assert_eq!(
+            parse_judge_reply("I think it passes."),
+            JudgeOutcome::Error("unparseable judge reply: I think it passes.".into())
+        );
+        let JudgeOutcome::Error(e) = parse_judge_reply(&"x".repeat(5000)) else {
+            panic!("a verdict from garbage");
+        };
+        assert_eq!(e.len(), "unparseable judge reply: ".len() + RAW_REPLY_MAX);
     }
 }
