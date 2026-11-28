@@ -37,7 +37,7 @@ pub use metrics::{MeasuredReport, RunMetrics, TokenCounts};
 pub use report::{CaseRun, EvalReport, VariantReport};
 pub use result::{Outcome, RunTranscript, ScoreResult, ToolCall, TurnRecord};
 pub use score::backend::{JudgeBackend, JudgeKind, JudgeOutcome, JudgeRequest};
-pub use score::judge::{GeminiJudge, render_conversation};
+pub use score::judge::{GeminiJudge, judge_prompt, parse_judge_reply, render_conversation};
 pub use score::{score_transcript, score_transcript_with};
 pub use spec::{EvalCase, EvalSet, ScorerSpec, ToolExpect};
 pub use variant::Variant;
