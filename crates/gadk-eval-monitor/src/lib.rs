@@ -44,6 +44,11 @@
 //! (console `FEEDBACK` rows with source `judge`), and [`write_judge_rows`] writes the ones a
 //! [`ScoreSink`] does not hold yet, so the console's review queue can show them.
 //!
+//! [`monitor_points`], [`guard_points`] and [`alert_points`] turn the results of those commands
+//! into Cloud Monitoring gauge points ([`MetricPoint`]), and a [`MetricsWriter`]
+//! ([`CloudMetricsWriter`]) writes them as custom metrics under `custom.googleapis.com/gadk/`,
+//! so dashboards and alert policies can follow pass rates, judge scores, rollouts and alert rules.
+//!
 //! ```no_run
 //! # async fn demo() -> Result<(), gadk_eval_monitor::MonitorError> {
 //! use gadk_eval_monitor::{
@@ -123,8 +128,8 @@ pub use judge_rows::{
     JUDGE_ROWS_PER_INSERT, JudgeRow, ScoreSink, WriteOutcome, judge_rows, write_judge_rows,
 };
 pub use metrics::{
-    AlertRuleValue, AlertRun, LABEL_VALUE_MAX, MetricPoint, MetricValue, alert_points,
-    guard_points, monitor_points,
+    AlertRuleValue, AlertRun, CloudMetricsWriter, LABEL_VALUE_MAX, MetricPoint, MetricValue,
+    MetricsWriter, SERIES_PER_REQUEST, alert_points, guard_points, monitor_points,
 };
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
 pub use pairwise::{

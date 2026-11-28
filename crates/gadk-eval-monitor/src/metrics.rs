@@ -16,16 +16,34 @@
 //! gauge points under `custom.googleapis.com/gadk/`.
 //!
 //! [`monitor_points`], [`guard_points`] and [`alert_points`] turn a report into
-//! [`MetricPoint`]s (pure).
+//! [`MetricPoint`]s (pure), and a [`MetricsWriter`] ([`CloudMetricsWriter`]) writes them.
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use bytes::Bytes;
+use chrono::{DateTime, SecondsFormat, Utc};
+use futures::future::BoxFuture;
 use gadk_eval::Outcome;
+use gadk_model::HttpClient;
+use http::Method;
+use serde_json::{Value, json};
 
+use crate::error::MonitorError;
+use crate::gcp::{AdcTokenSource, GcpHttp, TokenSource, encode};
 use crate::guard_report::{GuardReport, Status};
 use crate::judge_rows::{JUDGE_KINDS, scorer_name, scorer_positions};
 use crate::report::MonitorReport;
+
+/// The prefix of every metric type the builders produce.
+const METRIC_TYPE_PREFIX: &str = "custom.googleapis.com/gadk/";
+
+/// The Cloud Monitoring API.
+const MONITORING_API: &str = "https://monitoring.googleapis.com/v3";
+
+/// The most time series one [`CloudMetricsWriter`] request carries.
+pub const SERIES_PER_REQUEST: usize = 200;
 
 /// The longest label value, in bytes; longer values are cut at a character boundary.
 pub const LABEL_VALUE_MAX: usize = 1024;
@@ -320,13 +338,155 @@ pub fn alert_points(run: &AlertRun) -> Vec<MetricPoint> {
     points
 }
 
+/// Where metric points are written.
+///
+/// ```
+/// use std::sync::Mutex;
+///
+/// use futures::future::BoxFuture;
+/// use gadk_eval_monitor::{MetricPoint, MetricsWriter, MonitorError};
+///
+/// /// Keeps every point's metric.
+/// #[derive(Default)]
+/// struct Recorder(Mutex<Vec<String>>);
+///
+/// impl MetricsWriter for Recorder {
+///     fn write<'a>(
+///         &'a self,
+///         project: &'a str,
+///         points: &'a [MetricPoint],
+///     ) -> BoxFuture<'a, Result<(), MonitorError>> {
+///         Box::pin(async move {
+///             let mut seen = self.0.lock().unwrap();
+///             seen.extend(points.iter().map(|p| format!("{project} {}", p.metric)));
+///             Ok(())
+///         })
+///     }
+/// }
+/// ```
+pub trait MetricsWriter: Send + Sync {
+    /// Writes `points` to the project `project`.
+    ///
+    /// # Errors
+    ///
+    /// Why some or all of the points were not written.
+    fn write<'a>(
+        &'a self,
+        project: &'a str,
+        points: &'a [MetricPoint],
+    ) -> BoxFuture<'a, Result<(), MonitorError>>;
+}
+
+/// The Cloud Monitoring API as a [`MetricsWriter`]: each point is one `GAUGE` time series of
+/// the `global` resource, written with `projects.timeSeries.create`, at most
+/// [`SERIES_PER_REQUEST`] per request. Metric descriptors are created on the first write.
+#[non_exhaustive]
+#[derive(Clone)]
+pub struct CloudMetricsWriter {
+    gcp: GcpHttp,
+}
+
+impl fmt::Debug for CloudMetricsWriter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CloudMetricsWriter").finish_non_exhaustive()
+    }
+}
+
+impl CloudMetricsWriter {
+    /// A writer with Application Default Credentials. Must be called inside a Tokio runtime.
+    ///
+    /// # Errors
+    ///
+    /// [`MonitorError::Store`] when no credentials can be built.
+    pub fn new() -> Result<Self, MonitorError> {
+        let auth = AdcTokenSource::adc()
+            .map_err(|e| MonitorError::Store(format!("Application Default Credentials: {e}")))?;
+        Ok(Self::with_http(GcpHttp::default_http(), Arc::new(auth)))
+    }
+
+    /// A writer with an explicit HTTP client and credentials (tests).
+    pub fn with_http(http: Arc<dyn HttpClient>, auth: Arc<dyn TokenSource>) -> Self {
+        Self {
+            gcp: GcpHttp::new(http, auth),
+        }
+    }
+
+    /// Sends every chunk of `points`, even after a failed one, and sums up the failures.
+    async fn write_all(&self, project: &str, points: &[MetricPoint]) -> Result<(), MonitorError> {
+        let url = format!("{MONITORING_API}/projects/{}/timeSeries", encode(project));
+        let mut failed = 0;
+        let mut first_error = None;
+        for chunk in points.chunks(SERIES_PER_REQUEST) {
+            let series: Vec<Value> = chunk.iter().map(|p| time_series(project, p)).collect();
+            let body = json!({ "timeSeries": series }).to_string();
+            let error = match self
+                .gcp
+                .send(
+                    Method::POST,
+                    &url,
+                    Some(("application/json", Bytes::from(body))),
+                )
+                .await
+            {
+                Ok(reply) if reply.ok() => None,
+                Ok(reply) => Some(reply.error_text()),
+                Err(e) => Some(e),
+            };
+            if let Some(e) = error {
+                failed += chunk.len();
+                first_error.get_or_insert(e);
+            }
+        }
+        match first_error {
+            None => Ok(()),
+            Some(e) => Err(MonitorError::Store(format!(
+                "{failed} of {} series not written: {e}",
+                points.len()
+            ))),
+        }
+    }
+}
+
+impl MetricsWriter for CloudMetricsWriter {
+    fn write<'a>(
+        &'a self,
+        project: &'a str,
+        points: &'a [MetricPoint],
+    ) -> BoxFuture<'a, Result<(), MonitorError>> {
+        Box::pin(self.write_all(project, points))
+    }
+}
+
+/// `point` as one time series of the `global` resource in `project`.
+fn time_series(project: &str, point: &MetricPoint) -> Value {
+    let (value_type, value) = match point.value {
+        MetricValue::Int(n) => ("INT64", json!({ "int64Value": n.to_string() })),
+        MetricValue::Double(x) => ("DOUBLE", json!({ "doubleValue": x })),
+    };
+    json!({
+        "metric": {
+            "type": format!("{METRIC_TYPE_PREFIX}{}", point.metric),
+            "labels": point.labels,
+        },
+        "resource": {"type": "global", "labels": {"project_id": project}},
+        "metricKind": "GAUGE",
+        "valueType": value_type,
+        "points": [{
+            "interval": {"endTime": point.time.to_rfc3339_opts(SecondsFormat::Nanos, true)},
+            "value": value,
+        }],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::TimeDelta;
     use gadk_eval::ScoreResult;
+    use gadk_model::rest::test_util::{FakeResponse, ScriptedClient};
     use regex::Regex;
 
     use super::*;
+    use crate::gcp::NoAuth;
     use crate::guard_report::{Action, CheckResult, SideValue, Unit, Verdict};
     use crate::report::{MonitoredRun, Window};
     use crate::testutil::{at, run};
@@ -674,5 +834,139 @@ mod tests {
         for m in metrics {
             assert!(suffix.is_match(m), "{m}");
         }
+    }
+
+    const URL: &str = "https://monitoring.googleapis.com/v3/projects/my-proj/timeSeries";
+
+    fn writer(client: Arc<ScriptedClient>) -> CloudMetricsWriter {
+        CloudMetricsWriter::with_http(client, Arc::new(NoAuth))
+    }
+
+    #[tokio::test]
+    async fn the_body_has_one_gauge_series_per_point() {
+        let client = ScriptedClient::json("{}");
+        let time = DateTime::from_timestamp(1_800_000_000, 123_456_789).unwrap();
+        let points = [
+            MetricPoint::new(
+                "monitor/runs",
+                labels(&[("spec", "support"), ("agent", "")]),
+                MetricValue::Int(12),
+                time,
+            ),
+            MetricPoint::new(
+                "monitor/pass_rate",
+                labels(&[("spec", "support"), ("agent", "")]),
+                MetricValue::Double(0.75),
+                time,
+            ),
+        ];
+        writer(client.clone())
+            .write("my-proj", &points)
+            .await
+            .unwrap();
+        assert_eq!(client.hits(), 1);
+        let req = client.last_request();
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.url, URL);
+        assert_eq!(req.header("content-type"), "application/json");
+        let series = |metric: &str, value_type: &str, value: Value| {
+            json!({
+                "metric": {
+                    "type": format!("custom.googleapis.com/gadk/{metric}"),
+                    "labels": {"agent": "", "spec": "support"},
+                },
+                "resource": {"type": "global", "labels": {"project_id": "my-proj"}},
+                "metricKind": "GAUGE",
+                "valueType": value_type,
+                "points": [{
+                    "interval": {"endTime": "2027-01-15T08:00:00.123456789Z"},
+                    "value": value,
+                }],
+            })
+        };
+        assert_eq!(
+            req.json(),
+            json!({"timeSeries": [
+                series("monitor/runs", "INT64", json!({"int64Value": "12"})),
+                series("monitor/pass_rate", "DOUBLE", json!({"doubleValue": 0.75})),
+            ]})
+        );
+    }
+
+    /// `n` points of `check/ping`, one per `spec` label `s0`, `s1`, ….
+    fn pings(n: usize) -> Vec<MetricPoint> {
+        (0..n)
+            .map(|i| {
+                MetricPoint::new(
+                    "check/ping",
+                    labels(&[("spec", &format!("s{i}"))]),
+                    MetricValue::Int(1),
+                    at(1_800_000_000),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn points_are_sent_200_series_at_a_time() {
+        let client = ScriptedClient::json("{}");
+        writer(client.clone())
+            .write("my-proj", &pings(450))
+            .await
+            .unwrap();
+        let sizes: Vec<usize> = client
+            .requests()
+            .iter()
+            .map(|r| r.json()["timeSeries"].as_array().unwrap().len())
+            .collect();
+        assert_eq!(sizes, [200, 200, 50]);
+        let last = &client.requests()[2].json()["timeSeries"];
+        assert_eq!(last[0]["metric"]["labels"]["spec"], "s400");
+        assert_eq!(last[49]["metric"]["labels"]["spec"], "s449");
+    }
+
+    #[tokio::test]
+    async fn a_failed_chunk_is_summed_up_and_the_rest_are_still_sent() {
+        let client = ScriptedClient::sequence(vec![
+            FakeResponse::json("{}"),
+            FakeResponse::json_status(
+                400,
+                r#"{"error":{"code":400,"message":"One or more TimeSeries could not be written: timeSeries[0]: write for resource failed: Points must be written in order.","status":"INVALID_ARGUMENT"}}"#,
+            ),
+            FakeResponse::reset("connection reset"),
+        ]);
+        let err = writer(client.clone())
+            .write("my-proj", &pings(450))
+            .await
+            .unwrap_err();
+        assert_eq!(client.hits(), 3);
+        assert_eq!(
+            err.to_string(),
+            "report store: 250 of 450 series not written: HTTP 400: One or more \
+             TimeSeries could not be written: timeSeries[0]: write for resource failed: Points \
+             must be written in order."
+        );
+    }
+
+    #[tokio::test]
+    async fn a_transport_error_is_the_error_text() {
+        let client = ScriptedClient::always(FakeResponse::reset("connection reset"));
+        let err = writer(client)
+            .write("my-proj", &pings(1))
+            .await
+            .unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.starts_with(&format!("report store: 1 of 1 series not written: {URL}: ")),
+            "{text}"
+        );
+        assert!(text.contains("connection reset"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn no_points_send_nothing() {
+        let client = ScriptedClient::json("{}");
+        writer(client.clone()).write("my-proj", &[]).await.unwrap();
+        assert_eq!(client.hits(), 0);
     }
 }
