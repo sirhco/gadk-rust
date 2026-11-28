@@ -27,9 +27,10 @@ use gadk_eval::{
 };
 use gadk_model::Llm;
 
+use crate::batch::{BatchPredictor, RecordingJudge, judge_in_batch};
 use crate::error::MonitorError;
 use crate::report::{MonitorReport, MonitoredRun, Window};
-use crate::source::{ProductionRun, TranscriptSource};
+use crate::source::{ProductionRun, TranscriptQuery, TranscriptSource};
 use crate::spec::{DEFAULT_JUDGE_TIMEOUT, MonitorSpec};
 
 /// The default number of runs graded at once.
@@ -127,22 +128,91 @@ impl Monitor {
         judge: Option<Arc<dyn JudgeBackend>>,
     ) -> Result<MonitorReport, MonitorError> {
         check_judge(judge.is_some(), &spec.scorers)?;
+        let (now, q, runs) = self.list(spec, source).await?;
+        let runs = score_runs(judge, &spec.scorers, runs, self.concurrency).await?;
+        Ok(report(spec, now, &q, runs))
+    }
+
+    /// [`Monitor::run_with_backend`] with the `llm_judge` and `reference` scorers graded in one
+    /// batch job of `predictor`; also returns the job's name.
+    ///
+    /// The runs are listed once and scored twice: first with a [`RecordingJudge`], whose results
+    /// are thrown away, then, after [`judge_in_batch`] has graded the recorded requests, with the
+    /// [`ReplayJudge`](crate::ReplayJudge). A judge request the batch has no reply for is an
+    /// error result (`no batch result for this request`). When `spec` has no `llm_judge` or
+    /// `reference` scorer, this is `run_with_backend(spec, source, None)` and no job is created;
+    /// the name is also `None` when no run needed the judge.
+    ///
+    /// # Errors
+    ///
+    /// The source's error when listing fails; the predictor's error when the batch fails.
+    pub async fn run_batch(
+        &self,
+        spec: &MonitorSpec,
+        source: &dyn TranscriptSource,
+        predictor: &dyn BatchPredictor,
+    ) -> Result<(MonitorReport, Option<String>), MonitorError> {
+        let wants_judge = spec.scorers.iter().any(|s| {
+            matches!(
+                s,
+                ScorerSpec::LlmJudge { .. } | ScorerSpec::Reference { .. }
+            )
+        });
+        if !wants_judge {
+            return Ok((self.run_with_backend(spec, source, None).await?, None));
+        }
+        let (now, q, runs) = self.list(spec, source).await?;
+        let recorder = Arc::new(RecordingJudge::new());
+        score_runs(
+            Some(recorder.clone()),
+            &spec.scorers,
+            runs.clone(),
+            self.concurrency,
+        )
+        .await?;
+        let (replay, job) = judge_in_batch(predictor, &recorder).await?;
+        let runs = score_runs(
+            Some(Arc::new(replay)),
+            &spec.scorers,
+            runs,
+            self.concurrency,
+        )
+        .await?;
+        Ok((report(spec, now, &q, runs), job))
+    }
+
+    /// The end of the window, its query, and its runs from `source`: newest first, at most
+    /// `q.limit`.
+    async fn list(
+        &self,
+        spec: &MonitorSpec,
+        source: &dyn TranscriptSource,
+    ) -> Result<(DateTime<Utc>, TranscriptQuery, Vec<ProductionRun>), MonitorError> {
         let now = self.now.unwrap_or_else(Utc::now);
         let q = spec.query(now);
         let mut runs = source.list(&q).await?;
         runs.sort_by_key(|r| Reverse(r.started_at));
         runs.truncate(q.limit);
-        let runs = score_runs(judge, &spec.scorers, runs, self.concurrency).await?;
-        Ok(MonitorReport {
-            spec: spec.name.clone(),
-            generated_at: now,
-            window: Window {
-                from: q.from,
-                to: q.to,
-            },
-            source: spec.source.describe(),
-            runs,
-        })
+        Ok((now, q, runs))
+    }
+}
+
+/// The report of `spec` over the window of `q` ending `now`, with the scored `runs`.
+fn report(
+    spec: &MonitorSpec,
+    now: DateTime<Utc>,
+    q: &TranscriptQuery,
+    runs: Vec<MonitoredRun>,
+) -> MonitorReport {
+    MonitorReport {
+        spec: spec.name.clone(),
+        generated_at: now,
+        window: Window {
+            from: q.from,
+            to: q.to,
+        },
+        source: spec.source.describe(),
+        runs,
     }
 }
 
@@ -608,5 +678,130 @@ scorers:
             err.to_string(),
             "judge: the spec has llm_judge scorers but no judge model was given"
         );
+    }
+
+    /// Runs for the batch tests: two with the same conversation (one judge request), an
+    /// incomplete one (no judge request) and an errored one.
+    fn batch_runs() -> Vec<ProductionRun> {
+        let mut errored = run("inv-err", 10_000, &[("hi", "order", &[])]);
+        errored.transcript.error = Some("model failure 404".into());
+        vec![
+            run(
+                "inv-a",
+                40_000,
+                &[("Where is my order?", "Your order ships.", &["lookup_order"])],
+            ),
+            run(
+                "inv-b",
+                30_000,
+                &[("Where is my order?", "Your order ships.", &["lookup_order"])],
+            ),
+            run("inv-c", 20_000, &[("hi", "hello", &[])]),
+            incomplete("inv-mid", 15_000),
+            errored,
+        ]
+    }
+
+    #[tokio::test]
+    async fn run_batch_matches_a_live_run_with_the_same_verdicts() {
+        use crate::testutil::{FAKE_JOB, FakeBackend, FakePredictor};
+
+        let live = Monitor::new()
+            .now(at(100_000))
+            .run_with_backend(
+                &spec(SPEC),
+                &FakeSource::new(batch_runs()),
+                Some(FakeBackend::new(4)),
+            )
+            .await
+            .unwrap();
+        let predictor =
+            FakePredictor::new(r#"{"pass": true, "score": 4, "rationale": "fake backend"}"#);
+        let (batch, job) = Monitor::new()
+            .now(at(100_000))
+            .run_batch(
+                &spec(SPEC),
+                &FakeSource::new(batch_runs()),
+                predictor.as_ref(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&batch).unwrap(),
+            serde_json::to_value(&live).unwrap()
+        );
+        assert_eq!(job.as_deref(), Some(FAKE_JOB));
+        let calls = predictor.calls();
+        assert_eq!(calls.len(), 1);
+        let keys: Vec<&str> = calls[0].iter().map(|l| l.key.as_str()).collect();
+        assert_eq!(keys, ["r0", "r1"]);
+    }
+
+    #[tokio::test]
+    async fn run_batch_reports_missing_replies_as_errors() {
+        use crate::testutil::FakePredictor;
+
+        let predictor = FakePredictor::with(|_| None);
+        let (report, _) = Monitor::new()
+            .now(at(100_000))
+            .run_batch(
+                &spec(SPEC),
+                &FakeSource::new(vec![run("inv", 90_000, &[("u", "order", &[])])]),
+                predictor.as_ref(),
+            )
+            .await
+            .unwrap();
+        let judge = &report.runs[0].scores[2];
+        assert_eq!(judge.outcome, Outcome::Error);
+        assert_eq!(judge.rationale, "no batch result for this request");
+    }
+
+    #[tokio::test]
+    async fn run_batch_without_judge_scorers_or_requests_creates_no_job() {
+        use crate::testutil::FakePredictor;
+
+        let predictor = FakePredictor::new("unused");
+        let no_judge = spec(
+            "name: m\nsource: { bigquery: { project: p, dataset: d, table: t } }\nwindow: 1d\n\
+             scorers: [contains: order]\n",
+        );
+        let (report, job) = Monitor::new()
+            .now(at(100_000))
+            .run_batch(
+                &no_judge,
+                &FakeSource::new(batch_runs()),
+                predictor.as_ref(),
+            )
+            .await
+            .unwrap();
+        assert_eq!((report.runs.len(), job), (5, None));
+        let (report, job) = Monitor::new()
+            .now(at(100_000))
+            .run_batch(
+                &spec(SPEC),
+                &FakeSource::new(Vec::new()),
+                predictor.as_ref(),
+            )
+            .await
+            .unwrap();
+        assert_eq!((report.runs.len(), job), (0, None));
+        assert!(predictor.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_batch_returns_a_failed_batch() {
+        use crate::testutil::FakePredictor;
+
+        let predictor = FakePredictor::failing("batch: HTTP 403: denied");
+        let err = Monitor::new()
+            .now(at(100_000))
+            .run_batch(
+                &spec(SPEC),
+                &FakeSource::new(batch_runs()),
+                predictor.as_ref(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.to_string(), "judge: batch: HTTP 403: denied");
     }
 }
