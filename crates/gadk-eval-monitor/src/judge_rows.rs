@@ -21,7 +21,7 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
-use gadk_eval::Outcome;
+use gadk_eval::{Outcome, ScoreResult};
 use serde_json::{Value, json};
 
 use crate::error::MonitorError;
@@ -31,7 +31,7 @@ use crate::report::MonitorReport;
 pub const JUDGE_ROWS_PER_INSERT: usize = 500;
 
 /// The scorer kinds whose results become rows: the ones that set a 1-5 score.
-const JUDGE_KINDS: [&str; 2] = ["llm_judge", "reference"];
+pub(crate) const JUDGE_KINDS: [&str; 2] = ["llm_judge", "reference"];
 
 /// One judge result as a `FEEDBACK` row.
 #[derive(Debug, Clone, PartialEq)]
@@ -107,34 +107,19 @@ pub fn judge_rows(report: &MonitorReport, spec_name: &str) -> Vec<JudgeRow> {
     let mut rows = Vec::new();
     for monitored in &report.runs {
         let run = &monitored.run;
-        let mut counts: Vec<(&str, usize)> = Vec::new();
-        for s in &monitored.scores {
-            if !JUDGE_KINDS.contains(&s.kind.as_str()) {
+        let positions = scorer_positions(&monitored.scores);
+        for (s, (kind, n)) in monitored.scores.iter().zip(positions) {
+            if !JUDGE_KINDS.contains(&kind) {
                 continue;
             }
-            let n = match counts.iter().position(|(kind, _)| *kind == s.kind) {
-                Some(i) => {
-                    counts[i].1 += 1;
-                    counts[i].1
-                }
-                None => {
-                    counts.push((&s.kind, 1));
-                    1
-                }
-            };
             let Some(score) = s.score else {
                 continue;
             };
             if s.outcome == Outcome::Error {
                 continue;
             }
-            let name = if n == 1 {
-                format!("{spec_name}/{}", s.kind)
-            } else {
-                format!("{spec_name}/{}_{n}", s.kind)
-            };
             rows.push(JudgeRow::new(
-                name,
+                format!("{spec_name}/{}", scorer_name(kind, n)),
                 score,
                 s.outcome == Outcome::Pass,
                 s.rationale.clone(),
@@ -145,6 +130,39 @@ pub fn judge_rows(report: &MonitorReport, spec_name: &str) -> Vec<JudgeRow> {
         }
     }
     rows
+}
+
+/// The position of each of `scores` among the scores of its kind: one `(kind, n)` per score, in
+/// score order, with `n` counted from 1 per kind. Every kind is numbered; callers keep the kinds
+/// they want.
+pub(crate) fn scorer_positions(scores: &[ScoreResult]) -> Vec<(&str, usize)> {
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    scores
+        .iter()
+        .map(|s| {
+            let n = match counts.iter_mut().find(|(kind, _)| *kind == s.kind) {
+                Some(count) => {
+                    count.1 += 1;
+                    count.1
+                }
+                None => {
+                    counts.push((&s.kind, 1));
+                    1
+                }
+            };
+            (s.kind.as_str(), n)
+        })
+        .collect()
+}
+
+/// The name of the `n`-th scorer of `kind` ([`scorer_positions`]): `<kind>` for the first and
+/// `<kind>_<n>` after it.
+pub(crate) fn scorer_name(kind: &str, n: usize) -> String {
+    if n == 1 {
+        kind.to_owned()
+    } else {
+        format!("{kind}_{n}")
+    }
 }
 
 /// What [`write_judge_rows`] did.

@@ -86,6 +86,7 @@ pub mod guard_source;
 pub mod guard_spec;
 pub mod judge;
 pub mod judge_rows;
+pub mod metrics;
 pub mod monitor;
 pub mod pairwise;
 pub mod prices;
@@ -120,6 +121,10 @@ pub use guard_spec::{Check, FeedbackSource, GuardSpec};
 pub use judge::vertex_judge;
 pub use judge_rows::{
     JUDGE_ROWS_PER_INSERT, JudgeRow, ScoreSink, WriteOutcome, judge_rows, write_judge_rows,
+};
+pub use metrics::{
+    AlertRuleValue, AlertRun, LABEL_VALUE_MAX, MetricPoint, MetricValue, alert_points,
+    guard_points, monitor_points,
 };
 pub use monitor::{DEFAULT_CONCURRENCY, Monitor};
 pub use pairwise::{
