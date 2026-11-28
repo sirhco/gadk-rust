@@ -1153,6 +1153,117 @@ than 5,000 model × agent × prompt groups fails, printing
 [Access (IAM)](#access-iam), and Storage Object Viewer on the bucket holding `gs://` specs and
 the price file.
 
+## Cloud Monitoring metrics
+
+`monitor`, `guard`, `guards` and `alerts` take `--write-metrics`: each result is then also
+written to Cloud Monitoring as custom gauge metrics under `custom.googleapis.com/gadk/`, so pass
+rates, judge scores, rollouts and alert rules get dashboards, alert policies and notification
+channels.
+
+```sh
+gadk-eval monitor monitors/support.yaml --out gs://my-bucket/monitors --write-metrics
+gadk-eval guards gs://my-bucket/guards/ --apply --write-metrics --metrics-project ops-proj
+gadk-eval alerts gs://my-bucket/alerts/ --prices gs://my-bucket/prices.yaml --write-metrics
+```
+
+The points go to `--metrics-project <id>`, or else to the project of the spec's `source`. With
+`--write-metrics`, a `--metrics-project` that is not a project id exits 2 before anything runs;
+without `--write-metrics`, `--metrics-project` is ignored. Every point is a `global` resource
+point of its project, stamped with the report's time (for `alerts`, the end of the spec's
+window).
+
+| Metric (`custom.googleapis.com/gadk/…`) | Type | Labels | Value |
+|---|---|---|---|
+| `monitor/runs` | INT64 | `spec`, `agent` | runs graded |
+| `monitor/errors` | INT64 | `spec`, `agent` | runs with an error score |
+| `monitor/pass_rate` | DOUBLE | `spec`, `agent` | share of runs whose scores all passed (not written with no runs) |
+| `monitor/scorer_pass_rate` | DOUBLE | `spec`, `agent`, `scorer` | passes over the scorer's results that are not errors (not written when all are errors) |
+| `monitor/judge_score_mean` | DOUBLE | `spec`, `agent`, `scorer` | mean 1-5 score of an `llm_judge` or `reference` scorer, over its scored results that are not errors |
+| `guard/rollout_percent` | INT64 | `spec`, `prompt`, `label` | the rollout percent the guard read |
+| `guard/verdict` | INT64 | `spec`, `prompt`, `label`, `verdict` | `1`, with `verdict` = `advance`, `abort` or `wait` |
+| `guard/worse_checks` | INT64 | `spec`, `prompt`, `label` | checks whose status is `worse` |
+| `alerts/rule_value` | DOUBLE | `spec`, `rule` | the rule's value (USD for `cost`, a 0-1 fraction for `error_rate`, a count otherwise) |
+| `alerts/rule_fired` | INT64 | `spec`, `rule` | `1` when the rule fired, else `0` |
+
+`agent` is the monitor spec's `agent` (empty without one). `scorer` is the scorer's kind for the
+first scorer of a kind in the spec and `<kind>_<n>` for the n-th, as in
+[Judge scores in the console](#judge-scores-in-the-console). A guard with no rollout writes
+nothing, and neither does an alert rule with too few calls (`insufficient`) or a spec that
+fails. Label values longer than 1,024 bytes are cut. The metric descriptors are created by the
+first write, with the labels above; adding a label to a metric later needs a new descriptor.
+
+**When it writes.** `monitor` writes once the report is stored and printed, before
+`--write-scores` and the `min_pass_rate` check, so a run that exits 1 still writes. `guard` and
+`guards` write each guard's points once its report is printed and stored (after `--apply` has
+written the decision). `alerts` writes each spec's points after its rule lines. Both come before
+the summary line and `--notify`.
+
+**Failures.** A metrics failure never changes the command's outcome: the error is printed to
+stderr as one `metrics: <error>` line per failed write (for example
+`metrics: 3 of 3 series not written: HTTP 403: Permission denied`), and
+stdout, stored reports, applied actions and the exit code are those of the same run without
+`--write-metrics`. When the writer cannot be built (no credentials), the error is printed once
+and the command writes nothing. Each request carries at most 200 time series; Cloud Monitoring
+rejects a point older than its series' last point, so two hosts with skewed clocks writing the
+same spec can produce a `metrics:` line.
+
+**Access.** The writer uses Application Default Credentials and needs Monitoring Metric Writer
+(`roles/monitoring.metricWriter`) on the metrics project.
+
+**Cost and cardinality.** Each label combination is one time series: per monitor spec and
+agent, 3 plus one per scorer plus one per judge scorer; per guard spec, 2 plus one for each
+verdict it has reported (at most 5); per alert spec, 2 per rule. Every run writes one point per
+series. Custom metrics are billed by the volume ingested beyond a monthly free allotment per
+billing account (see the Cloud Monitoring pricing page); a few specs scheduled every few minutes
+stay far below it. Cloud Monitoring accepts at most one point per series every 5 seconds, which
+scheduled runs never come near.
+
+**Queries and alert policies.** One point per run makes the series sparse, so query over
+windows longer than the run interval. The pass rate of the `support` monitor in PromQL (Metrics
+Explorer or a dashboard):
+
+```promql
+last_over_time(custom_googleapis_com:gadk_monitor_pass_rate{monitored_resource="global", spec="support"}[2h])
+```
+
+An alert policy for a pass-rate drop below 90%, created with
+`gcloud alpha monitoring policies create --policy-from-file=pass-rate.json`:
+
+```json
+{
+  "displayName": "support monitor pass rate below 90%",
+  "combiner": "OR",
+  "conditions": [{
+    "displayName": "pass_rate < 0.9",
+    "conditionPrometheusQueryLanguage": {
+      "query": "last_over_time(custom_googleapis_com:gadk_monitor_pass_rate{monitored_resource=\"global\", spec=\"support\"}[2h]) < 0.9",
+      "duration": "0s",
+      "evaluationInterval": "300s"
+    }
+  }]
+}
+```
+
+And one for a guard that aborted a rollout (`guard/verdict{verdict="abort"}`):
+
+```json
+{
+  "displayName": "prompt rollout aborted",
+  "combiner": "OR",
+  "conditions": [{
+    "displayName": "guard verdict abort",
+    "conditionPrometheusQueryLanguage": {
+      "query": "last_over_time(custom_googleapis_com:gadk_guard_verdict{monitored_resource=\"global\", verdict=\"abort\"}[2h]) > 0",
+      "duration": "0s",
+      "evaluationInterval": "300s"
+    }
+  }]
+}
+```
+
+Add `"notificationChannels": ["projects/<project>/notificationChannels/<id>"]` to either policy
+to be notified. The abort policy stays open for the query window after the last abort.
+
 ## Library
 
 ```rust
@@ -1198,6 +1309,14 @@ refuses with `guards are not supported by these backends`.
 `alert_source(project, dataset, table, max_bytes)`; the default refuses with
 `alerts are not supported by these backends`.
 
+`monitor_points(&report, spec.agent.as_deref())`, `guard_points(&report)` and
+`alert_points(&AlertRun::new(spec, time, rules))` (`AlertRuleValue`) build the
+[Cloud Monitoring metrics](#cloud-monitoring-metrics) of a result as `MetricPoint`s
+(`MetricValue::Int` or `Double`), and a `MetricsWriter` writes them: `CloudMetricsWriter::new()`
+(Application Default Credentials) sends `SERIES_PER_REQUEST` (200) series per request. A custom
+`cli::Backends` implements `metrics_writer()`; the default refuses with
+`Cloud Monitoring metrics are not supported by these backends`.
+
 ## Access (IAM)
 
 Google Cloud access uses Application Default Credentials; specs and reports hold no
@@ -1223,6 +1342,8 @@ written to as you would the analytics table.
   `gs://` specs and the price file.
 - Storage Object Admin on the bucket for `gs://` output (`report` needs only Storage Object
   Viewer).
+- Monitoring Metric Writer (`roles/monitoring.metricWriter`) on the metrics project, only with
+  `--write-metrics`.
 
 ## Cost
 
@@ -1278,4 +1399,13 @@ model):
 GADK_EVAL_MONITOR_LIVE_PROJECT=<project> \
 GADK_EVAL_MONITOR_LIVE_BATCH_STAGING=gs://<bucket>/<prefix> \
   cargo test -p gadk-eval-monitor --all-features live_batch_judging -- --ignored --nocapture
+```
+
+Cloud Monitoring metrics have one that writes a single `INT64` point of
+`custom.googleapis.com/gadk/check/ping` (label `spec = live-test`), which creates that metric
+descriptor on its first run (Monitoring Metric Writer):
+
+```sh
+GADK_EVAL_MONITOR_LIVE_PROJECT=<project> \
+  cargo test -p gadk-eval-monitor --all-features live_metrics_write -- --ignored --nocapture
 ```

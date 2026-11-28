@@ -7,6 +7,21 @@ the public API.
 
 ## [Unreleased]
 
+### Added
+
+- `gadk-eval-monitor`: Cloud Monitoring metrics. `gadk-eval monitor`, `guard`, `guards` and
+  `alerts` take `--write-metrics` and `--metrics-project <id>` (default: the spec's source
+  project) and write their results as custom gauge metrics under
+  `custom.googleapis.com/gadk/`: `monitor/runs`, `monitor/errors`, `monitor/pass_rate`,
+  `monitor/scorer_pass_rate`, `monitor/judge_score_mean`, `guard/rollout_percent`,
+  `guard/verdict`, `guard/worse_checks`, `alerts/rule_value` and `alerts/rule_fired`. A metrics
+  failure prints `metrics: <error>` to stderr and changes nothing else; without the flag every
+  command behaves as before.
+  - `monitor_points`, `guard_points` and `alert_points` (`AlertRun`, `AlertRuleValue`) build the
+    points (`MetricPoint`, `MetricValue`), and `MetricsWriter` / `CloudMetricsWriter` write them,
+    `SERIES_PER_REQUEST` (200) series per request.
+  - `gadk_eval_monitor::cli::Backends::metrics_writer` (default: not supported) backs the flag.
+
 ## [0.5.29] - 2026-11-27
 
 ### Added
