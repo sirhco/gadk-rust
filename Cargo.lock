@@ -1260,7 +1260,7 @@ dependencies = [
 
 [[package]]
 name = "gadk"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1310,7 +1310,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-a2a"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "a2a-client-lf",
  "a2a-lf",
@@ -1347,7 +1347,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-agent"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1373,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-agentanalytics"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "arrow-array",
  "arrow-ipc",
@@ -1414,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-agentregistry"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "axum",
@@ -1442,7 +1442,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-analytics"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "bytes",
  "chrono",
@@ -1461,7 +1461,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-anthropic"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -1487,7 +1487,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-artifact"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1505,7 +1505,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-artifact-gcs"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1530,7 +1530,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-auth"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -1557,7 +1557,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-bigquery"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1579,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-cli"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -1600,7 +1600,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-cloudtrace"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1618,7 +1618,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-configurable"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-console"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "axum",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-console-client"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "axum",
  "chrono",
@@ -1698,7 +1698,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-engine"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1736,7 +1736,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-eval"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "futures",
  "gadk-agent",
@@ -1759,7 +1759,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-eval-monitor"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1791,7 +1791,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-gemini"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -1818,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-genai"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "base64 0.23.1",
  "bytes",
@@ -1832,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-goyaml"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -1843,7 +1843,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-httprr"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1860,7 +1860,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-launcher"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "axum",
@@ -1901,7 +1901,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-mcp"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -1929,7 +1929,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-memory"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1948,7 +1948,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-model"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1976,7 +1976,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-openai"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -1998,7 +1998,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-openapi"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "gadk-agent",
@@ -2020,7 +2020,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-platform"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2033,7 +2033,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-prompts"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2058,7 +2058,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-prompts-cli"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2073,7 +2073,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-prompts-firestore"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2089,7 +2089,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-server"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "axum",
@@ -2129,7 +2129,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-session"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2151,7 +2151,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-session-database"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2171,7 +2171,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-telemetry"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "axum",
@@ -2210,7 +2210,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-tools"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2235,7 +2235,7 @@ dependencies = [
 
 [[package]]
 name = "gadk-vertexai"
-version = "0.5.29"
+version = "0.5.30"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
