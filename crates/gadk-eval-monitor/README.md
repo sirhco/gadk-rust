@@ -261,6 +261,63 @@ pairwise vs v7:
 In Rust, `run_pairwise(judge, &set, &report.report)` returns the results and
 `ExperimentReport::with_pairwise` stores them; `pairwise_stats()` counts them.
 
+## Batch judging
+
+`monitor` and `experiment` take `--judge-mode live|batch` (default `live`),
+`--batch-staging gs://<bucket>/<prefix>` and `--batch-timeout <n>m|<n>h|<n>d` (default `6h`).
+With `batch`, every `llm_judge` and `reference` grade of the command goes into one Vertex AI
+batch prediction job of the spec's judge model (for example `gemini-3.8-flash`, in the judge's
+project and location) instead of one live Gemini call each. Batch prediction costs about half as
+much as live calls and has no per-minute quota, so it suits backfills and large experiments.
+Reports, summaries and stored reports have the same shape as a live run's; `batch job: <name>`
+is printed to stderr once the job has finished.
+
+```sh
+gadk-eval monitor monitors/support.yaml --judge-mode batch \
+  --batch-staging gs://my-bucket/gadk-batch --batch-timeout 3h --out gs://my-bucket/monitors
+gadk-eval experiment experiments/support-v8.yaml --judge-mode batch \
+  --batch-staging gs://my-bucket/gadk-batch
+```
+
+- **Latency.** A job is queued before it runs; a 2-line job took about 6 minutes. Use batch for
+  backfills and large runs, not for small or interactive ones.
+- **Staging.** The job's input is written to `<prefix>/<run-id>/input.jsonl` and its output under
+  `<prefix>/<run-id>/output/`, where `<run-id>` is `gadk-<UTC yyyymmddThhmmssZ>-<4 hex>`. Nothing
+  is deleted afterwards; add a bucket lifecycle rule (for example, delete objects under the
+  prefix after 30 days) to keep the bucket small.
+- **Timeout.** `--batch-timeout` bounds the wait for the job: a job that has not finished in
+  time is cancelled and the command exits 2 without storing a report. The upload, the job's
+  creation and the output read are not counted; each request has its own 5-minute timeout. When
+  the command runs as a scheduled job (such as a Cloud Run job), set `--batch-timeout` below
+  that job's own timeout.
+- **Status checks.** A status check that fails transiently (HTTP 429, HTTP 5xx or a connection
+  error) is retried at the next poll, up to 5 failures in a row; the fifth ends the command
+  (exit 2). A successful check resets the count, and any other HTTP error ends it at once. The
+  retries count against `--batch-timeout`. The upload, the creation and the output read are not
+  retried.
+- **Retries.** An unparseable judge reply is not retried, as it is in live mode: it is an error
+  result for that scorer (`unparseable judge reply: …`). A line the job failed is an error result
+  (`batch line error: …`), and a grade the job returned nothing for is one too
+  (`no batch result for this request`). A failed, cancelled or expired job exits 2.
+- **What stays live.** `guard` and `guards` always grade live. `--judge-mode batch` needs
+  `--judge-backend gemini` (the default) and cannot be used with `experiment --pairwise`.
+- **Checks.** Before anything runs, `batch` exits 2 without `--batch-staging`, with a staging
+  value that is not `gs://<bucket>/<prefix>`, with a bad `--batch-timeout`, with
+  `--judge-backend eval-service` or with `--pairwise`, for example
+  `gadk-eval: monitor spec: --judge-mode batch needs --batch-staging gs://<bucket>/<prefix>`.
+  In `live` mode `--batch-staging` and `--batch-timeout` are ignored.
+- **Nothing to judge.** A `monitor` spec without a `judge` section, or a command whose runs ask
+  the judge nothing, creates no job and prints no `batch job:` line.
+- **Access.** Vertex AI User (`roles/aiplatform.user`) on the judge's project and Storage Object
+  User (`roles/storage.objectUser`) on the staging bucket, through Application Default
+  Credentials. When the bucket is in another project, the judge project's Vertex AI service
+  agent needs the same access to the bucket.
+
+In Rust, `Monitor::run_batch(&spec, &source, &predictor)` returns the report and the job name;
+for an experiment, run it with `Evaluator::with_backend(recorder)` (a `RecordingJudge`), then
+`judge_in_batch(&predictor, &recorder)` and `report.rescore(&set, &replay)`.
+`VertexBatchPredictor` is the Vertex AI `BatchPredictor`.
+
 ## Judge scores in the console
 
 `gadk-eval monitor <spec.yaml> --write-scores` also writes the judge's results to the BigQuery
@@ -1209,4 +1266,14 @@ The evaluation service backend has one too (three pointwise calls and one pairwi
 ```sh
 GADK_EVAL_MONITOR_LIVE_PROJECT=<project> \
   cargo test -p gadk-eval-monitor --all-features live_eval_service -- --ignored --nocapture
+```
+
+Batch judging has one as well: one 2-line batch prediction job in location `us`, which takes
+about 6 minutes (`GADK_EVAL_MONITOR_LIVE_JUDGE_MODEL`, default `gemini-3.8-flash`, overrides the
+model):
+
+```sh
+GADK_EVAL_MONITOR_LIVE_PROJECT=<project> \
+GADK_EVAL_MONITOR_LIVE_BATCH_STAGING=gs://<bucket>/<prefix> \
+  cargo test -p gadk-eval-monitor --all-features live_batch_judging -- --ignored --nocapture
 ```

@@ -133,6 +133,12 @@ the run timeout does not bound the backend's calls; the backend bounds its own.
 `gadk-eval-monitor`'s `EvalServiceJudge` is a backend that asks the Vertex AI Gen AI evaluation
 service.
 
+`judge_prompt(&req)` returns exactly the prompt `GeminiJudge` sends for a request, and
+`parse_judge_reply(text)` reads a reply to it as `GeminiJudge` does: a `JudgeOutcome::Verdict`,
+or `JudgeOutcome::Error("unparseable judge reply: <the first 1024 bytes>")`. Together they let
+the same prompt go through another channel, such as the batch judging of
+`gadk-eval-monitor`; unlike `GeminiJudge`, nothing is retried there.
+
 ## Errors versus failures
 
 A result is `pass`, `fail` or `error`. Errors are counted apart from failures:
