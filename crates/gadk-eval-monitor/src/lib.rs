@@ -72,6 +72,7 @@ mod testutil;
 
 pub mod alert_source;
 pub mod alert_spec;
+pub mod batch;
 pub mod cli;
 pub mod eval_service;
 pub mod experiment;
@@ -94,6 +95,9 @@ pub mod store;
 
 pub use alert_source::{AlertQuery, AlertSource, UsageGroup};
 pub use alert_spec::{AlertFilter, AlertMetric, AlertRule, AlertSpec};
+pub use batch::{
+    BatchLine, BatchPredictor, BatchReply, BatchResult, RecordingJudge, ReplayJudge, judge_in_batch,
+};
 pub use error::MonitorError;
 pub use eval_service::{EvalServiceJudge, PairwiseChoice, PairwiseJudge, PairwiseOutcome};
 pub use experiment::{

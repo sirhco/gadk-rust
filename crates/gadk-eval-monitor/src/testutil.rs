@@ -13,10 +13,10 @@
 // limitations under the License.
 
 //! Test helpers: hand-built httprr traces, a scripted judge model, a fixed judge backend and
-//! pairwise judge, a fixed transcript source and run builders.
+//! pairwise judge, a scripted batch predictor, a fixed transcript source and run builders.
 
 use std::any::Any;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -31,6 +31,7 @@ use gadk_httprr::RecordReplay;
 use gadk_model::{Llm, LlmRequest, LlmResponse, ModelError, ReqwestClient};
 use serde_json::Map;
 
+use crate::batch::{BatchLine, BatchPredictor, BatchReply, BatchResult};
 use crate::error::MonitorError;
 use crate::eval_service::{PairwiseChoice, PairwiseJudge, PairwiseOutcome};
 use crate::judge_rows::{JudgeRow, ScoreSink};
@@ -231,6 +232,73 @@ impl PairwiseJudge for FakePairwise {
             self.in_flight.fetch_sub(1, Ordering::SeqCst);
             self.outcome.clone()
         })
+    }
+}
+
+/// The job name [`FakePredictor`] returns.
+pub(crate) const FAKE_JOB: &str = "projects/p/locations/us/batchPredictionJobs/1";
+
+/// The reply [`FakePredictor`] gives a line, if any.
+type LineReply = Box<dyn Fn(&BatchLine) -> Option<BatchReply> + Send + Sync>;
+
+/// A batch predictor answering each line with `reply(line)` (no reply when `None`) as job
+/// [`FAKE_JOB`], or failing with `fail`, and recording the lines of each call.
+pub(crate) struct FakePredictor {
+    reply: LineReply,
+    fail: Option<String>,
+    calls: Mutex<Vec<Vec<BatchLine>>>,
+}
+
+impl FakePredictor {
+    /// Answers every line with the text `text`.
+    pub(crate) fn new(text: &str) -> Arc<Self> {
+        let text = text.to_owned();
+        Self::with(move |_| Some(BatchReply::Text(text.clone())))
+    }
+
+    /// Answers each line with `reply(line)`.
+    pub(crate) fn with(
+        reply: impl Fn(&BatchLine) -> Option<BatchReply> + Send + Sync + 'static,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            reply: Box::new(reply),
+            fail: None,
+            calls: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Fails every call with `MonitorError::Judge(message)`.
+    pub(crate) fn failing(message: &str) -> Arc<Self> {
+        Arc::new(Self {
+            reply: Box::new(|_| None),
+            fail: Some(message.to_owned()),
+            calls: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// The lines of each call so far.
+    pub(crate) fn calls(&self) -> Vec<Vec<BatchLine>> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl BatchPredictor for FakePredictor {
+    fn predict<'a>(
+        &'a self,
+        lines: &'a [BatchLine],
+    ) -> BoxFuture<'a, Result<BatchResult, MonitorError>> {
+        self.calls.lock().unwrap().push(lines.to_vec());
+        let result = match &self.fail {
+            Some(e) => Err(MonitorError::Judge(e.clone())),
+            None => {
+                let replies: HashMap<String, BatchReply> = lines
+                    .iter()
+                    .filter_map(|l| (self.reply)(l).map(|r| (l.key.clone(), r)))
+                    .collect();
+                Ok(BatchResult::new(FAKE_JOB, replies))
+            }
+        };
+        Box::pin(async move { result })
     }
 }
 
