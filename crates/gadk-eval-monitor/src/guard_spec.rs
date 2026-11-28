@@ -58,8 +58,8 @@ use serde_json::{Map, Value};
 
 use crate::error::MonitorError;
 use crate::spec::{
-    JudgeSpec, SourceSpec, check_keys, is_monitor_name, parse_bigquery, parse_judge, parse_scorer,
-    parse_window, required, yaml_value,
+    JudgeSpec, SourceSpec, check_keys, is_monitor_name, needs_judge, parse_bigquery, parse_judge,
+    parse_scorer, parse_window, required, yaml_value,
 };
 
 /// The default `min_calls`.
@@ -238,9 +238,7 @@ impl GuardSpec {
     /// Whether an `eval` check has an `llm_judge` scorer (and so a judge model is needed).
     pub fn wants_judge(&self) -> bool {
         self.checks.iter().any(|c| match c {
-            Check::Eval { scorers, .. } => scorers
-                .iter()
-                .any(|s| matches!(s, ScorerSpec::LlmJudge { .. })),
+            Check::Eval { scorers, .. } => needs_judge(scorers),
             _ => false,
         })
     }

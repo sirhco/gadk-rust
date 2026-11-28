@@ -290,15 +290,16 @@ gadk-eval experiment experiments/support-v8.yaml --judge-mode batch \
   creation and the output read are not counted; each request has its own 5-minute timeout. When
   the command runs as a scheduled job (such as a Cloud Run job), set `--batch-timeout` below
   that job's own timeout.
-- **Status checks.** A status check that fails transiently (HTTP 429, HTTP 5xx or a connection
-  error) is retried at the next poll, up to 5 failures in a row; the fifth ends the command
-  (exit 2). A successful check resets the count, and any other HTTP error ends it at once. The
-  retries count against `--batch-timeout`. The upload, the creation and the output read are not
+- **Status checks.** The job is polled every 30 s for the first 10 minutes, then every minute.
+  A status check that fails transiently (HTTP 429, HTTP 5xx or a connection error) is retried
+  at the next poll, up to 5 failures in a row; the fifth ends the command (exit 2). A
+  successful check resets the count, and any other HTTP error ends it at once. The retries
+  count against `--batch-timeout`. The upload, the creation and the output read are not
   retried.
-- **Retries.** An unparseable judge reply is not retried, as it is in live mode: it is an error
-  result for that scorer (`unparseable judge reply: …`). A line the job failed is an error result
-  (`batch line error: …`), and a grade the job returned nothing for is one too
-  (`no batch result for this request`). A failed, cancelled or expired job exits 2.
+- **Retries.** Unlike live mode, which retries once, an unparseable judge reply is not retried:
+  it is an error result for that scorer (`unparseable judge reply: …`). A line the job failed
+  is an error result (`batch line error: …`), and a grade the job returned nothing for is one
+  too (`no batch result for this request`). A failed, cancelled or expired job exits 2.
 - **What stays live.** `guard` and `guards` always grade live. `--judge-mode batch` needs
   `--judge-backend gemini` (the default) and cannot be used with `experiment --pairwise`.
 - **Checks.** Before anything runs, `batch` exits 2 without `--batch-staging`, with a staging
@@ -314,7 +315,8 @@ gadk-eval experiment experiments/support-v8.yaml --judge-mode batch \
   agent needs the same access to the bucket.
 
 In Rust, `Monitor::run_batch(&spec, &source, &predictor)` returns the report and the job name;
-for an experiment, run it with `Evaluator::with_backend(recorder)` (a `RecordingJudge`), then
+for an experiment, make the recorder an `Arc` (`let recorder = Arc::new(RecordingJudge::new());`),
+run it with `Evaluator::with_backend(recorder.clone())`, then
 `judge_in_batch(&predictor, &recorder)` and `report.rescore(&set, &replay)`.
 `VertexBatchPredictor` is the Vertex AI `BatchPredictor`.
 

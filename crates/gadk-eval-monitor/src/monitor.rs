@@ -31,7 +31,7 @@ use crate::batch::{BatchPredictor, RecordingJudge, judge_in_batch};
 use crate::error::MonitorError;
 use crate::report::{MonitorReport, MonitoredRun, Window};
 use crate::source::{ProductionRun, TranscriptQuery, TranscriptSource};
-use crate::spec::{DEFAULT_JUDGE_TIMEOUT, MonitorSpec};
+use crate::spec::{DEFAULT_JUDGE_TIMEOUT, MonitorSpec, needs_judge};
 
 /// The default number of runs graded at once.
 pub const DEFAULT_CONCURRENCY: usize = 8;
@@ -152,13 +152,7 @@ impl Monitor {
         source: &dyn TranscriptSource,
         predictor: &dyn BatchPredictor,
     ) -> Result<(MonitorReport, Option<String>), MonitorError> {
-        let wants_judge = spec.scorers.iter().any(|s| {
-            matches!(
-                s,
-                ScorerSpec::LlmJudge { .. } | ScorerSpec::Reference { .. }
-            )
-        });
-        if !wants_judge {
+        if !needs_judge(&spec.scorers) {
             return Ok((self.run_with_backend(spec, source, None).await?, None));
         }
         let (now, q, runs) = self.list(spec, source).await?;
@@ -223,12 +217,9 @@ pub(crate) fn gemini_backend(model: Arc<dyn Llm>, timeout: Duration) -> Arc<dyn 
     Arc::new(GeminiJudge::new(model, timeout))
 }
 
-/// `MonitorError::Judge` when `scorers` has an `llm_judge` scorer and there is no judge.
+/// `MonitorError::Judge` when `scorers` needs a judge ([`needs_judge`]) and there is none.
 fn check_judge(has_judge: bool, scorers: &[ScorerSpec]) -> Result<(), MonitorError> {
-    let wants_judge = scorers
-        .iter()
-        .any(|s| matches!(s, ScorerSpec::LlmJudge { .. }));
-    if wants_judge && !has_judge {
+    if needs_judge(scorers) && !has_judge {
         return Err(MonitorError::Judge(
             "the spec has llm_judge scorers but no judge model was given".into(),
         ));

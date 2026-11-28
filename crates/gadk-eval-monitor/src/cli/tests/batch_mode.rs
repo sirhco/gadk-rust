@@ -456,3 +456,23 @@ async fn an_experiment_without_judge_scorers_creates_no_job() {
     assert_eq!((code, stderr.as_str()), (0, ""), "{stdout}");
     assert!(backends.predictor.calls().is_empty());
 }
+
+#[tokio::test]
+async fn a_failed_experiment_batch_exits_2_and_stores_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let spec = experiment_spec(dir.path(), true);
+    let out = dir.path().join("reports");
+    let backends = Batched::new(
+        Vec::new(),
+        FakePredictor::failing("batch: HTTP 403: denied"),
+    );
+    let (code, stdout, stderr) = cli_run(
+        &batch_args(&["experiment", &spec, "--out", &out.display().to_string()]),
+        &backends,
+    )
+    .await;
+    assert_eq!((code, stdout.as_str()), (2, ""));
+    assert_eq!(stderr, "gadk-eval: judge: batch: HTTP 403: denied\n");
+    assert_eq!(backends.predictor.calls().len(), 1);
+    assert!(!out.exists() || std::fs::read_dir(&out).unwrap().count() == 0);
+}

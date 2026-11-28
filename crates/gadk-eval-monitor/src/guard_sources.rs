@@ -26,7 +26,7 @@ use crate::cli::Backends;
 use crate::error::MonitorError;
 use crate::guard_spec::GuardSpec;
 use crate::prices::PriceTable;
-use crate::store::is_valid_bucket;
+use crate::store::{Gs, split_gs};
 
 /// The most guard specs one `guards` run takes, and alert specs one `alerts` run takes.
 pub(crate) const MAX_GUARD_SPECS: usize = 200;
@@ -290,29 +290,6 @@ async fn resolve(
         out.push((origin, text));
     }
     Ok(())
-}
-
-/// A spec or price-file source, split.
-enum Gs<'a> {
-    /// Not a `gs://` URL: a local path.
-    Local,
-    /// A `gs://` URL whose bucket fails [`is_valid_bucket`].
-    BadBucket,
-    /// `gs://<bucket>/<rest>` as `(bucket, rest)`; `gs://<bucket>` gives `(bucket, "")`.
-    Object(&'a str, &'a str),
-}
-
-/// Splits `source` into [`Gs`].
-fn split_gs(source: &str) -> Gs<'_> {
-    let Some(rest) = source.strip_prefix("gs://") else {
-        return Gs::Local;
-    };
-    let (bucket, rest) = rest.split_once('/').unwrap_or((rest, ""));
-    if is_valid_bucket(bucket) {
-        Gs::Object(bucket, rest)
-    } else {
-        Gs::BadBucket
-    }
 }
 
 /// Refuses `count` specs when that is more than [`MAX_GUARD_SPECS`], before any is read:

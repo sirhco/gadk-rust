@@ -33,7 +33,7 @@ use crate::error::MonitorError;
 use crate::gcp::{AdcTokenSource, GcpHttp, TokenSource, encode};
 use crate::spec::is_location;
 use crate::store::gcs::{list_all, put_object, read_text};
-use crate::store::is_valid_bucket;
+use crate::store::{Gs, split_gs, split_gs_url};
 
 /// The API version of the batch prediction endpoints.
 const API_VERSION: &str = "v1";
@@ -67,10 +67,12 @@ pub(crate) fn staging_error(staging: &str) -> MonitorError {
 /// `gs://<bucket>/<prefix>` as `(bucket, prefix)`, with one trailing `/` dropped; `None` unless
 /// the bucket is a valid bucket name and the prefix is not empty.
 pub(crate) fn parse_staging(staging: &str) -> Option<(String, String)> {
-    let rest = staging.strip_prefix("gs://")?;
-    let rest = rest.strip_suffix('/').unwrap_or(rest);
-    let (bucket, prefix) = rest.split_once('/')?;
-    (is_valid_bucket(bucket) && !prefix.is_empty()).then(|| (bucket.to_owned(), prefix.to_owned()))
+    match split_gs(staging.strip_suffix('/').unwrap_or(staging)) {
+        Gs::Object(bucket, prefix) if !prefix.is_empty() => {
+            Some((bucket.to_owned(), prefix.to_owned()))
+        }
+        _ => None,
+    }
 }
 
 /// The Vertex AI batch prediction service as a [`BatchPredictor`], grading with a Gemini model.
@@ -316,9 +318,8 @@ impl VertexBatchPredictor {
 
     /// The replies in every `.jsonl` object under the output directory `output`, at any depth.
     async fn collect(&self, output: &str) -> Result<HashMap<String, BatchReply>, MonitorError> {
-        let (bucket, path) = output
-            .strip_prefix("gs://")
-            .and_then(|rest| rest.split_once('/'))
+        let (bucket, path) = split_gs_url(output)
+            .and_then(|(bucket, path)| Some((bucket, path?)))
             .ok_or_else(|| {
                 MonitorError::Judge(format!(
                     "batch: the output directory {output:?} is not gs://<bucket>/<path>"

@@ -299,10 +299,7 @@ fn parse(doc: &Value) -> Result<MonitorSpec, String> {
             .collect::<Result<Vec<_>, _>>()?,
         _ => return Err("`scorers` must be a non-empty list".into()),
     };
-    let wants_judge = scorers
-        .iter()
-        .any(|s| matches!(s, ScorerSpec::LlmJudge { .. }));
-    let judge = match (top.get("judge"), wants_judge) {
+    let judge = match (top.get("judge"), needs_judge(&scorers)) {
         (None | Some(Value::Null), false) => None,
         (None | Some(Value::Null), true) => {
             return Err("`judge` is required when a scorer is `llm_judge`".into());
@@ -416,6 +413,17 @@ pub(crate) fn parse_judge(v: &Value, source_project: &str) -> Result<JudgeSpec, 
         project,
         location,
         timeout,
+    })
+}
+
+/// Whether `scorers` has a scorer a judge model grades: `llm_judge` or `reference` (specs
+/// reject `reference` when they are parsed, so for them this is "has an `llm_judge` scorer").
+pub(crate) fn needs_judge(scorers: &[ScorerSpec]) -> bool {
+    scorers.iter().any(|s| {
+        matches!(
+            s,
+            ScorerSpec::LlmJudge { .. } | ScorerSpec::Reference { .. }
+        )
     })
 }
 

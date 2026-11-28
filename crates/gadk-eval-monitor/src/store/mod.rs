@@ -54,6 +54,35 @@ pub(crate) fn is_valid_bucket(bucket: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b))
 }
 
+/// `gs://<bucket>[/<rest>]` as `(bucket, rest)`, `rest` being `None` when no `/` follows the
+/// bucket; `None` when `url` is not a `gs://` URL. The bucket is not checked (see [`split_gs`]).
+pub(crate) fn split_gs_url(url: &str) -> Option<(&str, Option<&str>)> {
+    let rest = url.strip_prefix("gs://")?;
+    Some(match rest.split_once('/') {
+        Some((bucket, rest)) => (bucket, Some(rest)),
+        None => (rest, None),
+    })
+}
+
+/// A path or `gs://` URL, split by [`split_gs`].
+pub(crate) enum Gs<'a> {
+    /// Not a `gs://` URL: a local path.
+    Local,
+    /// A `gs://` URL whose bucket fails [`is_valid_bucket`].
+    BadBucket,
+    /// `gs://<bucket>/<rest>` as `(bucket, rest)`; `gs://<bucket>` gives `(bucket, "")`.
+    Object(&'a str, &'a str),
+}
+
+/// Splits `source` into [`Gs`], checking the bucket with [`is_valid_bucket`].
+pub(crate) fn split_gs(source: &str) -> Gs<'_> {
+    match split_gs_url(source) {
+        None => Gs::Local,
+        Some((bucket, rest)) if is_valid_bucket(bucket) => Gs::Object(bucket, rest.unwrap_or("")),
+        Some(_) => Gs::BadBucket,
+    }
+}
+
 /// A stored report's name: `<spec>-<timestamp>[-<n>].json`.
 static NAME: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]+-(\d{8}T\d{6}Z)(?:-(\d+))?\.json$").ok());
@@ -227,11 +256,9 @@ impl ReportStore {
         auth: Arc<dyn TokenSource>,
     ) -> Result<Self, MonitorError> {
         let invalid = || MonitorError::Store(format!("invalid store URL {url:?}"));
-        let rest = url.strip_prefix("gs://").ok_or_else(invalid)?;
-        let (bucket, prefix) = rest.split_once('/').unwrap_or((rest, ""));
-        if !is_valid_bucket(bucket) {
+        let Gs::Object(bucket, prefix) = split_gs(url) else {
             return Err(invalid());
-        }
+        };
         Ok(Self::with_backend(Backend::Gcs(gcs::GcsStore::new(
             bucket,
             prefix,
