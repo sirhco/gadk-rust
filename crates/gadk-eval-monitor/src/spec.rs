@@ -299,7 +299,7 @@ fn parse(doc: &Value) -> Result<MonitorSpec, String> {
             .collect::<Result<Vec<_>, _>>()?,
         _ => return Err("`scorers` must be a non-empty list".into()),
     };
-    let judge = match (top.get("judge"), needs_judge(&scorers)) {
+    let judge = match (top.get("judge"), has_llm_judge(&scorers)) {
         (None | Some(Value::Null), false) => None,
         (None | Some(Value::Null), true) => {
             return Err("`judge` is required when a scorer is `llm_judge`".into());
@@ -416,9 +416,17 @@ pub(crate) fn parse_judge(v: &Value, source_project: &str) -> Result<JudgeSpec, 
     })
 }
 
-/// Whether `scorers` has a scorer a judge model grades: `llm_judge` or `reference` (specs
-/// reject `reference` when they are parsed, so for them this is "has an `llm_judge` scorer").
-pub(crate) fn needs_judge(scorers: &[ScorerSpec]) -> bool {
+/// Whether `scorers` has an `llm_judge` scorer, and so needs a judge model.
+pub(crate) fn has_llm_judge(scorers: &[ScorerSpec]) -> bool {
+    scorers
+        .iter()
+        .any(|s| matches!(s, ScorerSpec::LlmJudge { .. }))
+}
+
+/// Whether any of `scorers` asks a judge for a grade: an `llm_judge` or a `reference` scorer.
+/// Wider than [`has_llm_judge`]: a `reference` scorer without a judge is graded as an error
+/// rather than refused, but it still sends a request when a judge is there.
+pub(crate) fn grades_with_judge(scorers: &[ScorerSpec]) -> bool {
     scorers.iter().any(|s| {
         matches!(
             s,

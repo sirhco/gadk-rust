@@ -188,8 +188,8 @@ pub fn judge_prompt(req: &JudgeRequest) -> String {
 /// The outcome of a judge's reply `text` to a [`judge_prompt`]: [`JudgeOutcome::Verdict`] when
 /// the text holds a valid verdict (the whole reply, a fenced JSON block or the first JSON
 /// object), else [`JudgeOutcome::Error`] with `unparseable judge reply: <at most the first 1024
-/// bytes of the text>`. [`GeminiJudge`] reads each reply this way; it retries once when the first reply is
-/// unparseable.
+/// bytes of the text>`. [`GeminiJudge`] reads each reply this way; it retries once when the
+/// first reply is unparseable.
 pub fn parse_judge_reply(text: &str) -> JudgeOutcome {
     match parse_verdict(text) {
         Some(v) => JudgeOutcome::Verdict {

@@ -31,7 +31,7 @@ use crate::batch::{BatchPredictor, RecordingJudge, judge_in_batch};
 use crate::error::MonitorError;
 use crate::report::{MonitorReport, MonitoredRun, Window};
 use crate::source::{ProductionRun, TranscriptQuery, TranscriptSource};
-use crate::spec::{DEFAULT_JUDGE_TIMEOUT, MonitorSpec, needs_judge};
+use crate::spec::{DEFAULT_JUDGE_TIMEOUT, MonitorSpec, grades_with_judge, has_llm_judge};
 
 /// The default number of runs graded at once.
 pub const DEFAULT_CONCURRENCY: usize = 8;
@@ -152,7 +152,7 @@ impl Monitor {
         source: &dyn TranscriptSource,
         predictor: &dyn BatchPredictor,
     ) -> Result<(MonitorReport, Option<String>), MonitorError> {
-        if !needs_judge(&spec.scorers) {
+        if !grades_with_judge(&spec.scorers) {
             return Ok((self.run_with_backend(spec, source, None).await?, None));
         }
         let (now, q, runs) = self.list(spec, source).await?;
@@ -217,9 +217,9 @@ pub(crate) fn gemini_backend(model: Arc<dyn Llm>, timeout: Duration) -> Arc<dyn 
     Arc::new(GeminiJudge::new(model, timeout))
 }
 
-/// `MonitorError::Judge` when `scorers` needs a judge ([`needs_judge`]) and there is none.
+/// `MonitorError::Judge` when `scorers` has an `llm_judge` scorer and there is no judge.
 fn check_judge(has_judge: bool, scorers: &[ScorerSpec]) -> Result<(), MonitorError> {
-    if needs_judge(scorers) && !has_judge {
+    if has_llm_judge(scorers) && !has_judge {
         return Err(MonitorError::Judge(
             "the spec has llm_judge scorers but no judge model was given".into(),
         ));
@@ -357,6 +357,39 @@ scorers:
         r.content_complete = false;
         r.notes = vec!["turn 1 has no AGENT_RESPONSE".into()];
         r
+    }
+
+    #[tokio::test]
+    async fn a_reference_scorer_without_a_judge_grades_as_an_error() {
+        let mut spec = spec(
+            "name: m\nsource: { bigquery: { project: p, dataset: d, table: t } }\nwindow: 1d\n\
+             scorers: [contains: order]\n",
+        );
+        spec.scorers = vec![ScorerSpec::Reference {
+            answer: "Your order ships today.".into(),
+            min_score: 3,
+            turn: None,
+        }];
+        let source = FakeSource::new(vec![
+            run("inv-a", 20_000, &[("Where is my order?", "Today.", &[])]),
+            run("inv-b", 40_000, &[("hi", "hello", &[])]),
+        ]);
+        let report = Monitor::new()
+            .now(at(100_000))
+            .run(&spec, &source, None)
+            .await
+            .unwrap();
+        assert_eq!(report.runs.len(), 2);
+        for r in &report.runs {
+            let [score] = r.scores.as_slice() else {
+                panic!("expected one score, got {:?}", r.scores);
+            };
+            assert_eq!(
+                (score.kind.as_str(), score.outcome),
+                ("reference", Outcome::Error)
+            );
+            assert!(score.rationale.contains("no judge model"), "{score:?}");
+        }
     }
 
     #[tokio::test]

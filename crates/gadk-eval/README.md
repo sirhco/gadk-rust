@@ -135,8 +135,8 @@ service.
 
 `judge_prompt(&req)` returns exactly the prompt `GeminiJudge` sends for a request, and
 `parse_judge_reply(text)` reads a reply to it as `GeminiJudge` does: a `JudgeOutcome::Verdict`,
-or `JudgeOutcome::Error("unparseable judge reply: <at most the first 1024 bytes>")`. Together they let
-the same prompt go through another channel, such as the batch judging of
+or `JudgeOutcome::Error("unparseable judge reply: <at most the first 1024 bytes>")`. Together
+they let the same prompt go through another channel, such as the batch judging of
 `gadk-eval-monitor`; unlike `GeminiJudge`, nothing is retried there.
 
 ## Errors versus failures
