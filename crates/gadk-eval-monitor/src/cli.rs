@@ -15,20 +15,22 @@
 //! The `gadk-eval` command-line tool, as a library for testing.
 //!
 //! ```text
-//! gadk-eval monitor <spec.yaml> [--out <url>] [--limit N] [--write-scores] [<judge flags>]
-//!     [<batch flags>]
+//! gadk-eval monitor <spec.yaml> [--out <url>] [--limit N] [--write-scores] [<metrics flags>]
+//!     [<judge flags>] [<batch flags>]
 //! gadk-eval report <url> [<name>] [--limit N]
 //! gadk-eval export --source bigquery://<project>.<dataset>.<table> --out <file> [--append]
 //!     [--name N] [--trace ID]... [--since <n>h|<n>d] [--agent A] [--score F]... [--limit N]
 //!     [--rubric T] [--min-good X] [--no-history] [--tool-args]
 //! gadk-eval experiment <spec.yaml> [--out <url>] [--pairwise] [<judge flags>] [<batch flags>]
 //! gadk-eval guard <spec.yaml> [--apply] [--prices <file>] [--out <url>] [--max-bytes <n>]
-//!     [<judge flags>]
+//!     [<metrics flags>] [<judge flags>]
 //! gadk-eval guards <source>... [--apply] [--prices <file|gs://bucket/object>] [--out <url>]
-//!     [--max-bytes <n>] [--notify <url|env:NAME>] [--notify-format slack|json] [<judge flags>]
+//!     [--max-bytes <n>] [--notify <url|env:NAME>] [--notify-format slack|json]
+//!     [<metrics flags>] [<judge flags>]
 //! gadk-eval alerts <source>... [--prices <file|gs://bucket/object>] [--max-bytes <n>]
-//!     [--notify <url|env:NAME>] [--notify-format slack|json]
+//!     [--notify <url|env:NAME>] [--notify-format slack|json] [<metrics flags>]
 //!
+//! <metrics flags>: [--write-metrics] [--metrics-project <id>]
 //! <judge flags>: [--judge-backend gemini|eval-service] [--eval-location <location>]
 //! <batch flags>: [--judge-mode live|batch] [--batch-staging gs://<bucket>/<prefix>]
 //!     [--batch-timeout <n>m|<n>h|<n>d]
@@ -51,6 +53,19 @@
 //! without `--batch-staging`, with a staging value that is not `gs://<bucket>/<prefix>`, with a
 //! bad `--batch-timeout`, with `--judge-backend eval-service` or with `--pairwise`, and when
 //! the job fails or times out (no report is stored).
+//!
+//! `--write-metrics` (`monitor`, `guard`, `guards` and `alerts`) writes each result to Cloud
+//! Monitoring as custom gauge metrics under `custom.googleapis.com/gadk/`
+//! ([`Backends::metrics_writer`], [`monitor_points`], [`guard_points`], [`alert_points`]), in
+//! `--metrics-project` or else the spec's source project. `monitor` writes once the report is
+//! stored and printed, before `--write-scores` and `min_pass_rate`; `guard` and `guards` write
+//! each guard's report once it is printed and stored (a guard with no rollout writes nothing);
+//! `alerts` writes each spec's rules after printing them (rules with too few calls write
+//! nothing). All of it comes before the summary and `--notify`. A metrics failure prints
+//! `metrics: <error>` to stderr and changes nothing else: stdout, stored reports, applied
+//! actions and exit codes are those of the same run without `--write-metrics`. With
+//! `--write-metrics`, a `--metrics-project` that is not a project id exits 2 before anything
+//! runs; without it, `--metrics-project` is ignored.
 //!
 //! `experiment --pairwise` (only with `--judge-backend eval-service`; otherwise it exits 2
 //! before running anything) then compares each variant after the first with the first, run
@@ -128,7 +143,7 @@ use gadk_eval::{EvalSet, Evaluator, JudgeBackend, Variant};
 use gadk_model::Llm;
 use gadk_prompts::{PromptRegistry, Selector, StoreError};
 
-use crate::alert::{AlertCounts, AlertOutcome, RuleStatus, alerts_body, evaluate};
+use crate::alert::{AlertCounts, AlertOutcome, RuleResult, RuleStatus, alerts_body, evaluate};
 use crate::alert_source::{AlertQuery, AlertSource, UsageGroup};
 use crate::alert_spec::{AlertMetric, AlertSpec};
 use crate::batch::{BatchPredictor, RecordingJudge, judge_in_batch};
@@ -148,6 +163,10 @@ use crate::guard_sources::{load_alert_specs, load_prices, load_specs};
 use crate::guard_spec::GuardSpec;
 use crate::judge::vertex_judge;
 use crate::judge_rows::{ScoreSink, judge_rows, write_judge_rows};
+use crate::metrics::{
+    AlertRuleValue, AlertRun, CloudMetricsWriter, MetricPoint, MetricsWriter, alert_points,
+    guard_points, monitor_points,
+};
 use crate::monitor::{Monitor, gemini_backend};
 use crate::notify::{self, Counts, Notifier, NotifyFormat, Outcome};
 use crate::pairwise::run_pairwise;
@@ -321,6 +340,14 @@ pub trait Backends: Send + Sync {
         let _ = (url, body);
         Err(WEBHOOKS_UNSUPPORTED.into())
     }
+
+    /// The Cloud Monitoring writer for `--write-metrics` (`monitor`, `guard`, `guards` and
+    /// `alerts`), built once per command at its first write. The default refuses with
+    /// `Cloud Monitoring metrics are not supported by these backends`; [`CloudBackends`]
+    /// returns a [`CloudMetricsWriter`] with Application Default Credentials.
+    fn metrics_writer(&self) -> Result<Arc<dyn MetricsWriter>, MonitorError> {
+        Err(MonitorError::Store(METRICS_UNSUPPORTED.into()))
+    }
 }
 
 /// What grades `llm_judge` and `reference` scorers (`--judge-backend`).
@@ -376,6 +403,9 @@ const GS_REFUSED: &str = "gs:// sources are not supported by these backends";
 
 /// The error of `monitor --write-scores` without a BigQuery source.
 const WRITE_SCORES_NEEDS_BIGQUERY: &str = "--write-scores needs a bigquery source";
+
+/// The error of the default [`Backends::metrics_writer`].
+const METRICS_UNSUPPORTED: &str = "Cloud Monitoring metrics are not supported by these backends";
 
 /// The error of the default [`Backends::post_webhook`].
 pub(crate) const WEBHOOKS_UNSUPPORTED: &str = "webhooks are not supported by these backends";
@@ -551,6 +581,10 @@ impl Backends for CloudBackends {
         gcs::read_text(&cloud_storage()?, bucket, name).await
     }
 
+    fn metrics_writer(&self) -> Result<Arc<dyn MetricsWriter>, MonitorError> {
+        Ok(Arc::new(CloudMetricsWriter::new()?))
+    }
+
     /// Posts with a client of its own: a 10 s timeout, no redirects, no Google
     /// credentials. A transport error is returned as a kind that never names the URL: `timed
     /// out`, `connection failed` or `request failed` (a `reqwest` error's own text embeds it).
@@ -720,6 +754,102 @@ impl BatchFlags {
     }
 }
 
+/// `--write-metrics` and `--metrics-project` (`monitor`, `guard`, `guards` and `alerts`).
+fn metrics_flags() -> [Arg; 2] {
+    [
+        Arg::new("write-metrics")
+            .long("write-metrics")
+            .action(ArgAction::SetTrue)
+            .help("write the results to Cloud Monitoring as custom metrics"),
+        Arg::new("metrics-project")
+            .long("metrics-project")
+            .value_name("id")
+            .help("the project the metrics go to (default: the spec's source project)"),
+    ]
+}
+
+/// Where a command writes its metrics with `--write-metrics`: the `--metrics-project`
+/// override, and the writer once [`write_metrics`] has built it.
+struct MetricsTarget {
+    project: Option<String>,
+    writer: Option<Result<Arc<dyn MetricsWriter>, String>>,
+}
+
+impl MetricsTarget {
+    /// The target of `m`, or `None` without `--write-metrics` (`--metrics-project` is then
+    /// ignored). With it, a `--metrics-project` that is not a project id is refused
+    /// ([`MonitorError::Spec`]).
+    fn read(m: &ArgMatches) -> Result<Option<Self>, MonitorError> {
+        if !m.get_flag("write-metrics") {
+            return Ok(None);
+        }
+        let project = m.get_one::<String>("metrics-project").cloned();
+        if let Some(p) = &project
+            && !is_project_id(p)
+        {
+            return Err(MonitorError::Spec(format!(
+                "--metrics-project: invalid project id {p}"
+            )));
+        }
+        Ok(Some(Self {
+            project,
+            writer: None,
+        }))
+    }
+
+    /// Writes `points` to the override project, or else to `source`'s project.
+    async fn write(
+        &mut self,
+        backends: &dyn Backends,
+        source: &SourceSpec,
+        points: &[MetricPoint],
+        stderr: &mut dyn Write,
+    ) {
+        let project = self.project.as_deref().unwrap_or(source.project());
+        write_metrics(backends, &mut self.writer, project, points, stderr).await;
+    }
+}
+
+/// Writes `points` to `project` through `writer`, building it with
+/// [`Backends::metrics_writer`] at the first call. A failure to build it or to write is
+/// printed to `stderr` as `metrics: <message>` ([`metrics_message`]) and goes no further; a
+/// writer that failed to build is not built again, and its error is printed once. No points
+/// means no call.
+async fn write_metrics(
+    backends: &dyn Backends,
+    writer: &mut Option<Result<Arc<dyn MetricsWriter>, String>>,
+    project: &str,
+    points: &[MetricPoint],
+    stderr: &mut dyn Write,
+) {
+    if points.is_empty() {
+        return;
+    }
+    if writer.is_none() {
+        let built = backends.metrics_writer().map_err(|e| {
+            let message = metrics_message(&e);
+            let _ = writeln!(stderr, "metrics: {message}");
+            message
+        });
+        *writer = Some(built);
+    }
+    let Some(Ok(writer)) = writer else {
+        return;
+    };
+    if let Err(e) = writer.write(project, points).await {
+        let _ = writeln!(stderr, "metrics: {}", metrics_message(&e));
+    }
+}
+
+/// The text of a `metrics:` line for `e`: the message of a [`MonitorError::Store`] or
+/// [`MonitorError::Judge`] without the variant's prefix, else the error's `Display`.
+fn metrics_message(e: &MonitorError) -> String {
+    match e {
+        MonitorError::Store(message) | MonitorError::Judge(message) => message.clone(),
+        other => other.to_string(),
+    }
+}
+
 fn limit_arg() -> Arg {
     Arg::new("limit")
         .long("limit")
@@ -753,6 +883,7 @@ fn cli() -> Command {
                              (source judge)",
                         ),
                 )
+                .args(metrics_flags())
                 .args(judge_flags())
                 .args(batch_flags()),
         )
@@ -827,6 +958,7 @@ fn guard_cli() -> Command {
                 .value_parser(value_parser!(PathBuf))
                 .help("price file (YAML) for cost_per_call checks"),
         ))
+        .args(metrics_flags())
         .args(judge_flags())
 }
 
@@ -860,6 +992,7 @@ fn guards_cli() -> Command {
                 .requires("notify")
                 .help("webhook body: slack (default) or json"),
         )
+        .args(metrics_flags())
         .args(judge_flags())
 }
 
@@ -904,6 +1037,7 @@ fn alerts_cli() -> Command {
                 .requires("notify")
                 .help("webhook body: slack (default) or json"),
         )
+        .args(metrics_flags())
 }
 
 fn export_cli() -> Command {
@@ -1054,10 +1188,14 @@ pub async fn run(
         Some(("monitor", m)) => {
             let spec = m.get_one::<String>("spec").map_or("", String::as_str);
             let out = m.get_one::<String>("out").map(String::as_str);
-            match JudgeFlags::read(m)
-                .and_then(|judge| Ok((BatchFlags::read(m, &judge, false)?, judge)))
-            {
-                Ok((batch, judge)) => {
+            match JudgeFlags::read(m).and_then(|judge| {
+                Ok((
+                    BatchFlags::read(m, &judge, false)?,
+                    judge,
+                    MetricsTarget::read(m)?,
+                ))
+            }) {
+                Ok((batch, judge, metrics)) => {
                     monitor(
                         spec,
                         out,
@@ -1065,6 +1203,7 @@ pub async fn run(
                         m.get_flag("write-scores"),
                         &judge,
                         batch.as_ref(),
+                        metrics,
                         backends,
                         stdout,
                         stderr,
@@ -1103,9 +1242,9 @@ pub async fn run(
                 Err(e) => Err(e),
             }
         }
-        Some(("guard", m)) => guard(m, backends, stdout).await,
-        Some(("guards", m)) => guards(m, backends, stdout).await,
-        Some(("alerts", m)) => alerts(m, backends, stdout).await,
+        Some(("guard", m)) => guard(m, backends, stdout, stderr).await,
+        Some(("guards", m)) => guards(m, backends, stdout, stderr).await,
+        Some(("alerts", m)) => alerts(m, backends, stdout, stderr).await,
         _ => Ok(2),
     };
     match result {
@@ -1120,7 +1259,9 @@ pub async fn run(
 /// `monitor`: 0 or 1 (below `min_pass_rate`); errors map to 2. With `write_scores` the score
 /// sink is resolved before anything runs, and the report's judge rows are written after it is
 /// stored and printed, before `min_pass_rate` is applied. With `batch` and a `judge` section,
-/// the judge scorers are graded in one batch job, whose name is written to `stderr`.
+/// the judge scorers are graded in one batch job, whose name is written to `stderr`. With
+/// `metrics`, the report's points are written after it is stored and printed, before the judge
+/// rows; a metrics failure is only a `metrics:` line on `stderr`.
 #[allow(clippy::too_many_arguments)]
 async fn monitor(
     spec_path: &str,
@@ -1129,6 +1270,7 @@ async fn monitor(
     write_scores: bool,
     judge_flags: &JudgeFlags,
     batch: Option<&BatchFlags>,
+    metrics: Option<MetricsTarget>,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
@@ -1184,6 +1326,10 @@ async fn monitor(
     write!(stdout, "{}", report.summary())?;
     if let Some(name) = stored {
         writeln!(stdout, "stored report {name}")?;
+    }
+    if let Some(mut metrics) = metrics {
+        let points = monitor_points(&report, spec.agent.as_deref());
+        metrics.write(backends, &spec.source, &points, stderr).await;
     }
     if let Some(sink) = sink {
         let outcome = write_judge_rows(
@@ -1291,8 +1437,10 @@ async fn guard(
     m: &ArgMatches,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
     let judge = JudgeFlags::read(m)?;
+    let mut metrics = MetricsTarget::read(m)?;
     let spec_path = m.get_one::<String>("spec").map_or("", String::as_str);
     let spec = GuardSpec::load(spec_path)?;
     let out_url = m.get_one::<String>("out");
@@ -1313,7 +1461,11 @@ async fn guard(
             .unwrap_or(BigQueryGuardSource::DEFAULT_MAX_BYTES_BILLED),
         judge,
     };
-    Ok(run_one_guard(&spec, &opts, backends, stdout).await?.code)
+    Ok(
+        run_one_guard(&spec, &opts, metrics.as_mut(), backends, stdout, stderr)
+            .await?
+            .code,
+    )
 }
 
 /// What [`run_one_guard`] found.
@@ -1327,12 +1479,15 @@ struct GuardRun {
 }
 
 /// Runs `spec` once and prints what `guard` prints; the code is 0 (advance), 1 (abort), 3
-/// (wait) or 4 (no rollout).
+/// (wait) or 4 (no rollout). With `metrics`, the report's points are written once it is printed
+/// and stored; a metrics failure is only a `metrics:` line on `stderr`.
 async fn run_one_guard(
     spec: &GuardSpec,
     opts: &GuardRunOpts,
+    metrics: Option<&mut MetricsTarget>,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<GuardRun, MonitorError> {
     let previous = match (&opts.out, spec.min_step_age) {
         (Some(out), Some(_)) => out.latest_applied_ramp(&spec.name).await?,
@@ -1400,6 +1555,11 @@ async fn run_one_guard(
         writeln!(stdout, "stored report {name}")?;
         stored = Some(name);
     }
+    if let Some(metrics) = metrics {
+        metrics
+            .write(backends, &spec.source, &guard_points(&report), stderr)
+            .await;
+    }
     Ok(GuardRun {
         code: report.exit_code(),
         report: Some(report),
@@ -1413,8 +1573,10 @@ async fn guards(
     m: &ArgMatches,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
     let judge = JudgeFlags::read(m)?;
+    let mut metrics = MetricsTarget::read(m)?;
     let sources: Vec<String> = m
         .get_many::<String>("sources")
         .into_iter()
@@ -1460,7 +1622,15 @@ async fn guards(
     let mut outcomes = Vec::new();
     for s in &specs {
         writeln!(stdout, "== {} ==", s.spec.name)?;
-        let error = match run_one_guard(&s.spec, &opts, backends, &mut stdout).await {
+        let run = run_one_guard(
+            &s.spec,
+            &opts,
+            metrics.as_mut(),
+            backends,
+            &mut stdout,
+            stderr,
+        );
+        let error = match run.await {
             Ok(GuardRun {
                 code: code @ (0 | 1),
                 report: Some(report),
@@ -1541,7 +1711,9 @@ async fn alerts(
     m: &ArgMatches,
     backends: &dyn Backends,
     stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<i32, MonitorError> {
+    let mut metrics = MetricsTarget::read(m)?;
     let sources: Vec<String> = m
         .get_many::<String>("sources")
         .into_iter()
@@ -1582,9 +1754,12 @@ async fn alerts(
     for s in &specs {
         writeln!(stdout, "== {} ==", s.spec.name)?;
         match usage(&s.spec, max_bytes, backends).await {
-            Ok(groups) => {
+            Ok((groups, to)) => {
                 let results = evaluate(&s.spec, &groups, prices.as_ref());
                 counts.add(&results);
+                let run = metrics
+                    .is_some()
+                    .then(|| alert_run(&s.spec.name, to, &results));
                 for result in results {
                     writeln!(stdout, "{}", result.line)?;
                     if result.status == RuleStatus::Fired {
@@ -1593,6 +1768,11 @@ async fn alerts(
                             result,
                         });
                     }
+                }
+                if let (Some(metrics), Some(run)) = (metrics.as_mut(), run) {
+                    metrics
+                        .write(backends, &s.spec.source, &alert_points(&run), stderr)
+                        .await;
                 }
             }
             Err(e) => {
@@ -1634,13 +1814,30 @@ async fn alerts(
     }
 }
 
+/// One alert spec's rule results as an [`AlertRun`] of `spec` at `time`.
+fn alert_run(spec: &str, time: DateTime<Utc>, results: &[RuleResult]) -> AlertRun {
+    let rules = results
+        .iter()
+        .map(|r| {
+            let fired = match r.status {
+                RuleStatus::Fired => Some(true),
+                RuleStatus::Ok => Some(false),
+                RuleStatus::Insufficient => None,
+            };
+            AlertRuleValue::new(r.rule.name.clone(), r.value, fired)
+        })
+        .collect();
+    AlertRun::new(spec, time, rules)
+}
+
 /// The usage groups of `spec`'s calls in `[now - window, now)`, read through
-/// [`Backends::alert_source`] with every query capped at `max_bytes`.
+/// [`Backends::alert_source`] with every query capped at `max_bytes`, and the window's end
+/// (`now`).
 async fn usage(
     spec: &AlertSpec,
     max_bytes: i64,
     backends: &dyn Backends,
-) -> Result<Vec<UsageGroup>, MonitorError> {
+) -> Result<(Vec<UsageGroup>, DateTime<Utc>), MonitorError> {
     let SourceSpec::BigQuery {
         project,
         dataset,
@@ -1654,7 +1851,8 @@ async fn usage(
     };
     let source = backends.alert_source(project, dataset, table, max_bytes)?;
     let to = Utc::now();
-    source.usage(&AlertQuery::new(to - spec.window, to)).await
+    let groups = source.usage(&AlertQuery::new(to - spec.window, to)).await?;
+    Ok((groups, to))
 }
 
 /// A writer that remembers whether a write to `inner` failed.
@@ -1992,6 +2190,7 @@ fn build_agent(
 #[cfg(test)]
 mod tests {
     mod batch_mode;
+    mod metrics_mode;
 
     use std::collections::HashMap;
     use std::path::Path;
@@ -3800,6 +3999,8 @@ mod tests {
     // ---- guard ----
 
     mod guard_command {
+        mod metrics_mode;
+
         use std::collections::{BTreeMap, VecDeque};
         use std::path::PathBuf;
 
@@ -5185,6 +5386,8 @@ mod tests {
     // ---- alerts ----
 
     mod alerts_command {
+        mod metrics_mode;
+
         use std::collections::{BTreeMap, VecDeque};
 
         use crate::alert_source::{AlertQuery, AlertSource, UsageGroup};
