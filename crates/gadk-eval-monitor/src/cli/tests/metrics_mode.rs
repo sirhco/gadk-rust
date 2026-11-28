@@ -21,6 +21,7 @@ use crate::export::ExportSource;
 use crate::guard_source::GuardSource;
 use crate::metrics::{MetricPoint, MetricValue, MetricsWriter};
 
+use super::batch_mode::without_window;
 use super::*;
 
 /// A stdout that can be read while the command runs.
@@ -250,15 +251,6 @@ impl Backends for Metered<'_> {
     }
 }
 
-/// `stdout` without its `window … .. …` line, which names the run's own time.
-fn timeless(stdout: &str) -> String {
-    stdout
-        .lines()
-        .filter(|l| !l.starts_with("window "))
-        .map(|l| format!("{l}\n"))
-        .collect()
-}
-
 #[test]
 fn the_default_metrics_writer_refuses() {
     let Err(e) = Fake::new(Vec::new()).metrics_writer() else {
@@ -401,7 +393,7 @@ async fn a_failing_writer_changes_nothing_but_stderr() {
     let metered = Metered::failing(&fake, "4 of 4 series not written: HTTP 403: denied");
     let (code, stdout, stderr) = metered.run(&["monitor", &spec, "--write-metrics"]).await;
     assert_eq!(code, plain_code);
-    assert_eq!(timeless(&stdout), timeless(&plain_stdout));
+    assert_eq!(without_window(&stdout), without_window(&plain_stdout));
     assert_eq!(
         stderr,
         "metrics: 4 of 4 series not written: HTTP 403: denied\n"
@@ -411,7 +403,7 @@ async fn a_failing_writer_changes_nothing_but_stderr() {
     let metered = Metered::refusing(&fake, "Application Default Credentials: none found");
     let (code, stdout, stderr) = metered.run(&["monitor", &spec, "--write-metrics"]).await;
     assert_eq!(code, plain_code);
-    assert_eq!(timeless(&stdout), timeless(&plain_stdout));
+    assert_eq!(without_window(&stdout), without_window(&plain_stdout));
     assert_eq!(
         stderr,
         "metrics: Application Default Credentials: none found\n"

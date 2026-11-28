@@ -659,6 +659,71 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_scored_reference_scorer_writes_a_judge_score_mean() {
+        let r = report(vec![
+            vec![ScoreResult::judged("reference", true, 5, "matches")],
+            vec![ScoreResult::judged("reference", false, 2, "differs")],
+        ]);
+        let base = [("agent", ""), ("spec", "support")];
+        let scorer = [("agent", ""), ("scorer", "reference"), ("spec", "support")];
+        assert_eq!(
+            monitor_points(&r, None),
+            vec![
+                point("monitor/runs", &base, MetricValue::Int(2)),
+                point("monitor/errors", &base, MetricValue::Int(0)),
+                point("monitor/pass_rate", &base, MetricValue::Double(0.5)),
+                point(
+                    "monitor/scorer_pass_rate",
+                    &scorer,
+                    MetricValue::Double(0.5)
+                ),
+                point(
+                    "monitor/judge_score_mean",
+                    &scorer,
+                    MetricValue::Double(3.5)
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn scorers_are_in_the_order_they_first_appear_across_runs() {
+        // Run 1 lists `llm_judge` first, but `contains` appeared first, in run 0.
+        let r = report(vec![
+            vec![ScoreResult::check("contains", true, "ok")],
+            vec![
+                ScoreResult::judged("llm_judge", false, 2, "rude"),
+                ScoreResult::check("contains", true, "ok"),
+            ],
+        ]);
+        let base = [("agent", ""), ("spec", "support")];
+        let scorer = |name| [("agent", ""), ("scorer", name), ("spec", "support")];
+        assert_eq!(
+            monitor_points(&r, None),
+            vec![
+                point("monitor/runs", &base, MetricValue::Int(2)),
+                point("monitor/errors", &base, MetricValue::Int(0)),
+                point("monitor/pass_rate", &base, MetricValue::Double(0.5)),
+                point(
+                    "monitor/scorer_pass_rate",
+                    &scorer("contains"),
+                    MetricValue::Double(1.0)
+                ),
+                point(
+                    "monitor/scorer_pass_rate",
+                    &scorer("llm_judge"),
+                    MetricValue::Double(0.0)
+                ),
+                point(
+                    "monitor/judge_score_mean",
+                    &scorer("llm_judge"),
+                    MetricValue::Double(2.0)
+                ),
+            ]
+        );
+    }
+
     fn check(status: Status) -> CheckResult {
         CheckResult {
             name: "error_rate".into(),

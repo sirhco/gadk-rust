@@ -812,8 +812,9 @@ impl MetricsTarget {
 
 /// Writes `points` to `project` through `writer`, building it with
 /// [`Backends::metrics_writer`] at the first call. A failure to build it or to write is
-/// printed to `stderr` as `metrics: <message>` ([`metrics_message`]) and goes no further; a writer that failed to
-/// build is not built again, and its error is printed once. No points means no call.
+/// printed to `stderr` as `metrics: <message>` ([`metrics_message`]) and goes no further; a
+/// writer that failed to build is not built again, and its error is printed once. No points
+/// means no call.
 async fn write_metrics(
     backends: &dyn Backends,
     writer: &mut Option<Result<Arc<dyn MetricsWriter>, String>>,

@@ -1187,16 +1187,17 @@ window).
 
 `agent` is the monitor spec's `agent` (empty without one). `scorer` is the scorer's kind for the
 first scorer of a kind in the spec and `<kind>_<n>` for the n-th, as in
-[Judge scores in the console](#judge-scores-in-the-console). A guard with no rollout writes
-nothing, and neither does an alert rule with too few calls (`insufficient`) or a spec that
+[Judge scores in the console](#judge-scores-in-the-console). `guard/rollout_percent` is the
+percent from before any `--apply` in that run, so after an advance it shows the new step on the
+next run. A guard with no rollout writes nothing, and neither does an alert rule with too few calls (`insufficient`) or a spec that
 fails. Label values longer than 1,024 bytes are cut. The metric descriptors are created by the
 first write, with the labels above; adding a label to a metric later needs a new descriptor.
 
 **When it writes.** `monitor` writes once the report is stored and printed, before
 `--write-scores` and the `min_pass_rate` check, so a run that exits 1 still writes. `guard` and
 `guards` write each guard's points once its report is printed and stored (after `--apply` has
-written the decision). `alerts` writes each spec's points after its rule lines. Both come before
-the summary line and `--notify`.
+written the decision). `alerts` writes each spec's points after its rule lines. `guards` and
+`alerts`, the two commands with a summary line and `--notify`, write before both.
 
 **Failures.** A metrics failure never changes the command's outcome: the error is printed to
 stderr as one `metrics: <error>` line per failed write (for example
@@ -1205,7 +1206,11 @@ stdout, stored reports, applied actions and the exit code are those of the same 
 `--write-metrics`. When the writer cannot be built (no credentials), the error is printed once
 and the command writes nothing. Each request carries at most 200 time series; Cloud Monitoring
 rejects a point older than its series' last point, so two hosts with skewed clocks writing the
-same spec can produce a `metrics:` line.
+same spec can produce a `metrics:` line. Cloud Monitoring also rejects points older than about
+25 hours, and a monitor point carries the report's `generated_at` (the end of the window, taken
+before judging), so with `--judge-mode batch` and a `--batch-timeout` of a day or more a slow
+job's metrics write can fail and show only as a `metrics:` line: keep the batch timeout under
+24h when you use `--write-metrics`.
 
 **Access.** The writer uses Application Default Credentials and needs Monitoring Metric Writer
 (`roles/monitoring.metricWriter`) on the metrics project.

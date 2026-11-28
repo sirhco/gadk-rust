@@ -84,7 +84,7 @@ impl Backends for Batched {
 }
 
 /// `stdout` without its `window …` line, which names the current time.
-fn without_window(stdout: &str) -> String {
+pub(super) fn without_window(stdout: &str) -> String {
     stdout
         .lines()
         .filter(|l| !l.starts_with("window "))
