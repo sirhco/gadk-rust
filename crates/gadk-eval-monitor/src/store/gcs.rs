@@ -57,25 +57,8 @@ impl GcsStore {
     /// Uploads `body` as `name` unless the object exists (`ifGenerationMatch=0`); `false` when it
     /// does.
     pub(super) async fn create(&self, name: &str, body: &str) -> Result<bool, MonitorError> {
-        let url = format!(
-            "{UPLOAD}/{}/o?uploadType=media&name={}&ifGenerationMatch=0",
-            encode(&self.bucket),
-            encode(&format!("{}{name}", self.prefix))
-        );
-        let reply = self
-            .gcp
-            .send(
-                Method::POST,
-                &url,
-                Some(("application/json", Bytes::from(body.to_owned()))),
-            )
-            .await
-            .map_err(MonitorError::Store)?;
-        match reply.status {
-            412 => Ok(false),
-            _ if reply.ok() => Ok(true),
-            _ => Err(MonitorError::Store(reply.error_text())),
-        }
+        let name = format!("{}{name}", self.prefix);
+        put_object(&self.gcp, &self.bucket, &name, body, true).await
     }
 
     /// The object names directly under the prefix, with the prefix removed.
@@ -89,6 +72,39 @@ impl GcsStore {
     }
 }
 
+/// Uploads `body` (as `application/json`) to the object `name` in `bucket`. With `if_absent`
+/// only when no such object exists (`ifGenerationMatch=0`), and `false` when one does;
+/// otherwise any existing object is replaced.
+pub(crate) async fn put_object(
+    gcp: &GcpHttp,
+    bucket: &str,
+    name: &str,
+    body: &str,
+    if_absent: bool,
+) -> Result<bool, MonitorError> {
+    let mut url = format!(
+        "{UPLOAD}/{}/o?uploadType=media&name={}",
+        encode(bucket),
+        encode(name)
+    );
+    if if_absent {
+        url.push_str("&ifGenerationMatch=0");
+    }
+    let reply = gcp
+        .send(
+            Method::POST,
+            &url,
+            Some(("application/json", Bytes::from(body.to_owned()))),
+        )
+        .await
+        .map_err(MonitorError::Store)?;
+    match reply.status {
+        412 if if_absent => Ok(false),
+        _ if reply.ok() => Ok(true),
+        _ => Err(MonitorError::Store(reply.error_text())),
+    }
+}
+
 /// The names of the objects directly under `prefix` in `bucket` (`delimiter=/`, every page),
 /// with `prefix` removed.
 pub(crate) async fn list_names(
@@ -96,14 +112,38 @@ pub(crate) async fn list_names(
     bucket: &str,
     prefix: &str,
 ) -> Result<Vec<String>, MonitorError> {
+    let names = list_objects(gcp, bucket, prefix, true).await?;
+    Ok(names
+        .into_iter()
+        .filter_map(|n| n.strip_prefix(prefix).map(str::to_owned))
+        .collect())
+}
+
+/// The full names of every object under `prefix` in `bucket`, at any depth (no delimiter,
+/// every page).
+pub(crate) async fn list_all(
+    gcp: &GcpHttp,
+    bucket: &str,
+    prefix: &str,
+) -> Result<Vec<String>, MonitorError> {
+    list_objects(gcp, bucket, prefix, false).await
+}
+
+/// The full names of the objects under `prefix` in `bucket`, every page: with `delimiter`
+/// (`delimiter=/`) only those directly under it.
+async fn list_objects(
+    gcp: &GcpHttp,
+    bucket: &str,
+    prefix: &str,
+    delimiter: bool,
+) -> Result<Vec<String>, MonitorError> {
     let mut names = Vec::new();
     let mut page: Option<String> = None;
     loop {
-        let mut url = format!(
-            "{API}/{}/o?prefix={}&delimiter=%2F",
-            encode(bucket),
-            encode(prefix)
-        );
+        let mut url = format!("{API}/{}/o?prefix={}", encode(bucket), encode(prefix));
+        if delimiter {
+            url.push_str("&delimiter=%2F");
+        }
         if let Some(p) = &page {
             url.push_str(&format!("&pageToken={}", encode(p)));
         }
@@ -111,20 +151,14 @@ pub(crate) async fn list_names(
             .json(Method::GET, &url, None)
             .await
             .map_err(MonitorError::Store)?;
-        for item in v
-            .get("items")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if let Some(name) = item
-                .get("name")
-                .and_then(Value::as_str)
-                .and_then(|n| n.strip_prefix(prefix))
-            {
-                names.push(name.to_owned());
-            }
-        }
+        names.extend(
+            v.get("items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item.get("name").and_then(Value::as_str))
+                .map(str::to_owned),
+        );
         page = v
             .get("nextPageToken")
             .and_then(Value::as_str)
@@ -622,6 +656,89 @@ mod tests {
                 .await
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn put_object_with_and_without_if_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[
+                exchange(
+                    "POST",
+                    &format!("{UPLOADS}?uploadType=media&name=stage%2Frun%2Finput.jsonl"),
+                    "{\"a\":1}",
+                    200,
+                    r#"{"name":"stage/run/input.jsonl"}"#,
+                ),
+                exchange(
+                    "POST",
+                    &format!("{UPLOADS}?uploadType=media&name=stage%2Fa.json&ifGenerationMatch=0"),
+                    "{\"a\":1}",
+                    412,
+                    r#"{"error":{"code":412,"message":"At least one of the pre-conditions you specified did not hold."}}"#,
+                ),
+                exchange(
+                    "POST",
+                    &format!("{UPLOADS}?uploadType=media&name=stage%2Fdenied.json"),
+                    "{\"a\":1}",
+                    403,
+                    r#"{"error":{"code":403,"message":"caller lacks storage.objects.create"}}"#,
+                ),
+            ],
+        );
+        let gcp = GcpHttp::new(http, Arc::new(NoAuth));
+        let body = "{\"a\":1}";
+        assert!(
+            super::put_object(&gcp, "evals", "stage/run/input.jsonl", body, false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !super::put_object(&gcp, "evals", "stage/a.json", body, true)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            super::put_object(&gcp, "evals", "stage/denied.json", body, false)
+                .await
+                .unwrap_err()
+                .to_string(),
+            "report store: HTTP 403: caller lacks storage.objects.create"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_all_pages_without_a_delimiter_and_keeps_full_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let http = replay(
+            dir.path(),
+            &[
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=stage%2Fout%2F"),
+                    "",
+                    200,
+                    r#"{"items":[{"name":"stage/out/a/predictions.jsonl"}],"nextPageToken":"t 2"}"#,
+                ),
+                exchange(
+                    "GET",
+                    &format!("{OBJECTS}?prefix=stage%2Fout%2F&pageToken=t%202"),
+                    "",
+                    200,
+                    r#"{"items":[{"name":"stage/out/b/c/more.jsonl"},{"name":"stage/out/b/errors.txt"}]}"#,
+                ),
+            ],
+        );
+        let gcp = GcpHttp::new(http, Arc::new(NoAuth));
+        assert_eq!(
+            super::list_all(&gcp, "evals", "stage/out/").await.unwrap(),
+            [
+                "stage/out/a/predictions.jsonl",
+                "stage/out/b/c/more.jsonl",
+                "stage/out/b/errors.txt"
+            ]
         );
     }
 
