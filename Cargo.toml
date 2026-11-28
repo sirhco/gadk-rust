@@ -90,7 +90,7 @@ gadk-bigquery = { path = "crates/gadk-bigquery", version = "0.5.30" }
 gadk-openapi = { path = "crates/gadk-openapi", version = "0.5.30" }
 gadk-analytics = { path = "crates/gadk-analytics", version = "0.5.30" }
 gadk-console-client = { path = "crates/gadk-console-client", version = "0.5.30" }
-similar = "2.7.0"
+similar = "3.2.1"
 maud = { version = "0.27.0", default-features = false }
 tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 tokio-util = "0.7.20"
